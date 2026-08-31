@@ -23,12 +23,9 @@ private func fixtureRow(
   static let ceiling = (width: 8192, height: 4320)
 
   @Test func magLadderFillsTheEmptyBand() {
-    // Native 3440x1440, with three HiDPI rows already present. NOT a transcript
-    // of the MAG's revealed list: it is a deliberately STRICTER stand-in, three
-    // rows packed into the top of the band so SS2 precedence has the most it
-    // can possibly take over. The rig's own panel offers fewer, so a ladder that
-    // survives this survives the hardware.
-    // 1720x720 is the exact-2x rung the panel really does top out at.
+    // Not a transcript of the MAG's revealed list: a stricter stand-in, with the
+    // rows packed into the top of the band so SS2 precedence has the most it can
+    // take over. 1720x720 is the exact-2x rung the panel tops out at.
     let existing = [
       fixtureRow(2048, 858, hidpi: true), fixtureRow(1920, 804, hidpi: true),
       fixtureRow(1720, 720, hidpi: true), fixtureRow(3440, 1440, hidpi: false, native: true),
@@ -110,10 +107,9 @@ private func fixtureRow(
   }
 
   /// The sentinel is keyed on the stop's place in `stopPercents`, never on its
-  /// position in the ladder that survived filtering. On a 5K panel the ceiling
-  /// removes everything above 75%, so the first surviving stop is the ladder's
-  /// FIFTH percent: an ID derived from the filtered array's index would answer
-  /// -1000 and collide with the 95% stop's ID on every other panel.
+  /// place in the filtered ladder. On a 5K panel the ceiling drops everything
+  /// above 75%, so an ID derived from the filtered index would answer -1000 and
+  /// collide with the 95% stop's ID on every other panel.
   @Test func theSentinelSurvivesAFilteredLadder() throws {
     let fiveK = SyntheticSizeCatalog.stops(
       nativeLogicalWidth: 5120, nativeLogicalHeight: 2880,
@@ -234,18 +230,12 @@ private func fixtureRow(
     #expect(resolved == nil)
   }
 
-  /// The regression that made the launch restore report a stale descriptor
-  /// forever, pinned at the seam that fixed it.
-  ///
   /// A panel flags MORE than one mode native: the 1x row at its pixel size and
-  /// the HiDPI twin whose FRAMEBUFFER is that same size both carry the flag.
-  /// `first(where: \.isNative)` over the RAW list therefore answers whichever
-  /// the platform happened to enumerate first, and when that is the HiDPI twin
-  /// the ladder computes from a logical size less than half the real one: every
-  /// stop lands under the minor-axis floor, so the stored stop resolves nil and
-  /// the relaunch restore reports a stale descriptor forever.
-  /// `DisplayModeCatalog.full` sorts by logical area descending, so the same
-  /// lookup over its output is the panel's real native size.
+  /// the HiDPI twin whose framebuffer is that size. `first(where: \.isNative)`
+  /// over the RAW list picks whichever the platform enumerated first, and the
+  /// HiDPI twin gives a logical size under half the real one, so every stop
+  /// lands under the floor and the launch restore reports a stale descriptor
+  /// forever. `DisplayModeCatalog.full` sorts by logical area descending.
   @Test func theNativeRowIsTakenFromTheSortedListRatherThanTheRawOne() {
     let hiDPITwin = fixtureRow(1720, 720, hidpi: true, native: true)
     let onePointOne = fixtureRow(3440, 1440, hidpi: false, native: true)

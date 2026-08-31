@@ -1,48 +1,37 @@
 import AppKit
 import SwiftUI
 
-/// What every tile on the map says — decided ONCE for the whole canvas, never
-/// per tile.
+/// What every tile on the map says, decided ONCE for the whole canvas and never
+/// per tile. Asking per tile produced a map where three tiles read `Display 76 /
+/// 1680 × 1050` and the fourth, 12 pt shorter, read only `Display 77`, which
+/// reads as a rendering bug rather than a decision. So the level is the richest
+/// one EVERY tile can carry, in the fonts the tiles actually draw with.
 ///
-/// **The defect this type exists to prevent.** Disclosure used to be a per-tile
-/// question ("is *this* tile 52 pt tall?"), which produced a map where three
-/// tiles read `Display 76 / 1680 × 1050` and the fourth, 12 pt shorter, read
-/// only `Display 77`. Two adjacent tiles disagreeing about what a tile carries
-/// reads as a rendering bug, not as a decision. So the level is chosen for the
-/// **map**: the richest level *every* tile can carry, in the fonts the tile will
-/// actually draw with. Uniformity is then structural — one value reaches every
-/// tile — rather than a threshold every caller has to get right.
+/// It runs out of room in this order: full size, one type size down, name only,
+/// nothing. The name outranks the resolution because the tile's shape already
+/// carries the resolution to scale. Nothing is truncated to fit: a width that
+/// cannot hold `1680 × 1050` drops the line rather than drawing `16…50`.
 ///
-/// The level is honest about running out of room in this order: full size →
-/// one type size down → name only → nothing. The name outranks the resolution
-/// when only one line fits, because the name is what every sentence in the pane
-/// refers to and the tile's *shape* already carries the resolution to scale.
-/// Nothing is ever truncated to fit: a width that cannot hold `1680 × 1050`
-/// drops the line rather than drawing `16…50`.
-///
-/// **VoiceOver is untouched by any of this.** The canvas states the name and the
-/// resolution in the tile's accessibility label unconditionally, and the tooltip
-/// carries both as well, so a dropped line is a visual decision only.
+/// VoiceOver is untouched. The canvas states the name and the resolution in the
+/// tile's accessibility label unconditionally, so a dropped line is visual only.
 struct TileLabelStyle: Equatable, Sendable {
   enum Detail: Sendable { case none, name, nameAndSize }
 
   let detail: Detail
   /// Point size of the name line. The resolution line is always
-  /// `Self.secondarySize` — it is secondary at every level.
+  /// `Self.secondarySize`; it is secondary at every level.
   let nameSize: Double
   /// Whether tiles that mirror others say so. Decided over the mirrored tiles
-  /// **only**: a tile with no slaves has no third line to omit, so including it
-  /// in the vote would let a display that says nothing about mirroring silence
-  /// one that has something to say.
+  /// ONLY: a tile with no slaves has no third line to omit, so counting it would
+  /// let a display with nothing to say silence one that has something.
   let showsMirrored: Bool
 
   static let secondarySize: Double = 10
   static let horizontalPadding: Double = 3
   static let bottomPadding: Double = 2
 
-  /// The one place a tile's label geometry is described. `fitting` and the view
-  /// both read it, so the size a level is *tested* at is the size it is *drawn*
-  /// at — there is no second opinion to drift.
+  /// The one place a tile's label geometry is described: `fitting` and the view
+  /// both read it, so a level is tested at the size it is drawn at.
   static func labelHeight(detail: Detail, nameSize: Double, mirrored: Bool) -> Double {
     switch detail {
     case .none: 0
@@ -53,11 +42,10 @@ struct TileLabelStyle: Equatable, Sendable {
     }
   }
 
-  /// The band at the top of a tile the menu-bar strip occupies, plus the gap
-  /// under it, reserved on **every** tile rather than only on the main one.
-  /// Which display is main changes without the map resizing, so a band reserved
-  /// only when `isMain` would let one button press push a name into the strip it
-  /// was clearing.
+  /// The band the menu-bar strip occupies plus the gap under it, reserved on
+  /// EVERY tile rather than only the main one. Which display is main changes
+  /// without the map resizing, so a band reserved only when `isMain` would let
+  /// one button press push a name into the strip it was clearing.
   static func stripBand(forHeight height: Double) -> Double {
     stripInset + stripHeight(forHeight: height)
   }
@@ -73,9 +61,9 @@ struct TileLabelStyle: Equatable, Sendable {
     return (font.ascender - font.descender + font.leading).rounded(.up)
   }
 
-  /// Measured **semibold**, which is the weight a SELECTED tile draws its name
-  /// in. Measuring the regular weight would let clicking a tile truncate a name
-  /// that fitted a moment earlier.
+  /// Measured SEMIBOLD, the weight a selected tile draws its name in: measuring
+  /// the regular weight would let clicking a tile truncate a name that fitted a
+  /// moment earlier.
   private static func nameWidth(_ name: String, size: Double) -> Double {
     let font = NSFont.systemFont(ofSize: size, weight: .semibold)
     return (name as NSString).size(withAttributes: [.font: font]).width
@@ -94,9 +82,9 @@ struct TileLabelStyle: Equatable, Sendable {
     let isMirrored: Bool
   }
 
-  /// Richest first. A step DOWN in type size is tried before a line is dropped —
-  /// it buys little height (10 pt and 11 pt lines differ by one point) but ~8 %
-  /// of width, and width is what a tall, narrow display runs out of first.
+  /// Richest first. A step DOWN in type size is tried before a line is dropped:
+  /// it buys little height but about 8% of width, and width is what a tall,
+  /// narrow display runs out of first.
   private static let ladder: [(detail: Detail, nameSize: Double)] = [
     (.nameAndSize, 11), (.nameAndSize, secondarySize), (.name, 11), (.name, secondarySize),
   ]
@@ -138,67 +126,54 @@ struct TileLabelStyle: Equatable, Sendable {
 
 /// One display on the arrangement map, drawn to scale as a lit object (SV9).
 ///
-/// It carries **no geometry of its own** — the canvas sizes and positions it,
-/// and the canvas also hands it the `TileLabelStyle` every other tile is using —
-/// so it is a pure function of its appearance inputs and there is nothing to
-/// keep in sync across a SwiftUI diff.
+/// It carries NO geometry of its own: the canvas sizes and positions it and
+/// hands it the `TileLabelStyle` every other tile is using, so there is nothing
+/// to keep in sync across a SwiftUI diff.
 ///
-/// **Aspect ratio is never asserted here.** The frame the canvas gives this view
-/// *is* `width × height` from `CanvasTransform`, so the tile's shape is the
-/// display's shape by construction. An `.aspectRatio` modifier would be a
-/// second, disagreeing opinion about a shape that is already correct. The glass
-/// is drawn to that frame exactly, for the same reason: the map's whole claim is
-/// that abutting displays touch, and a face inset inside its own rect would put
-/// a gap between two displays the layout says are adjacent.
+/// Aspect ratio is never asserted here. The frame the canvas gives this view IS
+/// `width × height` from `CanvasTransform`, and the glass is drawn to that frame
+/// exactly: the map's whole claim is that abutting displays touch, and a face
+/// inset inside its own rect would put a gap between two displays the layout
+/// says are adjacent.
 ///
-/// **The face is the flow's glyph, not a second drawing of one** (SV5): the
-/// selected tile lights in the destination accent, every other tile in the
-/// map's neutral grey. Colour is never the only signal: an invalid drop also
-/// draws a 2 pt border and puts a sentence under the canvas, a virtual display
-/// says so in its name and in the accessibility value, and the main display's
-/// menu-bar strip is a shape rather than a hue.
+/// The face is the flow's glyph, never a second drawing of one (SV5). Colour is
+/// never the only signal: an invalid drop also draws a 2 pt border and a
+/// sentence under the canvas, a virtual display says so in its name and its
+/// accessibility value, and the main display's menu-bar strip is a shape.
 ///
 /// `@MainActor` because a `View`'s computed properties other than `body` are
-/// nonisolated under complete concurrency checking, and the virtual-display
-/// tint is read from the main-actor registry rather than copied.
+/// nonisolated under complete concurrency, and the virtual-display tint is read
+/// from the main-actor registry rather than copied.
 @MainActor
 struct DisplayTile: View {
   let name: String
   let pointSize: String
   let mirroredCount: Int
   let isMain: Bool
-  /// **Selection is a choice**, and the one "Use as Main Display" acts on. Drawn
-  /// as a *state of the tile*: the glass lights in the destination accent and
-  /// the name goes semibold, so it cannot be read as the ring the keyboard
-  /// leaves behind it.
+  /// Selection is a choice, and the one "Use as Main Display" acts on. Drawn as
+  /// a state of the tile, the glass lit and the name semibold, so it cannot be
+  /// read as the ring the keyboard leaves behind it.
   let isSelected: Bool
-  /// **Focus is where the keyboard is**, not a choice: Space promotes a focused
-  /// tile to the selection. Drawn as the system's own keyboard ring
-  /// (`keyboardFocusIndicatorColor`, the accent at 50 %) and changing nothing
-  /// else about the tile, because that is what the platform's focus indicator
-  /// means. The two states used to share one 2 pt tint ring, which put a tile
-  /// that read as "selected" beside a greyed-out "Use as Main Display" — the
-  /// pane looked broken at rest, and the honest reading was that focus had been
-  /// drawn as selection.
+  /// Focus is where the keyboard is, not a choice: Space promotes a focused tile
+  /// to the selection. Drawn as the system's own keyboard ring and changing
+  /// nothing else about the tile, because that is what the platform's focus
+  /// indicator means. Sharing one tint ring with selection put a tile that read
+  /// as "selected" beside a greyed-out "Use as Main Display".
   ///
-  /// Both are drawn when both are true. Suppressing the ring on a selected tile
+  /// Both are drawn when both are true: suppressing the ring on a selected tile
   /// made Tab appear to lose the keyboard as soon as it reached the selection.
   ///
-  /// Drawn HERE rather than by AppKit's focus effect. **Measured 2026-08-05.**
-  /// The system ring keeps the geometry it was drawn with: after an arrangement
-  /// change rescaled the map, the ring stayed at the tile's *previous* size —
-  /// pinned in the pixels of `05-canvas-pending.png`, where the ring ended 58 px
-  /// short of the tile it was supposed to be hugging. A ring pointing at a
-  /// region that is not the tile is worse than no ring at all, and it fails for
-  /// exactly the users the keyboard route exists for. Drawn as part of the tile
-  /// it cannot go stale, because it has no geometry of its own to remember.
+  /// Drawn HERE rather than by AppKit's focus effect. MEASURED 2026-08-05: the
+  /// system ring keeps the geometry it was drawn with, so after an arrangement
+  /// change rescaled the map it stayed at the tile's previous size, ending 58 px
+  /// short of the tile it was supposed to be hugging. Drawn as part of the tile
+  /// it has no geometry of its own to go stale.
   let isFocused: Bool
   let isInvalid: Bool
   let isDragging: Bool
   /// A display that exists in software only: one of Candela's own slots, or a
-  /// foreign synthetic display (Sidecar, AirPlay, a dummy). Drawn in the
-  /// Virtual Displays pane's purple so the map says which tiles are glass and
-  /// which are not. Never the ONLY signal: the tile's name says what it is,
+  /// foreign synthetic display (Sidecar, AirPlay, a dummy). Drawn in the Virtual
+  /// Displays pane's purple, never as the ONLY signal: the name says what it is,
   /// and the canvas appends "virtual display" to the accessibility value.
   var isVirtual: Bool = false
   /// The built-in display, which is drawn as a laptop everywhere it is depicted
@@ -221,9 +196,8 @@ struct DisplayTile: View {
             .strokeBorder(Color.red, lineWidth: 2)
         }
 
-        // INSET, so it reads as a ring inside the tile rather than as a second
-        // opinion about the tile's edge — adjacent displays share an edge, and
-        // a ring drawn on it would sit half over the neighbour.
+        // INSET: adjacent displays share an edge, and a ring drawn on it would
+        // sit half over the neighbour.
         if isFocused {
           RoundedRectangle(cornerRadius: 3, style: .continuous)
             .strokeBorder(Color(nsColor: .keyboardFocusIndicatorColor), lineWidth: 3)
@@ -234,21 +208,18 @@ struct DisplayTile: View {
       }
     }
     .opacity(isDragging ? 0.9 : 1)
-    // Every tile stands on the map's floor, so a shadow at rest is the stage
-    // light rather than an elevation claim; the dragged tile is the one that is
-    // genuinely lifted and deepens it.
+    // A shadow at rest is stage light, not an elevation claim; the dragged tile
+    // is the one genuinely lifted, and it deepens.
     .shadow(color: .black.opacity(shadowDepth), radius: 10, y: 5)
-    // The escape hatch for a map whose tiles are too small to say everything —
-    // the name and the size are then reachable without resizing anything.
+    // The escape hatch when tiles are too small to say everything: the name and
+    // the size stay reachable.
     .help(Text(verbatim: "\(name) (\(pointSize))"))
   }
 
   /// The face, drawn by the glyphs the guided setup flow and the display heroes
-  /// already use rather than by a second set of shapes (SV5).
-  ///
-  /// Aspect comes from the FRAME, not from the display's mode: the frame is
-  /// what `CanvasTransform` put there, so asking the glyph for that aspect is
-  /// what makes the glass fill the rect instead of fitting inside it.
+  /// already use (SV5). Aspect comes from the FRAME, not the display's mode: the
+  /// frame is what `CanvasTransform` put there, so asking the glyph for that
+  /// aspect makes the glass fill the rect instead of fitting inside it.
   @ViewBuilder private func glass(in size: CGSize) -> some View {
     // A layout pass before the canvas has sized anything hands this a zero, and
     // the glyphs divide by it.
@@ -262,10 +233,9 @@ struct DisplayTile: View {
       // The box's extra height is all deck, and the deck hangs BELOW the glass.
       .offset(y: (box.height - size.height) / 2)
       // The second frame reports the TILE's size back to the stack, so the
-      // overhang paints outside the tile without laying anything out around
-      // it. Measured, not defensive: without it the box's size became the
-      // ZStack's, which pushed the focus ring, the invalid border and the
-      // labels off the display they belong to.
+      // overhang paints outside the tile without laying anything out around it.
+      // Measured: without it the box's size became the ZStack's, pushing the
+      // focus ring, the invalid border and the labels off their display.
       .frame(width: size.width, height: size.height)
     } else {
       DisplayGlyph(
@@ -275,17 +245,11 @@ struct DisplayTile: View {
     }
   }
 
-  /// The menu bar drawn on the main display's face: the platform's own
-  /// signifier for "this is the main display", and what people actually look for
-  /// when they ask where their menu bar went. **Drawn, never dragged** (AR9):
-  /// it is not a separate gesture target, so there is no second drag semantic on
-  /// this tile.
-  ///
-  /// Handed to the glyph as its face overlay, which clips it to the glass, so
-  /// the strip follows the rounded corners the way a menu bar follows a
-  /// display's. The band it occupies is reserved on EVERY tile
-  /// (`TileLabelStyle.stripBand`), so a name never lands under it whichever
-  /// display is main.
+  /// The menu bar drawn on the main display's face: the platform's own signifier
+  /// for "this is the main display". Drawn, never dragged (AR9), so there is no
+  /// second drag semantic on this tile. Handed to the glyph as its face overlay,
+  /// which clips it to the glass; the band it occupies is reserved on EVERY tile
+  /// (`TileLabelStyle.stripBand`), so a name never lands under it.
   private func menuBarStrip(in size: CGSize) -> AnyView? {
     guard isMain else { return nil }
     return AnyView(
@@ -298,20 +262,17 @@ struct DisplayTile: View {
     )
   }
 
-  /// The box that puts `LaptopGlyph`'s glass exactly on the tile's rect.
+  /// The box that puts `LaptopGlyph`'s glass exactly on the tile's rect. That
+  /// view fits its face inside the box it is given and hangs a deck under it, so
+  /// a box the size of the rect would inset the glass; this inverts it.
   ///
-  /// That view fits its face inside the box it is given and hangs a deck under
-  /// it, so a box the size of the rect would inset the glass. This inverts it.
-  ///
-  /// **It mirrors three of `LaptopGlyph`'s numbers and depends on a fourth.**
-  /// The three are the constants below: the face's share of the box width, the
-  /// deck's share of the box height, and the deck's floor in points. The fourth
-  /// is that view's deck width, `min(bounds.width, faceWidth * 1.18)`, which the
-  /// box gets to ignore only because `1 / 0.86` is 1.163 and the `min` therefore
-  /// takes the box width. Raise the face share past `1 / 1.18` and the 1.18
-  /// starts to bind, and the deck stops widening with the glass. Change any of
-  /// them there and this has to follow, or the built-in's glass stops meeting
-  /// its neighbours.
+  /// It mirrors three of `LaptopGlyph`'s numbers (the constants below) and
+  /// depends on a fourth: that view's deck width, `min(bounds.width, faceWidth *
+  /// 1.18)`, which the box may ignore only because `1 / 0.86` is 1.163 and the
+  /// `min` therefore takes the box width. Raise the face share past `1 / 1.18`
+  /// and the 1.18 starts to bind, and the deck stops widening with the glass.
+  /// Change any of them there and this has to follow, or the built-in's glass
+  /// stops meeting its neighbours.
   private static func laptopBox(fitting face: CGSize) -> CGSize {
     CGSize(
       width: face.width / laptopFaceWidthShare,
@@ -323,10 +284,10 @@ struct DisplayTile: View {
   private static let laptopDeckHeightShare: Double = 0.075
   private static let laptopMinimumDeck: Double = 5
 
-  /// Centred in the space BELOW the menu-bar strip's band, never in the tile:
-  /// the band is reserved on every tile (`TileLabelStyle.stripBand`), so the
-  /// name clears the strip whichever display is main, and the height
-  /// `TileLabelStyle.fitting` tested is the height this stack occupies.
+  /// Centred in the space BELOW the strip's band, never in the tile: the band is
+  /// reserved on every tile, so the name clears the strip whichever display is
+  /// main, and the height `TileLabelStyle.fitting` tested is the one this stack
+  /// occupies.
   @ViewBuilder private func labelStack(in size: CGSize) -> some View {
     if labels.detail != .none {
       VStack(spacing: 0) {
@@ -365,8 +326,7 @@ struct DisplayTile: View {
   /// What the glass is lit in. The selected tile takes the destination's own
   /// accent, so the map is lit by the same source as the canvas behind it; a
   /// virtual display takes the Virtual Displays pane's tint, read from the
-  /// registry rather than copied, so a software tile on the map and its sidebar
-  /// row are one statement.
+  /// registry rather than copied, so the tile and its sidebar row agree.
   private var faceAccent: Color {
     if isInvalid { return .red }
     if isSelected { return lighting.accent }

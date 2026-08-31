@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Marks every confirmation window as one, so a newcomer can see the questions
 /// already on screen without any surface knowing about another surface. It is
-/// the app's own window list being read, not cross-feature state (#126).
+/// the app's own window list being read, not cross-feature state.
 private let confirmationPanelIdentifier = NSUserInterfaceItemIdentifier(
   "com.rydersel.Candela.confirmation"
 )
@@ -29,46 +29,33 @@ private func occupiedConfirmationFrames(on screen: NSScreen, excluding panel: NS
 ///
 /// **Why a window rather than a banner.** For a panel-started change it is
 /// forced: the panel is a SwiftUI view inside a real `NSMenu` tracking session,
-/// and that session ends on Escape, on a click in the menu bar, and — the case
-/// that matters — possibly as a side effect of the display reconfiguration the
-/// preview itself performs. Change something, the panel vanishes, half a minute
-/// later the screen snaps back with no explanation. A hotkey-started change has
-/// no panel open at all.
+/// and that session can end as a side effect of the display reconfiguration the
+/// preview itself performs, leaving the screen to snap back half a minute later
+/// with no explanation. A hotkey-started change has no panel open at all. For a
+/// settings-started change it is a judgement: a pane's banner sits partway down
+/// a scrolling page, in a window very often on a DIFFERENT display from the one
+/// that just changed, and this is a safety question. macOS confirms display
+/// changes exactly this way.
 ///
-/// For a settings-started change it is a judgement, and it was made the other way
-/// once. A pane's banner is a few lines of text partway down a scrolling page, in
-/// a window that is very often on a DIFFERENT display from the one that just
-/// changed. It was missable, and this is a *safety* question — the countdown
-/// exists because a bad change can leave a screen unreadable, so it must never be
-/// answered blind or, worse, silently.
-///
-/// A dialog on the affected display is also the platform's own answer: macOS
-/// confirms display changes exactly this way.
-///
-/// **Its buttons take the FIRST click.** That was an open question until
-/// 2026-08-04 and it is the reason this window could be promoted at all: a
-/// never-activated window can swallow the click that would otherwise focus it,
-/// and there is no `acceptsFirstMouse` override anywhere in this repo. Measured
-/// on real hardware with a synthesised `kCGEventLeftMouseDown`/`Up` pair while
-/// another app was frontmost — one click on the primary committed, one click on
-/// the secondary reverted. No override is needed. The result depends on the style
-/// mask and on `becomesKeyOnlyIfNeeded`; re-measure if either changes.
+/// **Its buttons take the FIRST click**, which is the reason this window could
+/// be promoted at all: a never-activated window can swallow the click that would
+/// otherwise focus it, and there is no `acceptsFirstMouse` override anywhere in
+/// this repo. Measured on real hardware with a synthesised
+/// `kCGEventLeftMouseDown`/`Up` pair while another app was frontmost: one click
+/// on the primary committed, one on the secondary reverted. The result depends
+/// on the style mask and on `becomesKeyOnlyIfNeeded`; re-measure if either
+/// changes.
 ///
 /// WHICH DISPLAY is the caller's business, not this type's: it differs per
 /// feature (a mode preview asks on its own display, a mirror preview must ask on
-/// the master), and resolving it needs topology this island deliberately holds
-/// none of.
-///
-/// Where on that display is this type's business, and has to be: every surface
-/// centred its own window, so two questions resolving to one display landed on
-/// exactly the same point and neither ever moved (#126). Deciding it here is
-/// what lets a newcomer step clear of the questions already up without any
-/// surface learning about another surface.
+/// the master), and resolving it needs topology this island holds none of. Where
+/// on that display is this type's business, because every surface centring its
+/// own window put two questions on exactly the same point.
 @MainActor
 final class ConfirmationPanel<Content: View> {
-  /// Drawn nowhere (`titleVisibility` is hidden) — it exists so assistive
-  /// technology has a name for the window. Deliberately the subject, not the
-  /// question, which is only one of the things the window says.
+  /// Drawn nowhere (`titleVisibility` is hidden): it exists so assistive
+  /// technology has a name for the window. The subject, not the question, which
+  /// is only one of the things the window says.
   private let accessibilityTitle: String
   private var panel: NSPanel?
   private var hosting: ConfirmationHostingView<Content>?
@@ -98,10 +85,9 @@ final class ConfirmationPanel<Content: View> {
     // Geometry is this method's for the whole pass: it measures, sizes and places
     // the window below, and an auto-resize starting mid-pass would work from the
     // centre the window had BEFORE placement. This also ends the suspension a
-    // dismissal leaves standing. Dropping an invalidation inside the pass is only
-    // safe because `ConfirmationCard` pins its width at 340 pt, so `fittingSize`
-    // answers the same width every time and cannot oscillate against the size
-    // applied here.
+    // dismissal leaves standing. Dropping an invalidation inside the pass is safe
+    // only because `ConfirmationCard` pins its width at 340 pt, so `fittingSize`
+    // cannot oscillate against the size applied here.
     hosting.suspendAutoResize()
     defer { hosting.resumeAutoResize() }
     if isFirstPresent {
@@ -120,10 +106,10 @@ final class ConfirmationPanel<Content: View> {
     hosting.layoutSubtreeIfNeeded()
     panel.setContentSize(hosting.fittingSize)
 
-    // Centred when this is the only question up, and clear of the others when
-    // it is not (#126). Placement runs once per content identity, never on a
-    // countdown tick, so the incumbent keeps the place it was given and a
-    // window the user dragged is left where they put it.
+    // Centred when this is the only question up, and clear of the others when it
+    // is not. Placement runs once per content identity, never on a countdown
+    // tick, so the incumbent keeps the place it was given and a window the user
+    // dragged is left where they put it.
     panel.setFrameOrigin(ConfirmationPlacement.origin(
       size: panel.frame.size,
       in: screen.visibleFrame,
@@ -139,12 +125,10 @@ final class ConfirmationPanel<Content: View> {
     // Reduce Motion lands on full opacity at once. Otherwise the fade starts
     // from the live alpha, which is 0 for a window that is not up.
     let start = fadeIn > 0 ? (panel.isVisible ? panel.alphaValue : 0) : 1
-    // A fade-in animator survives orderOut and keeps driving the hidden
-    // window's alpha toward 1 (measured). On the normal path the fade below
-    // replaces it by itself, so this group looks removable; it is not. It
-    // covers the one path with no following animation: Reduce Motion turns
-    // fadeIn to 0 and start to 1, and only this group stops the surviving
-    // animator from finishing on top of the direct assignment.
+    // A fade-in animator survives orderOut and keeps driving the hidden window's
+    // alpha toward 1 (measured). This group looks removable and is not: it covers
+    // the one path with no following animation, where Reduce Motion turns fadeIn
+    // to 0 and start to 1.
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0
       panel.animator().alphaValue = start
@@ -164,20 +148,18 @@ final class ConfirmationPanel<Content: View> {
 
   /// Closes instantly, and deliberately: there is no dismissal fade.
   ///
-  /// Usually the card's content is gone before this runs (measured 5 of 6:
-  /// a coordinator clears its preview, awaits an actor hop, and SwiftUI
-  /// commits the emptied body inside the hop), so a dismissal fade would show
-  /// a blank panel dissolving. The synchronous paths, the start-failure OK
-  /// among them, reach here with the card intact, and stay instant too: the
-  /// answer is the event, and a window that lingers after it reads as an
-  /// unanswered question.
+  /// The card's content is usually gone before this runs: a coordinator clears
+  /// its preview, awaits an actor hop, and SwiftUI commits the emptied body
+  /// inside the hop, so a fade would show a blank panel dissolving. The
+  /// synchronous paths reach here with the card intact and stay instant too: a
+  /// window that lingers after the answer reads as an unanswered question.
   func dismiss() {
     guard shown != nil else { return }
     shown = nil
     guard let panel else { return }
-    // Belt, since the emptied card's intrinsic size has usually collapsed by now:
-    // nothing should size this window between here and the next `present`, which
-    // resumes the auto-resize and re-applies both size and placement itself.
+    // The emptied card's intrinsic size has usually collapsed by now, and nothing
+    // should size this window between here and the next `present`, which resumes
+    // the auto-resize and re-applies both size and placement itself.
     hosting?.suspendAutoResize()
     panel.orderOut(nil)
   }
@@ -198,7 +180,7 @@ final class ConfirmationPanel<Content: View> {
     panel.level = .floating
     panel.isFloatingPanel = true
     // `isFloatingPanel` turns `hidesOnDeactivate` ON, and this app is an
-    // accessory that is essentially never the active app — left alone, the
+    // accessory that is essentially never the active app: left alone, the
     // confirmation would be invisible exactly when it is needed.
     panel.hidesOnDeactivate = false
     // Not `becomesKeyOnlyIfNeeded`: SwiftUI buttons in a never-key window are a
@@ -219,10 +201,9 @@ final class ConfirmationPanel<Content: View> {
 /// `PanelHostingView`.
 ///
 /// It carries the whole burden on a countdown tick, because `present`
-/// short-circuits on unchanged content and so never reaches the sizing code
-/// above. Since the initialiser narrows `sizingOptions`, it is also the ONLY
-/// thing that resizes the window: AppKit's own content-driven path is off, which
-/// is what makes the size suspendable at all.
+/// short-circuits on unchanged content. Since the initialiser narrows
+/// `sizingOptions`, it is also the ONLY thing that resizes the window: AppKit's
+/// own content-driven path is off, which is what makes the size suspendable.
 private final class ConfirmationHostingView<Content: View>: NSHostingView<Content> {
   /// Set while the resize animation is running. Every intermediate frame lays
   /// the content out again, and each of those layouts can invalidate the
@@ -267,18 +248,14 @@ private final class ConfirmationHostingView<Content: View>: NSHostingView<Conten
 
   required init(rootView: Content) {
     super.init(rootView: rootView)
-    // The default options let `NSHostingView` drive the WINDOW's size itself, on a
-    // path `invalidateIntrinsicContentSize` cannot suspend. Measured: the moment a
-    // coordinator clears its preview the card's body becomes empty, and AppKit had
-    // already taken the window to 0x32 before this class was even called; the same
-    // path made the mid-countdown grow an instantaneous AppKit jump this class never
-    // got to animate, so the grow below was dead code. Keeping only the
-    // intrinsic size leaves `fittingSize` and the invalidation hook working, which
-    // is what everything here and in `present` measures with, and makes
-    // `resizeWindowToFittingSize` the only thing that ever sizes the window.
-    // A bare `[]` also stops the window following the content, but it stops
-    // publishing an intrinsic size at all: `fittingSize` answers 0x0 and `present`
-    // then sizes a zero-by-zero window [both measured 2026-08-17].
+    // The default options let `NSHostingView` drive the WINDOW's size itself, on
+    // a path `invalidateIntrinsicContentSize` cannot suspend: AppKit had already
+    // taken the window to 0x32 the moment a coordinator cleared its preview.
+    // Keeping only the intrinsic size leaves `fittingSize` and the invalidation
+    // hook working and makes `resizeWindowToFittingSize` the only thing that ever
+    // sizes the window. A bare `[]` also stops the window following the content,
+    // but it stops publishing an intrinsic size at all: `fittingSize` answers 0x0
+    // and `present` then sizes a zero-by-zero window [both MEASURED 2026-08-17].
     sizingOptions = [.intrinsicContentSize]
   }
 
@@ -303,17 +280,16 @@ private final class ConfirmationHostingView<Content: View>: NSHostingView<Conten
     let target = fittingSize
     guard frame.size != target else { return }
     // An answered question's card empties before `dismiss` is called, and an empty
-    // body measures 0 pt wide (measured: 0x32). No question can legitimately ask for
-    // that: `ConfirmationCard` pins 340 pt. Refusing it means an emptied card cannot
-    // implode a window that is still on screen, whether or not the close is on its
-    // way, so this does not depend on the suspension winning a race with SwiftUI.
+    // body measures 0 pt wide. No question can legitimately ask for that:
+    // `ConfirmationCard` pins 340 pt. Refusing it means an emptied card cannot
+    // implode a window that is still on screen, so this does not depend on the
+    // suspension winning a race with SwiftUI.
     guard target.width > 0, target.height > 0 else { return }
-    // Grow around the window's CURRENT centre, not its bottom-left origin.
-    // AppKit's origin is bottom-left, so a failure caption appearing mid-preview
-    // would otherwise push the whole window upward: the buttons would move out
-    // from under the pointer at the moment the user is being told to try again.
-    // Reading the live centre (rather than re-centring on the screen) means a
-    // window the user has dragged stays where they put it.
+    // Grow around the window's CURRENT centre, not its bottom-left origin: a
+    // failure caption appearing mid-preview would otherwise push the window
+    // upward, moving the buttons out from under the pointer at the moment the
+    // user is told to try again. The live centre also leaves a window the user
+    // dragged where they put it.
     let centre = NSPoint(x: window.frame.midX, y: window.frame.midY)
     let before = window.frame
     let duration = Motion.windowResize(reduceMotion: Motion.systemReduceMotion)
@@ -329,11 +305,8 @@ private final class ConfirmationHostingView<Content: View>: NSHostingView<Conten
     // The geometry is the unanimated code's own, computed and applied first; only
     // the path there animates. Rewinding to `before` undisplayed (nothing has
     // drawn since) leaves the animator ending on exactly that frame. Both rects
-    // share a centre, so the growth stays symmetric about it and the endpoint is
-    // the one the jump reached: what changes is that the caption's arrival reads
-    // as the window growing rather than as the buttons teleporting. Where the
-    // buttons sit at each intermediate height is SwiftUI's to decide, so the path
-    // is not a claim this code can make.
+    // share a centre, so the caption's arrival reads as the window growing rather
+    // than as the buttons teleporting.
     let destination = window.frame
     let generation = resizeGeneration
     window.setFrame(before, display: false)
@@ -343,11 +316,10 @@ private final class ConfirmationHostingView<Content: View>: NSHostingView<Conten
     } completionHandler: { [weak self] in
       // Typed `@Sendable`, but fires on the main thread where the window lives.
       MainActor.assumeIsolated {
-        // The geometry has been taken over since (a newer question placed, or this
-        // one answered), so this destination is stale: pinning it would undo what
-        // did the taking over, and the flag is not this animation's to clear any
-        // more, since `suspendAutoResize` cleared it and a later resize may have
-        // set it again.
+        // The geometry has been taken over since (a newer question placed, or
+        // this one answered), so this destination is stale: pinning it would undo
+        // what did the taking over, and the flag is no longer this animation's to
+        // clear.
         guard let self, self.resizeGeneration == generation else { return }
         // Pinned rather than trusted: the shipped geometry has to be the
         // unanimated one to the point, wherever the animator stopped.

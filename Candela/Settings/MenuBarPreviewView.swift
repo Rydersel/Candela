@@ -9,53 +9,35 @@ enum MenuBarPreviewJump {
 }
 
 /// The Menu Bar pane's live preview (KMR7): a miniature desktop showing what
-/// Candela puts on screen right now: the status icon in the menu bar, the open
-/// panel with its slider rows, and both on-screen indicator pills. Every
-/// control on the pane changes something here, so the choices stop being
-/// phrases.
+/// Candela puts on screen right now, so every control on the pane changes
+/// something visible.
 ///
-/// Fidelity (KMR8): each miniature replicates the real widget's anatomy at
-/// about half scale, from the real sources rather than from imagination:
-/// the panel from `PanelView`/`CandelaSlider` (280 pt wide, 13 pt semibold
-/// secondary headers, capsule track with a white fill and knob, leading glyph,
-/// trailing percent readout, gear/power footer pills), the pill from
-/// `BrightnessHUD` (314 x 62, corner radius 22, name label over an icon-flanked
-/// 4 pt bar), and the icon from `StatusItemController` (`sun.max`). The real
-/// pill sits on `.hudWindow` material; this window is opaque by rule (no
-/// effect views in the settings window), so the pill and panel grounds are
-/// opaque colors matched per appearance instead.
+/// Fidelity (KMR8): each miniature is drawn at half scale from the real source
+/// rather than from imagination, the panel from `PanelView`/`CandelaSlider`, the
+/// pill from `BrightnessHUD`, the icon from `StatusItemController`. The real
+/// pill sits on `.hudWindow` material and this window is opaque by rule, so the
+/// grounds here are opaque colors matched per appearance instead.
 ///
-/// Honesty (KMR9, amended by KMR-A5): everything shown is derived from the
-/// same policies the real widgets consult. Icon presence is
-/// `MenuIconPolicy.isStatusItemVisible` with the live rig's inputs; the rows
-/// are `PanelView.visibleDisplays` / `showsBuiltIn` / `showsVolumeSlider` /
-/// `showsContrastSlider`; every bar (panel rows and pills alike) shows the
-/// controllers' LIVE values; each pill sits at its own persisted
-/// `HUDPosition` in the persisted `HUDStyle` (KMR-A3). Both pills are
-/// depicted so both position choices stay visible; the pane's footer keeps
-/// the truth that on screen the two kinds take turns in one window per
-/// display. Pills sharing an anchor stack brightness-above-volume, and pills
-/// at the panel's corner stack above the panel (KMR-A2).
+/// Honesty (KMR9, amended by KMR-A5): everything shown comes from the policies
+/// the real widgets consult, and every bar shows the controllers' LIVE values.
+/// Both pills are depicted so both position choices stay visible; on screen the
+/// two kinds take turns in one window per display, which the pane's footer says.
 ///
 /// Doorways, not dead furniture (KMR-A5, superseding KMR10's no-hit-targets
-/// clause the way the OLED hero map superseded OC3): hovering the panel or a
-/// pill lifts it, and clicking scrolls the pane to the section that
-/// configures it. The scenery stays decorative and hidden from
-/// accessibility; the widgets are buttons whose labels name their
-/// destination.
+/// clause): the widgets are buttons whose labels name their destination, and
+/// the scenery stays decorative and hidden from accessibility.
 ///
-/// `@MainActor` for the same reason as every pane: `PanelView`'s statics and
-/// `AppModel` are main-actor, and a `View`'s non-`body` members are nonisolated
-/// under complete concurrency checking.
+/// `@MainActor`: `PanelView`'s statics and `AppModel` are main-actor, and a
+/// `View`'s non-`body` members are nonisolated under complete concurrency
+/// checking.
 @MainActor
 struct MenuBarPreviewView: View {
   @Environment(AppModel.self) private var model
 
-  /// The widgets follow the SYSTEM appearance, and the settings window is dark
-  /// by rule, so the window's own color scheme would make the preview draw a
-  /// dark panel and pill to someone whose real ones are light. It feeds the
-  /// grounds below AND the depicted subtree's whole color scheme (see `body`),
-  /// because the labels and glyphs adapt too.
+  /// The widgets follow the SYSTEM appearance while this window is dark by rule,
+  /// so reading the window's color scheme would draw a dark panel and pill for
+  /// someone whose real ones are light. Feeds the grounds and the depicted
+  /// subtree's whole color scheme, since labels and glyphs adapt too.
   @State private var systemAppearance = SystemAppearance()
 
   /// What the widgets resolve their adaptive colors against.
@@ -72,9 +54,8 @@ struct MenuBarPreviewView: View {
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
 
   var body: some View {
-    // The preview reads prefs directly, and prefs are plain UserDefaults:
-    // without this read a position change would redraw only when something
-    // else invalidated the pane.
+    // Prefs are plain UserDefaults: without this read a position change would
+    // redraw only when something else invalidated the pane.
     let _ = model.prefsRevision
     let externals = PanelView.visibleDisplays(model)
     let showsBuiltIn = PanelView.showsBuiltIn(model)
@@ -90,23 +71,19 @@ struct MenuBarPreviewView: View {
       anchorColumn(.topCenter, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
       anchorColumn(.topRight, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
     }
-    // SV13 covers the INK as well as the grounds. Every adaptive color inside a
-    // widget (`.primary` labels, `.secondary` headers and glyphs, `.quaternary`
-    // tracks, the panel's `.separator` edge) resolves against the environment's
-    // color scheme, and this window pins that dark, so in a light-mode system
-    // the panel and pills drew light with white text on them: illegible, and a
-    // claim about the real widgets that is simply false. Resolving the depicted
-    // subtree from the tracked system appearance flips text, glyphs and grounds
-    // together. The literal whites below are NOT covered by this and must not
-    // be: they copy `CandelaSlider`'s own literals, which are white in both
-    // appearances (Control Center's fill is), and the fixed-dark menu bar's.
+    // SV13 covers the INK as well as the grounds: every adaptive color inside a
+    // widget resolves against the environment's color scheme, and this window
+    // pins that dark, so on a light-mode system the panel and pills drew light
+    // with white text on them. The literal whites below are NOT covered and must
+    // not be: they copy `CandelaSlider`'s own literals, white in both
+    // appearances, and the fixed-dark menu bar's.
     //
-    // Applied to the scene, not to the whole `body`: the card frame added
-    // beneath this line is the settings window's chrome and stays themed.
+    // Applied to the scene, not the whole `body`: the card frame below is the
+    // settings window's chrome and stays themed.
     .environment(\.colorScheme, depictedScheme)
     // Sized for the tallest realistic column: both pills at top right above a
-    // panel showing a built-in row plus two externals with volume and
-    // contrast. Columns top-align, so smaller content just leaves ground.
+    // panel with a built-in row and two externals. Columns top-align, so
+    // smaller content just leaves ground.
     .frame(height: 300)
     .frame(maxWidth: .infinity)
     // The frame is the settings window's (SV13): the widgets inside it keep
@@ -130,9 +107,9 @@ struct MenuBarPreviewView: View {
     return kinds
   }
 
-  /// One position's stack: its pills, and at top right the panel beneath them
-  /// (KMR-A2: the pill sits nearest the menu bar; the true z-overlap is
-  /// illegible at miniature scale, so the corner stacks instead).
+  /// One position's stack: its pills, and at top right the panel beneath them.
+  /// The true z-overlap is illegible at miniature scale, so the corner stacks
+  /// instead (KMR-A2).
   @ViewBuilder
   private func anchorColumn(
     _ position: HUDPosition, externals: [AppModel.DisplayState],
@@ -183,8 +160,7 @@ struct MenuBarPreviewView: View {
 
   // MARK: - Desktop
 
-  /// A fixed depiction of a desktop, deliberately not appearance-adaptive: it
-  /// is the scene the widgets sit on, and a stable ground keeps the widgets
+  /// Deliberately not appearance-adaptive: a stable ground keeps the widgets
   /// (which DO adapt) readable in both appearances.
   private var wallpaper: some View {
     LinearGradient(
@@ -215,8 +191,8 @@ struct MenuBarPreviewView: View {
       }
       Image(systemName: "wifi").font(.system(size: 6))
       Image(systemName: "battery.75percent").font(.system(size: 7))
-      // Fixed-size: the clock is the trailing element, and letting it
-      // compress put its last digits under the rounded corner's clip.
+      // Fixed-size: letting the clock compress put its last digits under the
+      // rounded corner's clip.
       Text("Wed 14:12").font(.system(size: 6.5)).fixedSize()
     }
     .foregroundStyle(.white.opacity(0.85))
@@ -267,7 +243,6 @@ struct MenuBarPreviewView: View {
         displaySection(name: PanelView.title(for: state.display), rows: rows(for: state))
       }
       Divider().opacity(0.6)
-      // The real footer: a Settings pill leading, a Quit pill trailing.
       HStack {
         footerPill(glyph: "gearshape", title: "Settings…")
         Spacer(minLength: 4)
@@ -293,9 +268,9 @@ struct MenuBarPreviewView: View {
     MiniRow(glyph: glyph, value: min(max(value, 0), 1))
   }
 
-  /// The same rows, in the same order, gated by the same statics the real
-  /// panel consults; a muted volume renders as 0 with the slashed speaker,
-  /// exactly as `ValueSliderRow` draws it.
+  /// The same rows in the same order, gated by the statics the real panel
+  /// consults; a muted volume renders as 0 with the slashed speaker, the way
+  /// `ValueSliderRow` draws it.
   private func rows(for state: AppModel.DisplayState) -> [MiniRow] {
     let rowPrefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
     var rows = [miniRow(glyph: "sun.max.fill", value: state.controller.brightness)]
@@ -324,10 +299,8 @@ struct MenuBarPreviewView: View {
     }
   }
 
-  /// `CandelaSlider`'s anatomy at half scale: quaternary capsule track, white
-  /// fill from the leading edge, white knob with a grey hairline at the fill
-  /// boundary, leading glyph dimmed against the fill, optional trailing
-  /// percent readout.
+  /// `CandelaSlider`'s anatomy at half scale: quaternary track, white fill and
+  /// knob, a glyph dimmed against the fill, optional percent readout.
   private func miniSlider(_ row: MiniRow) -> some View {
     let h: CGFloat = 30 * Self.s
     return HStack(spacing: 4) {
@@ -375,9 +348,8 @@ struct MenuBarPreviewView: View {
 
   // MARK: - Indicator pill miniatures
 
-  /// Lightened from the first pass (KMR-A4): the native pill's material reads
-  /// brighter than `.hudWindow` did, and the real HUD is being corrected the
-  /// same direction.
+  /// Lighter than the first pass (KMR-A4): the native pill's material reads
+  /// brighter than `.hudWindow` did.
   private var pillGround: Color {
     systemAppearance.isDark
       ? Color(white: 0.27).opacity(0.97) : Color(white: 0.95).opacity(0.97)
@@ -389,13 +361,10 @@ struct MenuBarPreviewView: View {
     systemAppearance.isDark ? .white.opacity(0.22) : .black.opacity(0.08)
   }
 
-  /// The display a pill names, its live value, and whether it is muted:
-  /// mirrors the panel miniature's row ordering (the first display with a row
-  /// of that kind), which keeps the two surfaces naming the same subject. The
-  /// REAL pill's subject depends on the key target mode, so this is a preview
-  /// convention, not a claim about which display a press would name. The
-  /// value is the controllers' live one (KMR-A5), the exact reads the panel
-  /// miniature's bars use, so the two move together.
+  /// Mirrors the panel miniature's row ordering on the same live reads, so the
+  /// two surfaces name the same subject and move together. The REAL pill's
+  /// subject depends on the key target mode, so this is a preview convention,
+  /// not a claim about which display a press would name.
   private func pillSubject(kind: HUDType, externals: [AppModel.DisplayState])
     -> (name: String, value: Double, muted: Bool) {
     if kind == .volume || kind == .volumeMuted,
@@ -418,15 +387,12 @@ struct MenuBarPreviewView: View {
   }
 
   /// The selected `HUDStyle` at half scale (KMR-A3), from the spec's pinned
-  /// geometry: Match macOS and Segmented share the 314 x 62 chrome (radius 22,
-  /// name label over an icon-flanked bar); Compact is a 220 x 36 name-less
-  /// pill (radius 18, margin 14). One definition in the spec, two
-  /// implementations (here and `BrightnessHUD`), reconciled side by side.
+  /// geometry. One definition in the spec, two implementations (here and
+  /// `BrightnessHUD`), reconciled side by side.
   @ViewBuilder
   private func pillMiniature(kind: HUDType, externals: [AppModel.DisplayState]) -> some View {
     let subject = pillSubject(kind: kind, externals: externals)
-    // A muted volume pill shows the real HUD's muted anatomy: slashed
-    // speakers, empty bar.
+    // The real HUD's muted anatomy: slashed speakers, empty bar.
     let shownKind: HUDType = kind == .volume && subject.muted ? .volumeMuted : kind
     switch prefs.hudStyle {
     case .system, .segments:
@@ -461,8 +427,8 @@ struct MenuBarPreviewView: View {
           continuousTrack(value: value)
         }
       }
-      // Kept at the real 4 pt rather than half: 2 pt reads as a hairline and
-      // loses the fill boundary the pill exists to show.
+      // The real 4 pt rather than half: 2 pt reads as a hairline and loses the
+      // fill boundary the pill exists to show.
       .frame(height: 4)
       Image(systemName: kind.rightSymbolName)
         .font(.system(size: 6.5, weight: .semibold))
@@ -471,7 +437,7 @@ struct MenuBarPreviewView: View {
   }
 
   /// Match macOS: continuous fill, with the native track's tick dots hinted on
-  /// the unfilled portion (the fill paints over the rest), per KMR-A4.
+  /// the unfilled portion (KMR-A4).
   private func continuousTrack(value: Double) -> some View {
     GeometryReader { geo in
       ZStack(alignment: .leading) {
@@ -491,8 +457,7 @@ struct MenuBarPreviewView: View {
     }
   }
 
-  /// Segmented (KMR-A3): 16 segments, full-scale 8 pt tall with 2 pt gaps and
-  /// radius 2, filled count Int((value * 16).rounded()); halved here.
+  /// Segmented (KMR-A3): the spec's segment count and gaps, halved here.
   private func segmentedTrack(value: Double) -> some View {
     let filled = Int((min(max(value, 0), 1) * 16).rounded())
     return HStack(spacing: 2 * Self.s) {
@@ -518,8 +483,7 @@ struct MenuBarPreviewView: View {
 }
 
 /// The pill's shared chrome (KMR-A3): every style differs inside the pill, not
-/// around it. The light hairline and the softened shadow are KMR-A4's
-/// direction; the dark `separatorColor` edge was one of the named deltas.
+/// around it. The light hairline and softened shadow are KMR-A4's direction.
 private struct PillChrome: ViewModifier {
   let radius: CGFloat
   let ground: Color
@@ -535,12 +499,9 @@ private struct PillChrome: ViewModifier {
 }
 
 /// Whether the system is drawing in dark, live. The preview depicts widgets
-/// that follow the system appearance while the settings window is pinned dark,
-/// so it cannot read the window's color scheme (SV13).
-///
-/// KVO on `NSApp.effectiveAppearance`: an appearance flip made while this window
-/// is open has to relight the miniatures, and an activation notification would
-/// miss it.
+/// that follow the system appearance while this window is pinned dark, so it
+/// cannot read the window's color scheme (SV13). KVO rather than an activation
+/// notification, which would miss a flip made while the window is open.
 @MainActor
 @Observable
 private final class SystemAppearance {
@@ -561,10 +522,9 @@ private final class SystemAppearance {
   }
 }
 
-/// The preview widgets' doorway affordance (KMR-A5): the OLED hero's "lift,
-/// not tint" hover, which survives an unfocused window because it never leans
-/// on the accent color. Scale is skipped under Reduce Motion; the shadow
-/// deepens either way, a non-moving cue.
+/// The preview widgets' doorway affordance (KMR-A5): lift, not tint, so the
+/// hover survives an unfocused window. Scale is skipped under Reduce Motion; the
+/// shadow deepens either way, a non-moving cue.
 private struct LiftButton<Content: View>: View {
   let label: String
   let action: () -> Void

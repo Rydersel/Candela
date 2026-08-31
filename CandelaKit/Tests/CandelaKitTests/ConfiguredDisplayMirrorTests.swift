@@ -5,10 +5,9 @@ import Testing
 
 @Suite("Mirror facts on a configured display (DT10)")
 struct ConfiguredDisplayMirrorTests {
-  /// The ambiguity this whole pair of fields exists for. A standalone display
-  /// and a master both report a null `mirrorsDisplay`, so the second call is
-  /// what separates them — measured on this machine, where an unmirrored
-  /// built-in reports `IsInMirrorSet=0, MirrorsDisplay=0`.
+  /// The ambiguity both fields exist for: a standalone display and a master both report
+  /// a null `mirrorsDisplay`, so `isInMirrorSet` separates them. Measured here, where an
+  /// unmirrored built-in reports `IsInMirrorSet=0, MirrorsDisplay=0`.
   @Test func aMasterAndAStandaloneDisplayAreIndistinguishableByMirrorsDisplayAlone() {
     let master = MirrorFixtures.display(1, inSet: true)
     let standalone = MirrorFixtures.display(2)
@@ -17,9 +16,8 @@ struct ConfiguredDisplayMirrorTests {
     #expect(!standalone.isMirrorMaster)
   }
 
-  /// A slave that claims not to be in a mirror set is not a state any caller
-  /// should have to defend against, and the defaulted parameters make it
-  /// constructible by accident in every fixture that sets only `mirrorsDisplay`.
+  /// A slave claiming not to be in a mirror set is not a state callers should defend
+  /// against, and the defaulted parameters make it constructible by accident.
   @Test func aSlaveIsInAMirrorSetEvenWhenTheFixtureForgotToSaySo() {
     let slave = MirrorFixtures.display(3, mirrors: 1)
     #expect(slave.isInMirrorSet)

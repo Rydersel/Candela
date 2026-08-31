@@ -14,32 +14,30 @@ public protocol HDRToggling: Sendable {
   func isHDREnabled(displayID: CGDirectDisplayID) async -> Bool
   /// The panel's HDR state read NOW, past any cache.
   ///
-  /// Deliberately not a default implementation forwarding to `isHDREnabled`
-  /// (#65). A conformance that silently answered from a cache would turn every
-  /// achieved-state check built on this into a check that cannot fail, which is
-  /// the defect this method exists to remove: each conformance has to say what
-  /// its own read-through is.
+  /// No default forwarding to `isHDREnabled`: a conformance answering from a
+  /// cache turns every achieved-state check built on this into one that cannot
+  /// fail. Each conformance states its own read-through.
   func measuredHDREnabled(displayID: CGDirectDisplayID) async -> Bool
-  /// Reports whether the write was ISSUED, never whether the display switched
-  /// (#65). See the implementation's note.
+  /// Reports whether the write was ISSUED, never whether the display switched.
+  /// See the implementation's note.
   @discardableResult
   func setHDR(displayID: CGDirectDisplayID, enabled: Bool) async -> Bool
   func displaysReconfigured() async
 }
 
 /// Programmatic control of the System Settings HDR toggle via the private
-/// MonitorPanel framework (fork: Support/HDRControl.swift; same mechanism
-/// BetterDisplay/ToggleHDR use). Actor isolation replaces the fork's serial
-/// DispatchQueue; MPDisplay/MPDisplayMgr existentials are non-Sendable and
-/// must never escape this actor (the compiler enforces this).
+/// MonitorPanel framework (the mechanism BetterDisplay and ToggleHDR use).
+/// Actor isolation replaces the fork's serial DispatchQueue; MPDisplay and
+/// MPDisplayMgr existentials are non-Sendable and must never escape this actor,
+/// which the compiler enforces.
 public actor MonitorPanelService: HDRToggling {
   private let log = Logger(subsystem: "com.rydersel.Candela", category: "MonitorPanel")
 
   public init() {}
 
-  /// The only retained MonitorPanel object. MPDisplay instances are NEVER
-  /// stored — see mpDisplay(_:). nil when the framework failed to load;
-  /// every entry point then degrades (spec §6).
+  /// The only retained MonitorPanel object; MPDisplay instances are never
+  /// stored (see `mpDisplay`). nil when the framework failed to load, and every
+  /// entry point then degrades.
   private lazy var manager: NSObject? = {
     guard dlopen("/System/Library/PrivateFrameworks/MonitorPanel.framework/MonitorPanel", RTLD_LAZY) != nil,
           let managerClass = NSClassFromString("MPDisplayMgr") as? NSObject.Type
@@ -50,12 +48,12 @@ public actor MonitorPanelService: HDRToggling {
     return managerClass.init()
   }()
 
-  /// 2 s isHDREnabled cache (fork: HDRControl.swift:41-53) — checked on every
-  /// brightness keypress; MPDisplayMgr enumeration is not free.
+  /// 2 s cache: `isHDREnabled` runs on every brightness keypress and
+  /// MPDisplayMgr enumeration is not free.
   private var hdrStateCache: [CGDirectDisplayID: (value: Bool, timestamp: ContinuousClock.Instant)] = [:]
 
-  /// Fork rule (HDRControl.swift:20): MPDisplay objects must not be cached
-  /// across display reconfigurations — always re-fetch per call.
+  /// MPDisplay objects must not be cached across display reconfigurations, so
+  /// re-fetch on every call.
   private func mpDisplay(_ displayID: CGDirectDisplayID) -> MPDisplay? {
     guard let manager else { return nil }
     let mgr = unsafeBitCast(manager, to: MPDisplayMgr.self)
@@ -84,14 +82,10 @@ public actor MonitorPanelService: HDRToggling {
   }
 
   /// The display blanks and re-modes for ~2 s after this returns; the caller
-  /// owns the settle delay and any deferred brightness write (spec §6,
-  /// fork: HDRControl.swift:56,107,125).
+  /// owns the settle delay and any deferred brightness write.
   ///
-  /// **`true` means the write was ISSUED: the lock was taken and
-  /// `preferHDRModes` was assigned. It does NOT mean the display switched**
-  /// (#65). A caller deciding whether an engage happened has to read
-  /// `measuredHDREnabled` after the settle; CLAUDE.md §2's rule about treating
-  /// an ACK as evidence of nothing applies here as much as it does on the wire.
+  /// **`true` means the write was ISSUED, not that the display switched.** To
+  /// know whether an engage happened, read `measuredHDREnabled` after the settle.
   @discardableResult
   public func setHDR(displayID: CGDirectDisplayID, enabled: Bool) -> Bool {
     guard let manager, let display = mpDisplay(displayID) else { return false }
@@ -102,18 +96,15 @@ public actor MonitorPanelService: HDRToggling {
     }
     display.preferHDRModes = enabled
     mgr.unlockAccess()
-    // INVALIDATED, not seeded with the requested value (#65). Seeding made the
-    // cache assert the very thing the post-settle read is there to test, and
-    // the seed's 2 s TTL equalled `BrightnessController.settleDelay`, so the
-    // confirmation read landed on the boundary of the window that would have
-    // returned the request back to itself.
+    // Invalidated, not seeded with the requested value: a seed makes the cache
+    // assert the very thing the post-settle read exists to test, and its 2 s TTL
+    // equals `BrightnessController.settleDelay`.
     self.hdrStateCache[displayID] = nil
     return true
   }
 
-  /// Call from DisplayManager on every reconfiguration epoch bump: HDR state
-  /// may have changed out from under the 2 s cache (mode switches themselves
-  /// trigger reconfiguration).
+  /// Call on every reconfiguration epoch bump: HDR state may have changed out
+  /// from under the 2 s cache, and mode switches trigger reconfiguration.
   public func displaysReconfigured() {
     self.hdrStateCache.removeAll()
   }

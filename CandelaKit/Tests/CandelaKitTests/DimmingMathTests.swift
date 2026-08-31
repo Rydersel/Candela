@@ -6,9 +6,8 @@ import Testing
 /// (§1, §2, §3, §6, §9) — the fork is the behavior oracle for every number here.
 @Suite("Dimming math")
 struct DimmingMathTests {
-  /// Only for the expectations that carry unavoidable binary-float residue (the
-  /// sw reverse transform, the shade curve); everything else is exactly
-  /// representable and asserted with `==`.
+  /// Only for expectations carrying binary-float residue (the sw reverse transform,
+  /// the shade curve); everything else is exactly representable and asserted `==`.
   private func isClose(_ actual: Double, _ expected: Double, accuracy: Double) -> Bool {
     abs(actual - expected) <= accuracy
   }

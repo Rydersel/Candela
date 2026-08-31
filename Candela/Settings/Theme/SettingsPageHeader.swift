@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// A page's opening lockup. Left-aligned, unlike the guided setup flow's
-/// centered heading: a settings page is a working surface, so the title anchors
-/// where the content does.
+/// Left-aligned, unlike the guided setup flow's centered heading: a settings
+/// page is a working surface, so the title anchors where the content does.
 struct SettingsPageHeader: View {
   var title: String
   var subtitle: String?

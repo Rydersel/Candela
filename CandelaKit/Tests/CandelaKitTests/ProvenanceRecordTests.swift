@@ -80,8 +80,8 @@ struct ProvenanceRecordTests {
     #expect(back.macOSBuild.isEmpty)
   }
 
-  /// Stands in for the envelope's body until that type exists. The digest covers
-  /// exactly this encode, so a key gated by the wrong flag hashes an unreproducible body.
+  /// The digest covers exactly this encode, so a key gated by the wrong flag
+  /// hashes a body nobody can reproduce.
   private struct SubsetBody: Encodable {
     let record: ProvenanceRecord
     let keys: Set<String>

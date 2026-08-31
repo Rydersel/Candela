@@ -81,9 +81,8 @@ struct OnboardingSecondaryButtonStyle: ButtonStyle {
   }
 }
 
-/// Bare text link (Skip Setup, Not Now, Choose Another). Hover gives it a
-/// faint capsule and brightens the text; without that it reads as a caption
-/// rather than a control.
+/// Bare text link. Hover gives it a faint capsule and brightens the text;
+/// without that it reads as a caption rather than a control.
 struct OnboardingLinkButtonStyle: ButtonStyle {
   func makeBody(configuration: Configuration) -> some View {
     HoverLabel(configuration: configuration)
@@ -135,8 +134,8 @@ struct OnboardingCard<Content: View>: View {
   }
 }
 
-/// The one escape hatch, rendered under every page's primary action so the
-/// exit always sits in the same place the eye already is.
+/// Rendered under every page's primary action, so the exit is always in the
+/// same place.
 @MainActor
 struct OnboardingSkipLink: View {
   let model: OnboardingFlowModel

@@ -17,11 +17,9 @@ enum OledCareSuspensionReason: Equatable, CaseIterable {
 /// itself: a lock dim that did not happen, and a pause whose cause the user may
 /// never have asked for.
 ///
-/// OC7 sub-ruling 4 is the reason this is shared rather than repeated: a skip is
-/// "recorded, never reported as dimmed", and both surfaces that report lock dim
-/// (the OLED Care pane's status row, the display hub's care preview) printed
-/// "Dimmed" for a display the policy had refused. A rule kept by two private
-/// switches is a rule that drifts the first time one of them is edited.
+/// Shared rather than repeated (OC7 sub-ruling 4): a skip is "recorded, never
+/// reported as dimmed", and when two private switches kept that rule both
+/// surfaces printed "Dimmed" for a display the policy had refused.
 ///
 /// Every lock-dim string here is written for a display that IS locked: the skip
 /// map only carries live refusals, cleared the moment the dim engages.
@@ -41,11 +39,8 @@ enum OledCareCopy {
 
   /// The OLED Care pane's status row for OC13's pause. One state under every
   /// reason, so the row names which rather than telling a user they mirrored
-  /// something they did not. A reason and not a pair of bools, which could
-  /// express four states with words for two.
-  ///
-  /// No arm ends in a period, ruled 2026-08-18: it matches every neighbouring
-  /// status string, which is what a status row reads as.
+  /// something they did not. No arm ends in a period, matching every
+  /// neighbouring status string.
   static func suspendedStatus(reason: OledCareSuspensionReason) -> LocalizedStringKey {
     switch reason {
     case .mirrored: "Paused while this display is mirrored"
@@ -54,10 +49,9 @@ enum OledCareCopy {
     }
   }
 
-  /// The summary tile's short form of the same pause. Shorter than the status
-  /// row and, unlike the lock-dim preview, still carrying its reason: the tile
-  /// has room for four words, and "Paused" alone would leave the only surface
-  /// on the overview page saying nothing about a mirror the user never made.
+  /// The summary tile's short form of the same pause. It keeps its reason where
+  /// the lock-dim preview drops one: "Paused" alone would leave the overview
+  /// page saying nothing about a mirror the user never made.
   static func suspendedPreview(reason: OledCareSuspensionReason) -> String {
     switch reason {
     case .mirrored: "Paused while mirrored"
@@ -66,13 +60,10 @@ enum OledCareCopy {
     }
   }
 
-  /// The hub's spoken preview of the pause, which carries the reason its
-  /// two-word sighted neighbour leaves to the pane.
-  ///
-  /// It reads word for word like the status row above, and the two stay
-  /// SEPARATE builders anyway: one is a sentence on a pane and the other is an
-  /// accessibility label on a hub row, and deriving either from the other would
-  /// make the next edit to one silently an edit to both.
+  /// The hub's spoken preview of the pause, carrying the reason its two-word
+  /// sighted neighbour leaves to the pane. Word for word like the status row and
+  /// a SEPARATE builder anyway: deriving either from the other would make the
+  /// next edit to one silently an edit to both.
   static func suspendedSpokenPreview(reason: OledCareSuspensionReason) -> String {
     switch reason {
     case .mirrored: "Paused while this display is mirrored"
@@ -81,14 +72,13 @@ enum OledCareCopy {
     }
   }
 
-  /// What the two halves of the usage histogram actually count, said out loud
-  /// because they do not count the same thing and nothing on the page said so.
+  /// What the two halves of the usage histogram count, said out loud because
+  /// they do not count the same thing.
   ///
-  /// OC17's denominator is MASK-COULD-APPLY time (ruled 2026-08-18): suspended
-  /// seconds are excluded from the percentage because a protective dim cannot
-  /// apply during them. The bars are the whole histogram and exclude nothing.
-  /// Both readings are right; a reader comparing them without this sentence
-  /// would take the percentage for a share of the bars.
+  /// OC17's denominator is MASK-COULD-APPLY time: suspended seconds are excluded
+  /// from the percentage, because a protective dim cannot apply during them. The
+  /// bars exclude nothing, so without this a reader takes the percentage for a
+  /// share of the bars.
   static var wearFractionScope: String {
     "The bars cover every state this display was tracked in. The percentage covers only the time a protective dim could apply."
   }

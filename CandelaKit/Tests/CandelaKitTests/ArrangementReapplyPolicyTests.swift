@@ -45,9 +45,8 @@ struct ArrangementReapplyPolicyTests {
   private var attached: [ConfiguredDisplay] { [display(3, "mag"), display(2, "dell")] }
   private var bothArrived: Set<CGDirectDisplayID> { [2, 3] }
 
-  /// The saved layout puts the Dell on the LEFT — the opposite of what is on
-  /// screen, so a restore is a visible change and a skipped restore is visible
-  /// too.
+  /// The saved layout puts the Dell on the left, the opposite of what is on screen, so
+  /// both a restore and a skipped restore are visible.
   private var saved: SavedArrangement {
     SavedArrangement(DisplayArrangement(tiles: [tile(2, "dell", left), tile(3, "mag", right)]))
   }
@@ -75,9 +74,8 @@ struct ArrangementReapplyPolicyTests {
 
   // MARK: - Arrival gating
 
-  /// The rule the whole feature rests on. A reconfiguration event is ALSO what
-  /// the user dragging displays in System Settings produces, so a pass that
-  /// restored on every event would undo their change a second later, forever.
+  /// A reconfiguration event is also what dragging displays in System Settings produces,
+  /// so restoring on every event would undo the user's change a second later, forever.
   @Test func restoreHappensOnArrivalNotOnEveryReconfiguration() {
     let onArrival = ArrangementReapplyPolicy.decide(
       isEnabled: true, arrivals: bothArrived, stored: saved,
@@ -111,11 +109,9 @@ struct ArrangementReapplyPolicyTests {
     #expect(decision == .doNothing)
   }
 
-  /// Online means active **or mirrored or sleeping** — measured `online=3,
-  /// active=0` with the displays asleep. Reading an active list here makes one
-  /// sleep look like a departure on every display and the wake like three
-  /// arrivals, which silently re-asserts the saved layout over a manual change,
-  /// daily. That exact bug shipped in this repo once.
+  /// Online means active or mirrored or sleeping: measured `online=3, active=0` with the
+  /// displays asleep. Reading the active list makes a sleep look like a departure on every
+  /// display and the wake like arrivals, re-asserting the saved layout over manual changes.
   @Test func aSleepingDisplayIsNotTreatedAsADeparture() {
     var arrivals = TopologyArrivalTracker()
     #expect(arrivals.claimArrivals(online: attached) == [2, 3])
@@ -126,9 +122,8 @@ struct ArrangementReapplyPolicyTests {
     #expect(arrivals.claimArrivals(online: attached).isEmpty)
   }
 
-  /// The set-level half of the rule. Unplug the third display and the two that
-  /// remain never left, so a per-display tracker reports nothing — and the
-  /// layout saved for the pair would never come back.
+  /// The set-level half: unplug the third display and the two that remain never left, so
+  /// a per-display tracker reports nothing and the pair's saved layout never comes back.
   @Test func aDepartureMakesTheRemainingDisplaysArriveAsANewSet() {
     var arrivals = TopologyArrivalTracker()
     let three = attached + [display(1, "builtIn")]
@@ -148,9 +143,8 @@ struct ArrangementReapplyPolicyTests {
     #expect(arrivals.claimArrivals(online: reassigned) == [2, 3])
   }
 
-  /// A claim that is deliberately not acted on goes back, or "not now" becomes
-  /// "never until replug": nothing else re-arms an arrival for a display that
-  /// stays put.
+  /// A claim that is not acted on goes back, or not-now becomes never-until-replug:
+  /// nothing else re-arms an arrival for a display that stays put.
   @Test func aReleasedClaimIsAnArrivalAgain() {
     var arrivals = TopologyArrivalTracker()
     #expect(arrivals.claimArrivals(online: attached) == [2, 3])
@@ -166,9 +160,8 @@ struct ArrangementReapplyPolicyTests {
     #expect(arrivals.claimArrivals(online: attached).isEmpty)
   }
 
-  /// The arrival gate reads the ONLINE list and the storage key reads the
-  /// layout. They have to be talking about the same topology, so the agreement
-  /// is pinned rather than argued.
+  /// The arrival gate reads the online list and the storage key reads the layout, so the
+  /// two spellings have to be talking about the same topology.
   @Test func bothSpellingsOfTheSignatureAgreeOnACompleteRead() {
     #expect(TopologySignature(online: attached) == TopologySignature(onScreen))
 
@@ -196,10 +189,8 @@ struct ArrangementReapplyPolicyTests {
 
   private var pairing: [CGDirectDisplayID: String] { [7: Self.identity("mag").key] }
 
-  /// SS12's whole point at the arrival gate: engaging a size is not a change of
-  /// display SET. Without this the set reads as new, every display in it counts
-  /// as having arrived, and the saved layout is re-asserted over whatever the
-  /// user last did by hand.
+  /// SS12 at the arrival gate: engaging a size is not a set change. Without it every
+  /// display counts as arrived and the saved layout overwrites whatever the user last did.
   @Test func engagingASynthesizedSizeIsNotASetChange() {
     var arrivals = TopologyArrivalTracker()
     #expect(arrivals.claimArrivals(online: attached, substituting: [:]) == [2, 3])
@@ -218,9 +209,8 @@ struct ArrangementReapplyPolicyTests {
     #expect(arrivals.claimArrivals(online: engagedOnline, substituting: [:]) == [2, 3, 7])
   }
 
-  /// The restore decision itself, with a size standing. The layout was saved
-  /// for the panel; the origins land on the virtual display, which is the only
-  /// member of the pair a plan can move.
+  /// The restore decision with a size standing: the layout was saved for the panel, and
+  /// the origins land on the virtual display, the only member of the pair a plan can move.
   @Test func aLayoutSavedForThePanelIsRestoredOntoTheEngagedPair() {
     let decision = ArrangementReapplyPolicy.decide(
       isEnabled: true, arrivals: [7], stored: saved,
@@ -232,9 +222,8 @@ struct ArrangementReapplyPolicyTests {
     #expect(layout?.tile(2)?.rect.origin == DisplayPoint(x: 0, y: 0))
   }
 
-  /// And the control for that: unsubstituted, the pair reads as a set the saved
-  /// layout is not about, and the user gets a report naming a display they have
-  /// never heard of.
+  /// The control: unsubstituted, the pair reads as a set the saved layout is not about,
+  /// and the user gets a report naming a display they have never heard of.
   @Test func withoutTheMapTheEngagedPairIsReportedAsADifferentSet() {
     let decision = ArrangementReapplyPolicy.decide(
       isEnabled: true, arrivals: [7], stored: saved,
@@ -246,12 +235,9 @@ struct ArrangementReapplyPolicyTests {
     ))
   }
 
-  /// A size that CHANGES the desktop's footprint, which is what a synthesized
-  /// size normally does. The v1 pin declined this on geometry and the hardware
-  /// overturned it (2026-08-18): refusing hands the virtual display to the
-  /// OS's default placement, on the wrong side of the arrangement. The layout
-  /// is found under the panel, the substitute is re-anchored at the panel's
-  /// saved tile, and the plan is applied with nothing to report.
+  /// A size that changes the desktop's footprint, which is what a synthesized size
+  /// normally does. Refusing hands the virtual display to the OS's default placement, on
+  /// the wrong side of the arrangement, so the substitute re-anchors at the saved tile.
   @Test func aSizeThatChangesTheFootprintIsFoundAndApplied() {
     // A stop the size ladder actually offers under a 1920x1080 panel.
     let resized = DisplayArrangement(tiles: [
@@ -272,11 +258,9 @@ struct ArrangementReapplyPolicyTests {
 
   // MARK: - The read-side trap (AR4)
 
-  /// **`ArrangementSnapshot` SKIPS a display whose `CGDisplayBounds` is
-  /// unreadable**, so it gets no tile and no origin. The plan stays structurally
-  /// total while describing an incomplete world, and applying it hands the
-  /// missing display to CoreGraphics' "as close as possible to its current
-  /// location" heuristic — a display the user never touched, moved silently.
+  /// `ArrangementSnapshot` skips a display whose `CGDisplayBounds` is unreadable, so it
+  /// gets no tile and no origin. The plan stays structurally total while describing an
+  /// incomplete world, and applying it lets CoreGraphics move a display nobody touched.
   @Test func restoreIsDeferredWhenTheTopologyCannotBeReconfigured() {
     let incomplete = DisplayArrangement(tiles: [tile(3, "mag", left)])
     let decision = ArrangementReapplyPolicy.decide(
@@ -299,10 +283,9 @@ struct ArrangementReapplyPolicyTests {
     #expect(decision == .deferred)
   }
 
-  /// Deferred BEFORE the saved layout is consulted, for
-  /// `ModeReapplyPolicy`'s reason: an incomplete read also signs as a different
-  /// topology, so resolving against it would report a set difference about a
-  /// machine that merely had a display it could not describe for a moment.
+  /// Deferred before the saved layout is consulted, for `ModeReapplyPolicy`'s reason: an
+  /// incomplete read signs as a different topology, so resolving reports a bogus set
+  /// difference about a machine that briefly could not describe one display.
   @Test func anIncompleteReadIsNotReportedAsASetDifference() {
     let incomplete = DisplayArrangement(tiles: [tile(3, "mag", left)])
     for stored in [saved, nil] {
@@ -315,9 +298,8 @@ struct ArrangementReapplyPolicyTests {
     }
   }
 
-  /// A mirror slave is EXPECTED to have no tile — it has no independent origin
-  /// and setting one would remove it from the mirror set (AR6). Deferring on it
-  /// would mean never restoring anything while a mirror is engaged.
+  /// A mirror slave is expected to have no tile: it has no independent origin, and
+  /// setting one removes it from the mirror set (AR6). Deferring on it restores nothing.
   @Test func aMirrorSlaveWithNoTileIsNotAnIncompleteRead() {
     let mirrored = attached + [display(9, "mag", mirrors: 3)]
     let withMirror = DisplayArrangement(tiles: [
@@ -347,9 +329,8 @@ struct ArrangementReapplyPolicyTests {
     #expect(Set(layout.tiles.map(\.id)) == Set(onScreen.tiles.map(\.id)))
   }
 
-  /// Applying the layout the machine is already in still costs a full
-  /// CoreGraphics reconfiguration — blanked screens, another topology event, and
-  /// this same decision again. At launch, for nothing.
+  /// Applying the layout the machine is already in still costs a full CoreGraphics
+  /// reconfiguration: blanked screens and another topology event, at launch, for nothing.
   @Test func aMachineAlreadyInItsSavedLayoutIsLeftAlone() {
     let decision = ArrangementReapplyPolicy.decide(
       isEnabled: true, arrivals: bothArrived, stored: SavedArrangement(onScreen),
@@ -358,10 +339,8 @@ struct ArrangementReapplyPolicyTests {
     #expect(decision == .doNothing)
   }
 
-  /// **AR11.** Two attached displays share an identity and nothing separates
-  /// them, so nothing says which saved position belongs to which screen. Refused
-  /// and reported — a coin flip that swaps the user's screens is worse than not
-  /// restoring.
+  /// AR11: two attached displays share an identity, so nothing says which saved position
+  /// belongs to which screen. A coin flip that swaps them is worse than not restoring.
   @Test func aTwinCollisionIsRefusedAndReportedRatherThanGuessed() {
     let twins = [display(2, "mag"), display(3, "mag")]
     let twinLayout = DisplayArrangement(tiles: [tile(2, "mag", left), tile(3, "mag", right)])
@@ -376,16 +355,10 @@ struct ArrangementReapplyPolicyTests {
     #expect(!decision.isDeferred)
   }
 
-  /// **§7.4, and #180 is what it costs to get this wrong.** Stored MODES are
-  /// reapplied before the layout is, so a display really can be a different size
-  /// than it was when the layout was captured. Its recorded origins are then
-  /// about a machine that no longer exists, and nothing is applied.
-  ///
-  /// What must NOT happen is the app rebuilding the old origins onto the new
-  /// footprints, discovering that its own reconstruction overlaps, and reporting
-  /// that overlap as a refusal. That is what shipped: a panel at every launch
-  /// telling the user two displays covered each other while they sat side by
-  /// side.
+  /// Stored modes are reapplied before the layout, so a display really can be a different
+  /// size than when the layout was captured, and its recorded origins are about a machine
+  /// that no longer exists. What must not happen is rebuilding those origins onto the new
+  /// footprints and reporting the reconstruction's own overlap, which is what shipped.
   @Test func aSavedLayoutRecordedAtDifferentSizesAppliesNothingAndReportsNoOverlap() {
     // The Dell is now twice as wide, and macOS has already moved the MAG right
     // to make room, so the machine on screen is perfectly legal.
@@ -404,15 +377,10 @@ struct ArrangementReapplyPolicyTests {
     #expect(!decision.isDeferred)
   }
 
-  /// The state is permanent: the saved layout is not rewritten, so this same
-  /// decision is reached again on every launch and every reconnect until the
-  /// user arranges the displays themselves. A surface that interrupts them for
-  /// it is therefore not a report, it is a recurring alarm with no off switch,
-  /// and there is nothing in it for them to act on.
-  ///
-  /// Genuine restore failures are unaffected: unattended, silence about an
-  /// attempt that went wrong is indistinguishable from one that worked, and that
-  /// is a different thing from silence about deciding not to attempt.
+  /// The state is permanent: the saved layout is not rewritten, so this decision recurs
+  /// on every launch until the user arranges the displays themselves, and interrupting
+  /// them for it is an alarm with nothing to act on. Genuine restore failures still
+  /// interrupt, because unattended silence about a failed attempt looks like success.
   @Test func onlyAStaleFootprintIsKeptOffTheConfirmationSurface() {
     #expect(!ArrangementReapplyNotice.savedForDifferentGeometry(["a"]).isWorthInterrupting)
 
@@ -427,13 +395,10 @@ struct ArrangementReapplyPolicyTests {
     }
   }
 
-  /// **AR7 stays as the backstop it was**, reachable now only for a stored
-  /// layout that does not tile at the very sizes it recorded: hand-edited or
-  /// corrupt data, since a layout is only ever saved from one the machine
-  /// achieved. macOS cannot be made to hold an invalid layout, and this is the
-  /// exact case `expectsExactOrigins` turns the post-commit check off for, so
-  /// sending it unattended would commit a layout nobody chose with nothing left
-  /// able to notice.
+  /// AR7 stays the backstop, reachable only for stored data that does not tile at the
+  /// sizes it recorded: hand-edited or corrupt, since a layout is only saved from one the
+  /// machine achieved. It is also the case `expectsExactOrigins` turns the post-commit
+  /// check off for, so sending it unattended commits a layout nobody chose, unwatched.
   @Test func aStoredLayoutThatDoesNotTileAtItsOwnRecordedSizesIsStillRefused() {
     let overlapping = SavedArrangement(entries: [
       SavedArrangementEntry(
@@ -464,10 +429,8 @@ struct ArrangementReapplyPolicyTests {
 
   // MARK: - Not a preview
 
-  /// Restore commits at a scope that OUTLIVES the process. `.preview` is
-  /// `kCGConfigureForAppOnly`, which unwinds on exit — a restore committed there
-  /// would evaporate on quit — and `.session` is dropped at logout, which reads
-  /// as the feature not working.
+  /// Restore commits at a scope that outlives the process: `.preview` is
+  /// `kCGConfigureForAppOnly` and unwinds on exit, and `.session` is dropped at logout.
   @Test func restoreCommitsDirectlyWithoutACountdown() {
     #expect(ArrangementReapplyPolicy.scope == .permanent)
     #expect(ArrangementReapplyPolicy.scope != .preview)

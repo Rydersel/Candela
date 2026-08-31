@@ -2,19 +2,18 @@
   import AppKit
   import SwiftUI
 
-  /// Stage 1's window (OB11): the real flow view over the rig fixture, all
-  /// commits recorded rather than written, permission asks simulated so every
-  /// page state is clickable. Presented only by the debug hook; compiled out
-  /// of Release by construction like the rest of the hook family.
+  /// The real flow view over the rig fixture (OB11): commits recorded rather
+  /// than written, permission asks simulated so every page state is clickable.
+  /// Presented only by the debug hook, so it compiles out of Release.
   @MainActor
   enum OnboardingMockPresenter {
     private static var window: NSWindow?
 
     static func present() {
       let model = OnboardingFlowModel(environment: OnboardingFixtures.rig)
-      // Simulated grant: the real prompt cannot be shown twice per process
-      // and the mock must be re-runnable, so the grant just lands after a
-      // beat, long enough to see the requested state.
+      // Simulated grant: the real prompt cannot be shown twice per process and
+      // the mock must be re-runnable, so the grant lands after a beat, long
+      // enough to see the requested state.
       model.onRequestAccessibility = {
         Task { @MainActor in
           try? await Task.sleep(for: .seconds(1.4))

@@ -3,18 +3,15 @@ import os
 import Testing
 @testable import CandelaKit
 
-// Test debounce: 50 ms quiet window (the brief's suggested short window).
-// `settle` is used ONLY where elapsed time IS the assertion — absence checks
-// and duplicate-emission confirm windows. Arrival is awaited via `settled`,
-// never a fixed sleep: the debounce fire and the counter's consumer are both
-// detached tasks, and under full-suite load neither is guaranteed a slice
-// inside any fixed wall-clock window (#114).
+// `settle` is used ONLY where elapsed time IS the assertion: absence checks and
+// duplicate-emission windows. Arrival is awaited through `settled`, never a fixed
+// sleep, because the debounce fire and the counter's consumer are detached tasks
+// and neither is guaranteed a slice inside a wall-clock window under suite load.
 private let testDebounce: Duration = .milliseconds(50)
 private let settle: Duration = .milliseconds(250)
 
-/// Polls until `condition` holds; returns whether it did before `deadline`.
-/// The deadline only bounds a genuinely broken run — a correct run exits at
-/// the first true poll, so generosity here costs passing runs nothing.
+/// Polls until `condition` holds, reporting whether it did before `deadline`. The
+/// deadline only bounds a broken run: a correct one exits at the first true poll.
 private func settled(
   within deadline: Duration = .seconds(10),
   _ condition: () -> Bool
@@ -59,10 +56,9 @@ private final class TopologyCounter: Sendable {
   #expect(manager.isEpochCurrent(0))
 }
 
-/// `isEpochCurrent` / `currentEpoch` are synchronous — this test function is
-/// deliberately not async: the calls must compile and answer without await
-/// (the property that lets the coalescer drain consult the gate with no
-/// actor hop).
+/// Deliberately not async: `isEpochCurrent` and `currentEpoch` must compile and
+/// answer without await, which is what lets the coalescer drain consult the gate
+/// with no actor hop.
 @Test func epochChecksAreCallableWithoutAwait() {
   let manager = DisplayManager(debounce: testDebounce)
   let epoch: UInt64 = manager.currentEpoch()
@@ -71,10 +67,9 @@ private final class TopologyCounter: Sendable {
 
 // MARK: - Reconfigure burst intake
 
-/// N rapid simulated events bump the epoch N times IMMEDIATELY (review I6:
-/// the bump happens inside the callback, not after the debounce), suspend
-/// writes for the whole burst, then — after one quiet window — produce
-/// exactly ONE topology element and clear the suspension.
+/// N rapid events bump the epoch N times immediately, inside the callback rather
+/// than after the debounce, suspend writes for the whole burst, then after one
+/// quiet window produce exactly one topology element and clear the suspension.
 @Test func burstBumpsImmediatelySuspendsAndDebouncesToOneElement() async {
   let manager = DisplayManager(debounce: testDebounce)
   let counter = TopologyCounter(manager)
@@ -90,10 +85,9 @@ private final class TopologyCounter: Sendable {
 
   // Await the quiet transition itself, not a wall-clock guess.
   #expect(await settled { manager.isEpochCurrent(5) && counter.elements == 1 })
-  // "Exactly one" needs a further quiet window: only elapsed time can rule
-  // out a duplicate emission. Benign failure direction — a slow machine can
-  // delay a duplicate past the window (spurious pass), never fail a correct
-  // coalescer.
+  // "Exactly one" needs a further quiet window, since only elapsed time rules out
+  // a duplicate. A slow machine can hide a duplicate (spurious pass); it can never
+  // fail a correct coalescer.
   try? await Task.sleep(for: settle)
   #expect(counter.elements == 1) // the burst debounced to ONE downstream signal
   #expect(manager.currentEpoch() == 5)
@@ -113,7 +107,7 @@ private final class TopologyCounter: Sendable {
     manager._simulateReconfigureEvent()
   }
   #expect(manager.isEpochCurrent(captured) == false) // stale from the first event
-  // The live epoch becomes current at quiet — await the transition (#114).
+  // The live epoch becomes current at quiet, so await the transition.
   #expect(await settled { manager.isEpochCurrent(manager.currentEpoch()) })
   #expect(manager.isEpochCurrent(captured) == false) // and stale forever after it
 }
@@ -132,10 +126,9 @@ private final class TopologyCounter: Sendable {
   #expect(manager.currentEpoch() == 1) // synchronous bump
   #expect(manager.isEpochCurrent(1) == false) // suspended
 
-  // Absence cannot be polled — there is no event to wait for, so this stays
-  // a real elapsed wait (5× the debounce window). Its failure direction is
-  // the acceptable one: a machine slow enough to starve a wrongful emission
-  // past the window makes this pass spuriously; it can never fail spuriously.
+  // Absence cannot be polled, so this stays a real elapsed wait. A machine slow
+  // enough to starve a wrongful emission past the window passes spuriously; it
+  // can never fail spuriously.
   try? await Task.sleep(for: settle)
   #expect(counter.elements == 0) // no element, even after the debounce window
   #expect(manager.isEpochCurrent(1) == false) // still suspended: only a wake clears it
@@ -156,9 +149,8 @@ private final class TopologyCounter: Sendable {
   #expect(manager.isEpochCurrent(manager.currentEpoch()) == false)
   #expect(counter.elements == 0)
 
-  // Await the wake fire (bump + emit), then hold a quiet window to pin
-  // "exactly one" — same shape and same benign failure direction as the
-  // burst test above.
+  // Await the wake fire, then hold a quiet window to pin "exactly one": same shape
+  // and same benign failure direction as the burst test.
   #expect(await settled { manager.isEpochCurrent(2) && counter.elements == 1 })
   try? await Task.sleep(for: settle)
   #expect(counter.elements == 1) // one element once sober
@@ -195,14 +187,10 @@ private actor GatedDDC: DDCWriting {
   func recordedWrites() -> [(command: UInt8, value: UInt16)] { writes }
 }
 
-/// A `BrightnessController` wired to a REAL DisplayManager epoch pair: a
-/// write submitted before `noteSleep()` lands is never applied to hardware
-/// once the sleep suspension is up, and `waitForPendingWrites` still returns
-/// (the M1 deadlock rule: skipped targets complete their generation).
-///
-/// Determinism: a first write parks the drain inside the gated writer, so the
-/// test write is provably still in the newest-wins slot when `noteSleep()`
-/// lands; only then is the drain released to dequeue it.
+/// Wired to a real DisplayManager epoch pair: a write submitted before `noteSleep()`
+/// never reaches hardware, and `waitForPendingWrites` still returns, because skipped
+/// targets complete their generation. A first write parks the drain inside the gated
+/// writer, so the test write is provably still in the slot when the sleep lands.
 @MainActor
 @Test func writeSubmittedBeforeSleepNeverLandsButWaitReturns() async {
   let writer = GatedDDC()

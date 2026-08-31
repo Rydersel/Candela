@@ -61,22 +61,15 @@ public enum DisplayServices {
   }()
 
   /// Whether DisplayServices.framework resolved at all on this machine (B6).
-  ///
-  /// The shim logs ONCE at resolve time if the framework or a symbol is
-  /// missing and then degrades silently to nil/false forever — correct
-  /// behaviour, and completely invisible: "native brightness cannot work on
-  /// this machine at all" is a fact the process learns on first use and, until
-  /// now, could not state. Two lines make it sayable, which is the project's
-  /// private-API rule (spec §6) made VISIBLE rather than merely obeyed.
+  /// The shim itself only logs once at resolve time and then degrades to
+  /// nil/false forever, so without this nothing can state the fact.
   ///
   /// Keyed on `setBrightness` rather than on both symbols because setting is
   /// what the native path requires: a machine that resolves the setter but not
-  /// the getter can still drive brightness, and reporting that as unavailable
-  /// would be a second untruth in the other direction.
+  /// the getter can still drive brightness.
   ///
-  /// Reading this forces the lazy resolve — i.e. one `dlopen` of a system
-  /// framework, on whatever thread asks first, thereafter cached by static-let
-  /// semantics. No new calls into the private API itself.
+  /// Reading this forces the lazy resolve, so one `dlopen` of a system framework
+  /// happens on whatever thread asks first. No calls into the private API.
   public static var isAvailable: Bool { symbols.setBrightness != nil }
 
   /// Conformance-only granularity: `isAvailable` is deliberately keyed on the
@@ -85,9 +78,8 @@ public enum DisplayServices {
   static var resolvedGetter: Bool { symbols.getBrightness != nil }
   static var resolvedSetter: Bool { symbols.setBrightness != nil }
 
-  /// nil when the symbol is unavailable, the call fails, or the value is
-  /// out of range (fork convention: success == (ret == 0 && value >= 0),
-  /// OtherDisplay.swift:330).
+  /// nil when the symbol is unavailable, the call fails, or the value is out of
+  /// range (fork convention: success == (ret == 0 && value >= 0)).
   public static func getBrightness(for displayID: CGDirectDisplayID) -> Float? {
     guard let fn = symbols.getBrightness else { return nil }
     var value: Float = -1
@@ -98,10 +90,8 @@ public enum DisplayServices {
   /// false when the symbol is unavailable or the call fails. Callers must
   /// treat false as "degrade to DDC/software", never crash (spec §6).
   ///
-  /// Serialization is the caller's job: the fork serialized SetBrightness on a
-  /// per-display queue (AppleDisplay.swift:27); in Candela set calls route
-  /// through the per-display write path, and this shim stays a stateless
-  /// function table.
+  /// Serialization is the caller's job: set calls route through the per-display
+  /// write path, and this shim stays a stateless function table.
   @discardableResult
   public static func setBrightness(_ value: Float, for displayID: CGDirectDisplayID) -> Bool {
     guard let fn = symbols.setBrightness else { return false }
@@ -112,9 +102,8 @@ public enum DisplayServices {
   ///
   /// The wrapping is where the C conventions stop: a missing symbol becomes a
   /// nil member rather than a call that silently does nothing, a failing read
-  /// becomes nil rather than a zero byte the call never wrote, and the
-  /// setter's return code is dropped at the boundary so no caller can mistake
-  /// it for the achieved state.
+  /// becomes nil rather than a zero byte the call never wrote, and the setter's
+  /// return code is dropped so no caller mistakes it for the achieved state.
   static let ambientLightSymbols: AmbientLightSymbols = {
     var table = AmbientLightSymbols()
     if let hasAmbient = symbols.hasAmbient {

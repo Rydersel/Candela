@@ -18,8 +18,8 @@ struct ExposureAccumulatorTests {
 
   // MARK: - Accumulation
 
-  /// #22's stated sanity check: if a menu-bar-hot sequence does not produce a
-  /// hottest top row, the analysis is wrong.
+  /// The sanity check for the whole model: a menu-bar-hot sequence that does not
+  /// produce a hottest top row means the analysis is wrong.
   @Test func menuBarHotSequenceProducesHottestTopRow() throws {
     var acc = ExposureAccumulator()
     var now = Date(timeIntervalSince1970: 0)
@@ -90,12 +90,10 @@ struct ExposureAccumulatorTests {
 
     #expect(afterUpright == 0)
     #expect(acc.map.hottestCell == afterUpright)
-    // THE assertion. `hottestCell` above cannot fail here: under the inverted
-    // convention the second sample lands in cell 239 instead of cell 0, giving
-    // an exact 60/60 tie, and `hottestCell` answers with the first index of the
-    // maximum — so it returns 0 either way and the test passed while pinning
-    // nothing. The whole point of panel-physical space is that the two samples
-    // land in the SAME cell and it keeps growing, which is 120 against 60.
+    // The load-bearing assertion. `hottestCell` above cannot fail: under the
+    // inverted convention the second sample lands in the last cell, giving an exact
+    // tie that `hottestCell` resolves to index 0 either way. Panel-physical space
+    // means both samples land in the SAME cell and it keeps growing, 120 against 60.
     #expect(abs(acc.map.cells[0] - 120) < 1e-9)
     #expect(abs(acc.map.cells[PanelGrid.cellCount - 1]) < 1e-9)
   }
@@ -119,8 +117,8 @@ struct ExposureAccumulatorTests {
     #expect(relative > 1.5 && relative < 2.5)
   }
 
-  /// Task 7 renders a grid and will index it. A cell outside the map answers
-  /// "no reading" rather than trapping — the map can also arrive from disk.
+  /// The health view indexes this grid, and the map can arrive from disk, so a cell
+  /// outside it answers "no reading" rather than trapping.
   @Test func relativeExposureIsNilOutsideTheGrid() {
     var acc = ExposureAccumulator()
     acc.accumulate(
@@ -301,12 +299,10 @@ struct ExposureAccumulatorTests {
     #expect(decoded == acc.map)
   }
 
-  /// A truncated or hand-edited store must not decode into a map that traps the
-  /// first time the health view indexes a cell. It throws
-  /// `OledStoreDecodeFailure`, NOT `DecodingError`, and the difference is
-  /// load-bearing: the coordinator discards the first and quarantines the
-  /// second, so downgrading this to a plain decoding error would restore the
-  /// silent-overwrite path.
+  /// A truncated or hand-edited store must not decode into a map that traps when the
+  /// health view indexes it. `OledStoreDecodeFailure`, not `DecodingError`: the
+  /// coordinator discards the first and quarantines the second, so downgrading this
+  /// restores the silent-overwrite path.
   @Test func decodingAWrongSizedMapReportsAGridChange() throws {
     let data = try JSONEncoder().encode(ExposureMap.empty)
     let object = try #require(

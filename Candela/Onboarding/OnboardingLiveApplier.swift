@@ -4,27 +4,24 @@ import Observation
 
 /// Implements the flow model's apply seam over the shipped mode-apply path.
 ///
-/// The shape is fixed by two shipped facts. First, an apply must ride the one
-/// path every resolution control uses (`ResolutionSelection` into
+/// Two shipped facts fix the shape. An apply must ride the one path every
+/// resolution control uses (`ResolutionSelection` into
 /// `DisplayModeCoordinator.selectFromList`), so the real keep and revert
-/// countdown guards it (PD9: expiry reverts, never silently keeps). Second,
-/// the shipped countdown's answering surface is fixed at preview start and
-/// none of those surfaces is this window, so the Setup window renders its
-/// OWN Keep and Revert from the coordinator's observable preview state and
-/// answers with `confirm`/`revert` directly, carrying the exact preview it
-/// rendered: an answer can only resolve what the user was looking at. The
-/// preview it starts therefore carries `.guidedSetup`, the surface no other
-/// one answers for (DM11).
+/// countdown guards it (PD9: expiry reverts, never silently keeps). And the
+/// shipped countdown's answering surface is fixed at preview start, never this
+/// window, so Setup renders its OWN Keep and Revert from the coordinator's
+/// observable preview state and answers with `confirm`/`revert` carrying the
+/// exact preview it rendered: an answer can only resolve what the user was
+/// looking at. The preview it starts therefore carries `.guidedSetup`, the
+/// surface no other one answers for (DM11).
 ///
-/// This object reports into the model (`applyCountdownTicked`, `applyKept`,
-/// `applyReverted`, `applyFailed`) and owns no meaning of its own; the model
+/// This object reports into the model and owns no meaning of its own; the model
 /// decides what each report does to the flow.
 @MainActor
 final class OnboardingLiveApplier {
   /// What the flow's synchronous `.counting` seed shows before the first
-  /// observed tick arrives. Mirrors `ModePreviewSession`'s default countdown
-  /// length; only cosmetic, because the first tick report carries the real
-  /// remaining seconds and overwrites it.
+  /// observed tick. Mirrors `ModePreviewSession`'s default countdown length, and
+  /// is only cosmetic: the first tick report overwrites it.
   static let countdownSeedSeconds = 30
 
   private let model: AppModel
@@ -47,9 +44,9 @@ final class OnboardingLiveApplier {
   /// preview's disappearance; the outcome is the authority.
   private var answerInFlight = false
   /// An answer requested before the first preview observation (the window can
-  /// close between the select and the first tick). Held and delivered when
-  /// the preview first appears; cleared whenever the pending apply resolves
-  /// some other way first. true keeps, false reverts.
+  /// close between the select and the first tick). Held and delivered when the
+  /// preview appears, cleared if the apply resolves some other way first. True
+  /// keeps, false reverts.
   private var requestedAnswerBeforePreview: Bool?
   private var tracking = false
 
@@ -86,9 +83,9 @@ final class OnboardingLiveApplier {
       flow?.applyFailed()
       return
     }
-    // A pick of the size already on the glass (the alternatives grid offers
-    // it) would hit the shipped already-on-screen guard, which applies nothing
-    // and opens no countdown, leaving the model counting against silence. The
+    // A pick of the size already on the glass (the alternatives grid offers it)
+    // would hit the shipped already-on-screen guard, which applies nothing and
+    // opens no countdown, leaving the model counting against silence. The
     // display is showing that size, which is what a kept apply means.
     if let onScreen = catalog.onScreen,
       onScreen.logicalWidth == looksLikeWidth, onScreen.logicalHeight == looksLikeHeight
@@ -96,10 +93,9 @@ final class OnboardingLiveApplier {
       flow?.applyKept()
       return
     }
-    // A start failure left behind by an earlier select (a settings-window
-    // visit included) must not be mistaken for THIS apply's outcome: the
-    // failure branch below keys on the display alone, so dismiss any stale
-    // one before the select.
+    // A start failure left by an earlier select must not be mistaken for THIS
+    // apply's outcome: the failure branch below keys on the display alone, so
+    // dismiss a stale one before the select.
     if let stale = coordinator.startFailure, stale.displayID == state.id {
       coordinator.dismissStartFailure()
     }
@@ -108,14 +104,13 @@ final class OnboardingLiveApplier {
     sawPreview = false
     answerInFlight = false
     requestedAnswerBeforePreview = nil
-    // This flow OWNS the answer (DM11): the Setup page renders the countdown
-    // and both buttons itself, so no other surface offers an ANSWER for
-    // `.guidedSetup`. The floating confirmation window is not presented and
-    // the settings banner renders nothing, including in a background settings
-    // window sitting on this display's page; the menu-bar panel keeps its
-    // passive waiting line, which asks for nothing. Ownership is the guarantee;
-    // the session's stale-answer refusal stays what it always was, a backstop
-    // rather than the thing keeping two button rows from disagreeing.
+    // This flow OWNS the answer (DM11): the Setup page renders the countdown and
+    // both buttons itself, and no other surface offers an ANSWER for
+    // `.guidedSetup`. The floating confirmation window is not presented, the
+    // settings banner renders nothing even in a background window on this
+    // display's page, and the menu-bar panel keeps its passive waiting line.
+    // Ownership is the guarantee; the session's stale-answer refusal is a
+    // backstop, not what keeps two button rows from disagreeing.
     let selection = ResolutionSelection(
       coordinator: coordinator, displayID: state.id, surface: .guidedSetup)
     selection.select(size: row, in: catalog)
@@ -127,11 +122,10 @@ final class OnboardingLiveApplier {
 
   /// Forget the pending apply so the next observation pass lets the tracking
   /// loop die. Called when the hosting window closes and when a fresh flow
-  /// replaces this applier: a departed pending display or a late answer
-  /// outcome must not leave the loop armed against a dead flow. An answer
-  /// already requested before the first preview observation is kept; the loop
-  /// stays armed just long enough to deliver it (the coordinator's own expiry
-  /// revert is the backstop if the preview never appears).
+  /// replaces this applier: a departed display or a late outcome must not leave
+  /// the loop armed against a dead flow. An answer already requested before the
+  /// first preview observation is kept, and the loop stays armed just long
+  /// enough to deliver it.
   func cancel() {
     guard requestedAnswerBeforePreview == nil else { return }
     finishPending()
@@ -142,10 +136,9 @@ final class OnboardingLiveApplier {
   private func answer(keeping: Bool) {
     guard pendingDisplayID != nil, !answerInFlight else { return }
     guard let preview = renderedPreview else {
-      // The apply is pending but its preview has not been observed yet (the
-      // window can close inside that sliver). Remember the answer; the
-      // observation pass delivers it when the preview first appears, so the
-      // preview never runs headless to expiry.
+      // The apply is pending but its preview has not been observed yet. Hold
+      // the answer; the observation pass delivers it when the preview appears,
+      // so the preview never runs headless to expiry.
       requestedAnswerBeforePreview = keeping
       return
     }
@@ -171,12 +164,10 @@ final class OnboardingLiveApplier {
       finishPending()
       flow?.applyReverted()
     case .failed:
-      // The session still holds the fallback and the preview stays
-      // outstanding with its failure recorded, buttons live, nothing
-      // auto-retries. The model stays counting, so Keep and Revert remain
-      // clickable and the next click retries through the same path. Not
-      // `applyFailed`: that is for an apply that never started, and calling
-      // it here would abandon a preview that is still on the glass.
+      // The preview stays outstanding with its failure recorded and nothing
+      // auto-retries, so the model stays counting and the next click retries
+      // through the same path. Not `applyFailed`: that is for an apply that
+      // never started, and it would abandon a preview still on the glass.
       break
     case .stale:
       // The answer named a preview that had already resolved (an expiry
@@ -188,11 +179,10 @@ final class OnboardingLiveApplier {
 
   // MARK: - Observing the coordinator
 
-  /// Mirrors the coordinator's observable preview state into the model, the
-  /// same state `BannerRegion` renders from in the settings window. There is
-  /// no SwiftUI body here to track it, so a re-arming observation loop does
-  /// the same job: each pass re-reads and re-arms, and every preview mutation
-  /// (the once-a-second tick included) lands as a report.
+  /// Mirrors the coordinator's observable preview state into the model, the same
+  /// state `BannerRegion` renders from. No SwiftUI body here tracks it, so a
+  /// re-arming observation loop does the job: each pass re-reads and re-arms, so
+  /// every preview mutation (the once-a-second tick included) lands as a report.
   private func startTrackingIfNeeded() {
     guard !tracking else { return }
     tracking = true
@@ -225,8 +215,7 @@ final class OnboardingLiveApplier {
       renderedPreview = preview
       sawPreview = true
       // An answer requested before this first observation is delivered now,
-      // with the preview it could not name earlier; the in-flight rule below
-      // then owns the resolution as usual.
+      // with the preview it could not name earlier.
       if let keeping = requestedAnswerBeforePreview {
         requestedAnswerBeforePreview = nil
         answer(keeping: keeping)
@@ -246,11 +235,10 @@ final class OnboardingLiveApplier {
       finishPending()
       flow?.applyReverted()
     } else if let failure = coordinator.startFailure, failure.displayID == pendingID {
-      // The select never took effect: begin() failed or another
-      // reconfiguration claimed the displays. Nothing is outstanding. The
-      // failure is dismissed once reported, because this page renders its own
-      // failure copy; leaving it would show a stale banner the next time the
-      // settings window opens on this display.
+      // The select never took effect: begin() failed, or another reconfiguration
+      // claimed the displays. Dismissed once reported, since this page renders
+      // its own failure copy and leaving it would show a stale banner the next
+      // time the settings window opens on this display.
       finishPending()
       coordinator.dismissStartFailure()
       flow?.applyFailed()

@@ -8,9 +8,9 @@ import Testing
 ///
 /// `MirrorTopologyPolicy.toggle` is break-else-build, so on the common rig (one
 /// panel, one synthesized size, no user mirroring) the unwind removes the only
-/// set on the machine and the same call then answers `.engage`: the press would
-/// take the size down and mirror the built-in onto the panel behind a
-/// thirty-second countdown, which is the opposite of a panic button.
+/// set and the same call answers `.engage`: the press would take the size down
+/// and mirror the built-in onto the panel behind a countdown, which is the
+/// opposite of a panic button.
 @Suite("The panic press after a synthesis unwind") @MainActor
 struct MirrorPanicDecisionTests {
   private func display(
@@ -75,13 +75,10 @@ struct MirrorPanicDecisionTests {
   }
 
   /// The second reading, and the reason it exists. The caller verifies the
-  /// unwind from the PAIRING TABLE, which is empty for the whole of an engage:
-  /// an unwind refused because one was in flight leaves an empty table over a
-  /// machine that is about to have a synthesis set on it, and the table read on
-  /// its own answers "everything came down". This sample is what the decision
-  /// would be made from, so it is the one that gets the last word, and SS13's
-  /// rule is that no raw mirror change is ever staged over a standing synthesis
-  /// set.
+  /// unwind from the PAIRING TABLE, which is empty for the whole of an engage,
+  /// so an unwind refused because one was in flight still reads as "everything
+  /// came down". This sample gets the last word: SS13's rule is that no raw
+  /// mirror change is staged over a standing synthesis set.
   ///
   /// The fixture is the one that makes the rule bite: without the synthesis
   /// master the very same topology answers with a break.

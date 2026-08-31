@@ -3,12 +3,10 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// Lock dim, re-scoped from an overlay to a hardware dim on 2026-08-07.
-///
-/// The overlay could not do the job: a `CGShieldingWindowLevel()` window does
-/// not render above the macOS lock screen, MEASURED, and it reports itself on
-/// screen while it is covered. These tests pin the replacement's two halves:
-/// the decision (which displays can be dimmed on the leg driving them) and the
+/// Lock dim is a hardware dim, not an overlay: a `CGShieldingWindowLevel()`
+/// window does not render above the macOS lock screen, MEASURED, and it reports
+/// itself on screen while it is covered. Both halves are pinned here, the
+/// decision (which displays can be dimmed on the leg driving them) and the
 /// mechanism (a multiplier that never touches the value the user set).
 @Suite("Lock dim (hardware delivery)")
 @MainActor
@@ -73,11 +71,9 @@ struct LockDimTests {
     }
   }
 
-  /// The HDR case, stated as its own test because it is the one the ruling
-  /// turns on: live HDR locks the DDC brightness register, so the path is
-  /// `.native` and the dim rides DisplayServices instead of being skipped.
-  /// Lock dim uses exactly the leg the user's own slider uses, so it cannot be
-  /// deader than the slider.
+  /// Live HDR locks the DDC brightness register, so the path is `.native` and
+  /// the dim rides DisplayServices instead of being skipped. Lock dim uses the
+  /// leg the user's own slider uses, so it cannot be deader than the slider.
   @Test func hdrDisplaysDimOnTheNativeLegRatherThanBeingSkipped() async {
     let rig = makeRig(hdrEnabled: true)
     await rig.controller.initialHDRRefresh?.value
@@ -102,9 +98,9 @@ struct LockDimTests {
     )
   }
 
-  /// Combined mode with its DDC half turned off holds the software leg flat at
-  /// 1 above the band, so a dim that stays above it is accepted and changes
-  /// nothing. That is the accept-and-ignore class, and it gets a skip.
+  /// Combined mode with its DDC half off holds the software leg flat at 1 above
+  /// the band, so a dim that stays above it changes nothing: accept and ignore,
+  /// which gets a skip.
   @Test func aDimThatWouldStayAboveTheSoftwareBandIsSkipped() {
     let path = BrightnessPath.softwareOnly(
       backend: .gamma, reason: .ddcTurnedOff, dimsBelow: 0.25
@@ -131,18 +127,16 @@ struct LockDimTests {
     )
   }
 
-  /// Ruling D (locking never brightens) is arithmetic here rather than a
-  /// comparison someone has to remember: the dim is a fraction of whatever the
-  /// user set, so a dark display gets darker and never lighter.
+  /// Ruling D (locking never brightens) is arithmetic here, not a comparison
+  /// someone has to remember: the dim is a fraction of whatever the user set.
   @Test func theDimIsAFractionOfTheUsersValueSoItCannotBrighten() {
     let factor = LockDimPolicy.factor(forBrightness: 0.5)
     for brightness in stride(from: 0.05, through: 1.0, by: 0.05) {
       #expect(brightness * factor <= brightness)
     }
-    // The setting is HOW BRIGHT to leave the display (2026-08-07), so the
-    // number and the multiplier are the same: 10% is DARKEST, 90% is mildest.
-    // Before the flip this returned the complement, and the two directions are
-    // pinned here so a regression cannot pass by reading plausibly.
+    // The setting is HOW BRIGHT to leave the display, so the number IS the
+    // multiplier: 10% is darkest, 90% is mildest. Both directions are pinned
+    // because the complement reads just as plausibly.
     #expect(abs(LockDimPolicy.factor(forBrightness: 0.1) - 0.1) < 1e-9)
     #expect(abs(LockDimPolicy.factor(forBrightness: 0.9) - 0.9) < 1e-9)
     // Out-of-range values are clamped to the same window the config accepts,
@@ -162,9 +156,8 @@ struct LockDimTests {
     #expect(await rig.ddc.recordedWrites().last?.value == 40)
   }
 
-  /// Asserted as the whole SEQUENCE, not just the final value: an engine that
-  /// never dimmed at all would end on 80 too, so a last-write check cannot fail
-  /// for the reason it claims.
+  /// Asserted as the whole SEQUENCE: an engine that never dimmed would end on 80
+  /// too, so a last-write check cannot fail for the reason it claims.
   @Test func unlockingRestoresTheExactValue() async {
     let rig = makeHardwareRig()
     rig.controller.setBrightness(0.8)
@@ -177,10 +170,10 @@ struct LockDimTests {
     #expect(rig.controller.temporaryDimFactor == nil)
   }
 
-  /// The published value and the persisted store are the user's, never the
-  /// dim's. This is what makes the restore exact on a write-only panel (the
-  /// MAG answers no DDC read, so last-written IS the truth) and what keeps a
-  /// process that dies mid-dim from reopening dim forever.
+  /// The published value and the persisted store are the user's, never the dim's.
+  /// That is what makes the restore exact on a write-only panel (the MAG answers
+  /// no DDC read, so last-written IS the truth) and what keeps a process that
+  /// dies mid-dim from reopening dim forever.
   @Test func theDimNeverTouchesThePublishedValueOrTheStore() async {
     let rig = makeHardwareRig()
     rig.controller.setBrightness(0.8)
@@ -190,14 +183,12 @@ struct LockDimTests {
     #expect(rig.store.values[Self.storageKey] == 0.8)
   }
 
-  /// A readback that lands mid-dim reads OUR OWN write. Adopting it folds the
-  /// dim into the user's value and persists it, so the corruption survives the
-  /// quit and `endTemporaryDim` "restores" to the corrupted number. The path is
-  /// not hypothetical: `AppModel.performRefresh`'s kept branch calls
-  /// `refreshFromHardware` on every reconfiguration, and a lock dim outlasts
-  /// one. Only a panel that ANSWERS reads can be hit (the Dell here; the MAG
-  /// answers nothing), which is why this is pinned rather than left to the
-  /// hardware pass.
+  /// A readback that lands mid-dim reads OUR OWN write. Adopting it folds the dim
+  /// into the user's value, persists it, and `endTemporaryDim` then "restores" to
+  /// the corrupted number. Not hypothetical: `AppModel.performRefresh` calls
+  /// `refreshFromHardware` on every reconfiguration and a lock dim outlasts one.
+  /// Only a panel that ANSWERS reads can be hit, which is why it is pinned here
+  /// instead of left to the hardware pass.
   @Test func aReadbackDuringTheDimAdoptsNothing() async {
     let rig = makeHardwareRig()
     rig.controller.setBrightness(0.8)
@@ -215,10 +206,9 @@ struct LockDimTests {
     #expect(await rig.ddc.recordedWrites().map(\.value) == [80, 40, 80])
   }
 
-  /// A slider moved while the screen is locked composes with the dim instead of
-  /// fighting it: the wire follows the new value scaled, and the unlock
-  /// restores the NEW value. Nothing has to notice the collision, because the
-  /// dim is a multiplier on the way out rather than a value someone stored.
+  /// A slider moved while the screen is locked composes with the dim: the wire
+  /// follows the new value scaled, and the unlock restores the NEW value. The dim
+  /// is a multiplier on the way out, so nothing has to notice the collision.
   @Test func aBrightnessChangeDuringTheDimIsWhatGetsRestored() async {
     let rig = makeHardwareRig()
     rig.controller.setBrightness(0.8)
@@ -233,12 +223,11 @@ struct LockDimTests {
     #expect(rig.controller.brightness == 0.6)
   }
 
-  /// A reconfiguration mid-lock (a replug, a sibling display's HDR flip, a bus
-  /// drop) re-runs the SOFTWARE leg for the current value. It must re-run it
-  /// dimmed: an undimmed software leg over a hardware leg still holding the dim
-  /// is a partially lifted dim on a locked screen, and the coordinator's
-  /// per-tick re-assert cannot repair it, because `beginTemporaryDim` no-ops on
-  /// an unchanged factor.
+  /// A reconfiguration mid-lock re-runs the SOFTWARE leg for the current value,
+  /// and it has to re-run it dimmed. An undimmed software leg over a hardware leg
+  /// still holding the dim is a partially lifted dim on a locked screen, and the
+  /// per-tick re-assert cannot repair it: `beginTemporaryDim` no-ops on an
+  /// unchanged factor.
   @Test func aReconfigurationDuringTheDimReAppliesTheSoftwareLegDimmed() async {
     // Combined path: the software leg carries everything below the switching
     // point, so a dim that lands there is visible in the gamma scale.
@@ -266,9 +255,9 @@ struct LockDimTests {
     #expect(gamma.scales.last == dimmed)
   }
 
-  /// Teardown restore: the quit path writes the register's full-range
-  /// equivalent of the PUBLISHED value, so a quit while lock-dimmed hands the
-  /// panel back rather than leaving it dark with nobody left to restore it.
+  /// The quit path writes the register's full-range equivalent of the PUBLISHED
+  /// value, so a quit while lock-dimmed hands the panel back rather than leaving
+  /// it dark with nobody left to restore it.
   @Test func quittingWhileDimmedWritesTheUndimmedValue() async {
     let rig = makeHardwareRig()
     rig.controller.setBrightness(0.8)
@@ -280,20 +269,17 @@ struct LockDimTests {
     rig.controller.endTemporaryDim() // what the coordinator does at termination
     rig.controller.restoreFullRangeDDC()
     await rig.controller.waitForPendingWrites()
-    // The quit path submits the same undimmed value twice, and latest-wins
-    // coalescing collapses the pair only when the drain has not already run,
-    // so the exact write COUNT is scheduling-dependent and must not be pinned.
-    // The contract is what the panel is left holding: every write the teardown
-    // put on the wire is the user's 80, and the dim's 40 is not left standing.
+    // Latest-wins coalescing collapses the teardown's duplicate write only when
+    // the drain has not already run, so the write COUNT is scheduling-dependent.
+    // The contract is what the panel is left holding: the user's 80, not the 40.
     let teardownWrites = await rig.ddc.recordedWrites().map(\.value)
       .dropFirst(throughTheDim.count)
     #expect(!teardownWrites.isEmpty, "the teardown must hand the register back")
     #expect(teardownWrites.allSatisfy { $0 == 80 }, "saw \(Array(teardownWrites))")
   }
 
-  /// Ending a dim nobody started is a no-op, which is what lets every teardown
-  /// path (unlock, departure, reset, quit) call it unconditionally instead of
-  /// each keeping its own record of whether one is outstanding.
+  /// Ending a dim nobody started is a no-op, so every teardown path can call it
+  /// unconditionally instead of tracking whether one is outstanding.
   @Test func endingADimThatWasNeverStartedWritesNothing() async {
     let rig = makeHardwareRig()
     rig.controller.setBrightness(0.8)
@@ -332,19 +318,17 @@ struct LockDimTests {
     let written = await rig.ddc.recordedWrites().map(\.value)
     #expect(written.first == 100)
     #expect(written.last == 50)
-    // Latest-wins coalescing may drop intermediate steps at a 1 ms test
-    // interval, so this asserts the SHAPE the user sees rather than a count:
-    // never brighter than the step before, and it arrives at the target.
+    // Latest-wins coalescing may drop steps at a 1 ms test interval, so this
+    // asserts the SHAPE: never brighter than the step before, and it arrives.
     for (previous, next) in zip(written, written.dropFirst()) {
       #expect(next <= previous)
     }
     #expect(written.count > 2, "a ramp, not a jump")
   }
 
-  /// The lift has to work MID-ramp, not just after it. Two properties, and the
-  /// second is the one a cancel alone would not give: the restore is exact, and
-  /// no step that was already suspended when the user unlocked lands afterwards
-  /// and re-dims the screen they just came back to.
+  /// The lift has to work MID-ramp, not just after it. The second property is the
+  /// one a cancel alone would not give: no step already suspended when the user
+  /// unlocked lands afterwards and re-dims the screen they came back to.
   @Test func cancellingMidRampRestoresTheExactValueAndNoLaterStepLands() async {
     let rig = makeHardwareRig()
     rig.controller.lockDimRampInterval = .milliseconds(20)
@@ -368,10 +352,9 @@ struct LockDimTests {
     #expect(await rig.ddc.recordedWrites().last?.value == 80)
   }
 
-  /// The lift promise is 100 ms, and a lock dim raises no overlay, so the
-  /// cadence has to count it as a dim that is up. It did not: the wire-
-  /// delivered dim ticked every 2 s, which is what the user typing their
-  /// password would have waited for the brightness to come back.
+  /// The lift promise is 100 ms and a lock dim raises no overlay, so the cadence
+  /// has to count it as a dim that is up. It did not: the wire-delivered dim
+  /// ticked every 2 s while the user typed their password.
   @Test func aLockDimHoldsTheFastCadenceEvenThoughItRaisesNoOverlay() {
     #expect(
       OledCareCadence.interval(
@@ -406,9 +389,9 @@ struct LockDimTests {
       unfocusedDimEnabled: false, unfocusedDimSeconds: 600, unfocusedDimBrightness: 0.7
     ))
     #expect(engine.alpha(for: .lockDim) == nil)
-    // Asymmetric on purpose: at 0.5 the flip is invisible because the value is
-    // its own complement, which is exactly how an inverted mapping ships. A
-    // dim TO 20% brightness is an 80% opaque overlay.
+    // Asymmetric on purpose: at 0.5 the flip is invisible because the value is its
+    // own complement, which is how an inverted mapping ships. A dim TO 20%
+    // brightness is an 80% opaque overlay.
     #expect(abs(engine.alpha(for: .idleDim)! - 0.8) < 1e-9)
     #expect(abs(engine.lockDimFactor - 0.2) < 1e-9)
   }

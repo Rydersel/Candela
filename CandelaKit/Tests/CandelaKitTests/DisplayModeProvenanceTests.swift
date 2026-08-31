@@ -50,25 +50,20 @@ struct DisplayModeProvenanceTests {
   }
 }
 
-/// SS5's routing half, against the REAL configurator: a synthesized mode is
-/// refused by the CoreGraphics apply path rather than routed anywhere in it.
+/// SS5's routing half, against the real configurator: the CoreGraphics apply path
+/// refuses a synthesized mode rather than routing it anywhere.
 ///
-/// Safe on this machine, and the safety is structural rather than lucky: the
-/// `.synthesized` arm throws before `beginDisplayConfiguration`, so no
-/// transaction is opened. It stays safe under a mutation that routes to the
-/// PUBLISHED path, because a sentinel `ioModeID` is negative, resolves to no
-/// `CGDisplayMode` on any display, and that lookup throws before opening a
-/// transaction too.
+/// Safe on an attached display, structurally: the `.synthesized` arm throws before
+/// `beginDisplayConfiguration`, and a mutation routing to the published path throws
+/// too, since a negative sentinel `ioModeID` resolves to no `CGDisplayMode`. A
+/// mutation routing to the REVEALED path is not covered by that argument and is not
+/// tested here: `applyRevealedMode` would hand the sentinel to
+/// `CGSConfigureDisplayMode`, and what that private call does with a negative mode
+/// number is an expectation, not a measurement.
 ///
-/// **A mutation routing to the REVEALED path is not covered by that argument**,
-/// and nothing here tests it: `applyRevealedMode` opens a transaction and hands
-/// the sentinel to `CGSConfigureDisplayMode`. What that private call does with a
-/// negative mode number is an expectation (it refuses, and the transaction is
-/// cancelled), not a measurement.
-///
-/// The expected error is spelled exactly, not merely `DisplayConfigError.self`.
-/// A wrong routing throws SOMETHING, so a type-only expectation would pass
-/// against a configurator that had stopped refusing entirely.
+/// The expected error is spelled exactly rather than `DisplayConfigError.self`: a
+/// wrong routing throws something, so a type-only expectation would pass against a
+/// configurator that had stopped refusing.
 @Suite("Synthesized apply refusal (SS5)")
 struct SynthesizedApplyRefusalTests {
   private let refusal = DisplayConfigError(cgErrorCode: CGError.invalidOperation.rawValue)
@@ -99,15 +94,10 @@ struct SynthesizedApplyRefusalTests {
     }
   }
 
-  /// The refusal code must stay distinguishable from the published path's
-  /// stale-ID failure, which is the only reason the expectations above can tell
-  /// a refusal from a wrong routing that happened to fail.
-  ///
-  /// Read from what `apply` ACTUALLY throws for a published mode it cannot
-  /// resolve, rather than from a second literal: comparing two constants is a
-  /// statement about the test file, and either code could move without it
-  /// noticing. Safe on an attached display for the suite's own reason: the
-  /// lookup throws before `beginDisplayConfiguration`.
+  /// The refusal code has to stay distinguishable from the published path's stale-ID
+  /// failure, or the expectations above cannot tell a refusal from a wrong routing
+  /// that happened to fail. Read from what `apply` actually throws rather than a
+  /// second literal, which would only be a statement about this test file.
   @Test func theRefusalCodeIsNotTheCodeAStaleIDProduces() {
     let configurator = CoreGraphicsDisplayConfigurator()
     let unresolvable = DisplayMode(
@@ -126,15 +116,11 @@ struct SynthesizedApplyRefusalTests {
   }
 }
 
-/// The one question the pickers ask about provenance: is this an option our own
-/// enumeration added?
-///
-/// It is answered from the recorded provenance and from nothing else. Two wrong
-/// answers were available and both are pinned shut here: sharpness is not
-/// provenance (`kCGDisplayShowDuplicateLowResolutionModes` puts HiDPI modes in
-/// the CoreGraphics list, so a flag derived that way is a synonym for
-/// `!isHiDPI`), and it is a fact about ONE mode rather than about the list it
-/// arrived in.
+/// The pickers ask one thing about provenance: did our own enumeration add this
+/// option? Answered from the recorded provenance and nothing else. Two wrong answers
+/// are pinned shut here: sharpness is not provenance
+/// (`kCGDisplayShowDuplicateLowResolutionModes` puts HiDPI modes in the CoreGraphics
+/// list), and it is a fact about one mode, not about the list it arrived in.
 @Suite("Revealed-mode marking")
 struct RevealedModeMarkingTests {
   private func mode(
@@ -160,10 +146,9 @@ struct RevealedModeMarkingTests {
     #expect(revealed.isRevealed)
   }
 
-  /// The MAG's measured collision (S6): CoreGraphics and our revelation both
-  /// offer 1920×804, and curation hands the row to the sharp one. Unless it
-  /// does, the mark has nothing to attach to and the feature stays invisible at
-  /// the exact point it delivers.
+  /// The MAG's measured collision (S6): CoreGraphics and our revelation both offer
+  /// 1920×804, and curation hands the row to the sharp one. Otherwise the mark has
+  /// nothing to attach to and the feature is invisible where it delivers.
   @Test func curationHandsACollidedSizeToTheModeWeAdded() {
     let modes = [
       mode(69, logical: (3440, 1440), pixels: (3440, 1440), native: true),
@@ -192,19 +177,12 @@ struct RevealedModeMarkingTests {
     #expect(rows.first { $0.mode.ioModeID == 101 }?.mode.isRevealed == true)
   }
 
-  /// Why a curated row cannot be marked from its representative: one framebuffer
-  /// can hold both provenances at once, so the representative and the mode a
-  /// press would apply disagree.
-  ///
-  /// This is the MAG's measured post-adoption state (S6, after the dock cycle):
-  /// once 1920×804 was engaged at 175 Hz, CoreGraphics began publishing THAT
-  /// rate while the other rates at the same framebuffer stayed ours. The
-  /// representative is the size's fastest, so it is now the published one, and
-  /// a display running 120 Hz applies the mode we added.
-  ///
-  /// The pickers therefore ask `modeKeepingCurrentRefreshRate` (app target,
-  /// no test target). What is pinned here is that the two answers really do
-  /// diverge, so a later "simplify this to `row.mode`" reads the case first.
+  /// One framebuffer can hold both provenances at once, so a curated row cannot be
+  /// marked from its representative. Measured on the MAG after adoption (S6): once
+  /// 1920×804 was engaged at 175 Hz, CoreGraphics published that rate while the
+  /// other rates at the same framebuffer stayed ours, so the representative is
+  /// published and a display at 120 Hz applies the mode we added. Pinned so a later
+  /// "simplify this to `row.mode`" reads the case first.
   @Test func theRepresentativeAndTheAppliedSiblingCanDisagree() {
     let modes = [
       mode(101, logical: (1920, 804), pixels: (3840, 1608), hz: 175),

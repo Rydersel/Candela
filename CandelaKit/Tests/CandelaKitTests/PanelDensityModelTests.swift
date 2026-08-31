@@ -196,18 +196,16 @@ import Testing
     #expect(forward == backward)
   }
 
-  /// The tie-break past the density gap is only reachable when two candidates
-  /// are EXACTLY equal at the first comparison, which the major-axis derivation
-  /// makes routine: the built-in panel offers three pairs sharing a major
-  /// (1800x1125/1800x1169, 1512x945/1512x982, 1352x845/1352x878). The 1800 pair
-  /// is above the band, so the two in-band pairs are what a ranking is actually
-  /// asked to separate.
+  /// The tie-break past the density gap is only reachable when two candidates are
+  /// EXACTLY equal at the first comparison, which the major-axis derivation makes
+  /// routine: the built-in offers three pairs sharing a major, and the 1800 pair is
+  /// above the band, so the two in-band pairs are what a ranking has to separate.
   ///
   /// 1280x800 is withheld deliberately. It beats both pairs on gap, so with it
-  /// present no tie decides anything and a ranking cut down to its first
-  /// comparison would pass. Without it the winner comes from the tie, and
-  /// `min(by:)` keeps whichever tied row it saw first: the reversed run then
-  /// disagrees with the forward one.
+  /// present no tie decides anything and a ranking cut down to its first comparison
+  /// would pass. Without it the winner comes from the tie, and `min(by:)` keeps
+  /// whichever tied row it saw first, so the reversed run disagrees with the
+  /// forward one.
   @Test func tiedDensitiesRankTheSameWhicheverOrderTheyArriveIn() throws {
     let rows = DisplayModeCatalog.curated(
       DisplayModeFixtures.builtIn,

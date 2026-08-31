@@ -3,12 +3,9 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// The predicate that identifies a virtual display Candela did NOT create.
-///
-/// Every wrong-shape answer must read as "don't know", never as "not virtual":
-/// the caller's degrade path for nil is "treat it as an ordinary panel", which
-/// is exactly today's behavior, and a nil that read as false would be the same
-/// thing while pretending to be an answer.
+/// Every wrong-shape answer must read as "don't know", never as "not virtual".
+/// The caller treats nil as an ordinary panel; a false would do the same thing
+/// while pretending to be an answer.
 @Suite("Foreign virtual-display detection (VD3)")
 struct VirtualDisplayDetectionTests {
   @Test func theVirtualDeviceFlagIsReadAsABoolean() {
@@ -29,10 +26,9 @@ struct VirtualDisplayDetectionTests {
     #expect(VirtualDisplayDetection.flag(in: ["kCGDisplayIsVirtualDevice": "yes"]) == nil)
   }
 
-  /// Measured: the built-in Retina panel reports 0, every CGVirtualDisplay
-  /// reports 1 (S1). Asserting false rather than `!= true` because the
-  /// measurement is what makes the predicate usable; a machine where the
-  /// built-in reads nil is a finding, not a pass.
+  /// Measured (S1): the built-in Retina panel reports 0, every CGVirtualDisplay
+  /// reports 1. Asserts false rather than `!= true` because a built-in that
+  /// reads nil is a finding, not a pass.
   @Test func theBuiltInPanelIsNotVirtual() {
     #expect(VirtualDisplayDetection.isVirtual(CGMainDisplayID()) == false)
   }

@@ -44,14 +44,12 @@ struct AudioRoutingPolicyTests {
   }
 
   @Test func aSuffixMismatchNeedsTheOverride() {
-    // Deliberate brittleness, inherited from `displayMatchesDevice`: matching
-    // is exact on normalized forms, so a display whose audio device carries an
-    // extra word reports NO sink...
+    // Matching is exact on normalized forms, so a display whose audio device carries
+    // an extra word reports no sink...
     #expect(!AudioRoutingPolicy.displayHasAudioSink(
       rawDisplayName: "MAG 341C", nameOverride: "", outputDeviceNames: sinks
     ))
-    // ...and `audioDeviceNameOverride` is the documented way out. This is the
-    // reason detection alone is not the whole feature.
+    // ...and `audioDeviceNameOverride` is the documented way out.
     #expect(AudioRoutingPolicy.displayHasAudioSink(
       rawDisplayName: "MAG 341C", nameOverride: "MAG 341C OLED", outputDeviceNames: sinks
     ))
@@ -126,14 +124,9 @@ struct AudioRoutingPolicyTests {
     ))
   }
 
-  /// The dead-key case. Watching a key the tap will consume while no display can
-  /// act on it takes the press away from macOS as well, so the whole family goes
-  /// silent. Every mode releases the keys when the count is zero, including the
-  /// one whose default output cannot set its own volume.
-  ///
-  /// Only two of the three cells are new. Name matching already released on a
-  /// zero count; what changed for that mode is WHICH displays the count is of,
-  /// since a matched display that cannot take the command no longer counts.
+  /// The dead-key case: watching a key the tap consumes while no display can act on it
+  /// takes the press away from macOS too, so the whole family goes silent. Every mode
+  /// releases the keys at a zero count.
   @Test func nothingActionableReleasesTheKeysInEveryMode() {
     for mode in [MultiKeyboardVolume.mouse, .allScreens, .audioDeviceNameMatching] {
       #expect(!AudioRoutingPolicy.shouldWatchVolumeKeys(
@@ -143,9 +136,8 @@ struct AudioRoutingPolicyTests {
     }
   }
 
-  /// The count is a count of displays a press would ACT on, not of displays
-  /// present: one that can act keeps the family armed for the whole rig, which is
-  /// what preserves the per-display swallow (R1) for the ones that cannot.
+  /// The count is of displays a press would act on, not displays present: one that can
+  /// act keeps the family armed, which preserves the per-display swallow (R1) for the rest.
   @Test func oneActionableDisplayIsEnoughToKeepTheKeysWatched() {
     #expect(AudioRoutingPolicy.shouldWatchVolumeKeys(
       mode: .allScreens, ddcDisplaysExist: true, actionableDisplayCount: 1,
@@ -154,10 +146,8 @@ struct AudioRoutingPolicyTests {
   }
 
   @Test func noDefaultOutputKeepsTheKeysWatched() {
-    // Fork parity: the key-removal block sits inside `if let defaultAudioDevice`.
-    // Deliberately ahead of the actionable count, and it changes nothing a user
-    // can feel: with no output device at all there is no system volume for a
-    // released key to move, so releasing would trade a dead key for a dead key.
+    // Fork parity: the key-removal block sits inside `if let defaultAudioDevice`. With
+    // no output device there is no system volume for a released key to move anyway.
     #expect(AudioRoutingPolicy.shouldWatchVolumeKeys(
       mode: .mouse, ddcDisplaysExist: true, actionableDisplayCount: 0, defaultOutput: nil
     ))

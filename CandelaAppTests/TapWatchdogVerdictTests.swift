@@ -1,12 +1,11 @@
 import Foundation
 import Testing
 
-/// The event-tap deadman switch decides from clock deltas alone, and the one
-/// delta it must never trust is the machine's own sleep: at a dark wake the
-/// monitor thread runs first and sees the prober's last stamp minutes old in
-/// wall time with nothing actually wedged. Measured 2026-08-22 to 08-25:
-/// 87 emergency exits in three days, every one `proberDead` alone, every one
-/// at a dark wake.
+/// The deadman switch decides from clock deltas alone, and the one delta it must
+/// never trust is the machine's own sleep: at a dark wake the monitor thread runs
+/// first and sees the prober's last stamp minutes old in wall time with nothing
+/// wedged. [MEASURED 2026-08-25] 87 emergency exits in three days, every one
+/// `proberDead` alone at a dark wake.
 @Suite("The tap watchdog's verdict across a sleep")
 struct TapWatchdogVerdictTests {
   private let t0 = Date(timeIntervalSinceReferenceDate: 800_000_000)
@@ -16,8 +15,7 @@ struct TapWatchdogVerdictTests {
   }
 
   @Test func aDarkWakeAfterFifteenMinutesAsleepIsNotADeadProber() {
-    // Previous tick 15 minutes ago on the wall, the machine awake for only one
-    // second of it: the prober's stamp is exactly as old as the sleep.
+    // The prober's stamp is exactly as old as the sleep.
     let outcome = TapWatchdogVerdict.evaluate(
       sample: .init(pingPosted: nil, probing: nil, alive: t0),
       previousTick: clock(wallOffset: 0, uptime: 100),
@@ -36,8 +34,7 @@ struct TapWatchdogVerdictTests {
   }
 
   @Test func aProberSilentForThirteenAwakeSecondsIsDead() {
-    // The positive control: both clocks advanced together, so the staleness
-    // is real and the verdict must still fire on the prober alone.
+    // Positive control: both clocks advanced together, so the staleness is real.
     let outcome = TapWatchdogVerdict.evaluate(
       sample: .init(pingPosted: nil, probing: nil, alive: t0),
       previousTick: clock(wallOffset: 12, uptime: 112),
@@ -74,8 +71,7 @@ struct TapWatchdogVerdictTests {
   }
 
   @Test func ordinaryTickJitterIsNotASleep() {
-    // A tick that ran 1.5 s late on both clocks is scheduling noise, not a
-    // sleep; the drift between the clocks is what marks a sleep, not the gap.
+    // Drift BETWEEN the clocks marks a sleep. A late tick on both is scheduling noise.
     let outcome = TapWatchdogVerdict.evaluate(
       sample: .init(pingPosted: nil, probing: nil, alive: t0.addingTimeInterval(2)),
       previousTick: clock(wallOffset: 0, uptime: 100),

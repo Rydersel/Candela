@@ -36,19 +36,17 @@ public enum CapabilityString {
   /// Every feature code at depth 0 of the vcp list, or nil when the string is
   /// not fully understood.
   ///
-  /// Same D24 rule as `support(forVCP:in:)`, and the same three gates in the
+  /// Same D24 rule as `support(forVCP:in:)` and the same three gates in the
   /// same order: balance check FIRST, whole-tag match at depth 1 (so a `vcp(`
   /// buried inside another tag's body is not mistaken for the list), and
-  /// top-level codes only — each of the two "top-level" claims in that sentence
-  /// is a separate depth counter, one over tags and one over codes. A
-  /// partially-parsed string never produces a partial answer — a pane listing
-  /// "the codes we could make out" would read as the display's advertised list
-  /// and be wrong in the one direction that matters.
+  /// top-level codes only. Those are two separate depth counters, one over tags
+  /// and one over codes. A partially-parsed string never produces a partial
+  /// answer: a pane listing "the codes we could make out" reads as the display's
+  /// advertised list.
   ///
   /// `nil` and an empty set are deliberately not both reachable: an empty vcp
-  /// list is "we did not understand this", not "this display advertises
-  /// nothing". Collapsing the two would let a truncated read render as a
-  /// display that genuinely supports no features at all.
+  /// list means "we did not understand this", not "this display advertises
+  /// nothing".
   public static func codes(in capabilities: String) -> Set<UInt8>? {
     guard isBalanced(capabilities) else { return nil }
     guard let body = body(ofTag: "vcp", in: capabilities) else { return nil }
@@ -64,10 +62,8 @@ public enum CapabilityString {
   ///
   /// nil when the tag is absent, nested, the string is unbalanced, or the group
   /// never closes. An empty STRING is a different answer from nil: the tag was
-  /// declared and its body is blank (DT30 rule e). A caller that flattened the
-  /// two would report "the display did not say" and "the display said nothing"
-  /// as the same fact, which is exactly the conflation D24 and DT30 exist to
-  /// prevent.
+  /// declared and its body is blank (DT30 rule e). Flattening the two reports
+  /// "the display did not say" and "the display said nothing" as one fact.
   public static func tag(_ name: String, in capabilities: String) -> String? {
     guard isBalanced(capabilities) else { return nil }
     guard let body = body(ofTag: name, in: capabilities) else { return nil }
@@ -91,76 +87,53 @@ public enum CapabilityString {
   /// nested groups included. `nil` when there is no such tag or the group never
   /// closes (the truncation case).
   ///
-  /// "Top-level" means immediately inside the outer group — depth 1 — and is
+  /// "Top-level" means immediately inside the outer group, depth 1, and is
   /// enforced two ways, because a tag name can be wrong about its identity in
   /// two independent directions:
   ///
   /// 1. **Horizontally, by the boundary check.** "vcpname(" and "mccs_vcp(" are
-  ///    different keys from "vcp(", and matching them would invent a list out
-  ///    of unrelated data. The same check stops `tag("type", …)` from answering
+  ///    different keys from "vcp(", and matching them invents a list out of
+  ///    unrelated data. The same check stops `tag("type", …)` from answering
   ///    with `prot_type(`'s body.
   /// 2. **Vertically, by the depth counter.** A textual scan finds the first
-  ///    `<name>(` at *any* nesting depth, so `tag("type", in: "(prot(type(LCD))…")`
-  ///    answered "LCD" — a nested field's body reported as a top-level field's.
-  ///    `prot(type(...))` is a shape real monitors emit, and generalising this
-  ///    function from `vcp` to arbitrary tags turned an unlikely collision into
-  ///    a plausible one. Reporting one field's value as another's is the same
-  ///    invented fact as (1), arriving by the other door.
+  ///    `<name>(` at ANY nesting depth, so `tag("type", in: "(prot(type(LCD))…")`
+  ///    reports a nested field's body as a top-level field's.
+  ///    `prot(type(...))` is a shape real monitors emit.
   ///
   /// "Depth 1" is measured against a real wrapper, not against whatever group
-  /// happens to come first (see `outerGroupInterior`). Without that, the
-  /// unwrapped `"vcp(vcp(60(01 03)))"` would treat its own leading `vcp(` as
-  /// the outer group, read the INNER list as top-level, and answer
-  /// `.unsupported` — a denial manufactured out of a string that is not a
-  /// capability string at all. Measured: that shape, and only that shape, was
-  /// the entire `unknown → .unsupported` class in the differential fuzz.
+  /// comes first (see `outerGroupInterior`). Without that, the unwrapped
+  /// `"vcp(vcp(60(01 03)))"` treats its own leading `vcp(` as the outer group,
+  /// reads the INNER list as top-level, and answers `.unsupported`: a denial
+  /// manufactured out of a string that is not a capability string at all.
+  /// Measured: that shape, and only that shape, was the entire
+  /// `unknown -> .unsupported` class in the differential fuzz.
   ///
-  /// That class is not the whole of what the depth fix moves, and the note
-  /// used to stop there. The same counter also moves verdicts the other way
-  /// round the D24 axis, `.supported → .unsupported`:
-  /// `support(forVCP: 0x10, in: "(vcpname(vcp(10))vcp(20))")` answered
-  /// `.supported` before it and answers `.unsupported` now. The new answer is
-  /// the correct one — the `10` sits inside `vcpname`'s body, where it is a
-  /// permitted VALUE and not a feature the display advertises, and the real
-  /// top-level list is `vcp(20)` — but it is worth writing down that a
-  /// depth-counter fix can *withdraw* support as well as withdraw a denial.
-  /// `.unsupported` greys a control, so a wrong answer in this direction is
-  /// the expensive kind; it is right here only because the string parsed
-  /// cleanly, end to end, and genuinely does not list the code.
+  /// The same counter moves verdicts the other way round the D24 axis too.
+  /// `support(forVCP: 0x10, in: "(vcpname(vcp(10))vcp(20))")` is `.unsupported`,
+  /// because the `10` sits inside `vcpname`'s body as a permitted VALUE and the
+  /// real top-level list is `vcp(20)`. Correct, and worth writing down: a depth
+  /// counter can WITHDRAW support as well as withdraw a denial, and
+  /// `.unsupported` greys a control.
   ///
   /// The consequence, taken deliberately: a capability string with no outer
-  /// group — `vcp(10)` rather than `(vcp(10))` — is not well-formed MCCS and
+  /// group (`vcp(10)` rather than `(vcp(10))`) is not well-formed MCCS and
   /// returns `nil`.
   ///
-  /// That `nil` used to be described as free, on the grounds that D24 lets it
-  /// reach the UI as `.unknown`, which `VolumeSliderPolicy` resolves to
-  /// *enabled*. That remains true of `VolumeSliderPolicy`, and is false of
-  /// `DiagnosticsPage`, which is now also a consumer and reads the
-  /// same `nil` as a statement about the DISPLAY rather than about our parser:
+  /// That `nil` is not free. `VolumeSliderPolicy` resolves it to enabled under
+  /// D24, but `DiagnosticsPage` reads the same `nil` as a statement about the
+  /// DISPLAY rather than about our parser: `tag("mccs_ver"/"model"/"type", …)`
+  /// renders "Not stated" about a panel that stated all three, and `codes(in:)`
+  /// disclaims a vcp list the same page is showing verbatim.
   ///
-  /// - `CapabilityString.tag("mccs_ver"/"model"/"type", …)` renders "Not
-  ///   stated" — attributing silence to a panel that stated all three.
-  /// - `CapabilityString.codes(in:)` renders "The description did not parse,
-  ///   so Candela makes no claim about it", which is honest, but sits next to
-  ///   a "Capability request: The display answered" row and a disclosure group
-  ///   showing the raw string — so the pane displays a legible vcp list while
-  ///   telling the reader it could not read one.
-  ///
-  /// It was reachable without malformed firmware, and a real panel reached it:
-  /// the reassembly concatenated fragments with no trimming, so the DELL
-  /// U2725QE's one trailing NUL turned `"(…mswhql(1))"` into
-  /// `"(…mswhql(1))\0"`, whose last character is not `)` and is not whitespace
-  /// — `outerGroupInterior` rejected all 606 bytes of a complete answer, and
-  /// the pane disclaimed a vcp list it was displaying verbatim. [MEASURED
-  /// 2026-08-04: 44 codes and `mccs_ver` "2.1" trimmed, nil with the NUL.]
-  ///
-  /// Fixed in the reassembly, where the wire's own noise is —
-  /// `CapabilityPayload.string(from:)`, called by both
-  /// `Arm64DDCService.readCapabilityString` and `IntelDDC.readCapabilityString`
-  /// — and deliberately NOT by loosening the wrapper rule here. D24 would still
-  /// rather say nothing than guess at a wrapper, and the nine measured
-  /// `unknown → .unsupported` moves that rule prevents cost more than the bug
-  /// it caused.
+  /// A real panel reached it without malformed firmware: the DELL U2725QE's one
+  /// trailing NUL left a last character that is neither `)` nor whitespace, so
+  /// `outerGroupInterior` rejected all 606 bytes of a complete answer [MEASURED
+  /// 2026-08-04: 44 codes and `mccs_ver` "2.1" once trimmed, nil with the NUL].
+  /// Fixed in the reassembly, where the wire's own noise is
+  /// (`CapabilityPayload.string(from:)`), and deliberately NOT by loosening the
+  /// wrapper rule here: D24 would rather say nothing than guess at a wrapper,
+  /// and the nine measured `unknown -> .unsupported` moves that rule prevents
+  /// cost more than the bug it caused.
   ///
   /// The scan is hand-rolled rather than a regex because capability strings
   /// nest: only a depth counter can tell `60(0F 11 12)`'s closing paren from
@@ -251,14 +224,12 @@ public enum CapabilityString {
     func flush() -> Bool {
       defer { token = "" }
       guard !token.isEmpty else { return true }
-      // Both characters must be ASCII hex digits, checked explicitly rather
-      // than left to `UInt8(_:radix:)`. That initialiser accepts a leading sign
-      // — `UInt8("+1", radix: 16)` is 1, and "+1" is two Characters, so a
-      // count-only guard passed a token that is not a hex pair. The cost was
-      // not merely a wrong entry in a diagnostics list: `support(forVCP:in:)`
-      // would then answer .unsupported for "(vcp(+1))" and grey a working
-      // control on the word of a provably malformed string, inverting D24's
-      // doctrine that an unclear answer resolves to *enabled*.
+      // Both characters must be ASCII hex digits, checked here rather than left
+      // to `UInt8(_:radix:)`. That initialiser accepts a leading sign, so
+      // `UInt8("+1", radix: 16)` is 1 and a count-only guard passes a token that
+      // is not a hex pair. `support(forVCP:in:)` would then answer .unsupported
+      // for "(vcp(+1))" and grey a working control on the word of a provably
+      // malformed string, inverting D24.
       //
       // `isASCII` is load-bearing alongside `isHexDigit`: the latter is true
       // for fullwidth forms like "１", which `UInt8(_:radix:)` then rejects.

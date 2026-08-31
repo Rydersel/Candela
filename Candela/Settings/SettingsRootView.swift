@@ -2,83 +2,69 @@ import AppKit
 import CandelaKit
 import SwiftUI
 
-/// Sidebar navigation over a pane registry. Replaces the five-tab `TabView`,
-/// whose tab-for-tab match with the fork was the actual source of the visual
-/// resemblance.
+/// Sidebar navigation over a pane registry.
 ///
 /// The shell is hand-built (SV4): a canvas, a fixed-width sidebar, a hairline,
-/// and the detail column. It was a framework split view until the visual
-/// redesign, and what that cost was the whole surface: a split view owns its
-/// column backgrounds, so no canvas could be drawn under both columns, and its
-/// sidebar column drew a panel that dimmed whenever the window lost focus. It
-/// also brought a collapse hazard with it, since AppKit's `NSSplitView` could
-/// hide the sidebar under a squeeze and autosave that state, leaving a window
-/// with no navigation and no way back from inside the app. A fixed column
-/// cannot collapse, so that whole defence retires with the split view.
+/// the detail column. **Do not reintroduce a split view.** One owns its column
+/// backgrounds, so no canvas can be drawn under both columns, its sidebar drew
+/// a panel that dimmed when the window lost focus, and `NSSplitView` could hide
+/// the sidebar under a squeeze and autosave that, leaving a window with no
+/// navigation and no way back from inside the app.
 ///
-/// D6 still holds and generalises to the registry: `PaneID.rawValue` is the
-/// identifier, `title` is the label, and cross-pane state goes through
-/// AppModel/SettingsActions observation, never view lifecycle ordering.
+/// D6 generalises to the registry: `PaneID.rawValue` is the identifier, `title`
+/// is the label, and cross-pane state goes through AppModel/SettingsActions
+/// observation, never view lifecycle ordering.
 ///
 /// `@MainActor` because `SettingsRegistry` is main-actor-isolated and a
-/// `View`'s stored-property default expressions are nonisolated under
-/// `SWIFT_STRICT_CONCURRENCY: complete`.
+/// `View`'s stored-property defaults are nonisolated under complete
+/// concurrency.
 @MainActor
 struct SettingsRootView: View {
   @State private var selection: SettingsDestination? = .pane(.general)
 
   /// Each display destination's pushed-sub-page stack, keyed by persistence key
-  /// (SO23). Retained for the life of the window so leaving a display and
-  /// coming back lands where the user was; cleared ONLY on that display's
-  /// departure — which is also what guarantees SO9's "returns to the hub, not
-  /// a sub-page" on reconnection. `@State`, so closing the window clears all.
+  /// (SO23). Retained for the life of the window, cleared ONLY on that
+  /// display's departure, which is what makes a reconnection land on the hub
+  /// rather than a sub-page (SO9).
   @State private var subPagePaths: [String: [DisplaySubPage]] = [:]
-  /// The display whose departure evicted the user, remembered so its return
-  /// can restore the selection (SO9). Only the SELECTED display's departure is
-  /// remembered — an unrelated monitor unplugging must not hijack a later
-  /// arrival.
+  /// The display whose departure evicted the user, so its return can restore
+  /// the selection (SO9). Only the SELECTED display's departure is remembered:
+  /// an unrelated monitor unplugging must not hijack a later arrival.
   @State private var lastDisplayKey: String?
-  /// The OLED Care pane's pushed-page stack (OCR1). Lives here beside
-  /// `subPagePaths` because it rides the same `NavigationStack`; retained
-  /// across selection changes like a display's stack (SO23's rule applied to
-  /// the pane), cleared when a display in it departs, and popped by the
-  /// sidebar row's re-click. Display Health is NOT in this stack: it opens
-  /// in its own window (OCR-A1), an AppKit island reached through
-  /// `SettingsActions.openDisplayHealth`.
+  /// The OLED Care pane's pushed-page stack (OCR1), here because it rides the
+  /// same `NavigationStack`. Retained across selection changes like a display's,
+  /// cleared when a display in it departs. Display Health is NOT in this stack:
+  /// it opens in its own AppKit window (OCR-A1).
   @State private var oledCarePath: [OledCarePage] = []
-  /// For the debug capture route's Display Health window; the pane's own
-  /// health links read the same actions object from their environment.
+  /// For the debug capture route's health window; the pane's own links read the
+  /// same actions object from their environment.
   @Environment(SettingsActions.self) private var actions
-  /// The Keyboard pane's pushed-page stack (KMR11): same NavigationStack, same
-  /// retention rules as the OLED pane's, minus the display dependence — these
-  /// pages name no hardware, so departure clearing never touches this.
+  /// The Keyboard pane's pushed-page stack (KMR11): same stack, same retention
+  /// rules as the OLED pane's. These pages name no hardware, so departure
+  /// clearing never touches this.
   @State private var keyboardPath: [KeyboardPage] = []
-  /// Accessibility contract 2: selecting a sidebar destination moves focus
-  /// into the detail column. Anchored on the detail root; hand-verified only
-  /// (no app test target, and synthetic keys go to the terminal, not an
-  /// LSUIElement app).
+  /// Selecting a sidebar destination moves focus into the detail column.
+  /// Hand-verified only: synthetic keys go to the terminal, not an LSUIElement
+  /// app.
   @FocusState private var detailFocusAnchor: Bool
 
   @Environment(AppModel.self) private var model
 
   var body: some View {
     ZStack {
-      // The ground under both columns, lit by whatever destination is on
-      // screen. One canvas for the life of the window, so a selection change
-      // moves the light rather than cutting to a new one (SV8).
+      // One canvas for the life of the window, so a selection change moves the
+      // light rather than cutting to a new one (SV8).
       //
-      // **The canvas is the only view here that opts out of the safe area**
-      // (`ignoresSafeArea` lives inside it), and that asymmetry is the whole
-      // defence for the top strip: the glow runs under the transparent
-      // titlebar while the columns start below it, so nothing scrolls up
-      // behind the traffic lights and no view needs a clearance of its own.
-      // The mock is built the same way. Never add `.ignoresSafeArea()` to the
-      // HStack or to a page, and never re-add per-view titlebar padding.
+      // **The canvas is the ONLY view here that opts out of the safe area**,
+      // and that asymmetry is the whole defence for the top strip: the glow
+      // runs under the transparent titlebar while the columns start below it,
+      // so nothing scrolls up behind the traffic lights. Never add
+      // `.ignoresSafeArea()` to the HStack or to a page, and never re-add
+      // per-view titlebar padding.
       SettingsCanvas(accent: currentAccent.accent, secondary: currentAccent.secondary)
       HStack(spacing: 0) {
         SettingsSidebar(selection: animatedSelection, onReselect: returnToHub)
-          // Fixed, not a resizable split-view column: nothing in this window
-          // needs a wider sidebar, and a fixed column cannot be collapsed to
+          // Fixed, not a resizable column: a fixed one cannot be collapsed to
           // nothing by an AppKit squeeze.
           .frame(width: 224)
         Rectangle()
@@ -89,13 +75,11 @@ struct SettingsRootView: View {
           .environment(\.oledCarePath, $oledCarePath)
           .environment(\.keyboardPath, $keyboardPath)
           .focused($detailFocusAnchor)
-          // Keyboard contract (accessibility contract 2): ⌘[ pops the current
-          // display's sub-page; ⌘1–⌘9 select the first nine sidebar
-          // destinations in sidebar render order. Hidden buttons rather than
-          // `.commands`: the `Settings` scene's menu bar is not this view's to
-          // edit, and a shortcut on a button in the key window's hierarchy
-          // fires without being visible. Not tab-reachable at zero size;
-          // VoiceOver skips them via `accessibilityHidden`.
+          // ⌘[ pops the current sub-page; ⌘1 onward select sidebar
+          // destinations in render order. Hidden buttons rather than
+          // `.commands`, because the `Settings` scene's menu bar is not this
+          // view's to edit and a shortcut on a button in the key window's
+          // hierarchy fires without being visible.
           .background {
             Group {
               Button("") { popCurrentSubPage() }
@@ -111,24 +95,22 @@ struct SettingsRootView: View {
           }
       }
     }
-    // Published once for the whole shell, so the sidebar's wordmark and every
-    // themed component on the page read one destination's lighting.
+    // Published once for the whole shell, so the wordmark and every themed
+    // component read one destination's lighting.
     .environment(\.settingsAccent, currentAccent)
-    // Dark-only (SV2). Every colour in this window comes from the theme layer,
-    // and none of them has a light-appearance answer.
+    // Dark-only (SV2): every colour comes from the theme layer and none of
+    // them has a light-appearance answer.
     .preferredColorScheme(.dark)
-    // The care cross-links' navigation seam (SC4, SC6): wired here because
-    // this view owns the selection, and re-wired on every appearance so a
-    // reopened window binds the closure to the live view identity.
+    // The cross-link navigation seam (SC4, SC6), wired here because this view
+    // owns the selection and re-wired per appearance so a reopened window binds
+    // to the live view identity.
     //
-    // A reveal lands on the destination's ROOT: a cross-link names a page, not
-    // wherever the reader last was, so the destination's retained stack is
-    // cleared before the selection moves. Otherwise a row promising "the
-    // display's own page" opens on whatever sub-page that display was left on,
-    // which for Advanced or All Sizes is a page the promised control is not on.
+    // A reveal lands on the destination's ROOT, so the retained stack is
+    // cleared first. Otherwise a row promising "the display's own page" opens
+    // on whatever sub-page that display was left on, which for Advanced or All
+    // Sizes is a page the promised control is not on.
     //
-    // SO23's retention is untouched by this: sidebar clicks do not come
-    // through the seam, so ordinary navigation still returns where it left.
+    // SO23 retention is untouched: sidebar clicks do not come through the seam.
     .onAppear {
       actions.reveal = { destination in
         switch destination {
@@ -140,15 +122,11 @@ struct SettingsRootView: View {
         select(destination)
       }
     }
-    // Replaces the fork-era fixed `.frame(width: 620)`.
-    //
-    // The maxima are load-bearing, not decoration: a bare `minWidth/minHeight`
-    // pair leaves the content's ideal size as its maximum too, and the window
-    // then refuses to grow OR shrink — measured at a hard 900×512 in both
-    // directions. `.infinity` is what actually makes it resizable, and the
-    // scene needs `.windowResizability(.contentMinSize)` to agree (see
-    // CandelaApp). The minimum keeps the sidebar and a grouped form from
-    // crushing each other.
+    // The maxima are load-bearing. A bare `minWidth`/`minHeight` pair leaves
+    // the content's ideal size as its maximum too and the window then refuses
+    // to grow OR shrink, measured at a hard 900x512 in both directions.
+    // `.infinity` is what makes it resizable, and the scene needs
+    // `.windowResizability(.contentMinSize)` to agree.
     .frame(
       minWidth: SettingsWindowMetrics.minWidth,
       idealWidth: SettingsWindowMetrics.idealWidth,
@@ -158,21 +136,19 @@ struct SettingsRootView: View {
       maxHeight: .infinity
     )
     // `navigationToken` re-runs the configurator on every push and pop.
-    // Measured in the Task 9 spike: a push flips `titleVisibility` back to
-    // visible and AppKit draws the scene's own "Candela Settings" at the
-    // LEADING edge next to the Back button, and it LINGERS after the pop.
-    // Without a dependency that changes with the path, `updateNSView` never
-    // fires for a push/pop and cannot re-hide it.
+    // Measured: a push flips `titleVisibility` back to visible, AppKit draws
+    // the scene's own title at the LEADING edge next to the Back button, and it
+    // LINGERS after the pop. With no dependency that changes with the path,
+    // `updateNSView` never fires for a push and cannot re-hide it.
     .background(SettingsWindowConfigurator(title: currentTitle, navigationToken: currentPathDepth))
-    // Debug-only screenshot hook: the window has no URL scheme and cannot be
-    // driven by clicking without an Accessibility grant, so a capture run says
-    // which destination it wants through an env var and this adopts it once,
-    // here, where the `@State` selection actually lives.
+    // Debug screenshot hook: the window has no URL scheme and cannot be driven
+    // by clicking without an Accessibility grant, so a capture run names its
+    // destination through an env var and this adopts it once, where the
+    // `@State` selection lives.
     //
-    // The `#if` wraps the MODIFIER, not the closure body: guarding the body
-    // instead leaves Release with a live, empty `.onAppear { }` in the chain
-    // and a comment naming the debug env var — residue, and a quiet lie in
-    // `DebugSettingsHook`'s claim that both call sites are compiled out.
+    // The `#if` wraps the MODIFIER, not the closure body. Guarding the body
+    // leaves Release with a live empty `.onAppear { }` and a comment naming the
+    // debug env var.
     #if DEBUG
       .onAppear {
         if let pending = DebugSettingsHook.pendingSelection {
@@ -190,9 +166,8 @@ struct SettingsRootView: View {
             DebugSettingsHook.pendingKeyboardPath = nil
             keyboardPath = path
           }
-          // Display Health is a window, not a pushed page (OCR-A1), so its
-          // capture route opens the window over the pane it left behind,
-          // through the same actions closure the pane's own links use.
+          // A window, not a pushed page (OCR-A1), so the capture route opens
+          // it over the pane through the same closure the pane's links use.
           if let key = DebugSettingsHook.pendingHealthWindowKey {
             DebugSettingsHook.pendingHealthWindowKey = nil
             actions.openDisplayHealth(key)
@@ -201,26 +176,23 @@ struct SettingsRootView: View {
       }
     #endif
     // A destination for an absent display must never render, so an unplug
-    // while selected falls back — to a surviving sibling display first, then
-    // to General (SO9). Keyed on persistence keys, not display IDs: an ID
-    // changes across a replug and would evict the user from a pane every time
-    // a link renegotiated.
+    // while selected falls back to a surviving sibling first, then to General
+    // (SO9). Keyed on persistence keys, not display IDs: an ID changes across a
+    // replug and would evict the user every time a link renegotiated.
     //
-    // The keys are `allControlledStates` — built-in first, then externals —
-    // which is exactly sidebar render order, INCLUDING the built-in. Feeding
-    // externals only (the pre-Task-9 shape) made sibling fallback unable to
-    // land on the built-in row: unplugging the only external on an open laptop
-    // dropped to General even though a display destination survived. The
-    // built-in is a real departure source too — clamshell removes it.
+    // The keys are `allControlledStates`, built-in first, which is sidebar
+    // render order. Feeding externals only left sibling fallback unable to land
+    // on the built-in row: unplugging the only external on an open laptop
+    // dropped to General with a display destination still alive. The built-in
+    // is a real departure source too, since clamshell removes it.
     .onChange(of: model.allControlledStates.map(\.display.persistenceKey)) { previous, connected in
-      // SO23's clearing rule: a departed display's sub-page stack dies with
-      // it, whether or not it was selected — its return lands on the hub.
+      // SO23: a departed display's sub-page stack dies with it, selected or
+      // not, so its return lands on the hub.
       for departed in Set(previous).subtracting(connected) {
         subPagePaths[departed] = nil
       }
-      // The OLED pane's stack follows the same rule: a pushed page for a
-      // display that left pops back to the overview, and the return does not
-      // resume it.
+      // Same rule for the OLED pane: a page for a departed display pops back
+      // to the overview and the return does not resume it.
       if oledCarePath.contains(where: { !connected.contains($0.displayKey) }) {
         oledCarePath = []
       }
@@ -238,9 +210,9 @@ struct SettingsRootView: View {
         }
       }
 
-      // A remembered display returning takes back the selection — unless the
-      // user is on a display destination they chose in the meantime (SO9).
-      // `currentIsDisplay` reads the possibly-just-updated selection: a
+      // A remembered display returning takes the selection back, unless the
+      // user chose another display destination meanwhile (SO9).
+      // `currentIsDisplay` reads the possibly-just-updated selection, so a
       // sibling fallback above counts as "on a display" and blocks this.
       let arrived = Array(Set(connected).subtracting(previous))
       var currentIsDisplay = false
@@ -252,23 +224,18 @@ struct SettingsRootView: View {
         selection = .display(restored)
       }
     }
-    // Contract 2's second clause: selecting a destination moves focus into the
-    // detail column, so Tab starts on the page the user just chose rather than
-    // back at the sidebar.
+    // Tab starts on the page the user just chose, not back at the sidebar.
     .onChange(of: selection) { _, _ in
       detailFocusAnchor = true
     }
   }
 
-  /// Every selection write in this window, so the canvas relight, the sidebar
-  /// pill and the page swap all ride one transaction (SV8). The sidebar writes
-  /// through the binding; the shortcuts and the display switcher call `select`.
+  /// Every selection write, so the canvas relight, the sidebar pill and the
+  /// page swap ride one transaction (SV8).
   ///
   /// Derived from `$selection`, never a fresh `Binding(get:set:)`: a hand-built
   /// binding carries no location, so SwiftUI cannot prove it equal between
   /// updates and every view holding it re-renders on each root body pass.
-  /// `animation(_:)` keeps the projected value's location and only attaches a
-  /// transaction to writes made through it.
   private var animatedSelection: Binding<SettingsDestination?> {
     $selection.animation(SettingsTheme.selectionMotion)
   }
@@ -277,9 +244,8 @@ struct SettingsRootView: View {
     withAnimation(SettingsTheme.selectionMotion) { selection = destination }
   }
 
-  /// The lighting the whole window reads: the destination's own pair, resolved
-  /// from the same `presentation` the title and the content resolve from, so
-  /// the canvas can never be lit for a destination that is not on screen.
+  /// Resolved from the same `presentation` the title and content are, so the
+  /// canvas can never be lit for a destination that is not on screen.
   private var currentAccent: SettingsAccent {
     switch presentation {
     case let .display(key, _):
@@ -293,14 +259,12 @@ struct SettingsRootView: View {
     }
   }
 
-  /// A display's hue, chosen by its position among the externals: the same
-  /// rule the sidebar's rows use, so a row and the canvas it lights agree.
+  /// By position among the externals, the same rule the sidebar's rows use, so
+  /// a row and the canvas it lights agree.
   ///
   /// A key with no position is lit neutral rather than by the first display's
-  /// hue. `presentation` makes that unreachable today, and a fallback that
-  /// borrows a hue belonging to some OTHER display would be wrong in the one
-  /// way this window cannot afford: the canvas would say the user is somewhere
-  /// they are not.
+  /// hue: borrowing another display's hue would have the canvas say the user is
+  /// somewhere they are not.
   private func displayAccent(for key: String) -> SettingsAccent {
     guard key != "builtIn" else { return .display(isBuiltIn: true, ordinal: 0) }
     guard let index = model.displays.firstIndex(where: { $0.display.persistenceKey == key })
@@ -308,28 +272,24 @@ struct SettingsRootView: View {
     return .display(isBuiltIn: false, ordinal: index)
   }
 
-  /// The selected display's key, or nil for a pane. Never a claim that the
-  /// display exists: `presentation` is what decides that.
+  /// Never a claim that the display exists; `presentation` decides that.
   private var selectedDisplayKey: String? {
     guard case let .display(key) = selection else { return nil }
     return key
   }
 
-  /// THE resolution of what the detail column is showing (#124). The title, the
+  /// THE resolution of what the detail column is showing. The title, the
   /// content, the pushed path and the window configurator all read this one
-  /// value; before it, each answered the question separately from the same
-  /// inputs and they could disagree within a frame.
+  /// value, because answering separately let them disagree within a frame.
   ///
-  /// The case that used to diverge: the selected display drops out of
-  /// `allControlledStates` for a pass, which a display reconfiguration under an
-  /// open window routinely produces. `currentTitle` and `detailRoot` both fell
-  /// back to General, but the path went on presenting a sub-page for a display
-  /// nothing could look up, so the stack rendered an empty destination over the
-  /// fallback: no content and no toolbar title. Resolving it once makes that
-  /// state unrepresentable rather than caught at three sites.
+  /// The case that diverged: the selected display drops out of
+  /// `allControlledStates` for a pass, which a reconfiguration under an open
+  /// window routinely produces. Title and root fell back to General while the
+  /// path went on presenting a sub-page nothing could look up, so the stack
+  /// rendered an empty destination over the fallback.
   ///
-  /// It reads `subPagePaths` and never writes it, so SO23 retention is
-  /// untouched: not presenting a path is not forgetting one.
+  /// Reads `subPagePaths` and never writes it: not presenting a path is not
+  /// forgetting one (SO23).
   private var presentation: SettingsDetailPresentation<DisplaySubPage> {
     SettingsSelectionPolicy.present(
       selectedDisplayKey: selectedDisplayKey,
@@ -338,15 +298,14 @@ struct SettingsRootView: View {
     )
   }
 
-  /// The title shown centred in the toolbar. Resolved from `presentation`
-  /// rather than read back from the panes, so every destination titles itself
-  /// the same way and the title always names what is on screen.
-  /// Display destinations use the display's own name, not a pane label.
+  /// Resolved from `presentation` rather than read back from the panes, so the
+  /// title always names what is on screen. Display destinations use the
+  /// display's own name.
   private var currentTitle: String {
     switch presentation {
     case let .display(key, _):
-      // The `??` is the same-frame race, not a second policy: `presentation`
-      // has already established the key is connected.
+      // The `??` covers the same-frame race, not a second policy:
+      // `presentation` already established the key is connected.
       model.allControlledStates
         .first { $0.display.persistenceKey == key }
         .map(\.display.name) ?? SettingsRegistry.descriptor(for: .general).title
@@ -354,44 +313,35 @@ struct SettingsRootView: View {
       if case let .pane(id) = selection {
         SettingsRegistry.descriptor(for: id).title
       } else {
-        // A pane presentation with a display selection is the fallback case,
-        // and `detailRoot` renders General for it. Same words, same source.
+        // The fallback case, which `detailRoot` renders General for.
         SettingsRegistry.descriptor(for: .general).title
       }
     }
   }
 
   /// ONE `NavigationStack` for the whole detail column, alive for the life of
-  /// the window. It used to be one stack per display destination, created
-  /// inside the selection switch and `.id`-keyed, and that shape shipped a
-  /// defect: destroying a `NavigationStack` while it is PRESENTING a sub-page
-  /// leaves the pushed page hosted by the split view's detail column with
-  /// nothing owning it (measured 2026-08-07: sidebar highlighted Keyboard,
-  /// window title said Keyboard, detail stayed frozen on the orphaned Advanced
-  /// page until Back). A selection change must therefore never remove the
-  /// stack; it changes the stack's ROOT and its PATH instead, so leaving a
-  /// display pops its sub-page through the binding before the root swaps.
+  /// the window. Destroying a `NavigationStack` while it is PRESENTING a
+  /// sub-page orphans the pushed page (measured 2026-08-07: sidebar and title
+  /// said Keyboard, detail stayed frozen on the Advanced page until Back). A
+  /// selection change must never remove the stack; it changes the ROOT and the
+  /// PATH, so leaving a display pops its sub-page before the root swaps.
   ///
-  /// SO23 is preserved: `subPagePaths` still retains every display's stack,
-  /// because the binding below reads and writes per-display storage; a pane
-  /// selection just presents none of it.
+  /// SO23 holds: the binding below still reads and writes per-display storage,
+  /// and a pane selection just presents none of it.
   private var detail: some View {
     NavigationStack(path: currentPathBinding) {
       detailRoot
-        // On macOS the stack keeps its ROOT rendered underneath the destination
-        // for the whole time a page is pushed, and the restyle is what made that
-        // visible: every page used to sit on an opaque grouped `Form`, which hid
-        // it, and these pages are deliberately transparent so the canvas shows
-        // through. What showed through instead was both destinations at once,
-        // two titles over one another and the overview's cards ghosting under
-        // the pushed page's rows. Hidden, not removed: `displayRoot`'s
-        // countdown-ownership rule needs the root to keep existing behind the
-        // page, and taking it out of the hierarchy would also drop the stack's
+        // On macOS the stack keeps its ROOT rendered under the destination the
+        // whole time a page is pushed. These pages are transparent so the canvas
+        // shows through, and what showed through instead was both destinations
+        // at once: two titles over one another, the overview's cards ghosting
+        // under the pushed page's rows.
+        //
+        // Hidden, not removed. `displayRoot`'s countdown-ownership rule needs
+        // the root to keep existing, and taking it out would drop the stack's
         // root while it is presenting, which is the orphaned-page defect above.
-        // Hit testing and accessibility go with the opacity: an invisible
-        // control must not catch a click meant for the page over it, and a
-        // zero-opacity subtree otherwise stays in the accessibility tree, so
-        // VoiceOver would still walk the hidden root's controls.
+        // Hit testing and accessibility go with the opacity, or an invisible
+        // control catches clicks and VoiceOver walks the hidden root.
         .opacity(hasPushedPage ? 0 : 1)
         .allowsHitTesting(!hasPushedPage)
         .accessibilityHidden(hasPushedPage)
@@ -403,24 +353,19 @@ struct SettingsRootView: View {
             case let .keyboard(page): keyboardPushedPage(page)
             }
           }
-          // The system back item draws at the WINDOW's leading edge, which in
-          // this shell is over the sidebar's wordmark rather than over the
-          // column it acts on, in unstyled chrome the mock has none of (SV1).
-          // Every pushed page opens with `SubPageHeader`, which draws the back
-          // control in the page instead. Cmd-[ and re-clicking the sidebar row
-          // are unaffected: both write the path directly.
+          // The system back item draws at the WINDOW's leading edge, over the
+          // sidebar's wordmark rather than over the column it acts on (SV1).
+          // `SubPageHeader` draws the back control in the page instead. Cmd-[
+          // and re-clicking the sidebar row write the path directly.
           .navigationBarBackButtonHidden(true)
         }
     }
   }
 
-  /// Whether the stack is PRESENTING a page, which is exactly what
-  /// `currentPathBinding` hands the stack: a display's retained path counts only
-  /// while that display is presented, and a pane's only while that pane is
-  /// selected. Derived from `currentPathDepth` rather than from a second read of
-  /// the three stores, so the hidden root and the window configurator's token
-  /// can never disagree about whether a page is on screen. A read, so the
-  /// binding's stale-write contract is untouched.
+  /// Whether the stack is PRESENTING a page: a retained path counts only while
+  /// its destination is presented. Derived from `currentPathDepth` rather than
+  /// a second read of the three stores, so the hidden root and the window
+  /// configurator's token cannot disagree about whether a page is on screen.
   private var hasPushedPage: Bool { currentPathDepth > 0 }
 
   @ViewBuilder private var detailRoot: some View {
@@ -440,27 +385,21 @@ struct SettingsRootView: View {
     }
   }
 
-  /// One display destination's root: the banner region sits above the root AND
-  /// above every pushed page from these two placements alone (SO7); pages
-  /// never own banners, so a new sub-page cannot forget one.
+  /// The banner region sits above the root AND above every pushed page from
+  /// these two placements alone (SO7), so a new sub-page cannot forget one.
   ///
-  /// `.id(key)` on the ROOT CONTENT, never on the stack: it still resets
-  /// per-display root state (scroll, focus) on a switch, without giving each
-  /// display its own stack identity, which is the orphaned-page defect `detail`
-  /// documents.
+  /// `.id(key)` on the ROOT CONTENT, never on the stack: it resets per-display
+  /// root state on a switch without giving each display its own stack identity,
+  /// which is the orphaned-page defect `detail` documents.
   private func displayRoot(
     key: String, state: AppModel.DisplayState, hasPushedPage: Bool
   ) -> some View {
     VStack(spacing: 0) {
-      // The root stays in the stack behind a pushed page and keeps rendering,
-      // hidden at zero opacity rather than removed (see `detail`), so both
-      // placements would still build the SAME answerable countdown. The pushed
-      // page is the one the reader is looking at, so it owns the answer; this
-      // one yields while a page is PRESENTED and keeps every passive banner,
-      // which the page's own `BannerRegion` is what actually shows meanwhile.
-      // Presented, not retained: a page held for a display that cannot be shown
-      // is not on screen to own anything, and reading `subPagePaths` directly
-      // here handed the answer to a page nobody could see.
+      // The root keeps rendering behind a pushed page (see `detail`), so both
+      // placements would build the SAME answerable countdown. The page is what
+      // the reader is looking at, so it owns the answer and this one yields
+      // while a page is PRESENTED. Presented, not retained: reading
+      // `subPagePaths` here handed the answer to a page nobody could see.
       BannerRegion(state: state, ownsAnswerableCountdown: !hasPushedPage)
       if key == "builtIn" {
         BuiltInDisplayPane(selection: animatedSelection, path: pathBinding(for: key))
@@ -473,8 +412,7 @@ struct SettingsRootView: View {
     .id(key)
   }
 
-  /// A pushed sub-page, resolved against the CURRENT selection: the stack is
-  /// shared, so a page is only ever presented for the selected display. The
+  /// Resolved against the CURRENT selection, since the stack is shared. The
   /// guard goes empty for the frame in which a pane selection is still popping
   /// the outgoing display's page.
   private func pushedPage(_ page: DisplaySubPage) -> some View {
@@ -486,33 +424,28 @@ struct SettingsRootView: View {
           subPage(page, key: key, state: state)
         }
         .modifier(BannerColumnHeight())
-        // `.id(key)` on the pushed CONTENT, mirroring `displayRoot`, and never
-        // on the stack (that re-keying is the orphaned-page defect `detail`
-        // documents). The switcher keeps this page presented while `state`
-        // re-resolves to the new display, so without the re-key the sub-page's
-        // `@State` (drafts, focus, list filters) survived the switch and
-        // rendered against the new display's prefs; a draft typed on one
-        // display could then commit into another's tuning (SO10).
+        // `.id(key)` on the pushed CONTENT, never on the stack (that re-keying
+        // is the orphaned-page defect `detail` documents). The switcher keeps
+        // this page presented while `state` re-resolves, so without the re-key
+        // the sub-page's `@State` survives the switch and a draft typed on one
+        // display commits into another's tuning (SO10).
         .id(key)
       }
     }
   }
 
-  /// An OLED Care pushed page (OCR1), resolved against the connected
-  /// externals. Same placement rule as `pushedPage`: `.id` on the content so a
-  /// display switch resets page state (SO10's lesson). The guard goes empty
-  /// for the frame in which a departed display's page is still popping.
+  /// An OLED Care pushed page (OCR1). Same placement rule as `pushedPage`:
+  /// `.id` on the content, so a display switch resets page state (SO10).
   @ViewBuilder
   private func oledPushedPage(_ page: OledCarePage) -> some View {
     Group {
-      // Rename dependency, the sub-page switcher's rule: the switcher's names
-      // come from `friendlyName`, and `DisplayPrefs` has no observation of
-      // its own, so the values passed INTO the page register it here.
+      // Rename dependency: the switcher's names come from `friendlyName` and
+      // `DisplayPrefs` has no observation, so values passed INTO the page
+      // register it here.
       let _ = model.prefsRevision
       if let state = model.displays.first(where: { $0.display.persistenceKey == page.displayKey }) {
-        // One case since SC5 retired Measurement & Data, and still a switch: a
-        // page added here later is then a compile error rather than a silent
-        // fall-through onto the display page.
+        // Still a switch on one case, so a page added later is a compile error
+        // rather than a silent fall-through onto the display page.
         Group {
           switch page {
           case .display:
@@ -525,9 +458,8 @@ struct SettingsRootView: View {
     }
   }
 
-  /// A Keyboard pushed page (KMR11). No display dependence: no resolution
-  /// guard, no `.id` re-key, no switcher; the page renders from app-level
-  /// prefs alone.
+  /// A Keyboard pushed page (KMR11). No display dependence, so no resolution
+  /// guard, no `.id` re-key and no switcher.
   @ViewBuilder
   private func keyboardPushedPage(_ page: KeyboardPage) -> some View {
     switch page {
@@ -536,46 +468,38 @@ struct SettingsRootView: View {
     }
   }
 
-  /// External displays only: OLED care never covers the built-in (its copy
-  /// says so), so the switcher must not offer it.
+  /// OLED care never covers the built-in, so the switcher must not offer it.
   private var oledSwitcherDisplays: [(key: String, name: String)] {
     switcherDisplays.filter { $0.key != "builtIn" }
   }
 
-  /// The OLED switcher swaps the SAME page depth onto another display by
-  /// rewriting every element's key; the sidebar selection stays on the pane.
+  /// Swaps the SAME page depth onto another display by rewriting every
+  /// element's key. The sidebar selection stays on the pane.
   private func switchOledDisplay(to newKey: String) {
     oledCarePath = oledCarePath.map { $0.withDisplayKey(newKey) }
   }
 
-  /// The persistent stack's path: the selected display's retained sub-page
-  /// stack, or empty for a pane. Selecting a pane changes this binding's VALUE
-  /// to `[]`, which is what pops the outgoing display's sub-page while the
-  /// stack survives.
+  /// The selected display's retained sub-page stack, or empty for a pane.
+  /// Selecting a pane changes this binding's VALUE to `[]`, which pops the
+  /// outgoing display's sub-page while the stack survives.
   ///
   /// The key is resolved ONCE, when the binding is built, and the setter drops
-  /// any write made after the presentation stops matching it. The stack can
-  /// flush a transition's write-back through a binding built before the
-  /// selection moved; a setter that re-read the selection at write time landed
-  /// that write under whatever was selected by then, which on a
-  /// display-to-display switch cleared the NEW display's retained path (SO23).
-  /// The pane branch keeps the old rule as its degenerate case: reads are empty
-  /// and every write is dropped.
+  /// writes made after the presentation stops matching it. The stack can flush
+  /// a transition's write-back through a binding built before the selection
+  /// moved, and a setter re-reading the selection landed that write under
+  /// whatever was selected by then, clearing the NEW display's retained path on
+  /// a display-to-display switch (SO23).
   ///
-  /// Matching against the PRESENTATION rather than the selection is what makes
-  /// a display leaving the list pop its page (#124) without losing it: the
-  /// getter reports empty, the stack pops and writes `[]` back, and that write
-  /// is dropped by the same guard, so the retained path is still there when the
-  /// display returns.
+  /// Matching the PRESENTATION rather than the selection is what lets a display
+  /// leaving the list pop its page without losing it: the getter reports empty,
+  /// the stack writes `[]` back, and the same guard drops that write.
   private var currentPathBinding: Binding<[SettingsPushedPage]> {
     if let boundKey = presentation.displayKey {
       return Binding(
         get: { (subPagePaths[boundKey] ?? []).map(SettingsPushedPage.display) },
-        // Against the PRESENTATION, not the selection: it is the stronger of
-        // the two (a presented display is a selected one), and it is what
-        // drops the `[]` the stack writes back as it pops a display that has
-        // left the list. Dropping that write is the point: the path stays
-        // retained (SO23) while nothing presents it.
+        // Against the PRESENTATION, the stronger of the two, so the `[]` the
+        // stack writes back while popping a departed display is dropped and the
+        // path stays retained (SO23).
         set: { newPath in
           guard presentation.displayKey == boundKey else { return }
           subPagePaths[boundKey] = newPath.compactMap {
@@ -587,9 +511,8 @@ struct SettingsRootView: View {
     if case .pane(.oledCare) = selection {
       return Binding(
         get: { oledCarePath.map(SettingsPushedPage.oledCare) },
-        // Same stale-write contract: a write landing after the selection
-        // moved is dropped, which is what retains the pane's path while
-        // nothing presents it.
+        // Same stale-write contract: a write landing after the selection moved
+        // is dropped, which retains the pane's path.
         set: { newPath in
           guard case .pane(.oledCare) = selection else { return }
           oledCarePath = newPath.compactMap {
@@ -613,18 +536,14 @@ struct SettingsRootView: View {
     return Binding(get: { [] }, set: { _ in })
   }
 
-  /// One case per sub-page; all three pages are real. Each page owns its own
-  /// `SettingsPageScaffold` (the scroll, the content column and the page
-  /// padding), so this switch names a view and nothing else. Every page starts
-  /// with `SubPageHeader`: title focus on push, and the display switcher that
-  /// carries THIS sub-page onto another display (SO23).
+  /// Each page owns its own `SettingsPageScaffold`, so this switch names a view
+  /// and nothing else. Every page starts with `SubPageHeader`, which supplies
+  /// title focus on push and the display switcher (SO23).
   @ViewBuilder
   private func subPage(_ page: DisplaySubPage, key: String, state: AppModel.DisplayState) -> some View {
-    // Rename dependency, registered HERE because `switcherDisplays` is read at
-    // this point: the switcher's names come from `friendlyName`, and
-    // `DisplayPrefs` is plain UserDefaults with no observation of its own. A
-    // page's own body reading `prefsRevision` does not cover the values passed
-    // INTO it.
+    // Rename dependency, registered HERE because `switcherDisplays` is read
+    // here. `DisplayPrefs` has no observation, and a page's own body reading
+    // `prefsRevision` does not cover the values passed INTO it.
     let _ = model.prefsRevision
     switch page {
     case .allModes:
@@ -649,10 +568,9 @@ struct SettingsRootView: View {
     }
   }
 
-  /// Pop focus restoration (accessibility contract 1's pop half) is the
-  /// destination's job, not this view's: `DisplayDetailView` and
-  /// `BuiltInDisplayPane` each own a `@FocusState focusedRow: DisplaySubPage?`
-  /// and hand it back to the pushing row when this binding shrinks.
+  /// Pop focus restoration is the destination's job: `DisplayDetailView` and
+  /// `BuiltInDisplayPane` each own a `@FocusState focusedRow` and hand focus
+  /// back to the pushing row when this binding shrinks.
   private func pathBinding(for key: String) -> Binding<[DisplaySubPage]> {
     Binding(
       get: { subPagePaths[key] ?? [] },
@@ -660,21 +578,18 @@ struct SettingsRootView: View {
     )
   }
 
-  /// Feeds the window configurator's `navigationToken`: any push or pop must
-  /// re-run it (see the call site). Panes other than OLED Care have no stack
-  /// and sit at depth 0.
+  /// Feeds the window configurator's `navigationToken`; any push or pop must
+  /// re-run it.
   ///
   /// What is PRESENTED, never what is retained: a depth read from storage
   /// claimed a push for a display that had left the list, so the token stopped
-  /// moving on the pop that actually happened. The OLED depth follows the same
-  /// rule through `oledPresentedDepth`'s selection gate.
+  /// moving on the pop that actually happened.
   private var currentPathDepth: Int {
     presentation.pathDepth + oledPresentedDepth + keyboardPresentedDepth
   }
 
-  /// The OLED pane's stack is presented only while the pane is selected;
-  /// retained depth counts for nothing (the same presented-not-retained rule
-  /// as `currentPathDepth`).
+  /// Presented only while the pane is selected; retained depth counts for
+  /// nothing, the same rule as `currentPathDepth`.
   private var oledPresentedDepth: Int {
     if case .pane(.oledCare) = selection { oledCarePath.count } else { 0 }
   }
@@ -685,43 +600,38 @@ struct SettingsRootView: View {
   }
 
   /// Sidebar render order: the registry's panes in section order (SC1), then
-  /// built-in, then externals (`allControlledStates` is exactly that order).
-  /// ⌘1–⌘9 index into this. `SettingsRegistry.panes` follows
-  /// `SettingsRegistry.sections`, so re-sectioning the sidebar moves the
-  /// shortcuts with it and nothing here has to know the order.
+  /// `allControlledStates`. The command-number shortcuts index into this, and
+  /// `SettingsRegistry.panes` follows `sections`, so re-sectioning the sidebar
+  /// moves the shortcuts with it.
   private var orderedDestinations: [SettingsDestination] {
     SettingsRegistry.panes.map { .pane($0.id) }
       + model.allControlledStates.map { .display($0.display.persistenceKey) }
   }
 
-  /// Clicking the sidebar row of the display you are already on returns that
-  /// display to its hub root. Without it the click does nothing, because the
-  /// row writes a selection that is already the selection.
+  /// Clicking the sidebar row you are already on returns that destination to
+  /// its root. Without it the click does nothing, since the row writes a
+  /// selection that is already the selection.
   ///
-  /// SO23 retention is untouched: this clears only the display being
-  /// re-clicked, never a path held for another display, so A to B to A still
-  /// lands where the user was. Panes have no stack and are left alone.
+  /// SO23 retention holds: only the re-clicked destination is cleared, so A to
+  /// B to A still lands where the user was.
   ///
-  /// The write goes through `currentPathBinding` rather than `subPagePaths`
-  /// directly, so the destination's shrink-detecting `onChange` sees a pop and
-  /// restores focus to the row that pushed. The binding's key is resolved from
-  /// the selection this guard has just matched, so its stale-write check
-  /// compares a key against itself and passes.
+  /// The write goes through `currentPathBinding` rather than `subPagePaths`, so
+  /// the destination's shrink-detecting `onChange` sees a pop and restores
+  /// focus to the row that pushed.
   private func returnToHub(_ destination: SettingsDestination) {
     guard destination == selection else { return }
     if case let .display(_, path) = presentation, !path.isEmpty {
       currentPathBinding.wrappedValue = []
     } else if case .pane(.oledCare) = selection, !oledCarePath.isEmpty {
-      // The OLED pane's row does the same thing a display's row does: return
-      // to this destination's root.
+      // Same as a display's row: return to this destination's root.
       oledCarePath = []
     } else if case .pane(.keyboard) = selection, !keyboardPath.isEmpty {
       keyboardPath = []
     }
   }
 
-  /// ⌘[ pops what is on screen. Gated on the PRESENTED path, so the shortcut
-  /// cannot quietly edit a stack that is not being shown.
+  /// Gated on the PRESENTED path, so the shortcut cannot quietly edit a stack
+  /// that is not on screen.
   private func popCurrentSubPage() {
     if case let .display(key, path) = presentation, !path.isEmpty {
       subPagePaths[key] = Array(path.dropLast())
@@ -732,9 +642,8 @@ struct SettingsRootView: View {
     }
   }
 
-  /// Every connected display, named the way the sidebar names it, so the
-  /// switcher menu and the sidebar can never disagree about what a display is
-  /// called.
+  /// Named the way the sidebar names them, so the switcher menu and the sidebar
+  /// cannot disagree about what a display is called.
   private var switcherDisplays: [(key: String, name: String)] {
     model.allControlledStates.map { state in
       let key = state.display.persistenceKey
@@ -749,49 +658,34 @@ struct SettingsRootView: View {
   }
 
   /// SO23's comparison workflow: the sub-page carries over, THEN the sidebar
-  /// selection moves. Copying the whole path (not just the visible page) keeps
-  /// any deeper future stack intact.
+  /// selection moves. The whole path is copied, not just the visible page.
   private func switchDisplay(from currentKey: String, to newKey: String) {
     subPagePaths[newKey] = subPagePaths[currentKey] ?? []
     select(.display(newKey))
   }
 
-  /// The detail column is never empty: an unresolvable selection shows General
-  /// rather than a blank pane, which reads as a broken window.
+  /// An unresolvable selection shows General rather than a blank pane, which
+  /// reads as a broken window.
   private var generalFallback: some View {
     SettingsRegistry.descriptor(for: .general).content()
   }
 }
 
-/// The settings window's size floor, declared once.
+/// Stops a banner from making the WINDOW taller instead of the page shorter.
 ///
-/// It used to live only in the SwiftUI content frame, which made it advisory:
-/// `.windowResizability(.contentMinSize)` stops the USER shrinking the window
-/// past it, and stops nothing else. A window AppKit re-fits (a display
-/// reconfiguration moving the window's screen out from under it) can land below
-/// the floor, and SwiftUI answers that by clipping the content rather than by
-/// keeping the size, which is #124's clipped window. `SettingsWindowConfigurator`
-/// enforces the same numbers on the `NSWindow`, so both layers read one source.
-/// Stops a banner from making the WINDOW taller instead of the page shorter
-/// (#124).
+/// A page reporting a minimum height near its own content, plus a banner
+/// stacked above it, once passed what the window could show: the whole SwiftUI
+/// root was laid out taller than the window and clipped from the TOP. Both
+/// columns rode up, the sidebar lost its first rows behind the traffic lights,
+/// and the detail column was cut mid-row.
 ///
-/// A display's page is a grouped `Form`, and a grouped `Form` reports a minimum
-/// height near its content rather than the small one a scroll view usually has.
-/// Stacking a banner above it added that banner's height to a minimum already
-/// close to the window's, and once the total passed what the window could show,
-/// the whole SwiftUI root was laid out taller than the window and clipped from
-/// the TOP: both columns rode up, the sidebar lost its first five rows behind
-/// the traffic lights, and the detail column was cut mid-row. Every symptom
-/// #124 was filed for is that one clip.
+/// A minimum of 0 breaks the chain: the column accepts whatever height the
+/// window has and the content scrolls inside it. **`.safeAreaInset` does NOT do
+/// this**, measured: inset content contributes to the container's minimum
+/// exactly like a stacked sibling.
 ///
-/// A minimum of 0 is what breaks the chain: the column then accepts whatever
-/// height the window has and the `Form` scrolls inside it, which is what a
-/// banner appearing is supposed to cost. **`.safeAreaInset` does NOT do this**
-/// and was measured doing nothing here: inset content contributes to the
-/// container's minimum exactly like a stacked sibling does.
-///
-/// A modifier rather than two copies of one line, because the root and every
-/// pushed page need the same treatment and the reason is too easy to lose.
+/// A modifier rather than two copies of one line, since the root and every
+/// pushed page need it.
 private struct BannerColumnHeight: ViewModifier {
   func body(content: Content) -> some View {
     content.frame(minHeight: 0, maxHeight: .infinity)
@@ -799,34 +693,26 @@ private struct BannerColumnHeight: ViewModifier {
 }
 
 /// **The two ideals size a window that has never been sized before, and nothing
-/// else** [MEASURED 2026-08-11, #149]. AppKit autosaves this window's frame,
-/// SIZE included, under `NSWindow Frame com_apple_SwiftUI_Settings_window` in
-/// the app's own defaults domain, and restores it ahead of anything SwiftUI
-/// computes. Once a person has dragged a corner, or a display reconfiguration
-/// has re-fitted the window, that saved frame is the size for good and these
-/// numbers never speak again.
+/// else** [MEASURED 2026-08-11]. AppKit autosaves this window's frame, SIZE
+/// included, under `NSWindow Frame com_apple_SwiftUI_Settings_window` and
+/// restores it ahead of anything SwiftUI computes. Once a corner has been
+/// dragged, or a reconfiguration has re-fitted the window, that saved frame is
+/// the size for good.
 ///
-/// So `idealWidth` disagreeing with the window on screen is the DESIGNED state,
-/// not a defect: #149 was filed on the disagreement, and the harness that
-/// settled it reproduced 1005x580 from a saved frame alone, with a page whose
-/// content wanted 900. Reading these constants as "the window is 900 wide" is
-/// what made a resize look like a regression, and it is also why the checkpoint
-/// scripts once selected the window by a literal `{900, 568}`. Never quote a
-/// size as this window's, in a comment, a doc or a selector.
+/// So `idealWidth` disagreeing with the window on screen is the DESIGNED state.
+/// **Never quote a size as this window's**, in a comment, a doc or a UI
+/// selector: a checkpoint script once selected the window by a literal
+/// `{900, 568}`.
 ///
-/// Two routes back to the ideals, both measured in that harness. From a shell,
-/// with the app quit:
+/// Two measured routes back to the ideals. With the app quit:
 /// `defaults delete com.rydersel.Candela "NSWindow Frame com_apple_SwiftUI_Settings_window"`.
-/// From inside the app, Reset All Settings, whose `removePersistentDomain` takes
-/// this key with everything else: closing the resized window afterwards does NOT
-/// write the frame back, and the next launch comes up at the ideals.
+/// Or Reset All Settings, whose `removePersistentDomain` takes the key with
+/// everything else; closing the resized window afterwards does NOT write the
+/// frame back.
 ///
-/// The MINIMA are a different contract and are not advisory: see the floor
-/// note above, `SettingsWindowConfigurator.pinMinimumSize` and #124. The
-/// visual redesign raised them well above the old ones, which is the one way a
-/// saved frame does not have the last word: a frame saved by the smaller
-/// window is under the new floor, so it is clamped back up to it on the next
-/// launch rather than restored as saved.
+/// The MINIMA are a different contract and are not advisory
+/// (`SettingsWindowConfigurator.pinMinimumSize`). A frame saved under the floor
+/// is clamped back up to it on the next launch rather than restored as saved.
 enum SettingsWindowMetrics {
   static let minWidth: CGFloat = 1040
   /// First-launch width only. Read the note above before quoting it.
@@ -842,40 +728,32 @@ enum SettingsWindowMetrics {
 /// `.fullSizeContentView` style masks, the dark appearance, the transparent
 /// titlebar, and dragging by the background.
 ///
-/// No SwiftUI modifier restores resizability: `.windowResizability(.contentMinSize)`
-/// on the scene plus an `.infinity` content frame both leave the zoom button
-/// disabled and the window pinned — measured at a hard 900×512, immovable in
-/// either direction.
+/// No SwiftUI modifier restores resizability. `.windowResizability(.contentMinSize)`
+/// plus an `.infinity` content frame still leave the zoom button disabled and
+/// the window pinned, measured at a hard 900x512 in both directions.
 ///
-/// This hangs off the view rather than off `SettingsOpener` deliberately.
-/// ⌘, does NOT go through `SettingsOpener` — it is delivered straight to
-/// SwiftUI's own menu item — so a fix installed on the open path only works
-/// when the window is opened from the panel's gear. Attaching it to the view
-/// makes it independent of how the window came to exist.
+/// This hangs off the VIEW rather than `SettingsOpener` deliberately: Cmd-comma
+/// goes straight to SwiftUI's own menu item, so a fix installed on the open
+/// path only works when the window is opened from the panel's gear.
 ///
-/// Also owns the window's NAME: set, but with `titleVisibility` hidden. The
-/// window is titled for the Window menu and for accessibility, and the page
-/// itself is what names the destination on screen. Drawing this title would
-/// put a second name at the LEADING edge of a full-size-content window, over
-/// the sidebar's own wordmark.
+/// It also owns the window's NAME, set but with `titleVisibility` hidden. The
+/// title feeds the Window menu and accessibility; drawing it would put a second
+/// name at the leading edge over the sidebar's wordmark.
 ///
 /// The dark appearance is pinned here as well as by `.preferredColorScheme`
-/// (SV2), because the appearance decides the titlebar and the traffic lights,
-/// which SwiftUI's colour scheme does not reach.
+/// (SV2), because the appearance decides the titlebar and traffic lights, which
+/// the colour scheme does not reach.
 ///
-/// **The whole contract is re-asserted, never written once** (#124). Every
-/// property below is one AppKit or SwiftUI can change back, and the previous
-/// shape wrote them from a `DispatchQueue.main.async` hop off `updateNSView`:
-/// a hop that found no window silently dropped the write with nothing to retry
-/// it, so `window.title` could sit on the words of a destination the user had
-/// long since left. That is a title that disagrees with the pane, which is only
-/// invisible for as long as `titleVisibility` stays hidden.
+/// **The whole contract is re-asserted, never written once.** Every property
+/// below is one AppKit or SwiftUI can change back. The previous shape wrote them
+/// from a `DispatchQueue.main.async` hop off `updateNSView`, and a hop that
+/// found no window dropped the write with nothing to retry it, leaving
+/// `window.title` on a destination the user had long since left.
 private struct SettingsWindowConfigurator: NSViewRepresentable {
   let title: String
-  /// A dependency that changes on push/pop so `updateNSView` fires then, which
-  /// re-asserts the contract promptly rather than on the next window update
-  /// pass. A push flips `titleVisibility` back to visible and draws the window
-  /// title leading (measured, Task 9 spike).
+  /// Changes on push and pop so `updateNSView` fires then, re-asserting the
+  /// contract promptly. Measured: a push flips `titleVisibility` back to visible
+  /// and draws the window title at the leading edge.
   let navigationToken: Int
 
   func makeNSView(context: Context) -> NSView {
@@ -883,8 +761,8 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
     coordinator.desiredTitle = title
     let view = WindowAttachedView()
     // The view has no window during `makeNSView`, and asking again after a
-    // `DispatchQueue.main.async` hop was a guess: it answered nil whenever the
-    // hop lost the race, and nothing retried. Being told is not a guess.
+    // `DispatchQueue.main.async` hop answered nil whenever the hop lost the
+    // race, with nothing to retry it.
     view.onAttach = { [weak coordinator] window in coordinator?.apply(to: window) }
     return view
   }
@@ -897,8 +775,8 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
-  /// Reports the moment it actually has a window, so the contract is applied
-  /// then rather than after a hop that may find none.
+  /// Reports the moment it has a window, so the contract is applied then rather
+  /// than after a hop that may find none.
   final class WindowAttachedView: NSView {
     var onAttach: (NSWindow) -> Void = { _ in }
 
@@ -911,31 +789,28 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
   /// Holds the desired title and the `didUpdateNotification` observation that
   /// re-asserts the window contract whenever AppKit changes it back.
   ///
-  /// `navigationToken` catches the flips that ride on a push or a pop, but
-  /// measured cases flip `titleVisibility` with NO dependency of `updateNSView`
-  /// changing: Back out of a pushed page whose selection had already moved, and
-  /// the banner region appearing over the hub. Rather than enumerating flip
-  /// sources one defect at a time, the enforcement rides
-  /// `NSWindow.didUpdateNotification`, which AppKit posts on every window update
-  /// pass. Every write below is guarded by a comparison, so an already-correct
-  /// window is a few loads and no writes, and the notification cannot feed back
-  /// on itself.
+  /// `navigationToken` catches the flips riding a push or a pop, but measured
+  /// cases flip `titleVisibility` with no `updateNSView` dependency changing:
+  /// Back out of a page whose selection had already moved, and the banner
+  /// region appearing over the hub. So enforcement rides
+  /// `NSWindow.didUpdateNotification`, which AppKit posts every update pass.
+  /// Every write below is guarded by a comparison, so the notification cannot
+  /// feed back on itself.
   ///
-  /// The title is re-asserted alongside the visibility, not only the visibility.
-  /// Re-hiding a title that says the wrong thing only hides the disagreement;
-  /// the frame where AppKit wins the race then shows a window named for a pane
-  /// that is not on screen.
+  /// The title is re-asserted alongside the visibility. Re-hiding a wrong title
+  /// only hides the disagreement, and the frame where AppKit wins the race
+  /// still shows a window named for a pane that is not on screen.
   final class Coordinator {
-    // Nonisolated storage so `deinit` can remove the observer (a `@MainActor`
-    // property is unreachable from a nonisolated deinit under Swift 6).
-    // `removeObserver` is thread-safe; both properties are only ever WRITTEN
-    // from `apply(to:)`, which is main-actor.
+    // Nonisolated storage so `deinit` can remove the observer: a `@MainActor`
+    // property is unreachable from a nonisolated deinit under Swift 6.
+    // `removeObserver` is thread-safe, and both properties are only ever
+    // WRITTEN from `apply(to:)`, which is main-actor.
     private var observer: NSObjectProtocol?
     private weak var observedWindow: NSWindow?
     private var title = ""
 
-    /// Written by the representable on every update; re-applied to the window
-    /// the moment it changes, so a dropped write cannot outlive one update.
+    /// Re-applied to the window the moment it changes, so a dropped write
+    /// cannot outlive one update.
     @MainActor var desiredTitle: String {
       get { title }
       set {
@@ -945,18 +820,18 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
       }
     }
 
-    /// The one way to hand the window into the `@Sendable` notification
-    /// closure. `@unchecked Sendable` is justified by confinement: the box is
-    /// only ever opened inside `MainActor.assumeIsolated`, on the `.main`
-    /// queue, which is where NSWindow lives.
+    /// Hands the window into the `@Sendable` notification closure.
+    /// `@unchecked Sendable` is justified by confinement: the box is only ever
+    /// opened inside `MainActor.assumeIsolated` on the `.main` queue, which is
+    /// where NSWindow lives.
     private struct WeakWindowBox: @unchecked Sendable {
       weak var window: NSWindow?
     }
 
-    /// The same trick for the coordinator itself, and the same justification:
-    /// opened only inside `MainActor.assumeIsolated` on the `.main` queue, which
-    /// is the only place this object is ever touched. Weak, so the observation
-    /// cannot keep a torn-down coordinator alive.
+    /// Same trick and same justification for the coordinator: opened only
+    /// inside `MainActor.assumeIsolated` on the `.main` queue, the only place
+    /// this object is touched. Weak, so the observation cannot keep a torn-down
+    /// coordinator alive.
     private struct WeakCoordinatorBox: @unchecked Sendable {
       weak var coordinator: Coordinator?
     }
@@ -966,16 +841,16 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
       if !window.styleMask.contains(.resizable) {
         window.styleMask.insert(.resizable)
       }
-      // The canvas runs to the top of the window, so the titlebar has to be
-      // glass over it rather than a band of its own.
+      // The canvas runs to the top, so the titlebar has to be glass over it
+      // rather than a band of its own.
       if !window.styleMask.contains(.fullSizeContentView) {
         window.styleMask.insert(.fullSizeContentView)
       }
       if !window.titlebarAppearsTransparent {
         window.titlebarAppearsTransparent = true
       }
-      // Dark-only (SV2): the appearance is what the titlebar and the traffic
-      // lights read, and neither of them sees `.preferredColorScheme`.
+      // Dark-only (SV2): the titlebar and traffic lights read the appearance
+      // and never see `.preferredColorScheme`.
       if window.appearance?.name != .darkAqua {
         window.appearance = NSAppearance(named: .darkAqua)
       }
@@ -983,17 +858,16 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
       if !window.isMovableByWindowBackground {
         window.isMovableByWindowBackground = true
       }
-      // Named but not drawn: the page names the destination on screen, so
-      // letting AppKit draw this one too would put a second name at the
-      // leading edge. `title` still feeds the Window menu and accessibility.
+      // Named but not drawn: the page names the destination, so letting AppKit
+      // draw this too puts a second name at the leading edge. `title` still
+      // feeds the Window menu and accessibility.
       if window.titleVisibility != .hidden {
         window.titleVisibility = .hidden
       }
-      // The window declares no toolbar content of its own any more, but a
-      // pushed page still gets SwiftUI's Back item, and the default style
-      // would put that in its own band BELOW the titlebar: a strip of dead
-      // space across the top of both columns (measured at 24 pt when the
-      // principal title lived there). `.unifiedCompact` merges the two rows.
+      // A pushed page still gets SwiftUI's Back item, and the default style
+      // puts it in its own band BELOW the titlebar: a strip of dead space
+      // across the top of both columns, measured at 24 pt. `.unifiedCompact`
+      // merges the two rows.
       if window.toolbarStyle != .unifiedCompact {
         window.toolbarStyle = .unifiedCompact
       }
@@ -1005,12 +879,12 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
       pinMinimumSize(on: window)
     }
 
-    /// The floor SwiftUI declares, pinned where it can actually hold (#124).
+    /// The floor SwiftUI declares, pinned where it can actually hold.
     ///
-    /// It RAISES `contentMinSize` and never lowers it: SwiftUI computes its own
-    /// answer from the content, and clamping that down would be this type
-    /// overruling a measurement it did not take. Idempotent either way, which is
-    /// what lets it sit on a per-update-pass notification.
+    /// RAISES `contentMinSize` and never lowers it: SwiftUI computes its own
+    /// answer from the content, and clamping that down would overrule a
+    /// measurement this type did not take. Idempotent, which is what lets it
+    /// sit on a per-update-pass notification.
     @MainActor private func pinMinimumSize(on window: NSWindow) {
       let floor = SettingsWindowMetrics.minContentSize
       var minimum = window.contentMinSize
@@ -1021,20 +895,17 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
       }
     }
 
-    /// Grows a window that is already under the floor back up to it.
+    /// Grows a window already under the floor back up to it. Raising
+    /// `contentMinSize` does not move a window that is already smaller, and the
+    /// reported state clipped its content rather than scrolling, so what was cut
+    /// off could not be reached at all. AppKit clamps a live user resize itself,
+    /// so this only fires for a size something else chose.
     ///
-    /// Raising `contentMinSize` does not move a window that is already smaller,
-    /// and the reported state was a window well under it: the content was
-    /// clipped rather than scrolled, so what was cut off could not be reached at
-    /// all. AppKit clamps a live user resize itself, so this only ever fires for
-    /// a size something else chose.
+    /// Called from the update-pass notification, never `updateNSView`: resizing
+    /// from inside SwiftUI's own update is a re-entrant layout nobody needs.
     ///
-    /// Called from the update-pass notification and never from `updateNSView`:
-    /// resizing a window from inside SwiftUI's own update is a re-entrant layout
-    /// nobody needs, and the notification lands a moment later anyway.
-    ///
-    /// Capped at the screen, because a window taller than the display it is on
-    /// is not an improvement on a clipped one.
+    /// Capped at the screen, since a window taller than its display is not an
+    /// improvement on a clipped one.
     @MainActor private func restoreMinimumSize(on window: NSWindow) {
       let minimum = window.contentMinSize
       let content = window.contentRect(forFrameRect: window.frame).size
@@ -1060,9 +931,8 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
       observer = NotificationCenter.default.addObserver(
         forName: NSWindow.didUpdateNotification, object: window, queue: .main
       ) { _ in
-        // didUpdateNotification for an NSWindow is posted on the main thread;
-        // the assumeIsolated is the bridge from the nonisolated notification
-        // closure to the AppKit calls below.
+        // didUpdateNotification is posted on the main thread; assumeIsolated
+        // bridges from the nonisolated closure to the AppKit calls below.
         MainActor.assumeIsolated {
           guard let coordinator = owner.coordinator, let window = box.window else { return }
           coordinator.apply(to: window)
@@ -1077,57 +947,49 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
   }
 }
 
-/// LSUIElement + Settings-scene activation (spec §9 budgeted risk). Every part
-/// of this sequence was measured on macOS 26 with an isolated LSUIElement +
-/// SwiftUI-`Settings` harness driving a real NSStatusItem tracking session; the
-/// obvious spelling of it is broken in two independent ways.
+/// LSUIElement plus Settings-scene activation. Every part of this sequence was
+/// measured on macOS 26 against an isolated LSUIElement harness driving a real
+/// NSStatusItem tracking session. The obvious spelling is broken two ways.
 ///
 /// 1. `NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)`
-///    is delivered — `SwiftUI.AppDelegate` implements it and `sendAction`
-///    returns `true` — but **no window is ever created**. It is a silent
-///    no-op, so its return value cannot even be used to detect the failure.
-///    What does work is performing the app menu's own Settings item, which
-///    SwiftUI wires to a private `MenuItemCallback`; that is the same path a
-///    user's ⌘, takes.
+///    is delivered (`SwiftUI.AppDelegate` implements it and `sendAction`
+///    returns `true`) but **no window is ever created**. A silent no-op, so
+///    the return value cannot even detect the failure. Performing the app
+///    menu's own Settings item works, which is the path Cmd-comma takes.
 ///
-/// 2. `NSApp.activate()` (and `NSRunningApplication.current.activate(options:)`,
-///    which returns `false`) will not activate an accessory-policy app from
-///    inside a menu tracking session. The window then opens *behind* the
-///    frontmost app and never becomes key — and no amount of
-///    `makeKeyAndOrderFront` / `orderFrontRegardless` on the window rescues it,
+/// 2. `NSApp.activate()` and `NSRunningApplication.current.activate(options:)`
+///    will not activate an accessory-policy app from inside a menu tracking
+///    session. The window opens behind the frontmost app and never becomes key.
+///    `makeKeyAndOrderFront` and `orderFrontRegardless` do not rescue it,
 ///    because key-ness follows app activation, not window ordering. Only the
 ///    deprecated `activate(ignoringOtherApps:)` works.
 ///
-/// Both calls must also stay **synchronous**, inside the click's event context:
-/// deferring either one with `DispatchQueue.main.async` loses the activation
-/// grant and puts the window back behind the frontmost app (measured — the
-/// async variants were the worst-behaved of the six tried).
+/// Both calls must stay **synchronous**, inside the click's event context.
+/// Deferring either with `DispatchQueue.main.async` loses the activation grant
+/// and puts the window back behind the frontmost app (measured).
 @MainActor
 enum SettingsOpener {
   static func open() {
     // The gear button lives inside the panel's menu tracking session, and no
-    // window can take focus while one is running. The menu is held by
-    // `PanelMenu` — one holder, because a second panel control now has to end
-    // tracking for a different reason (see `PanelResolutionSection`).
+    // window can take focus while one runs. `PanelMenu` is the one holder,
+    // since a second panel control also has to end tracking.
     PanelMenu.endTracking()
-    // Deprecated since macOS 14 and used anyway: the replacement genuinely
-    // does not activate an LSUIElement app from a tracking session. Revisit
-    // only against a measurement, never against the deprecation warning alone.
+    // Deprecated since macOS 14 and used anyway: the replacement does not
+    // activate an LSUIElement app from a tracking session. Revisit only against
+    // a measurement, never against the deprecation warning alone.
     NSApp.activate(ignoringOtherApps: true)
     if let item = settingsMenuItem, let action = item.action {
       NSApp.sendAction(action, to: item.target, from: item)
     } else {
-      // Last-ditch: known to be a no-op on macOS 26, kept only so a future
-      // SwiftUI that stops publishing the menu item degrades to "maybe".
+      // A no-op on macOS 26, kept only so a future SwiftUI that stops
+      // publishing the menu item degrades to "maybe".
       NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
     }
   }
 
-  /// The app menu's Settings item, found by its ⌘, key equivalent rather than
-  /// its title — the title is SwiftUI's ("Settings…" today, "Preferences…"
-  /// before macOS 13) but the key equivalent is fixed by the HIG. Scoped to the
-  /// app menu so a future ⌘, elsewhere in the menu bar cannot be mistaken for
-  /// it.
+  /// Found by its key equivalent, not its title: the title is SwiftUI's and has
+  /// changed across releases, while the HIG fixes the key. Scoped to the app
+  /// menu so another Cmd-comma in the menu bar cannot be mistaken for it.
   private static var settingsMenuItem: NSMenuItem? {
     NSApp.mainMenu?.items.first?.submenu?.items.first {
       $0.keyEquivalent == "," && $0.keyEquivalentModifierMask == .command

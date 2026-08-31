@@ -22,10 +22,8 @@ struct DisplayHardwareFactsTests {
     return s
   }
 
-  /// "This monitor is on DisplayPort" is the marquee diagnostic in the whole
-  /// feature and every byte of it is already read from the kernel on every
-  /// discovery pass. Pinned so a future tidy-up of `IOregService` cannot drop
-  /// it again silently.
+  /// Every byte of this is already read from the kernel on each discovery pass, so
+  /// it is pinned here against a tidy-up of `IOregService` dropping it again.
   @Test func transportAndManufacturerSurviveDiscovery() {
     let facts = DisplayHardwareFacts.from(
       service: service(transportUpstream: "DP", transportDownstream: "DP"),
@@ -39,11 +37,9 @@ struct DisplayHardwareFactsTests {
     #expect(facts.physicalHeightCm == 34)
   }
 
-  /// `IOregService`'s string fields default to `""` and its serial to `0`
-  /// rather than to nil, so "the panel declared nothing" and "the panel
-  /// declared an empty string" arrive identical. Translating that here is what
-  /// stops a row rendering a blank value where a reason was promised
-  /// (DT30 rule e).
+  /// `IOregService` defaults strings to `""` and the serial to `0`, so "declared
+  /// nothing" and "declared empty" arrive identical. Translating here is what stops
+  /// a row rendering blank where DT30 rule (e) promised a reason.
   @Test func aPanelThatDeclaredNothingReportsNilNotAnEmptyString() {
     let facts = DisplayHardwareFacts.from(
       service: service(manufacturerID: ""), matchScore: 0, physicalSizeCm: nil

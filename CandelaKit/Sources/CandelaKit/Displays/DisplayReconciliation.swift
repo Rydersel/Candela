@@ -34,12 +34,12 @@ public struct DisplayReconciliationPlan: Equatable, Sendable {
 /// still there". The persistence key (the EDID UUID) is the only stable
 /// per-panel identity available: `IOAVService` is rebuilt on every discovery
 /// pass and compares unequal regardless, and the service location names the
-/// PORT, so it is unchanged in exactly the different-monitor-same-port swap
-/// this exists to catch.
+/// PORT, so it is unchanged in exactly the different-monitor-same-port swap this
+/// exists to catch.
 ///
 /// Reconciling on the ID alone gave a newly attached panel the departed one's
 /// controllers, which persist brightness under the departed panel's storage key
-/// and read its tuning: min/max overrides, curve, invert, availability flags.
+/// and read its tuning.
 public enum DisplayReconciliation {
   public static func plan(
     held: [CGDirectDisplayID: String],

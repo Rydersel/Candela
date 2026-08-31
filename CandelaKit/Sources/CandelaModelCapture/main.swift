@@ -8,33 +8,25 @@ import ScreenCaptureKit
 // Records paired (measured, model-inputs) samples so candidate exposure models
 // can be fitted and scored offline.
 //
-// Deliberately NOT part of the app. Iterating on the model against the shipped
-// build costs a deploy plus a multi-day soak to read one number; a standalone
-// tool collects the same evidence today, commits no prefs schema, and cannot
-// disturb a soak in progress. Nothing here writes DDC; it only reads the
-// screen, so it is safe to run alongside the live comparison.
+// Deliberately NOT part of the app: iterating on the model against the shipped
+// build costs a deploy plus a multi-day soak to read one number. Nothing here
+// writes DDC, it only reads the screen, so it is safe to run alongside the live
+// comparison.
 //
-// The wallpaper is read PER DISPLAY through NSWorkspace, the same source the
-// app's own wallpaper island uses. An earlier version took a single explicit
-// --wallpaper path, on the theory that an explicit input is more reproducible
-// than an ambient one. That was wrong in effect twice over: this rig runs a
-// different wallpaper on each panel, which one path cannot express, and it
-// diverged from the app on precisely the input being fitted. A run where the
-// Dell showed nothing but wallpaper scored 0.201 against its own wallpaper
-// term where it should have scored ~1.0, which is what surfaced it.
+// The wallpaper is read PER DISPLAY through NSWorkspace, the same source the app's
+// own wallpaper island uses. A single explicit --wallpaper path cannot express a rig
+// running a different wallpaper on each panel, and it diverged from the app on
+// precisely the input being fitted: a Dell showing nothing but wallpaper scored 0.201
+// against its own wallpaper term where it should have scored ~1.0. The resolved path
+// is recorded per sample, and --wallpaper survives as an override.
 //
-// The resolved path is recorded per sample, so the log stays self-describing
-// and --wallpaper survives as an override.
-//
-// **Attribution is PANEL space, capture is SURFACE space, and the two are not
-// the same set of displays.** ScreenCaptureKit OMITS a display that is
-// mirroring, so a panel showing pixels can be absent from
-// `SCShareableContent.displays` entirely while the surface it mirrors onto is
-// present. Everything below therefore reads: one capture per SURFACE, one
-// record per PANEL showing that surface. `CaptureAttribution` is the whole of
-// that decision, it is pure, and `--self-test` exercises every branch of it,
-// including the mirror topologies this rig cannot be reconfigured into on
-// demand.
+// **Attribution is PANEL space, capture is SURFACE space, and the two are not the
+// same set of displays.** ScreenCaptureKit OMITS a display that is mirroring, so a
+// panel showing pixels can be absent from `SCShareableContent.displays` while the
+// surface it mirrors onto is present. So: one capture per SURFACE, one record per
+// PANEL showing that surface. `CaptureAttribution` is the whole of that decision, it
+// is pure, and `--self-test` exercises every branch, including the mirror topologies
+// this rig cannot be reconfigured into on demand.
 
 let candelaBundleID = "com.rydersel.Candela"
 
@@ -102,9 +94,8 @@ struct Tally: Sendable {
   var captureFailures = 0
   var writeFailures = 0
 
-  /// Every counter, always, even at zero. A skip line that hides its zeroes
-  /// cannot be read as "nothing was dropped" versus "this counter does not
-  /// exist in this build".
+  /// Every counter, always, even at zero: a skip line that hides its zeroes cannot be
+  /// read as "nothing was dropped" versus "this build has no such counter".
   var line: String {
     "written \(written) records over \(taken) ticks  "
       + "ticks skipped: locked \(skippedLocked), session-unknown \(skippedSessionUnknown), "
@@ -121,10 +112,9 @@ struct Tally: Sendable {
 /// The tally behind a lock, so the signal handler and the sampling loop can
 /// both reach it.
 ///
-/// `@unchecked Sendable` is confined by construction: the only stored state is
-/// the tally, every access to it is inside `lock`, and nothing hands out a
-/// reference to it. The retained signal sources are written once before any
-/// tick runs and never read again.
+/// `@unchecked Sendable` is confined by construction: the only stored state is the
+/// tally, every access is inside `lock`, and nothing hands out a reference to it. The
+/// retained signal sources are written once before any tick runs and never read.
 final class Ledger: @unchecked Sendable {
   private let lock = NSLock()
   private var tally = Tally()
@@ -151,18 +141,15 @@ final class Ledger: @unchecked Sendable {
 
 /// The ONE exit path, shared by the sample budget and by Ctrl-C.
 ///
-/// The "wrote nothing, exit non-zero" guarantee used to sit after the sampling
-/// loop, which only ends once `--max-samples` ticks have elapsed. At the run
-/// card's settings that is 16.7 hours for a 2.5 hour session, so in practice
-/// the operator always ended with Ctrl-C and neither the summary nor the exit
-/// status ever ran: a whole session could report success by saying nothing.
+/// The "wrote nothing, exit non-zero" guarantee used to sit after the sampling loop,
+/// which only ends once `--max-samples` ticks have elapsed. In practice the operator
+/// always ends with Ctrl-C, so neither the summary nor the exit status ever ran and a
+/// whole session could report success by saying nothing.
 func finishRun(_ ledger: Ledger, reason: String) -> Never {
   let tally = ledger.snapshot
   if tally.written == 0 {
-    // The hint is CONDITIONAL. A fixed "a locked screen is the usual cause"
-    // line printed beside a non-zero wallpaper or duplicate counter actively
-    // misdirects the diagnosis, which is the same defect as a counter that
-    // does not move.
+    // The hint is CONDITIONAL: a fixed "a locked screen is the usual cause" line
+    // beside a non-zero wallpaper or duplicate counter misdirects the diagnosis.
     let hint =
       tally.skippedLocked > 0 || tally.skippedSessionUnknown > 0
       ? "A locked screen is the usual cause; nothing was recorded.\n"
@@ -177,9 +164,8 @@ func finishRun(_ ledger: Ledger, reason: String) -> Never {
 
 /// Ctrl-C and `kill` both land on the summary rather than on a bare kill.
 ///
-/// `SIG_IGN` first, because a `DispatchSource` signal handler runs IN ADDITION
-/// to the default disposition, and the default for both of these is to
-/// terminate before the handler ever runs.
+/// `SIG_IGN` first, because a `DispatchSource` signal handler runs IN ADDITION to
+/// the default disposition, and the default for both is to terminate before it runs.
 func installSignalHandlers(_ ledger: Ledger) {
   var sources: [DispatchSourceSignal] = []
   for number in [SIGINT, SIGTERM] {
@@ -241,35 +227,28 @@ struct KnownPanel: Equatable, Sendable {
 }
 
 /// Pure. Every mirror question in a tick is answered from ONE `MirrorTopology`
-/// sample and one rotation sample, so no two answers can describe different
-/// instants; that type exists for exactly this reason, and its own doc records
-/// that three disagreeing definitions of "mirrored" produced a real bug.
+/// sample and one rotation sample, so no two answers can describe different instants.
 enum CaptureAttribution {
   /// The panels showing `surface`'s pixels, `id`-ascending.
   ///
-  /// A mirror set is one master with N slaves, so N greater than 1 is an
-  /// ORDINARY shape rather than an edge case: taking the first match would
-  /// have given one of two slaves nothing at all, silently, and would have
-  /// picked a different loser whenever discovery order changed. Sorting by ID
-  /// is what makes a mid-session re-discovery unable to split one panel's
-  /// stream across two keys.
+  /// A mirror set is one master with N slaves, so N greater than 1 is ORDINARY, not
+  /// an edge case: taking the first match gave one of two slaves nothing at all,
+  /// silently, and picked a different loser whenever discovery order changed. Sorting
+  /// by ID keeps a mid-session re-discovery from splitting one panel's stream across
+  /// two keys.
   ///
-  /// When the surface is itself a panel it is in this list too, which is the
-  /// other half of the same defect: panel A mirroring onto panel B used to
-  /// resolve B's own capture to A, so B stopped accumulating under its own key
-  /// for as long as the mirror lasted and no warning could report it, because
-  /// B was present in the ScreenCaptureKit list the whole time.
+  /// When the surface is itself a panel it is in this list too. Panel A mirroring onto
+  /// panel B used to resolve B's own capture to A, so B stopped accumulating under its
+  /// own key with no warning, because B was in the ScreenCaptureKit list throughout.
   static func targets(
     surface: CGDirectDisplayID, topology: MirrorTopology, panels: [CGDirectDisplayID: KnownPanel]
   ) -> [AttributionTarget] {
     let members = ([surface] + topology.slaves(of: surface)).sorted()
     let known = members.compactMap { panels[$0] }
     guard !known.isEmpty else {
-      // `DisplayDiscovery` returns only external DDC-capable panels, so a
-      // virtual display and the built-in have no entry. They are still
-      // perfectly good capture surfaces: EM13 makes the measured side the
-      // composited framebuffer rather than emitted light, so nothing here
-      // needs a physical panel.
+      // `DisplayDiscovery` returns only external DDC-capable panels, so a virtual
+      // display and the built-in have no entry. They are still good capture surfaces:
+      // EM13 makes the measured side the composited framebuffer, not emitted light.
       return [
         AttributionTarget(
           id: surface, key: "cgdisplay-\(surface)", name: "display \(surface)",
@@ -298,10 +277,9 @@ enum CaptureAttribution {
     for surface in surfaces.sorted() {
       var kept: [AttributionTarget] = []
       for target in targets(surface: surface, topology: topology, panels: panels) {
-        // The capture's grid is in the SURFACE's display space. Reading a
-        // panel's own rotation while taking the geometry from the surface is
-        // how a record ends up describing neither display: two slaves at
-        // different rotations would both be booked through one transform.
+        // The capture's grid is in the SURFACE's display space. Reading a panel's
+        // own rotation while taking geometry from the surface is how a record ends up
+        // describing neither display.
         let surfaceRotation = rotations[surface]
         let targetRotation = rotations[target.id] ?? surfaceRotation
         guard let surfaceRotation, let targetRotation,
@@ -316,10 +294,9 @@ enum CaptureAttribution {
           continue
         }
         // The single-record-per-panel property otherwise rests entirely on the
-        // measured claim that ScreenCaptureKit omits a mirroring display. If
-        // that ever stops holding, both the master and its slave arrive as
-        // surfaces, both resolve to the same panel, and two records land under
-        // one key at one timestamp and are double counted.
+        // measured claim that ScreenCaptureKit omits a mirroring display. If that
+        // stops holding, master and slave both arrive as surfaces, resolve to one
+        // panel, and two records land under one key at one timestamp.
         guard claimed.insert(target.key).inserted else {
           plan.duplicateKeys.append(target.key)
           continue
@@ -338,11 +315,9 @@ enum CaptureAttribution {
       plan.surfaces = unfiltered
       return plan
     }
-    // Matched against the PANEL as well as the surface. Filtering on the
-    // surface alone matched nothing at all whenever the named panel was
-    // mirroring, since such a panel is absent from ScreenCaptureKit: every
-    // tick continued, no counter moved, and the run ended with zero records
-    // and an all-zero skip line.
+    // Matched against the PANEL as well as the surface. Filtering on the surface
+    // alone matched nothing whenever the named panel was mirroring, since such a panel
+    // is absent from ScreenCaptureKit: zero records and an all-zero skip line.
     for entry in unfiltered {
       let kept = entry.targets.filter { $0.id == filter || entry.surface == filter }
       plan.filteredOut += entry.targets.count - kept.count
@@ -358,10 +333,9 @@ enum CaptureAttribution {
 /// Proves each guard can fire, over topologies this rig cannot be
 /// reconfigured into on demand.
 ///
-/// A check whose failure mode is silence is not a check: every case below is
-/// paired with the configuration that must produce the OPPOSITE answer, so a
-/// predicate that has stopped discriminating fails here rather than passing
-/// quietly on hardware that never exercises it.
+/// A check whose failure mode is silence is not a check: every case below is paired
+/// with the configuration that must produce the OPPOSITE answer, so a predicate that
+/// has stopped discriminating fails here rather than passing quietly.
 func runSelfTest() -> Never {
   var failures = 0
   func expect(_ label: String, _ condition: Bool) {
@@ -521,20 +495,16 @@ let ownPID = ProcessInfo.processInfo.processIdentifier
 
 /// Why a record has no backdrop, kept apart from having one.
 ///
-/// The wallpaper is the model's weakest input, so a run that silently lost it
-/// on some fraction of its records produces a verdict about that fraction. The
-/// only tell used to be a non-empty path beside a null grid, and nothing looked
-/// at it.
+/// The wallpaper is the model's weakest input, so a run that silently lost it on
+/// some fraction of its records produces a verdict about that fraction.
 enum Backdrop {
   case cells([Double])
-  /// NSWorkspace named no image for this display. Recorded anyway, with an
-  /// empty path, because there is nothing better to record and the fit can see
-  /// the empty path.
+  /// NSWorkspace named no image for this display. Recorded anyway with an empty
+  /// path, which the fit can see.
   case noWallpaper
-  /// An image was named and could not be turned into cells. The record is
-  /// REFUSED: a decode failure looks exactly like a model that cannot predict,
-  /// and mixing those records into the fit is how the failure gets absorbed
-  /// into the app priors instead of being noticed.
+  /// An image was named and could not be turned into cells. The record is REFUSED:
+  /// a decode failure looks exactly like a model that cannot predict, so mixing these
+  /// into the fit absorbs the failure into the app priors.
   case undecodable(String)
 }
 
@@ -564,17 +534,14 @@ enum Backdrop {
 
 /// ONE window-server listing per tick, taken adjacently for both option sets.
 ///
-/// Both sides of the pairing have to describe one instant. The two calls used
-/// to run PER DISPLAY and AFTER that display's capture and wallpaper decode, so
-/// with N displays the window server was queried 2N times at 2N instants: the
-/// measured and modelled halves of a record were separated by a full image
-/// decode, and two displays' records could disagree about what was on screen at
-/// the same tick.
+/// Both sides of the pairing have to describe one instant. Run per display and after
+/// that display's capture and wallpaper decode, the window server was queried 2N times
+/// at 2N instants, and two displays' records could disagree about what was on screen
+/// in the same tick.
 ///
-/// `everything` is read FIRST, deliberately. Chrome is the set difference, so a
-/// window that opens between the two calls appears only in the narrower list;
-/// read in this order it is admitted to the model, and read the other way round
-/// it would have been mislabelled as chrome.
+/// `everything` is read FIRST, deliberately. Chrome is the set difference, so a window
+/// that opens between the two calls appears only in the narrower list: in this order
+/// it is admitted to the model, the other way round it is mislabelled as chrome.
 struct WindowSample {
   let everything: [[String: Any]]
   let observed: [[String: Any]]
@@ -593,15 +560,14 @@ struct WindowSample {
 /// Candela's windows, identified the SAME WAY the ScreenCaptureKit filter
 /// identifies them.
 ///
-/// The two sides used different criteria: the capture excluded by bundle
-/// identifier and this list excluded by the process name `Candela`. A worktree
-/// or renamed build owns windows under a different process name and the same
-/// bundle identifier, so the measured side dropped its dimming overlays while
-/// the modelled side admitted them, feeding the app's own dimming back into the
-/// input being fitted against.
+/// The two sides used different criteria: the capture excluded by bundle identifier,
+/// this list by the process name `Candela`. A worktree or renamed build owns windows
+/// under a different process name and the same bundle identifier, so the measured side
+/// dropped its dimming overlays while the modelled side admitted them, feeding the
+/// app's own dimming back into the input being fitted against.
 ///
-/// Cached per tick: the lookup is a process-table read, and a busy desktop has
-/// well over a hundred window entries spread across a couple of dozen pids.
+/// Cached per tick: the lookup is a process-table read, and a busy desktop has well
+/// over a hundred window entries spread across a couple of dozen pids.
 @MainActor final class CandelaOwnership {
   private var cache: [Int32: Bool] = [:]
 
@@ -617,8 +583,7 @@ struct WindowSample {
 /// process and Candela's overlays removed.
 ///
 /// Candela's exclusion is not tidiness: detection dimming draws overlays, and
-/// capturing them would feed the dimming back into the measurement being fitted
-/// against, which is the feedback loop the sampler already guards.
+/// capturing them feeds the dimming back into the measurement being fitted against.
 @MainActor func windows(
   from entries: [[String: Any]], displayOrigin: CGPoint, ownership: CandelaOwnership
 ) -> [ModelReplayRecord.Window] {
@@ -629,9 +594,8 @@ struct WindowSample {
       let bounds = entry[kCGWindowBounds as String] as? [String: Any],
       let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary)
     else { return nil }
-    // Dropped when nameless, exactly as CGWindowListSource does. Admitting one
-    // as "" would let it earn a fitted prior the shipped model can never
-    // produce.
+    // Dropped when nameless, exactly as CGWindowListSource does. Admitting one as ""
+    // would let it earn a fitted prior the shipped model can never produce.
     guard let owner = entry[kCGWindowOwnerName as String] as? String, !owner.isEmpty else {
       return nil
     }
@@ -647,15 +611,13 @@ struct WindowSample {
 /// answer.
 ///
 /// A locked or sleeping display still answers a capture, and what comes back is
-/// black. Black is a luminance the accumulator cannot tell from a dark panel,
-/// so an unattended overnight run would book hours of "this panel was dark" at
-/// the same weight as real use and drown the informative samples.
+/// black, which the accumulator cannot tell from a dark panel. An unattended overnight
+/// run would book hours of "this panel was dark" at the weight of real use.
 ///
-/// **An unreadable session dictionary is treated as LOCKED, not as unlocked.**
-/// A lock screen is not black, so the black-frame guard downstream would not
-/// catch what a fail-open read admits. The cost of failing closed is a run that
-/// writes nothing and says exactly why, under its own counter; the cost of
-/// failing open is a run that writes a verdict about a lock screen.
+/// **An unreadable session dictionary is treated as LOCKED, not as unlocked.** A lock
+/// screen is not black, so the black-frame guard downstream would not catch what a
+/// fail-open read admits. Failing closed costs a run that writes nothing and says why;
+/// failing open costs a run that writes a verdict about a lock screen.
 enum ScreenLockState { case unlocked, locked, unknown }
 
 @MainActor func screenLockState() -> ScreenLockState {
@@ -665,20 +627,16 @@ enum ScreenLockState { case unlocked, locked, unknown }
 
 /// Read PER SAMPLE, never once at launch.
 ///
-/// A run that spans a light/dark switch would otherwise label every later
-/// record with the appearance it started in. The measured side sees the real
-/// appearance and the modelled side uses the stale flag, and BOTH replay
-/// controls still pass, because the log stays self-consistent with its own
-/// wrong label. Exercising the light prior is a thing this probe actively wants
-/// the operator to do, so freezing it made the advice self-defeating.
+/// A run that spans a light/dark switch would otherwise label every later record
+/// with the appearance it started in. The measured side sees the real appearance, the
+/// modelled side uses the stale flag, and BOTH replay controls still pass, because the
+/// log stays self-consistent with its own wrong label.
 @MainActor func currentAppearanceIsDark() -> Bool {
   // A plain read is enough: cfprefsd invalidates the cache, so a live toggle is
-  // picked up [MEASURED 2026-08-18, with a positive and negative control pair].
-  // An earlier version called `removeVolatileDomain(forName: .globalDomain)`
-  // first, which measured byte-identical: NSGlobalDomain is a PERSISTENT domain
-  // and `volatileDomainNames` is empty, so there was nothing to remove. Removed
-  // rather than kept as a charm; the same idiom aimed at NSRegistrationDomain
-  // would wipe every registered default.
+  // picked up [MEASURED, with a positive and negative control pair]. Do not add
+  // `removeVolatileDomain(forName: .globalDomain)` back: it measured byte-identical
+  // (NSGlobalDomain is PERSISTENT and `volatileDomainNames` is empty), and the same
+  // idiom aimed at NSRegistrationDomain would wipe every registered default.
   UserDefaults.standard.string(forKey: "AppleInterfaceStyle")?.lowercased() == "dark"
 }
 
@@ -687,9 +645,8 @@ let configurator = CoreGraphicsDisplayConfigurator()
 /// ONE instant's mirror facts plus the rotations that pair with them.
 @MainActor func sampleTopology() -> (topology: MirrorTopology, rotations: [CGDirectDisplayID: Double]) {
   let displays = configurator.displays()
-  // No synthesis pairing: this tool has none, and it does not need one. The
-  // pairing only separates a mirror set the app engaged from one the user
-  // asked for, and a capture measures the same pixels either way.
+  // No synthesis pairing needed: it only separates a mirror set the app engaged from
+  // one the user asked for, and a capture measures the same pixels either way.
   let topology = MirrorTopology(displays)
   var rotations: [CGDirectDisplayID: Double] = [:]
   for entry in displays { rotations[entry.id] = CGDisplayRotation(entry.id) }
@@ -722,9 +679,8 @@ installSignalHandlers(ledger)
 
 let log = try ModelReplayLog(directory: options.out)
 
-// A run header per RUN, not per directory. A single fixed name was overwritten
-// on every restart, and restarting is something this tool asks for, so the
-// provenance of everything already in the directory was being destroyed.
+// A run header per RUN, not per directory: a single fixed name was overwritten on
+// every restart, destroying the provenance of everything already in the directory.
 let startedAt = Date().timeIntervalSinceReferenceDate
 let header: [String: Any] = [
   "startedAt": startedAt,
@@ -750,32 +706,27 @@ fflush(stdout)
 var panels = panelMap(discovered)
 // The RE-DISCOVERY TRIGGER, and it is the identity map rather than the id set.
 //
-// The ID-to-key map is what moves: display IDs are reassigned across a replug,
-// and the observed case is the MAG going 3 to 2 and the Dell 2 to 3 across one
-// dock cycle. That swap leaves the id SET identical, so a trigger comparing
-// sets could never see the reconfiguration its own comment named, and the stale
-// map kept booking each panel's capture under the other panel's key.
+// The ID-to-key map is what moves: display IDs are reassigned across a replug, and the
+// observed case is two panels swapping IDs across one dock cycle. That leaves the id
+// SET identical, so a set comparison never sees the reconfiguration and the stale map
+// keeps booking each panel's capture under the other panel's key.
 //
-// The identity map is free here: `sampleTopology` already reads it every tick.
-// Re-running `DisplayDiscovery` unconditionally is not free: it is IOKit
-// iteration that leaks 2 mach ports per call and costs ~13 ms, so a per-tick
-// call turns a once-per-launch leak into a per-tick one.
+// The identity map is free here, since `sampleTopology` already reads it every tick.
+// Re-running `DisplayDiscovery` unconditionally is not: it is IOKit iteration that
+// leaks 2 mach ports per call and costs ~13 ms, turning a once-per-launch leak into a
+// per-tick one.
 //
-// Seeded from the launch enumeration, so the first tick does not immediately
-// re-run discovery against an empty map.
+// Seeded from the launch enumeration, so the first tick does not immediately re-run
+// discovery against an empty map.
 var lastIdentities = sampleTopology().topology.displays.reduce(
   into: [CGDirectDisplayID: String]()
 ) { $0[$1.id] = $1.identity.key }
 
 while ledger.snapshot.taken < options.maxSamples {
-  // `defer`, so every path counts and reports: it runs on `continue` too.
-  //
-  // The locked path used to `continue` before the progress print at the bottom
-  // of the loop, so a run started on a locked screen burned its entire sample
-  // budget in TOTAL silence and exited having written nothing. At the run
-  // card's settings that is 16.7 hours of a blank terminal. Caught by running
-  // the tool end to end at 02:00 with the screen locked, after four code
-  // reviews had read the same lines without seeing it.
+  // `defer`, so every path counts and reports: it runs on `continue` too. The locked
+  // path used to `continue` before the progress print at the bottom of the loop, so a
+  // run started on a locked screen burned its whole sample budget in TOTAL silence and
+  // exited having written nothing.
   defer {
     var tally = Tally()
     ledger.note {
@@ -935,19 +886,16 @@ while ledger.snapshot.taken < options.maxSamples {
       continue
     }
 
-    // Everything the capture's suspension can invalidate, re-checked, which is
-    // what the app's own telemetry does after the same await for the same
-    // reason: a sample taken before a reconfiguration describes a machine that
-    // no longer exists. Attribution is the part that matters here, since a
-    // mirror engaged or broken inside the suspension moves the pixels to a
-    // different panel without the surface going anywhere.
+    // Everything the capture's suspension can invalidate, re-checked: a sample taken
+    // before a reconfiguration describes a machine that no longer exists. Attribution
+    // matters most, since a mirror engaged or broken inside the suspension moves the
+    // pixels to a different panel without the surface going anywhere.
     let (topologyNow, rotationsNow) = sampleTopology()
     let targetsNow = CaptureAttribution.targets(
       surface: entry.surface, topology: topologyNow, panels: panels)
-    // A SUBSET rather than equality: the planned targets have already been
-    // through the duplicate and filter passes, so they are legitimately fewer
-    // than what the surface resolves to. What must not have happened is one of
-    // them going away.
+    // A SUBSET rather than equality: the planned targets have already been through
+    // the duplicate and filter passes, so they are legitimately fewer than what the
+    // surface resolves to. What must not have happened is one of them going away.
     guard Set(entry.targets.map(\.key)).isSubset(of: Set(targetsNow.map(\.key))),
       rotationsNow[entry.surface] == rotationDegrees
     else {
@@ -955,8 +903,7 @@ while ledger.snapshot.taken < options.maxSamples {
       continue
     }
 
-    // Delivered, never assumed: this is the defect class the project keeps
-    // rediscovering.
+    // Delivered, never assumed.
     let cols = image.width
     let rows = image.height
     guard cols > 0, rows > 0,
@@ -966,9 +913,9 @@ while ledger.snapshot.taken < options.maxSamples {
       continue
     }
 
-    // Belt and braces: an awake, unlocked display that captures pure black is
-    // more likely a state we failed to detect than a panel genuinely showing
-    // nothing. Dropping it costs one sample; booking it costs the run.
+    // An awake, unlocked display capturing pure black is more likely a state we
+    // failed to detect than a panel showing nothing. Dropping it costs one sample;
+    // booking it costs the run.
     if captured.allSatisfy({ $0 <= 0 }) {
       ledger.note { $0.skippedBlack += count }
       continue
@@ -1026,8 +973,7 @@ while ledger.snapshot.taken < options.maxSamples {
         appearanceIsDark: appearanceIsDark, windows: observed, chrome: chrome)
 
       // Never an unguarded `try` in this loop: a full disk, a removed output
-      // directory or a non-finite window rect would otherwise end a multi-hour
-      // run at whatever point it happened.
+      // directory or a non-finite window rect would end a multi-hour run mid-way.
       do {
         try log.append(record)
         ledger.note { $0.written += 1 }

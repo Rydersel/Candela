@@ -10,9 +10,9 @@ struct PanelHealthSummaryTests {
   private let uprightTransform = PanelSpaceTransform(
     displaySize: CGSize(width: 3440, height: 1440), rotation: .standard)
 
-  /// Accumulates `samples` copies of `grid` through the pass-through 24×10
-  /// upright transform. `ExposureMap` has no public memberwise init, so this
-  /// is the only door in — the same one every one of Task 3's tests uses.
+  /// Accumulates `samples` copies of `grid` through the pass-through 24×10 upright
+  /// transform. `ExposureMap` has no public memberwise init, so this is the only
+  /// door in.
   private func measuredMap(
     _ grid: [Double], samples: Int = ExposureAccumulator.minimumSamplesForAnalysis
   ) -> ExposureMap {
@@ -172,10 +172,6 @@ struct PanelHealthSummaryTests {
     #expect(summary.hottestOwner == nil)
   }
 
-  /// Replaces `topOwnersByHoursIsEmptyUntilThereIsAMeasuredPerOwnerTimeSeries`,
-  /// which pinned the always-empty stub that shipped before
-  /// `OwnerHoursAccumulator` existed. Empty is still the answer with no
-  /// measured series — it just is no longer the only answer.
   @Test func topOwnersByHoursIsEmptyWithNoMeasuredSeries() {
     let summary = PanelHealthSummary.make(
       map: .empty, observation: nil, ownerHours: .empty, telemetryEnabled: true, observationEnabled: true)
@@ -301,9 +297,8 @@ struct PanelHealthSummaryTests {
     #expect(on != off)
   }
 
-  /// `sampleCount` used to be a parameter beside `map`, so a caller could pass
-  /// one that disagreed and get `.measured` over an empty map. It is now read
-  /// off the map and there is no second source to disagree with.
+  /// `sampleCount` is read off the map rather than passed beside it: a second
+  /// source could disagree and hand back `.measured` over an empty map.
   @Test func confidenceIsReadFromTheMapNotFromABesideParameter() {
     let summary = PanelHealthSummary.make(
       map: .empty, observation: nil, ownerHours: .empty,

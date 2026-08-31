@@ -13,8 +13,7 @@ struct BrightnessPersistenceTests {
   }
 
   @Test func defaultsToFullWithoutSavedValue() {
-    // Task 6 first-run rule (review I13): post-M3, 0.5 means "hardware
-    // minimum" on the combined scale, so a fresh display starts at 1.0.
+    // 0.5 means hardware minimum on the combined scale, so a fresh display starts at 1.0.
     let c = makeLegacyPathController(writer: FakeDDC(), store: PathMemoryStore(), storageKey: "brightness.x")
     #expect(c.brightness == 1.0)
   }

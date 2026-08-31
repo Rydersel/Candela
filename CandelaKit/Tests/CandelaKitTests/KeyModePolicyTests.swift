@@ -20,11 +20,8 @@ struct KeyModePolicyTests {
   }
 
   @Test func accessibilityRequiredOnlyWhenATapIsWanted() {
-    // The three original assertions were also satisfied by
-    // `!firesCustomShortcuts(brightness)`, which ignores `volume` entirely
-    // (review lens 4, M6). The three added cases separate the two
-    // implementations: they pin that BOTH arguments are consulted and that
-    // the combination is a disjunction over `watchesMediaKeys`.
+    // The first three cases alone also pass an implementation that ignores
+    // `volume`. The rest pin that both arguments are consulted, as a disjunction.
     #expect(KeyModePolicy.requiresAccessibility(brightness: .media, volume: .disabled))
     #expect(KeyModePolicy.requiresAccessibility(brightness: .disabled, volume: .both))
     #expect(KeyModePolicy.requiresAccessibility(brightness: .both, volume: .disabled))

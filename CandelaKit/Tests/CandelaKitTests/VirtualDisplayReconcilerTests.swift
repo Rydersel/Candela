@@ -110,8 +110,8 @@ struct VirtualDisplayReconcilerTests {
   }
 
   /// VD17 made structural: a Create on one slot must never apply another
-  /// slot's drifted-but-unapplied edits. Two reviewers independently found
-  /// the unscoped version recreating slot 1 when slot 2 was created.
+  /// slot's drifted-but-unapplied edits. The unscoped version recreated slot 1
+  /// when slot 2 was created.
   @Test func aScopedSyncTouchesOnlyTheNamedSlot() {
     let running = definition()
     let drifted = VirtualSlotDefinition(
@@ -210,11 +210,9 @@ struct VirtualSlotPrefsTests {
     #expect(!prefs.virtualSlot(1).configured)
   }
 
-  /// Prefs are an escape-hatch surface: `defaults write` with no type flag
-  /// stores STRINGS, which `object(forKey:) as? Int` silently rejects while
-  /// `defaults.bool` accepts "YES" for `configured`. The accessor must read
-  /// both halves the same way or a staged slot half-applies (a 1920-wide
-  /// display from a 3440-wide pref, no error anywhere).
+  /// `defaults write` with no type flag stores STRINGS, which
+  /// `object(forKey:) as? Int` rejects while `defaults.bool` accepts "YES". Read
+  /// both halves the same way or a staged slot half-applies with no error.
   @Test func shellWrittenStringValuesAreCoercedNotDropped() {
     let defaults = UserDefaults(suiteName: "vd-slot-tests-\(UUID().uuidString)")!
     defaults.set("YES", forKey: "virtualSlotConfigured.1")

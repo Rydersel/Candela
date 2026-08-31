@@ -2,20 +2,15 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// Every sentence mirroring says, in one place.
+/// Every sentence mirroring says, in one place, because these words appear on
+/// several surfaces and copy split across private helpers drifts.
 ///
-/// One `…Copy` enum because these words appear on three surfaces — the settings
-/// section, the menu-bar panel and the confirmation window — and a rule enforced
-/// in three private helpers is a rule that drifts the first time one of them is
-/// edited. `DisplayModeCopy` is the same arrangement for the same reason.
+/// `LocalizedStringKey` is not `Sendable`, so these are computed `static var`s:
+/// a `static let` of one is a concurrency error under complete checking.
 ///
-/// `LocalizedStringKey` is not `Sendable`, so these are computed `static var`s
-/// rather than `static let`s (a `static let` of one is a concurrency error under
-/// complete checking). Each is a literal with no state behind it.
-///
-/// The CoreGraphics error code never appears in any of these. It is diagnostic,
-/// it belongs in a `.help(…)` tooltip, and it is not something to make someone
-/// read while their screen is wrong.
+/// The CoreGraphics error code never appears here. It is diagnostic, it belongs
+/// in a `.help(…)` tooltip, and nobody should read it while their screen is
+/// wrong.
 enum MirroringCopy {
   static var sectionTitle: LocalizedStringKey { "Mirroring" }
   static var notMirrored: LocalizedStringKey { LocalizedStringKey(Self.notMirroredText) }
@@ -27,20 +22,19 @@ enum MirroringCopy {
   static var startMirroring: LocalizedStringKey { "Start Mirroring" }
   static var stopMirroring: LocalizedStringKey { "Stop Mirroring" }
   /// The report window's headline. Says what did NOT happen, because that is the
-  /// whole content of the report — nothing on screen changed.
+  /// whole content of the report: nothing on screen changed.
   static var reportTitle: LocalizedStringKey { "Mirroring not changed" }
 
   // MARK: - Refusals
   //
-  // `MirrorRefusal` has EIGHT cases and each gets its own sentence here.
-  // Several exist precisely because one case used to carry three meanings,
-  // one of which was false — telling someone who has just named a perfectly good
-  // master that "no display can be the mirror master" is not a rounding error,
-  // it is a wrong statement about their machine. A `default:` arm anywhere that
-  // consumes this would quietly undo that.
+  // Every `MirrorRefusal` case gets its own sentence. Several exist because one
+  // case used to carry three meanings, one of them false: telling someone who
+  // just named a perfectly good master that "no display can be the mirror
+  // master" is a wrong statement about their machine. A `default:` arm anywhere
+  // that consumes this would quietly undo that.
 
-  /// `.onlyOneDisplay`. Also the empty-sample case: on the rig this actually
-  /// happens on — a laptop with nothing plugged in — this is the truth.
+  /// `.onlyOneDisplay`, and the empty-sample case too: on a laptop with nothing
+  /// plugged in, this is the truth.
   static var needsASecondDisplay: LocalizedStringKey {
     "Mirroring needs a second display."
   }
@@ -51,7 +45,7 @@ enum MirroringCopy {
     "No display here can show the picture for the others."
   }
 
-  /// `.noSuchDisplay`. The display named is not in the sample — unplugged, or
+  /// `.noSuchDisplay`. The display named is not in the sample: unplugged, or
   /// filtered out of the list the topology was built from.
   static var noSuchDisplay: LocalizedStringKey {
     "That display is no longer connected."
@@ -70,44 +64,38 @@ enum MirroringCopy {
   }
 
   /// `.alreadyMirrored`. The named master's set already holds everything that
-  /// could join it, so the request needed no work — stated outright rather
-  /// than staged as the all-no-op transaction macOS fails at commit (#56).
+  /// could join it. Stated outright rather than staged as an all-no-op
+  /// transaction, which macOS fails at commit.
   static var alreadyMirrored: LocalizedStringKey {
     "Every display that can mirror this one already is."
   }
 
-  /// The caption for a display that is ITSELF `isAlwaysInMirrorSet`, and for
-  /// nothing else. Named, never a bare grey (R8 generalised: no state is carried
-  /// by shape alone).
+  /// The caption for a display that is ITSELF `isAlwaysInMirrorSet`, and nothing
+  /// else. Named, never a bare grey (R8 generalised: no state carried by shape
+  /// alone).
   ///
-  /// NOT the sentence for `.setCannotBeBroken` — it used to be, and it was false
-  /// on two shapes that reach that refusal. See `setCannotBeBroken(members:name:)`.
-  /// The word "this" resolves here because both surfaces that use it are showing
-  /// one display's own row and have already asked
-  /// `MirrorTopology.cannotBeUnmirrored` about that display.
+  /// NOT the sentence for `.setCannotBeBroken`, where it is false on two shapes.
+  /// "This" resolves because both surfaces using it show one display's own row
+  /// and have already asked `MirrorTopology.cannotBeUnmirrored` about it.
   static var cannotBeUnmirrored: LocalizedStringKey {
     "macOS keeps this display mirrored and will not let it be separated."
   }
 
-  /// `.setCannotBeBroken(members)` — the only refusal with a payload, and the
+  /// `.setCannotBeBroken(members)`: the only refusal with a payload, and the
   /// only sentence here that is BUILT rather than written.
   ///
-  /// The payload-free sentence this case used to reuse (`cannotBeUnmirrored`,
-  /// "macOS keeps this display mirrored…") is FALSE on two shapes that reach
-  /// this refusal, and one of them is a click away. `MirrorTopologyPolicy`
-  /// refuses whenever no member is a slave macOS will release, so an UNLOCKED
-  /// master whose every slave is locked lands here — a display that is neither
-  /// mirrored nor locked, whose pane would have said it was both, two rows under
-  /// a status line reading "Mirrored to 1 display". A master whose slaves were
-  /// filtered out of the sample is the second shape.
+  /// `cannotBeUnmirrored` is FALSE on two shapes that reach this refusal.
+  /// `MirrorTopologyPolicy` refuses whenever no member is a slave macOS will
+  /// release, so an UNLOCKED master whose every slave is locked lands here,
+  /// neither mirrored nor locked, two rows under "Mirrored to 1 display". A
+  /// master whose slaves were filtered out of the sample is the second shape.
   ///
-  /// Naming the members is true in every surface, because it makes no claim
-  /// about whichever display's pane it lands in — which is why `MirrorRefusal`
-  /// carries them ("so the UI can name them") rather than being a bare case.
+  /// Naming the members makes no claim about whichever display's pane it lands
+  /// in, which is why `MirrorRefusal` carries them at all.
   ///
   /// Falls back to a count for `partialBreak`'s reason: a display macOS locks
   /// into a set is exactly the kind nothing can name (Sidecar, an AirPlay
-  /// receiver), and half a list reads as a bug rather than as a report.
+  /// receiver), and half a list reads as a bug rather than a report.
   ///
   /// "Turned off for" rather than "separated from what it is mirroring", because
   /// the members include the MASTER, which is mirroring nothing.
@@ -125,9 +113,9 @@ enum MirroringCopy {
       : "macOS will not let mirroring be turned off for those \(members.count) displays."
   }
 
-  /// `.notInASet`. A fourth refusal rather than an empty `setCannotBeBroken`
-  /// payload, so the UI never says "this set cannot be broken" about a display
-  /// that has no set.
+  /// `.notInASet`. Its own case rather than an empty `setCannotBeBroken`
+  /// payload, so nothing ever says "this set cannot be broken" about a display
+  /// with no set.
   static var notInASet: LocalizedStringKey {
     "This display is not mirroring anything."
   }
@@ -135,13 +123,12 @@ enum MirroringCopy {
   /// One sentence for whichever refusal happened, so every surface makes the
   /// same statement about the same refusal.
   ///
-  /// Returns `Text` rather than `LocalizedStringKey` because one of the eight
-  /// carries a payload and its sentence is built from it; a second function for
-  /// that one case would be the two-spellings problem this file exists to
-  /// prevent. `Text` is the type both spellings have in common.
+  /// Returns `Text`, not `LocalizedStringKey`, because one case carries a
+  /// payload and its sentence is built from it; a second function for that case
+  /// would be the two-spellings problem this file prevents.
   ///
-  /// Takes the naming closure for the same reason `partialBreak` and `state` do:
-  /// friendly-name resolution belongs to the surface, not here.
+  /// Takes the naming closure because friendly-name resolution belongs to the
+  /// surface, not here.
   static func refusal(
     _ refusal: MirrorRefusal, name: (CGDirectDisplayID) -> String
   ) -> Text {
@@ -159,13 +146,9 @@ enum MirroringCopy {
   }
 
   // MARK: - The settings section's own sentences
-  //
-  // Here rather than in the view for the reason this file exists: mirroring
-  // speaks on three surfaces and a sentence written in one of them is a sentence
-  // the other two cannot reuse and cannot be checked against.
 
-  /// The row carries the topic word since Task 13: the control sits inline in
-  /// the hub's Display section, where a bare "Status" would not say of what.
+  /// The row carries the topic word: the control sits inline in the hub's
+  /// Display section, where a bare "Status" would not say of what.
   static var statusLabel: LocalizedStringKey { "Mirroring" }
   static var pickMaster: LocalizedStringKey { "Show the picture from" }
 
@@ -175,9 +158,9 @@ enum MirroringCopy {
   }
 
   /// What Start does when something IS locked. `MirrorTopologyPolicy.engage`
-  /// stages no change for an `isAlwaysInMirrorSet` display — the change cannot
-  /// succeed and one failed stage cancels the whole transaction — so "every
-  /// other display" is a promise the apply does not keep on such a rig.
+  /// stages no change for an `isAlwaysInMirrorSet` display (it cannot succeed,
+  /// and one failed stage cancels the transaction), so "every other display"
+  /// is a promise the apply does not keep on such a rig.
   static var startExplanationSomeLocked: LocalizedStringKey {
     """
     The display you pick shows its picture on the other displays, apart from \
@@ -198,10 +181,9 @@ enum MirroringCopy {
     "Returns the displays macOS will release to their own desktops. The ones it keeps mirrored stay mirrored."
   }
 
-  /// Why a control is dead WHILE a change is being applied — the reason, not a
-  /// description of what the button does. A grey control with nothing attached
-  /// is the defect R8 forbids, and that includes the transient greying
-  /// `isApplying` causes.
+  /// Why a control is dead WHILE a change applies: the reason, not what the
+  /// button does. A grey control with nothing attached is the defect R8 forbids,
+  /// transient greying included.
   static var applyInProgress: LocalizedStringKey {
     "Waiting for the last mirroring change to finish."
   }
@@ -219,17 +201,14 @@ enum MirroringCopy {
 
   /// A break that LEFT SOMETHING BEHIND.
   ///
-  /// `MirrorToggleDecision.disengage` carries `residualMembers` for exactly this
+  /// `MirrorToggleDecision.disengage` carries `residualMembers` for this
   /// sentence: a locked slave keeps mirroring, which keeps its master a master,
-  /// so the set is only partly broken. Binding that residue and ignoring it
-  /// would report "mirroring off" over a set the user is still looking at —
-  /// the silent-success defect this whole sub-project exists to close,
-  /// re-created one layer up.
+  /// so the set is only partly broken. Ignoring the residue would report
+  /// "mirroring off" over a set the user is still looking at.
   ///
-  /// Names the survivors when every one of them can be named, and falls back to
-  /// a count when it cannot: an unnameable display is exactly the kind that gets
-  /// locked into a set (Sidecar, an AirPlay receiver), and half a list reads as
-  /// a bug rather than as a report.
+  /// Names the survivors only when every one can be named: an unnameable display
+  /// is exactly the kind that gets locked into a set (Sidecar, an AirPlay
+  /// receiver), and half a list reads as a bug rather than a report.
   static func partialBreak(
     residual: [CGDirectDisplayID], name: (CGDirectDisplayID) -> String
   ) -> String {

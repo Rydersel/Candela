@@ -2,9 +2,8 @@ import CandelaKit
 import Foundation
 
 /// One report as plain text (CK31), in the diagnostics report's shape. The ONE
-/// renderer: the summary page, Copy summary, the pane's history and every
-/// export come through here, so two copies of a run never disagree. Nothing
-/// here grades the display (CK8).
+/// renderer, so two copies of a run never disagree. Nothing here grades the
+/// display (CK8).
 enum CheckupSummaryText {
   static func render(_ report: CheckupReport) -> String {
     // The subject line owns the product name, scenario and UTC day; deriving

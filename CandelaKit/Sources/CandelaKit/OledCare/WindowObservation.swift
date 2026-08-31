@@ -3,11 +3,11 @@ import Foundation
 
 /// One window as the window server describes it.
 ///
-/// **OC18 — no title, ever.** `kCGWindowName` is the only field of a window list
-/// gated behind Screen Recording, and it is the one that carries what the user
-/// was reading. Attribution needs the owning app, which is free; adding a title
-/// field here would turn a permission-free feature into a permissioned one and
-/// put document names into a persisted store.
+/// **OC18: no title, ever.** `kCGWindowName` is the only field of a window list
+/// gated behind Screen Recording, and it carries what the user was reading.
+/// Attribution needs the owning app, which is free; a title field here would
+/// turn a permission-free feature into a permissioned one and put document names
+/// into a persisted store.
 public struct WindowSnapshot: Equatable, Sendable {
   public let windowID: UInt32
   public let ownerPID: Int32
@@ -30,9 +30,9 @@ public struct WindowSnapshot: Equatable, Sendable {
 
 /// The seam between Kit's attribution logic and CoreGraphics' window list.
 ///
-/// The protocol lives in Kit — CoreGraphics is an allowed Kit import — but its
-/// only real implementation is an app-target island, so the tests here drive
-/// `WindowObserver` with literal snapshots and never touch the window server.
+/// The protocol lives in Kit, but its only real implementation is an app-target
+/// island, so the tests here drive `WindowObserver` with literal snapshots and
+/// never touch the window server.
 public protocol WindowListing: Sendable {
   /// On-screen windows, in display coordinates, EXCLUDING our own process.
   func onScreenWindows() -> [WindowSnapshot]
@@ -40,7 +40,7 @@ public protocol WindowListing: Sendable {
 
 /// What one window-list sample says about a panel.
 public struct WindowObservation: Equatable, Sendable {
-  /// Per-cell dominant owner app, 240 entries; nil where nothing covers.
+  /// Per-cell dominant owner app; nil where nothing covers.
   public let dominantOwnerByCell: [String?]
   /// Seconds each still-present window has held unchanged bounds.
   public let stationarySecondsByWindowID: [UInt32: TimeInterval]
@@ -65,10 +65,10 @@ public struct WindowObservation: Equatable, Sendable {
 /// bounds to spot regions that have not moved.
 ///
 /// **Stationary bounds are a prior, not a verdict.** A video player holds a
-/// fixed rect while every pixel under it changes, and this type will call it
+/// fixed rect while every pixel under it changes, and this type calls it
 /// stationary. Geometry cannot tell static content from moving content without
-/// reading pixels or titles, and OC18 rules the second out — so what comes out
-/// of here is evidence to weigh, never a conclusion to act on alone.
+/// reading pixels or titles, and OC18 rules the second out, so what comes out of
+/// here is evidence to weigh and never a conclusion to act on alone.
 public struct WindowObserver: Sendable {
   /// Five minutes of unmoved bounds. Long enough that dragging a window around
   /// a workspace never trips it, short enough that a left-open editor does.
@@ -79,9 +79,9 @@ public struct WindowObserver: Sendable {
   /// by the menu bar is 25 pt off and must not read as full screen.
   public static let fullScreenTolerancePoints: CGFloat = 2
 
-  /// Layer 0 is an ordinary application window. Anything above it is chrome —
-  /// a shade, a screen saver, another tool's overlay — and a screen-filling one
-  /// is not an app running full screen.
+  /// Layer 0 is an ordinary application window. Anything above it is chrome (a
+  /// shade, a screen saver, another tool's overlay), and a screen-filling one is
+  /// not an app running full screen.
   private static let normalWindowLayer = 0
 
   private struct Held: Sendable {

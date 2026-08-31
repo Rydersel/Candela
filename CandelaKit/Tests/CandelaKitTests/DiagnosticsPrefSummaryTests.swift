@@ -2,12 +2,9 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// One persistence-key shape to run the scrub assertions against.
-///
-/// Both real shapes are exercised. `DisplayDiscovery.persistenceKey(from:)`
-/// returns `service.edidUUID` when there is one — the common case, and the one
-/// the first version of this suite never tested — and falls back to
-/// `name-manufacturer-serial` when there is not.
+/// One persistence-key shape to run the scrub assertions against. Both real shapes
+/// are exercised: `DisplayDiscovery.persistenceKey(from:)` returns the EDID UUID
+/// when there is one and falls back to `name-manufacturer-serial` when there is not.
 struct PersistenceKeyShape: Sendable, CustomTestStringConvertible {
   let description: String
   let key: String
@@ -45,13 +42,10 @@ struct DiagnosticsPrefSummaryTests {
     DiagnosticsPrefSummary.nonDefaultPrefs(prefs, remembersMode: remembersMode)
   }
 
-  /// Moves EVERY per-display setting the summary reads off its default. Shared
-  /// by the scrub test and the coverage test, so the two can never disagree
-  /// about what "a fully non-default display" means.
-  ///
-  /// `rememberDisplayMode` is not a `DisplayPrefs` property — it lives in
-  /// `ModePersistence` — so it can only arrive from the caller; every call site
-  /// here passes `remembersMode: true` alongside this helper.
+  /// Moves every per-display setting the summary reads off its default, shared so
+  /// the scrub and coverage tests cannot disagree about what that means.
+  /// `rememberDisplayMode` lives in `ModePersistence`, not `DisplayPrefs`, so every
+  /// call site passes `remembersMode: true` alongside this helper.
   private func moveEverythingOffDefault(_ prefs: DisplayPrefs) {
     prefs.friendlyName = "Left"
     prefs.hideDisplay = true
@@ -80,8 +74,8 @@ struct DiagnosticsPrefSummaryTests {
     prefs.oledUnfocusedDimSeconds = 900
     prefs.oledUnfocusedDimBrightness = 0.4
     prefs.oledHoursTracking = false
-    // W3b-1's two, and their defaults run opposite ways: telemetry is off until
-    // granted, window observation is on because it needs no permission.
+    // These two default opposite ways: telemetry is off until granted, window
+    // observation is on because it needs no permission.
     prefs.oledTelemetry = true
     prefs.oledWindowObservation = false
     prefs.oledDetectionDimming = true
@@ -107,12 +101,10 @@ struct DiagnosticsPrefSummaryTests {
 
   // MARK: - Coverage
 
-  /// Every `PrefName` this summary is NOT expected to report, each for a stated
-  /// reason. Anything else is per-display and must appear.
-  ///
-  /// This is the list a NEW `PrefName` case forces someone to look at: an
-  /// addition lands in neither this set nor the summary, and the test below
-  /// fails until it is classified deliberately.
+  /// Every `PrefName` this summary is not expected to report, each for a stated
+  /// reason; anything else is per-display and must appear. A new case lands in
+  /// neither this set nor the summary, so the test below fails until it is
+  /// classified deliberately.
   private static let notReportedPerDisplay: Set<PrefName> = [
     // App-level: one value for the whole app, not a fact about a display.
     .menuIcon, .hideBuiltInDisplay, .showContrast,
@@ -138,32 +130,18 @@ struct DiagnosticsPrefSummaryTests {
     .virtualSlotConfigured, .virtualSlotName, .virtualSlotWidth, .virtualSlotHeight,
     .virtualSlotHiDPI, .virtualSlotRefreshHz, .virtualSlotRecreateAtLaunch, .virtualSlotUUID,
     .virtualSlotDefined,
-    // Per-display, deliberately not summarised: it is the pinned mode
-    // descriptor, and `rememberDisplayMode = true` already reports that a pin
-    // is in force. The descriptor belongs in the report's `current mode` line,
-    // not in a list of settings.
+    // Per-display, but the descriptor belongs in the report's `current mode` line:
+    // `rememberDisplayMode = true` already reports that a pin is in force.
     .storedDisplayMode,
-    // Per-display, excluded on the same reasoning: it is the synthesized stop
-    // in force, which the report's mode line carries, and `offerSyntheticSizes`
-    // already reports that synthesis is available on this display.
+    // Same reasoning: the mode line carries the synthesized stop, and
+    // `offerSyntheticSizes` already reports that synthesis is available here.
     .storedSyntheticSize,
   ]
 
-  /// Closes the gap this suite's comments used to CLAIM was closed. A fixture
-  /// that only sets the prefs someone remembered to add covers exactly what it
-  /// covers, and nothing made a new pref appear in it. Driving both sides off
-  /// `PrefName.allCases` is what makes the claim true:
-  ///
-  /// - a new per-display `PrefName` the summary ignores → missing from
-  ///   `emitted` → fails;
-  /// - a pref the summary reports but this fixture never sets → missing from
-  ///   `emitted` → fails;
-  /// - a new app-level `PrefName` → absent from the exclusion set → fails,
-  ///   until someone classifies it.
-  ///
-  /// All three were verified by construction, not by argument: a temporary
-  /// `PrefName` case reported `unreported: ["futurePerDisplayThing"]`, and
-  /// deleting one line from the fixture reported `unreported: ["hideOsd"]`.
+  /// A fixture that only sets the prefs someone remembered to add covers exactly
+  /// those, and nothing makes a new pref appear in it. Driving both sides off
+  /// `PrefName.allCases` is what closes that: a new per-display case, a reported
+  /// pref the fixture never sets, and an unclassified app-level case all fail here.
   @Test func theFixtureCoversEveryPerDisplayPrefName() {
     let prefs = prefs()
     moveEverythingOffDefault(prefs)
@@ -193,15 +171,10 @@ struct DiagnosticsPrefSummaryTests {
 
   // MARK: - The PII contract
 
-  /// THE PII CONTRACT. `DisplayPrefs` stores under `"<name>.<persistenceKey>"`
-  /// and a persistence key is an EDID UUID or `name-manufacturer-serial`, so a
-  /// summary that named its settings by their real storage keys would put the
-  /// display's identity into every report — straight past the `hasSerial` flag
-  /// that exists to keep it out of public issues.
-  ///
-  /// Asserted over EVERY emitted line, against the fully-non-default fixture
-  /// whose completeness the coverage test above enforces, and against BOTH real
-  /// key shapes.
+  /// The PII contract. `DisplayPrefs` stores under `"<name>.<persistenceKey>"` and a
+  /// persistence key is an EDID UUID or `name-manufacturer-serial`, so a summary
+  /// naming settings by their storage keys puts the display's identity into every
+  /// report, past the `hasSerial` flag that keeps it out of public issues.
   @Test(arguments: DiagnosticsPrefSummaryTests.keyShapes)
   func noEmittedLineCarriesAComposedStorageKey(shape: PersistenceKeyShape) {
     let prefs = prefs(shape)
@@ -210,11 +183,9 @@ struct DiagnosticsPrefSummaryTests {
     let lines = summary(prefs, remembersMode: true)
     #expect(!lines.isEmpty, "a fixture that produced nothing could not fail this test")
 
-    // The composed key's tell, DERIVED from the fixture rather than spelled
-    // out: every stored key ends `.<persistenceKey>`, and no bare pref name
-    // may. A hardcoded `".DELL"` would have silently matched nothing the day
-    // the fixture's key changed shape — which is precisely what adding the
-    // EDID-UUID shape above would have done to it.
+    // Derived from the fixture rather than spelled out: every stored key ends
+    // `.<persistenceKey>` and no bare pref name may. A hardcoded `".DELL"` matches
+    // nothing the day a key shape changes, which is what the UUID shape would do.
     let composedTell = "." + shape.key.prefix(4)
 
     for line in lines {
@@ -252,10 +223,9 @@ struct DiagnosticsPrefSummaryTests {
     #expect(lines.contains("rememberDisplayMode = true"))
   }
 
-  /// The command is SCOPE, not identity — three commands share one pref name,
-  /// and dropping the middle component would print three different settings as
-  /// one. It is also the one part of a storage key that is safe to keep: it is
-  /// a fixed vocabulary, not display-derived.
+  /// The command is scope, not identity: every command shares one pref name, so
+  /// dropping the middle component prints different settings as one. It is also the
+  /// one part of a storage key safe to keep, being a fixed vocabulary.
   @Test func perCommandTuningNamesItsCommandAndNotItsDisplay() {
     let prefs = prefs()
     var tuning = CommandTuning.unset
@@ -287,10 +257,9 @@ struct DiagnosticsPrefSummaryTests {
     #expect(summary(prefs).isEmpty)
   }
 
-  /// #125. `oledIdleDimBrightness` is `1 - stored`, and `1 - 0.9` is
-  /// `0.09999999999999998` in binary floating point. The report is the artifact
-  /// a user pastes into a bug report, so binary noise in it reads as a bug in
-  /// the app to anyone who does not already know it is a display artifact.
+  /// `oledIdleDimBrightness` is `1 - stored`, and `1 - 0.9` is `0.09999999999999998`
+  /// in binary floating point. Users paste this report into bug reports, where the
+  /// noise reads as a bug in the app.
   @Test func aDimLevelCarriesNoFloatingPointNoise() {
     let prefs = prefs()
     prefs.oledIdleDimBrightness = 0.1
@@ -302,12 +271,9 @@ struct DiagnosticsPrefSummaryTests {
     }
   }
 
-  /// #125's second half. The line is named for the storage key, which holds the
-  /// dim AMOUNT, so a reader cross-checking `defaults read` must find that
-  /// number under it. The brightness the pane showed is its complement and is
-  /// what the report is usually about, so both are stated and each is named.
-  /// Printing one under the other's name is what made a reader conclude the
-  /// report and the domain disagreed.
+  /// The line is named for the storage key, which holds the dim amount, so a reader
+  /// cross-checking `defaults read` finds that number under it. The pane showed the
+  /// complement, so both are stated and each is named.
   @Test func aDimLevelStatesBothTheStoredAmountAndTheResultingBrightness() {
     let prefs = prefs()
     prefs.oledIdleDimBrightness = 0.1

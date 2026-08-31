@@ -1,10 +1,9 @@
 import SwiftUI
 
-/// The settings surface: the onboarding card at settings sharpness. Tighter
-/// corner and padding than the flow's card, macOS density over stage presence.
+/// The onboarding card at settings density: tighter corner and padding.
 struct SettingsCard<Content: View>: View {
-  /// Lit in the destination accent: the card's subject is on, enrolled, or
-  /// otherwise the one the page is about. Not a selection cursor.
+  /// Lit in the destination accent when the card's subject is on. Not a
+  /// selection cursor.
   var isLit = false
   @ViewBuilder var content: Content
 
@@ -29,8 +28,8 @@ struct SettingsCard<Content: View>: View {
 }
 
 /// A section kicker with no card under it, for a stretch of page that is
-/// several cards rather than one. Same type, same accent, same heading trait as
-/// the kicker `SettingsCardSection` draws, because it is that kicker.
+/// several cards. Literally the kicker `SettingsCardSection` draws, so the two
+/// cannot drift.
 struct SettingsSectionTitle: View {
   let text: String
 
@@ -51,9 +50,8 @@ struct SettingsSectionTitle: View {
   }
 }
 
-/// A titled group of rows on one card: this window's answer to a `Form`
-/// section. The kicker is a VoiceOver heading like every other settings section
-/// header (accessibility contract 4).
+/// A titled group of rows on one card, this window's answer to a `Form`
+/// section. The kicker is a VoiceOver heading like every other section header.
 struct SettingsCardSection<Content: View>: View {
   var title: String?
   @ViewBuilder var content: Content
@@ -81,14 +79,12 @@ struct SettingsCardDivider: View {
   }
 }
 
-/// A state the page is in, said once: a leading symbol and the sentences that
-/// explain it.
+/// A state the page is in, said once.
 ///
-/// Monochrome on purpose. The symbol carries the state alongside the words, so
+/// Monochrome on purpose. The symbol carries the state alongside the words so
 /// nothing is signalled by color alone, and it stays at `faintColor` rather
-/// than taking the destination accent, which in this window means "this is on".
-/// Outer spacing belongs to the call site: where a notice sits in its card is a
-/// property of the card, not of the notice.
+/// than the destination accent, which here means "this is on". Outer spacing
+/// belongs to the call site.
 struct SettingsNotice<Content: View>: View {
   var symbol: String = "exclamationmark.triangle"
   /// False where the notice already sits on a card, which would otherwise draw
@@ -123,9 +119,8 @@ struct SettingsNotice<Content: View>: View {
   }
 }
 
-/// A qualifier at row weight inside a card: a sentence with no control of its
-/// own, in the voice `SettingRow` gives a caption, so two kinds of qualifier on
-/// one card carry the same weight.
+/// A sentence with no control of its own, in the voice `SettingRow` gives a
+/// caption, so two kinds of qualifier on one card carry the same weight.
 struct SettingsRowNote: View {
   private let sentence: Text
 
@@ -137,7 +132,7 @@ struct SettingsRowNote: View {
   }
 
   /// For a sentence carrying a display name or a count, which cannot be a
-  /// `LocalizedStringKey` literal.
+  /// `LocalizedStringKey`.
   init(verbatim sentence: String) {
     self.sentence = Text(verbatim: sentence)
   }
@@ -148,8 +143,8 @@ struct SettingsRowNote: View {
       .foregroundStyle(SettingsTheme.faintColor)
       .fixedSize(horizontal: false, vertical: true)
       .opacity(isEnabled ? 1 : SettingsTheme.disabledOpacity)
-      // Standing on the card it is a row of its own; inside one the row
-      // wrapper already paid.
+      // Standing on the card this is a row of its own; nested, the row wrapper
+      // already paid.
       .padding(.vertical, rowIsPadded ? 0 : SettingsTheme.rowVerticalPadding)
   }
 }

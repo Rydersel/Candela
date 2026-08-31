@@ -5,9 +5,8 @@ import Testing
 //
 // Three states, and the middle one is the reason this is a named function
 // rather than an `if let` in `body`: "remembering is on and nothing is pinned"
-// is reachable by Forget and by a turn-on whose seeding pin declined, and both
-// used to render nothing at all, which is indistinguishable from the toggle
-// having failed.
+// is reachable by Forget and by a turn-on whose seeding pin declined, and a
+// state that renders nothing is indistinguishable from the toggle failing.
 @Suite("Pinned resolution row") @MainActor
 struct PinnedResolutionRowTests {
   private static let pin = DisplayModeDescriptor(

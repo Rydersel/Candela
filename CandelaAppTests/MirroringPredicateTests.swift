@@ -2,10 +2,8 @@ import CandelaKit
 import CoreGraphics
 import Testing
 
-/// SS7's carve-out as the three mirroring surfaces apply it, and SS12's naming
-/// fallback. Both were view-private before this suite and unreachable by any
-/// test; the derivation moved to a nameable function in the same file and this
-/// calls it (AT10).
+/// SS7's carve-out as the mirroring surfaces apply it, and SS12's naming
+/// fallback (AT10).
 ///
 /// The fixture is the shape that produced the defects: a single physical panel
 /// with a synthesized size engaged, so the virtual display is a second online
@@ -41,7 +39,7 @@ struct MirroringPredicateTests {
   }
 
   /// The same machine state with the stamp missing: the control for every test
-  /// below, and the state the surfaces were in before SS7 was wired.
+  /// below.
   private var unstamped: MirrorTopology {
     MirrorTopology([
       display(Self.panelID, name: "MAG341C", mirrors: Self.virtualID),

@@ -164,7 +164,7 @@ struct OnboardingFlowModelTests {
     }
     #expect(model.applyState == .reverted)
     #expect(model.sizeChoices["dell"] == .keepCurrent)
-    // The Stage 1 mock advanced here; expiry must leave the page in place.
+    // Expiry reverts in place; it never advances.
     #expect(model.index == pageIndex)
     #expect(model.committed.isEmpty)
   }
@@ -760,7 +760,7 @@ struct OnboardingFlowModelTests {
     #expect(model.displayName(forKey: "dell") == "Desk Display")
   }
 
-  // MARK: - Stage 1 behaviours that must not regress
+  // MARK: - Behaviours that must not regress
 
   @Test func commitsArriveInPageOrderOnAdvance() {
     let model = OnboardingFlowModel(environment: environment([

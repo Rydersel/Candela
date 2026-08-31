@@ -1,8 +1,7 @@
 import CandelaKit
 
 /// Every user-visible string in the checkup flow, in one place so the copy rules
-/// (no em dashes, no internal key names, no verdict on the display) can be
-/// checked over the whole surface at once.
+/// (no em dashes, no key names, no verdict on the display) can be checked at once.
 enum CheckupCopy {
 
   // MARK: - Scenario

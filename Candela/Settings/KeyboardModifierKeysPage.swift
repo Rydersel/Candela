@@ -2,14 +2,13 @@ import CandelaKit
 import SwiftUI
 
 /// The modifier-combination legend, a reference page pushed from Keyboard
-/// (KMR5): five rows, nothing here is a control, which is exactly the
-/// hub-vs-subpage cut (SO2). Always reachable; when the brightness keys are
-/// not watched it says the combinations are inactive rather than describing
-/// behavior that is not happening (the D11 defect class).
+/// (KMR5): nothing here is a control, which is the hub-vs-subpage cut (SO2).
+/// Always reachable; when the brightness keys are not watched it says the
+/// combinations are inactive rather than describing behavior that is not
+/// happening (the D11 defect class).
 ///
-/// `@MainActor` for the same reason as every pane: `AppModel` is main-actor
-/// and a `View`'s computed properties are nonisolated under complete
-/// concurrency checking.
+/// `@MainActor`: `AppModel` is main-actor and a `View`'s computed properties
+/// are nonisolated under complete concurrency checking.
 @MainActor
 struct KeyboardModifierKeysPage: View {
   @Environment(AppModel.self) private var model
@@ -18,7 +17,7 @@ struct KeyboardModifierKeysPage: View {
 
   var body: some View {
     // The inactive note follows the mode picker on the root; prefs are plain
-    // UserDefaults, so the revision bump is the only re-read.
+    // UserDefaults, so this bump is the only re-read.
     let _ = model.prefsRevision
     SettingsPageScaffold {
       SubPageHeader(
@@ -30,8 +29,7 @@ struct KeyboardModifierKeysPage: View {
           inactiveNote
           SettingsCardDivider()
         }
-        // Spoken labels preserved verbatim from the legend this page replaced
-        // (SO16: the sentence IS the accessibility label).
+        // SO16: the sentence IS the accessibility label.
         ModifierLegendRow(
           title: "Built-in display",
           modifiers: ["⌃"], suffix: "+ brightness key",
@@ -63,19 +61,16 @@ struct KeyboardModifierKeysPage: View {
         )
       }
 
-      // The scope, stated once for the page under the card the section footer
-      // used to sit beneath: media-key handling only, the fine-step modifiers,
-      // and the custom-shortcut exemption (KMR5).
+      // The page's scope, stated once: media-key handling only, the fine-step
+      // modifiers, and the custom-shortcut exemption (KMR5).
       SettingsCaption("These combinations work while the keyboard's brightness keys are handled by \(AppInfo.productName). Holding Shift and Option with any adjustment makes a fine step. Custom shortcuts carry their own modifiers, and none of these rules apply to them.")
     }
   }
 
-  /// Stays at the head of the legend rather than becoming a card of its own:
-  /// it is a fact about the five rows under it, and a separate notice would
-  /// float free of them.
+  /// At the head of the legend rather than a card of its own: it is a fact
+  /// about the rows under it, and a separate notice would float free of them.
   private var inactiveNote: some View {
-    // Surfaceless: it already sits on the legend's card, and a notice drawing a
-    // second surface inside the first is a box in a box.
+    // Surfaceless: it already sits on the legend's card.
     SettingsNotice(drawsSurface: false) {
       Text("These combinations are inactive because the keyboard's brightness keys are currently left to macOS.")
         .fixedSize(horizontal: false, vertical: true)
@@ -84,15 +79,13 @@ struct KeyboardModifierKeysPage: View {
   }
 }
 
-/// One modifier combination and what it does, the glyphs rendered as keycap
-/// chips matching the hero's vocabulary (KMR5).
+/// One modifier combination and what it does, glyphs drawn as keycap chips in
+/// the hero's vocabulary (KMR5).
 ///
-/// ONE accessibility element (SO16 + contract 5's shape): the label is the
-/// whole sentence the legend's caption used to say, so the glyphs are never
-/// spelled out character by character and the combination is described in
-/// words. At accessibility text sizes the combination drops onto its own line
-/// rather than truncating (contract 10), the same `ViewThatFits` measurement
-/// `NavigationRow` uses.
+/// ONE accessibility element (SO16): the label is the whole sentence, so the
+/// glyphs are never spelled out character by character. At accessibility text
+/// sizes the combination drops onto its own line rather than truncating, the
+/// same `ViewThatFits` measurement `NavigationRow` uses.
 private struct ModifierLegendRow: View {
   let title: LocalizedStringKey
   let modifiers: [String]
@@ -120,8 +113,8 @@ private struct ModifierLegendRow: View {
     .accessibilityLabel(spoken)
   }
 
-  /// Chips in the hero's keycap vocabulary at row scale: a flat face and a
-  /// hairline edge, the same two whites the caps use.
+  /// Chips at row scale: a flat face and a hairline edge, the two whites the
+  /// keycaps use.
   private var combination: some View {
     HStack(spacing: 4) {
       ForEach(modifiers, id: \.self) { glyph in

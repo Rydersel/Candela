@@ -4,15 +4,13 @@ import Testing
 @testable import CandelaKit
 
 /// The derivations the Health pane's cards and the OLED Care overview's cards
-/// now share (SC4). Both surfaces read one display's measurement and both must
-/// read it the same way, so the sentence they join lives in one function and is
-/// pinned here.
+/// share (SC4). Both read one display's measurement and both must read it the
+/// same way, so the sentence they join lives in one function and is pinned here.
 ///
-/// The honesty precedence is the assertion that matters: `confidence` is a pure
-/// function of the telemetry pref and the stored sample count, so it stays
-/// `.measured` through a revoked Screen Recording grant and through a Safe Mode
-/// session. A card that read the switch alone would keep claiming readings a
-/// minute in a session that has taken none.
+/// The honesty precedence is what matters: `confidence` is a pure function of
+/// the telemetry pref and the stored sample count, so it stays `.measured`
+/// through a revoked Screen Recording grant and through Safe Mode. A card that
+/// read the switch alone would keep claiming readings a session never took.
 @Suite("Summary card copy")
 struct HealthCardCopyTests {
   private func summary(
@@ -87,10 +85,9 @@ struct HealthCardCopyTests {
 
   // MARK: - The findings card's gate
 
-  /// `PanelHottestAreaCard` moved onto the OLED Care display page on
-  /// 2026-08-20, above the dimming settings it argues for. Its gate is the
-  /// whole honesty rule for that card: the multiple is the one number this
-  /// feature may state, and only a `.measured` history may state it.
+  /// `PanelHottestAreaCard` sits above the dimming settings it argues for, and
+  /// its gate is the honesty rule for the card: the multiple is the one number
+  /// this feature may state, and only a `.measured` history may state it.
   @Test func theHottestAreaCardStatesAMultipleOnlyWhenMeasured() {
     #expect(PanelHottestAreaCard.multiple(summary(.measured, hottestRelative: 3.24)) == "3.2×")
     #expect(PanelHottestAreaCard.multiple(summary(.measured)) == nil)

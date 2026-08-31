@@ -22,9 +22,8 @@ actor EngagesAfterFirstMeasureHDR: HDRToggling {
   func displaysReconfigured() {}
 }
 
-/// The banner recovery's ordering and its evidence rules (D29). The reset path's
-/// equivalent lives in the app target and so has never had a test; this is the
-/// same discipline expressed where it can be pinned.
+/// The banner recovery's ordering and evidence rules (D29). The reset path's
+/// equivalent lives in the app target, where nothing can pin it.
 @Suite("Stranded mute recovery (D29)")
 @MainActor
 struct StrandedMuteRecoveryTests {
@@ -143,13 +142,10 @@ struct StrandedMuteRecoveryTests {
     #expect(await rig.muteWires() == [2])
   }
 
-  /// The race the second read exists for: the write is queued, HDR engages
-  /// while it is in flight, and the panel swallows it while the applier reports
-  /// success. Nothing in the ACK can see this.
-  ///
-  /// Built from the read counter rather than from a sleep: "engaged between the
-  /// two reads" IS the window, and timing it against the settle would be a bet
-  /// on a duration nobody measured.
+  /// The race the second read exists for: HDR engages while the write is in
+  /// flight, the panel swallows it, the applier reports success, and nothing in
+  /// the ACK can see it. Built from the read counter, not a sleep, because
+  /// "engaged between the two reads" IS the window.
   @Test("HDR that engages while the unmute is in flight leaves the mute standing")
   func hdrEngagingMidFlightIsUnconfirmed() async {
     let hdr = EngagesAfterFirstMeasureHDR()

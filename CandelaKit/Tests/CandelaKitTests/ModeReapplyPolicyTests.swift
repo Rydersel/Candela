@@ -36,9 +36,9 @@ struct ModeReapplyPolicyTests {
   }
 
   /// Applying the mode a display already runs still costs a full CoreGraphics
-  /// reconfiguration — a blank screen, suspended DDC writes, and another
-  /// topology event that arrives back at this same decision. At launch, for
-  /// every remembered display, for nothing.
+  /// reconfiguration: a blank screen, suspended DDC writes, and another topology
+  /// event arriving back at this same decision. At launch, for every remembered
+  /// display, for nothing.
   @Test func aDisplayAlreadyOnItsStoredModeIsLeftAlone() {
     let decision = ModeReapplyPolicy.decide(
       isEnabled: true, stored: native.descriptor, available: [native, faster], current: native
@@ -69,13 +69,11 @@ struct ModeReapplyPolicyTests {
   }
 
   /// A display that cannot say what mode it is running is not in a state to be
-  /// reconfigured — which in practice means asleep, or mirrored. The old
-  /// behaviour applied blind, on the grounds that skipping would silently drop
-  /// the reapply; the failure that made it wrong is that a blind apply which
-  /// FAILS reports a failure that stands until the display is physically
-  /// replugged, because a wake is not a departure and only an absence re-arms an
-  /// arrival. Deferring drops nothing: the claim goes back, and the wake is
-  /// itself a reconfiguration event that runs this again.
+  /// reconfigured, which in practice means asleep or mirrored. A blind apply that
+  /// FAILS reports a failure standing until the display is physically replugged,
+  /// because a wake is not a departure and only an absence re-arms an arrival.
+  /// Deferring drops nothing: the claim goes back, and the wake is itself a
+  /// reconfiguration event that runs this again.
   @Test func anUnreadableCurrentModeIsDeferredRatherThanAppliedBlind() {
     let decision = ModeReapplyPolicy.decide(
       isEnabled: true, stored: native.descriptor, available: [native], current: nil
@@ -111,9 +109,8 @@ struct ModeReapplyPolicyTests {
   }
 
   /// Deferred, not dismissed. Marking a mirror slave handled would mean it is
-  /// never reapplied for the rest of the connection — including after the user
-  /// breaks the mirror, which is exactly when its own resolution starts to
-  /// matter again.
+  /// never reapplied for the rest of the connection, including after the user
+  /// breaks the mirror, which is when its own resolution starts to matter again.
   @Test func aMirrorSlaveIsDeferredRatherThanSilentlyHandled() {
     let decision = ModeReapplyPolicy.decide(
       isEnabled: true, isMirroringAnotherDisplay: true, stored: native.descriptor,
@@ -154,8 +151,8 @@ struct ModeReapplyPolicyTests {
     #expect(decision.notice == .substituted(smaller))
   }
 
-  /// The quiet failure this task exists to prevent: a substitute that lands
-  /// without a word, on a display the user set deliberately.
+  /// The quiet failure: a substitute that lands without a word, on a display the
+  /// user set deliberately.
   @Test func aSubstituteIsNeverSilent() {
     for available in [[faster], [smaller]] {
       let decision = ModeReapplyPolicy.decide(

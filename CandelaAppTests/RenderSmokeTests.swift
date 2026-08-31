@@ -17,14 +17,12 @@ import Testing
 // wrong, and only a human looking at the window catches that.
 @Suite("Render smoke") @MainActor
 struct RenderSmokeTests {
-  /// Well under any surface here and well above a collapsed layout, so the
-  /// assertion fails on "rendered nothing" without pinning a size that a font
-  /// metric or an appearance change can move.
+  /// Well under any surface here and well above a collapsed layout, so nothing
+  /// pins a size a font metric or an appearance change can move.
   private static let floor = 20
 
-  /// Renders offscreen and returns the image, or nil when the renderer
-  /// produced none. Scale stays at the default 1, so a dimension is a point
-  /// count and the floor above means what it reads as.
+  /// Scale stays at the default 1, so a dimension is a point count and the
+  /// floor above means what it reads as.
   private func render(_ view: some View) -> CGImage? {
     ImageRenderer(content: view).cgImage
   }
@@ -41,11 +39,10 @@ struct RenderSmokeTests {
   /// either is missing or the sizes differ. The scheme comparisons use this
   /// instead of byte equality because `ImageRenderer` is not bitwise
   /// deterministic [MEASURED 2026-08-27]: one unchanged view re-renders a unit
-  /// or two off per channel, in a single glyph pixel once the process is warm
-  /// (full bundle only, never in isolation) or across the whole wallpaper
-  /// gradient under a light system appearance. Byte equality read both as a
-  /// scheme leak. A real scheme flip moves tens of units, which the positive
-  /// control pins.
+  /// or two off per channel, in a single glyph pixel once the process is warm or
+  /// across the whole wallpaper gradient in light appearance, and byte equality
+  /// read both as a scheme leak. A real scheme flip moves tens of units, which
+  /// the positive control pins.
   private func maxChannelDelta(_ lhs: CGImage?, _ rhs: CGImage?) -> Int? {
     guard let a = pixels(lhs), let b = pixels(rhs), a.count == b.count, !a.isEmpty else { return nil }
     return zip(a, b).reduce(0) { max($0, abs(Int($1.0) - Int($1.1))) }
@@ -75,9 +72,8 @@ struct RenderSmokeTests {
   ///
   /// Size is the whole assertion, and on this surface it has to be. The panel
   /// draws no background of its own (the hosting `NSMenu` supplies one), so a
-  /// correct render is mostly clear pixels with ink only where the text and
-  /// the divider are: measured 2026-08-17 at 280x170 with about a tenth of the
-  /// pixels carrying any alpha. Anything counting ink would be pinning that
+  /// correct render is mostly clear pixels: measured 2026-08-17 at 280x170 with
+  /// about a tenth of the pixels carrying any alpha. Counting ink would pin that
   /// ratio, which is appearance, and appearance is a human's job.
   @Test func theEmptyPanelRenders() {
     let model = TestFixtures.appModel()
@@ -85,9 +81,7 @@ struct RenderSmokeTests {
   }
 
   /// The three slider rows a display section draws, over a fixture state and
-  /// without a model. This used to be the only way to get rows on screen at
-  /// all; the populated panel below now covers the real composition, and this
-  /// stays because it isolates the rows from everything the panel wraps them
+  /// without a model, which isolates them from everything the panel wraps them
   /// in. The header row and the two disclosure sections are private to their
   /// files and stay uncovered.
   @Test func aDisplaysSliderRowsRender() {
@@ -108,18 +102,16 @@ struct RenderSmokeTests {
     expectPixels(render(rows), "panel slider rows")
   }
 
-  /// The panel WITH display rows, which the discovery seam finally makes
-  /// reachable (this suite used to record it as impossible).
+  /// The panel WITH display rows, which the discovery seam makes reachable.
   ///
   /// The premise is asserted before the render, and that is the point: with no
-  /// displays the panel still renders perfectly well as its empty state, so a
-  /// refresh that quietly produced nothing would leave every pixel assertion
-  /// below passing for the wrong reason. That is the vacuous pass this layer
-  /// exists to avoid, arriving through the back door.
+  /// displays the panel still renders fine as its empty state, so a refresh that
+  /// quietly produced nothing would leave every pixel assertion below passing
+  /// for the wrong reason.
   ///
   /// The comparison against the empty panel is the real assertion. A size floor
-  /// alone cannot tell "two displays drew their rows" from "the empty state
-  /// drew its one line of text", because both clear the floor comfortably.
+  /// alone cannot tell "two displays drew their rows" from "the empty state drew
+  /// its one line of text"; both clear the floor comfortably.
   @Test func thePopulatedPanelRendersItsDisplayRows() async {
     let discovery = ScriptedDiscovery([
       (id: 2, key: "smoke-panel-a", name: "Smoke Panel A"),
@@ -135,10 +127,9 @@ struct RenderSmokeTests {
     // The baseline is a model refreshed through the SAME seam with nothing
     // attached, never `TestFixtures.appModel()` unrefreshed. `refreshBuiltIn`
     // reads the machine, so a refreshed model on a laptop also gains a built-in
-    // row: measured 2026-08-19, comparing refreshed against unrefreshed made
-    // this assertion pass on the built-in's height alone, and it went on
-    // passing with the external topology emptied. Refreshing both leaves the
-    // two display rows as the only difference between them.
+    // row: measured 2026-08-19, comparing refreshed against unrefreshed passed
+    // on the built-in's height alone and went on passing with the external
+    // topology emptied. Refreshing both leaves the two rows as the difference.
     let baseline = TestFixtures.appModel(discovery: ScriptedDiscovery([]))
     await baseline.refresh()
     let empty = render(PanelView().environment(baseline))
@@ -186,18 +177,14 @@ struct RenderSmokeTests {
 
   /// The page's header and the scaffold's card chrome. The mode list is NOT on
   /// screen: it renders from `DisplayModeCoordinator.catalogs`, which is
-  /// `private(set)` on the coordinator the page reads out of the environment
-  /// model, so the only honest routes to a populated list are a live display
-  /// or an injection seam this suite may not add. A nil catalog is a real
-  /// state the page has to survive anyway (it is what a push renders before
-  /// enumeration lands), so this covers that state and the row derivation
-  /// stays covered structurally instead.
+  /// `private(set)`, so the only honest routes to a populated list are a live
+  /// display or an injection seam this suite may not add. A nil catalog is a
+  /// real state anyway, the one a push renders before enumeration lands.
   ///
-  /// The frame is the page's own extent since the card conversion, the way the
-  /// built-in pane's render is: the scaffold lays a `SettingsTheme.pageWidth`
-  /// column out inside 32 pt of horizontal padding, so anything narrower than
-  /// that sum renders the cards compressed. The accent is injected because the
-  /// list's selection ring and its checkmark both read from it.
+  /// The frame is the page's own extent: the scaffold lays a
+  /// `SettingsTheme.pageWidth` column out inside 32 pt of horizontal padding, so
+  /// anything narrower renders the cards compressed. The accent is injected
+  /// because the list's selection ring and its checkmark both read from it.
   @Test func theAllModesPageRendersWithoutACatalog() {
     let model = TestFixtures.appModel()
     let state = TestFixtures.displayState(name: "Smoke Panel", persistenceKey: "smoke-panel")
@@ -213,17 +200,16 @@ struct RenderSmokeTests {
   }
 
   /// The opening both display pages share: the lit glyph, the identity block
-  /// and the levels card. It gets its own render because neither page can put
-  /// it on screen from this bundle (the built-in slot is empty on a
-  /// hardware-free model, and the external hub needs a connected display), so
-  /// without this the whole hero composition would go unrendered.
+  /// and the levels card. It gets its own render because neither page can put it
+  /// on screen from this bundle (the built-in slot is empty on a hardware-free
+  /// model, and the external hub needs a connected display).
   ///
   /// Width only: the hero sizes its own height, and pinning one would assert a
   /// layout rather than the fact that it produced pixels.
   ///
   /// Both variants, because they are different drawings and not a parameter of
-  /// one: the built-in draws `LaptopGlyph` and drops the volume row, so a
-  /// break in the laptop path is invisible to the external render.
+  /// one: the built-in draws `LaptopGlyph` and drops the volume row, so a break
+  /// in the laptop path is invisible to the external render.
   @Test(arguments: [DisplayHeroView.Variant.external, .builtIn])
   func theDisplayHeroRenders(variant: DisplayHeroView.Variant) {
     let model = TestFixtures.appModel()
@@ -236,20 +222,18 @@ struct RenderSmokeTests {
     expectPixels(render(hero), "DisplayHeroView, \(isBuiltIn ? "built-in" : "external")")
   }
 
-  /// The built-in display's page, which grew a Display section of its own.
+  /// The built-in display's page.
   ///
   /// The catalog is absent here, and on a hardware-free fixture `model.builtIn`
-  /// is too, so what this covers is the state every visit to the page starts
-  /// in: the rest of the pane on screen and the resolution section correctly
-  /// not yet drawn. A populated catalog is unreachable from this bundle for
-  /// `AllModesPage`'s reason (`catalogs` is `private(set)` and the only honest
-  /// filler is a live display), so the section's own derivation is covered by
-  /// the row-model suite instead.
+  /// is too, so this covers the state every visit to the page starts in: the
+  /// rest of the pane on screen and the resolution section correctly not yet
+  /// drawn. A populated catalog is unreachable from this bundle for
+  /// `AllModesPage`'s reason, so the section's own derivation is covered by the
+  /// row-model suite instead.
   ///
-  /// The frame is the page's own extent since the card conversion, not a round
-  /// number: the scaffold lays a `SettingsTheme.pageWidth` column out inside 32
-  /// pt of horizontal padding, so anything narrower than that sum renders the
-  /// cards compressed and covers a layout the window never shows.
+  /// The frame is the page's own extent, not a round number: the scaffold lays a
+  /// `SettingsTheme.pageWidth` column out inside 32 pt of horizontal padding, so
+  /// anything narrower renders a layout the window never shows.
   @Test func theBuiltInDisplayPaneRenders() {
     let model = TestFixtures.appModel()
     let pane = BuiltInDisplayPane(
@@ -262,12 +246,10 @@ struct RenderSmokeTests {
     expectPixels(render(pane), "BuiltInDisplayPane")
   }
 
-  /// The theme layer composed the way a restyled page composes it: the
-  /// scaffold's scroll and content column, a card section, and the two shared
-  /// rows inside it. Nothing here is a real pane, which is the point: it covers
-  /// the shared components before any page adopts them, so a collapsed card or
-  /// a crashing row surfaces here rather than in whichever page happens to be
-  /// migrated first.
+  /// The theme layer composed the way a page composes it: the scaffold's scroll
+  /// and content column, a card section, and the two shared rows inside it.
+  /// Nothing here is a real pane, which is the point: a collapsed card or a
+  /// crashing row surfaces here rather than in whichever page adopted it.
   @Test func theThemeComponentsRender() {
     let page = SettingsPageScaffold {
       SettingsPageHeader(title: "Levels", subtitle: "The shared components on one card.")
@@ -290,13 +272,10 @@ struct RenderSmokeTests {
   /// depicted widgets follow the SYSTEM appearance, so the settings window's own
   /// pinned-dark scheme must not reach them.
   ///
-  /// The regression this catches shipped once. The grounds already tracked the
-  /// system through the appearance observer, but the labels ("Color LCD", the
-  /// pill's display name, "Settings…", "Quit", the percent readouts) resolved
-  /// `.primary` and `.secondary` against the WINDOW, so a light-mode system got
-  /// white text on the light panel and pills the preview had correctly drawn.
-  /// Renders under the two window schemes that differ by no more than
-  /// rasterization noise is exactly the property that was missing.
+  /// The regression this catches shipped once. The grounds tracked the system
+  /// through the appearance observer, but the labels resolved `.primary` and
+  /// `.secondary` against the WINDOW, so a light-mode system got white text on
+  /// the light panel and pills the preview had drawn correctly.
   ///
   /// Not a color assertion: nothing here says which scheme the widgets drew in,
   /// only that the window's did not decide it. Whether the depiction MATCHES the
@@ -322,10 +301,8 @@ struct RenderSmokeTests {
 
   /// The positive control the case above is worth nothing without: two renders
   /// of a view that DOES follow the ambient scheme must differ by far more than
-  /// the noise tolerance above. Without it, a preview that rendered nothing, a
-  /// renderer that ignores the scheme override, a comparison that cannot see a
-  /// color change, or a tolerance wide enough to swallow a scheme flip would
-  /// all report the case above as a pass.
+  /// the noise tolerance. Without it, a renderer that ignores the scheme
+  /// override or a tolerance wide enough to swallow a flip both read as a pass.
   @Test func theSchemeComparisonCanSeeAScheme() {
     func shot(_ scheme: ColorScheme) -> CGImage? {
       render(
@@ -353,11 +330,9 @@ struct RenderSmokeTests {
   /// itself from its host, and an unframed render of it has nothing to fill.
   private static let flowSize = (width: 820.0, height: 620.0)
 
-  /// A flow model walked to `page`. Advancing is the only route the model
-  /// offers (`index` is `private(set)`, and the page list derives from the
-  /// environment plus the designation set), and in fixture mode advancing
-  /// records commits into the model instead of writing anything, so the walk
-  /// touches no prefs and no display.
+  /// A flow model walked to `page`. Advancing is the only route the model offers
+  /// (`index` is `private(set)`), and in fixture mode it records commits into the
+  /// model instead of writing, so the walk touches no prefs and no display.
   ///
   /// `designating` is passed where the page under test depends on the OLED
   /// designation, so the test does not ride on the fixture's product name

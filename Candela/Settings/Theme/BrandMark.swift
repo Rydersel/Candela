@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// The simplified brand mark: the app icon's C reduced to a tintable vector, an
-/// open ring whose upper terminus carries the flame dot. Takes whatever tint
-/// the destination provides, which the full icon cannot.
+/// The app icon's C reduced to a tintable vector, so it can take the
+/// destination accent. The full icon cannot.
 struct BrandMark: View {
   var tint: Color
 
@@ -14,8 +13,7 @@ struct BrandMark: View {
       let ring = side - line
       let radius = ring / 2
       let center = CGPoint(x: proxy.size.width / 2, y: proxy.size.height / 2)
-      // The C opens to the right; the dot sits on the upper terminus. The
-      // aperture matches the app icon's, a quarter of the ring: any less and
+      // Aperture matches the app icon's, a quarter of the ring. Any less and
       // the mark reads as an O at wordmark size.
       let dotAngle = Angle.degrees(-49)
       let dotCenter = CGPoint(

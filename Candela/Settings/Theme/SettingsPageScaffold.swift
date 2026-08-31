@@ -3,10 +3,10 @@ import SwiftUI
 /// The scroll, the content column and the page padding every settings page
 /// shares, so a page declares its sections and nothing else.
 ///
-/// Two initialisers because a handful of pages scroll to an anchor and need the
-/// proxy at build time. The plain one takes its content immediately rather than
-/// storing an escaping closure, which keeps the common call site free of
-/// `@escaping` and of a rebuild per scroll.
+/// The second initialiser exists for pages that scroll to an anchor and need
+/// the proxy at build time. The plain one takes content immediately rather than
+/// storing an escaping closure, sparing the common call site a rebuild per
+/// scroll.
 struct SettingsPageScaffold<Content: View>: View {
   private enum Source {
     case plain(Content)
@@ -43,8 +43,7 @@ struct SettingsPageScaffold<Content: View>: View {
       .padding(.horizontal, 32)
       .padding(.top, 24)
       .padding(.bottom, 32)
-      // The column stays centered as the window widens; the content inside it
-      // stays leading.
+      // Centers the column as the window widens; content inside stays leading.
       .frame(maxWidth: .infinity)
     }
     .labeledContentStyle(ThemedLabeledContentStyle())

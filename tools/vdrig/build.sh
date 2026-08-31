@@ -94,7 +94,7 @@ scan_binary() {
   return 0
 }
 
-# ---- positive control: the scanner must actually be able to fail -------------
+# Positive control: the scanner must actually be able to fail.
 FIXTURE_DIR="$(mktemp -d -t vdrig-fixture)"
 cat >"$FIXTURE_DIR/tripwire.m" <<'OBJC'
 #import <CoreGraphics/CoreGraphics.h>
@@ -135,7 +135,6 @@ else
 fi
 [ "$fail" -eq 0 ] || { echo; echo "BUILD ABORTED: the guard cannot be trusted."; exit 1; }
 
-# ---- build ------------------------------------------------------------------
 echo
 echo "== build =="
 mkdir -p "$OUT"
@@ -149,7 +148,6 @@ for tool in holder topology; do
 done
 [ "$fail" -eq 0 ] || exit 1
 
-# ---- guard 1 ----------------------------------------------------------------
 echo
 echo "== guard 1: no display reconfiguration =="
 for f in "$SRC"/*.m "$SRC"/*.h; do

@@ -13,9 +13,8 @@ struct ArrangementRulesTests {
     #expect(ArrangementRules.problems(in: layout) == [.disconnected(2)])
     #expect(!ArrangementRules.isValid(layout))
 
-    // The harness case from drag-canvas §3.2: the built-in tucked under the left
-    // end of the ultrawide. It looks like a normal desktop and meets at exactly
-    // one point, so macOS treats it as a gap.
+    // The built-in tucked under the left end of the ultrawide: it looks like a normal
+    // desktop but meets at exactly one point, so macOS treats it as a gap.
     let tucked = ArrangementFixtures.arrangement([
       (1, DisplayRect(x: 0, y: 0, width: 3440, height: 1440)),
       (2, DisplayRect(x: -1470, y: 1440, width: 1470, height: 956)),
@@ -57,9 +56,8 @@ struct ArrangementRulesTests {
   }
 
   @Test func overlapsSuppressConnectivityReporting() {
-    // 1 and 2 overlap; 3 is nowhere near either. Both problems are real, but the
-    // overlap is the cause the user has to fix, and reporting both for one drag
-    // reads as noise.
+    // 1 and 2 overlap; 3 is nowhere near either. Both are real, but the overlap is the
+    // cause the user has to fix and reporting both for one drag reads as noise.
     let layout = ArrangementFixtures.arrangement([
       (1, DisplayRect(x: 0, y: 0, width: 100, height: 100)),
       (2, DisplayRect(x: 50, y: 0, width: 100, height: 100)),
@@ -106,8 +104,8 @@ struct ArrangementRulesTests {
   }
 
   @Test func movingTheMiddleDisplayOfARowStrandsTheFarOne() {
-    // drag-canvas §3.5: connectivity is checked on the WHOLE arrangement, so the
-    // display that did not move is named too.
+    // Connectivity is checked on the whole arrangement, so the display that did not
+    // move is named too.
     let row = ArrangementFixtures.arrangement([
       (1, DisplayRect(x: 0, y: 0, width: 100, height: 100)),
       (2, DisplayRect(x: 100, y: 0, width: 100, height: 100)),

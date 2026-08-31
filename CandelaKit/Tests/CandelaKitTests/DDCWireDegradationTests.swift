@@ -3,17 +3,14 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// The engine half of the wire degradation: what the controller does with
-/// `DDCWireHealth`, which applies reach it, and every route back.
-///
-/// `DDCWireHealthTests` pins the counting rule itself. The two defects these
-/// guard are a demotion no route undoes, and one that fires on an HDR window.
+/// What the controller does with `DDCWireHealth`, which applies reach it, and
+/// every route back. `DDCWireHealthTests` pins the counting rule itself; the two
+/// defects here are a demotion no route undoes, and one that fires on an HDR window.
 @Suite("DDC wire degradation (WD1, WD3, WD4)")
 @MainActor
 struct DDCWireDegradationTests {
-  /// Drives the wire until it has failed `count` applies, then waits for the
-  /// verdict. Distinct values on purpose: a repeat of the target already on the
-  /// wire is duplicate-skipped, and a skip asks the panel nothing.
+  /// Drives the wire until `count` applies have failed. Distinct values on purpose:
+  /// a repeat of the target already on the wire is duplicate-skipped.
   private func failWrites(_ harness: Harness, count: Int, from start: Double = 0.9) async {
     for step in 0 ..< count {
       harness.controller.setBrightness(start - Double(step) * 0.05)
@@ -59,8 +56,6 @@ struct DDCWireDegradationTests {
     #expect(harness.controller.brightnessPath == .combined(switchingValue: 0.5, backend: .gamma))
   }
 
-  /// The slider stops claiming a hardware leg; the software leg carries what it
-  /// can.
   @Test func threeFailedWritesDemoteTheDisplayToTheSoftwareLeg() async {
     let harness = Harness(withHDR: false)
     await harness.prime()

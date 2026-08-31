@@ -11,27 +11,23 @@ import SwiftUI
 /// never shown: one answerable surface per preview, decided at start.
 ///
 /// Why it is a window at all, and why its buttons take the first click, are
-/// `ConfirmationPanel`'s to explain — this type owns only the two things that are
-/// specific to a resolution change: where the question goes, and what it says.
+/// `ConfirmationPanel`'s to explain. This type owns only what is specific to a
+/// resolution change: where the question goes, and what it says.
 ///
-/// The commit is still explicit — nothing is committed at session scope without
+/// The commit stays explicit: nothing is committed at session scope without
 /// someone pressing Keep, and doing nothing still reverts.
 @MainActor
 final class ModeConfirmationWindow: ModeConfirmationPresenting {
   private let coordinator: DisplayModeCoordinator
   /// Friendly-name resolution (renames, per-display prefs) is the panel's
-  /// business, not the coordinator's, so it is injected at launch. Default is
-  /// deliberately empty rather than a hardware name: an unwired presenter
-  /// should look unfinished in testing, not plausibly right.
+  /// business, not the coordinator's, so it is injected at launch. Empty by
+  /// default rather than a hardware name: an unwired presenter should look
+  /// unfinished in testing, not plausibly right.
   var displayName: (CGDirectDisplayID) -> String = { _ in "" }
-  /// Resolves a display to one that has an `NSScreen` — itself, or its mirror
-  /// master (DT15). Injected for the same reason `displayName` is: the island
-  /// holds no topology of its own and exercises no judgement about mirroring
-  /// (DT16).
-  ///
-  /// The default is the IDENTITY function and not something obviously broken,
-  /// because identity is exactly the old behaviour and is right for every
-  /// unmirrored display. Wired at launch in `StatusItemController`.
+  /// Resolves a display to one that has an `NSScreen`: itself, or its mirror
+  /// master (DT15). Injected because the island holds no topology of its own and
+  /// exercises no judgement about mirroring (DT16). Identity by default, which
+  /// is right for every unmirrored display; wired at launch.
   var drawableDisplayID: (CGDirectDisplayID) -> CGDirectDisplayID = { $0 }
 
   private let window = ConfirmationPanel<ModeConfirmationView>(
@@ -70,9 +66,8 @@ final class ModeConfirmationWindow: ModeConfirmationPresenting {
 /// only WHICH of the two things this window is showing; the words come from the
 /// coordinator's own state.
 ///
-/// Deliberately the same words as the settings banner and the panel's own rows —
-/// these are the same statements, and two spellings of one are two things to
-/// keep true.
+/// The same words as the settings banner and the panel's own rows: two
+/// spellings of one statement are two things to keep true.
 struct ModeConfirmationView: View {
   let coordinator: DisplayModeCoordinator
   let content: ModeConfirmationContent
@@ -120,9 +115,8 @@ struct ModeConfirmationView: View {
             .buttonStyle(AnswerButtonStyle(isPrimary: true))
             .keyboardShortcut(.defaultAction)
         }
-        // Belt to the intent check's braces: while a selection is still landing
-        // the window is about to change, so offering an answer to the old one
-        // is pointless even though it is now harmless.
+        // While a selection is still landing the window is about to change, so
+        // offering an answer to the old one is pointless, though harmless.
         .disabled(coordinator.isApplying)
       }
     }
@@ -135,7 +129,7 @@ struct ModeConfirmationView: View {
   /// reopen the panel: the screen did not change and there is no preview to
   /// answer, so silence here is indistinguishable from the feature not working.
   ///
-  /// No countdown and no revert — nothing was applied. One button, which
+  /// No countdown and no revert, because nothing was applied. One button, which
   /// dismisses the report rather than resolving anything.
   @ViewBuilder private var startFailureBody: some View {
     if let failure = coordinator.startFailure {

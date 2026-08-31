@@ -1,8 +1,8 @@
 import Foundation
 
-/// Canvas space: the view's local coordinate space — origin top-left, y-**down**,
-/// units of canvas points. Same handedness as display space, so the mapping is a
-/// uniform scale plus a translation with **no flip anywhere** (AR1).
+/// Canvas space: the view's local coordinate space, origin top-left, y-**down**, in
+/// canvas points. Same handedness as display space, so the mapping is a uniform scale
+/// plus a translation with **no flip anywhere** (AR1).
 public struct CanvasSize: Sendable, Equatable {
   public var width: Double
   public var height: Double
@@ -47,18 +47,15 @@ public struct CanvasRect: Sendable, Equatable {
 /// The one mapping between display space and canvas space. The app target never
 /// reimplements any part of it.
 public struct CanvasTransform: Sendable, Equatable {
-  /// Canvas points per display point. Finite and > 0 — enforced by `init`, not
-  /// merely asserted here.
+  /// Canvas points per display point. Finite and > 0, enforced by `init`.
   public let scale: Double
   public let offsetX: Double
   public let offsetY: Double
 
-  /// `scale == 0` makes `displayPoint` evaluate `Int(±infinity)`, which traps
-  /// somewhere far from the mistake; a NaN or infinite scale poisons every
-  /// coordinate it touches. `fitting` already guarantees the invariant, so this
-  /// precondition costs nothing there and closes the hole for every other
-  /// caller — including in-module ones, which is why this is a precondition
-  /// rather than an `internal` access level.
+  /// `scale == 0` makes `displayPoint` evaluate `Int(±infinity)`, which traps far from
+  /// the mistake, and a NaN or infinite scale poisons every coordinate it touches. A
+  /// precondition rather than an `internal` access level so in-module callers are
+  /// covered too.
   public init(scale: Double, offsetX: Double, offsetY: Double) {
     precondition(scale > 0 && scale.isFinite, "CanvasTransform.scale must be finite and > 0")
     self.scale = scale
@@ -66,9 +63,9 @@ public struct CanvasTransform: Sendable, Equatable {
     self.offsetY = offsetY
   }
 
-  /// `headroom` reserves slack so a tile dragged outward has somewhere to go. It
-  /// is applied to the **scale only** — centring uses the true bounds, so
-  /// freezing the transform at drag start (AR2) changes nothing visually.
+  /// `headroom` reserves slack so a tile dragged outward has somewhere to go, applied
+  /// to the **scale only**. Centring uses the true bounds, so freezing the transform
+  /// at drag start (AR2) changes nothing visually.
   public static func fitting(
     _ bounds: DisplayRect,
     in canvas: CanvasSize,
@@ -79,18 +76,15 @@ public struct CanvasTransform: Sendable, Equatable {
     let innerH = max(1, canvas.height - 2 * margin)
     let padded = 1 + 2 * headroom
 
-    // No upper clamp. A `min(fit, 1.0)` cannot overflow the canvas — it only
-    // ever shrinks — but it would render a small arrangement postage-stamp-sized
-    // in the middle of it instead of filling the space the margin and headroom
-    // leave. Pinned by `f_aSmallArrangementIsScaledUpToFillTheCanvas`, which is
-    // the only test the clamp breaks. Extra terms may go inside this `min`;
-    // nothing may be applied after it.
+    // No upper clamp. A `min(fit, 1.0)` cannot overflow the canvas, but it renders a
+    // small arrangement postage-stamp-sized instead of filling the space the margin
+    // and headroom leave. Extra terms may go inside this `min`; nothing after it.
     let fitted = min(innerW / (Double(bounds.width) * padded),
                      innerH / (Double(bounds.height) * padded))
 
-    // An empty arrangement has zero-size bounds, which divides by zero on both
-    // axes. Identity keeps the view rendering nothing rather than NaN, and keeps
-    // the `scale > 0` guarantee the round trip depends on.
+    // An empty arrangement has zero-size bounds, dividing by zero on both axes.
+    // Identity renders nothing rather than NaN and keeps the `scale > 0` guarantee the
+    // round trip depends on.
     let scale = fitted.isFinite && fitted > 0 ? fitted : 1
 
     let cx = Double(bounds.x) + Double(bounds.width) / 2
@@ -117,9 +111,8 @@ public struct CanvasTransform: Sendable, Equatable {
   }
 
   /// Rounded to nearest, **away from zero**. Truncation biases every negative
-  /// coordinate one point toward the origin — and negative coordinates are
-  /// exactly where the displays left of and above main live, i.e. half of every
-  /// real setup.
+  /// coordinate one point toward the origin, and negative coordinates are where the
+  /// displays left of and above main live.
   public func displayPoint(_ point: CanvasPoint) -> DisplayPoint {
     DisplayPoint(
       x: Int(((point.x - offsetX) / scale).rounded()),

@@ -2,45 +2,29 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// What Invert means, pinned against the composition it runs inside.
+/// Invert is a hardware correction: it says this display's brightness register
+/// runs backwards, and the portion domain stays the truth on both sides of it.
+/// Combined dimming pins the portion to 0 in the software zone, so with Invert
+/// on that pin writes the register's MAXIMUM, which on a backwards display is
+/// its darkest setting.
 ///
-/// Invert is a HARDWARE CORRECTION: it says "this display's brightness register
-/// runs backwards", and the portion domain stays the truth on both sides of it
-/// (portion 0 is the darkest the display goes, whatever register value lands
-/// there). Under combined dimming the software zone pins the portion to 0, so
-/// with Invert on that pin writes the register's MAXIMUM, and on a display that
-/// really does run backwards that is its darkest setting. The composed response
-/// is then monotonic, which is the whole point of the control.
-///
-/// Turn Invert on for a display that does NOT run backwards and the composed
-/// response is a tent: the software zone rides on a full-brightness register
-/// while the hardware zone descends, so the peak sits exactly at the switching
-/// point. That tent is not a defect in the composition. It is the identical
-/// shape a genuinely backwards display shows with Invert OFF, which is the
-/// symptom the control exists to remove, and the two are a bijection: no code
-/// can make both of them monotonic, because the software leg would have to run
-/// in opposite directions in the two cases and the app has one pref telling it
-/// which case it is in.
-///
-/// So these tests pin the ruled semantics rather than a bug fix. A future
-/// change that makes the software leg inversion-aware to flatten the tent will
-/// fail `theInteriorMaximumOfAMismatchedInvertPrefSitsAtTheSwitchingPoint`, and
-/// that failure is the warning: it buys a correct-looking slider on a display
-/// that never needed the control and takes the top of the range away from the
-/// display that did.
+/// With the pref on a display that runs the normal way, the composed response is
+/// a tent peaking at the switching point. Ruled, not a defect: it is the same
+/// shape a backwards display shows with Invert off, and one pref cannot flatten
+/// both, because the software leg would have to run in opposite directions.
+/// Flattening it breaks
+/// `theInteriorMaximumOfAMismatchedInvertPrefSitsAtTheSwitchingPoint` on purpose,
+/// and costs the top of the range on the display that needed Invert.
 @Suite("Invert composition")
 struct InvertCompositionTests {
   /// The register range the engine assumes until a display answers a read, and
   /// the one the write-only ultrawide in the rig never replaces.
   private static let maxDDC = 100.0
 
-  /// How a display's light responds to its brightness register: rising with it,
-  /// or running backwards, which is the only hardware Invert exists for.
-  ///
-  /// The floor is deliberately NOT zero. A display parked at its DDC minimum
-  /// still emits light, and that residue is exactly what the software leg dims
-  /// below; a model that bottomed out at zero would make the whole software
-  /// zone flat and hide every ordering question these tests ask.
+  /// Light against the brightness register: rising with it, or running backwards,
+  /// which is the only hardware Invert exists for. The floor is not zero because
+  /// a display parked at its DDC minimum still emits light, and a zero floor
+  /// would flatten the software zone and hide every ordering question here.
   private enum Panel {
     case normal
     case backwards
@@ -54,17 +38,15 @@ struct InvertCompositionTests {
     }
   }
 
-  /// The three shapes the engine can put a display in, named by what carries
-  /// the value rather than by the pref that selects them.
+  /// The shapes the engine can put a display in, named by what carries the value.
   private enum Leg {
     case combined(switchingPoint: Int)
     case pureDDC
     case softwareOnly
   }
 
-  /// Every leg the composition can run, with the switching point walked to both
-  /// rails: at -8 the software band has no width and combined degrades to pure
-  /// hardware, at 7 it is nearly the whole slider.
+  /// The switching point walked to both rails: at -8 the software band has no
+  /// width and combined degrades to pure hardware, at 7 it is nearly the whole slider.
   private static let legs: [Leg] = [
     .combined(switchingPoint: -8),
     .combined(switchingPoint: 0),
@@ -78,9 +60,8 @@ struct InvertCompositionTests {
   /// can be compared against `switchingValue` with `==` and no tolerance.
   private static let grid: [Double] = (0 ... 64).map { Double($0) / 64 }
 
-  /// A display nobody is driving over DDC sits wherever its own buttons left
-  /// it. The value is arbitrary; what matters is that it is a constant, because
-  /// that is what makes the software-only leg unable to see the pref at all.
+  /// A display nobody drives over DDC sits wherever its own buttons left it. The
+  /// value is arbitrary; the constancy is what keeps the pref out of that leg.
   private static let undrivenRegister: UInt16 = 60
 
   private func raw(_ portion: Double, invert: Bool) -> UInt16 {
@@ -93,10 +74,8 @@ struct InvertCompositionTests {
     DimmingMath.swTransform(sw, allowZero: false)
   }
 
-  /// The composed light a display emits for a slider value: the register's own
-  /// response times whatever the software leg is scaling it by. This is the
-  /// engine's arithmetic and nothing else, assembled the way `applyPaths`
-  /// assembles it.
+  /// The register's own response times whatever the software leg scales it by,
+  /// assembled the way `applyPaths` assembles it and no other way.
   private func composedLight(at value: Double, leg: Leg, invert: Bool, panel: Panel) -> Double {
     switch leg {
     case let .combined(point):
@@ -139,10 +118,8 @@ struct InvertCompositionTests {
   }
 
   @Test func theEndpointsSpanTheWholeRangeWhenTheInvertPrefMatchesThePanel() {
-    // Monotonic alone would be satisfied by a flat line. Both matched pairings
-    // have to reach the display's floor at 0 and its ceiling at 1, because the
-    // failure a mismatched inversion would otherwise hide is a slider whose top
-    // end is clamped to the software floor.
+    // Monotonic alone would pass on a flat line. The endpoints catch what that
+    // hides: a slider whose top end is clamped to the software floor.
     let matched: [(panel: Panel, invert: Bool)] = [(.normal, false), (.backwards, true)]
     for (panel, invert) in matched {
       for point in [-8, 0, 4, 7] {
@@ -184,11 +161,9 @@ struct InvertCompositionTests {
 
   // MARK: - The wire
 
-  /// The register values the arithmetic above is a model of, taken off the
-  /// engine's own submit path rather than recomputed: with Invert on, the
-  /// combined software zone parks the register at its MAXIMUM and a full slider
-  /// puts it at its MINIMUM. `combinedBoundaryWalk` pins the same two points
-  /// with the pref off, where they are 0 and 100 the other way round.
+  /// Off the engine's submit path, not recomputed: with Invert on, the combined
+  /// software zone parks the register at its MAXIMUM and a full slider at its
+  /// MINIMUM. `combinedBoundaryWalk` pins the same two points the other way round.
   @MainActor
   @Test func invertParksTheCombinedSoftwareZoneOnTheRegisterMaximum() {
     let h = Harness { prefs, _ in

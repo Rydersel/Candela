@@ -5,10 +5,9 @@ import Testing
 
 /// macOS's ambient auto-brightness, over the injectable symbol table.
 ///
-/// Everything here runs against fakes on purpose. The rules that matter are
-/// about symbols that are missing and reads that refuse to answer, and neither
-/// is reachable on a machine where the API works: waiting for a macOS release
-/// to drop a symbol is not a test plan.
+/// Everything runs against fakes: the rules that matter are about missing
+/// symbols and reads that refuse to answer, and neither is reachable on a
+/// machine where the API works.
 @Suite("Ambient light compensation")
 struct AmbientLightCompensationTests {
   private static let builtIn: CGDirectDisplayID = 1
@@ -24,9 +23,8 @@ struct AmbientLightCompensationTests {
     private let lock = NSLock()
     private var value: Bool
     private var writeCount = 0
-    /// What a write does to the stored value. The identity case is an
-    /// ordinary honest panel; the others are the ways a write can fail to
-    /// land while still returning.
+    /// What a write does to the stored value. Identity is an honest panel; the
+    /// others are the ways a write can fail to land while still returning.
     private let coerce: @Sendable (Bool) -> Bool
 
     init(_ value: Bool, coerce: @escaping @Sendable (Bool) -> Bool = { $0 }) {
@@ -72,9 +70,8 @@ struct AmbientLightCompensationTests {
 
   // MARK: - Whether the control is offered at all
 
-  /// The degradation case the hardware list cannot reach by waiting: every
-  /// symbol gone, which is also what a failed dlopen leaves behind. Nothing is
-  /// supported, nothing reads, and the write path is inert.
+  /// The degradation case no hardware pass can reach by waiting: every symbol
+  /// gone, which is also what a failed dlopen leaves behind.
   @Test func aMachineWithNoSymbolsSupportsNothing() {
     let degraded = AmbientLightCompensation(symbols: .none)
     #expect(!degraded.supports(Self.builtIn))
@@ -94,8 +91,7 @@ struct AmbientLightCompensationTests {
   }
 
   /// Without the reader there is no achieved state to publish, so the switch
-  /// could only show what was asked for. That is the thing this whole feature
-  /// is not allowed to do.
+  /// could only ever show what was asked for.
   @Test func aMissingReaderWithdrawsTheControl() {
     let panel = FakePanel(true)
     let symbols = AmbientLightSymbols(
@@ -111,9 +107,8 @@ struct AmbientLightCompensationTests {
     #expect(!withoutSensor.supports(Self.external))
   }
 
-  /// A display whose sensor query says no is not offered the control even
-  /// though its getter answers happily. The dedicated query outranks the
-  /// getter's success, which is the looser signal of the two.
+  /// The dedicated sensor query outranks the getter's success, which is the
+  /// looser signal of the two.
   @Test func aWorkingGetterDoesNotOverrideTheSensorQuery() {
     let panel = FakePanel(true)
     let compensation = AmbientLightCompensation(symbols: Self.symbols(panel: panel, hasSensor: false))
@@ -121,10 +116,9 @@ struct AmbientLightCompensationTests {
     #expect(!compensation.supports(Self.external))
   }
 
-  /// The fallback, for a macOS that keeps the getter and drops the sensor
-  /// query: the getter's own success stands in. On the rig it separates the
-  /// same two groups, returning 0 on the built-in and an error on a display
-  /// with no sensor.
+  /// The fallback for a macOS that keeps the getter and drops the sensor query.
+  /// On the rig the getter separates the same two groups: 0 on the built-in, an
+  /// error on a display with no sensor.
   @Test func theReaderStandsInWhenTheSensorQueryIsAbsent() {
     let panel = FakePanel(true)
     let answering = AmbientLightCompensation(
@@ -165,9 +159,8 @@ struct AmbientLightCompensationTests {
     #expect(!panel.stored)
   }
 
-  /// The rule the whole class of API is under: a write that returns is not a
-  /// write that happened. This panel takes the call, counts it, and stays
-  /// where it was, and the answer is the state it actually reached.
+  /// A write that returns is not a write that happened: this panel takes the
+  /// call, counts it, and stays put, and the answer is the state it reached.
   @Test func aWriteThatDoesNotLandReportsTheOldState() {
     let stubborn = FakePanel(false, coerce: { _ in false })
     let compensation = AmbientLightCompensation(symbols: Self.symbols(panel: stubborn))
@@ -185,9 +178,8 @@ struct AmbientLightCompensationTests {
     #expect(compensation.setEnabled(true, for: Self.builtIn) == false)
   }
 
-  /// No write reaches a display that does not support the setting, even if a
-  /// caller asks. The control is not rendered there, so this is the second
-  /// line rather than the first, and it is cheap.
+  /// No write reaches a display that does not support the setting. The control
+  /// is not rendered there, so this is a cheap second line of defence.
   @Test func anUnsupportedDisplayIsNeverWrittenTo() {
     let panel = FakePanel(false)
     let compensation = AmbientLightCompensation(symbols: Self.symbols(panel: panel, hasSensor: false))

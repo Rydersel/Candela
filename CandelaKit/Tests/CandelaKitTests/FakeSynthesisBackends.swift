@@ -2,12 +2,9 @@ import CoreGraphics
 import Foundation
 @testable import CandelaKit
 
-/// One call the synthesis engine made against either backend, in the order it
-/// made it.
-///
-/// ONE log across both fakes, deliberately. The unwind ordering rule (SS10) is
-/// about the relationship between a mirror change and a virtual-display
-/// destroy, and two per-fake logs can only prove that each happened.
+/// One call the engine made against either backend, in order. One log across both
+/// fakes deliberately: the unwind ordering rule (SS10) is about the relationship
+/// between a mirror change and a virtual-display destroy, which two logs cannot show.
 enum SynthesisCall: Equatable {
   case createVirtualDisplay(slot: Int, name: String, logicalWidth: Int, logicalHeight: Int, hiDPI: Bool)
   case destroyVirtualDisplay(slot: Int)
@@ -17,19 +14,15 @@ enum SynthesisCall: Equatable {
   case unexpected(String)
 }
 
-/// The machine both synthesis fakes describe: the panels, who is mirroring
-/// whom, which slots are live, and the call log.
+/// The machine both synthesis fakes describe: panels, mirror topology, live slots
+/// and the call log. Shared rather than two independent fakes because the engine's
+/// achieved-state checks read across the seam, so two fakes that could not see each
+/// other would make those checks tautological.
 ///
-/// A shared world rather than two independent fakes because the engine's
-/// achieved-state checks read across the seam: it verifies the PHYSICAL's
-/// current mode, and what that mode reports depends on the geometry of a
-/// virtual display the other fake created. Two fakes that could not see each
-/// other would make that check tautological.
-///
-/// `@unchecked Sendable` is justified by confinement: every stored property
-/// lives behind `lock` and the accessors below are the only way in. The tests
-/// need that because the engine is an actor, so its calls run on the actor's
-/// executor while the test body reads the log from its own task.
+/// `@unchecked Sendable` is justified by confinement: every stored property lives
+/// behind `lock` and the accessors below are the only way in. Needed because the
+/// engine is an actor, so its calls run on the actor's executor while the test body
+/// reads the log from its own task.
 final class FakeSynthesisWorld: @unchecked Sendable {
   struct Panel {
     let identity: DisplayConfigIdentity
@@ -145,14 +138,9 @@ final class FakeSynthesisWorld: @unchecked Sendable {
   }
 
   /// What the 2x engage helper reported for a create. False is the measured
-  /// create-succeeded-but-stayed-1x case the host logs by name: the display
-  /// appears, the slot is live, and the recorded achieved mode is not the size
-  /// that was asked for.
-  ///
-  /// A RECORDED verdict, not a derived read, because that is all the host has:
-  /// the creating process cannot read its own virtual display, so a fake that
-  /// derived this from a live mode would model a call that returns nil on
-  /// hardware.
+  /// create-succeeded-but-stayed-1x case: the display appears, the slot is live, and
+  /// the achieved mode is not the size asked for. A recorded verdict rather than a
+  /// derived read, because the creating process cannot read its own virtual display.
   var hiDPIEngageVerdict: Bool {
     get { lock.withLock { _hiDPIEngageVerdict } }
     set { lock.withLock { _hiDPIEngageVerdict = newValue } }
@@ -171,10 +159,9 @@ final class FakeSynthesisWorld: @unchecked Sendable {
     set { lock.withLock { _mirrorFailure = newValue } }
   }
 
-  /// Accept the batch and change nothing. This is #53's shape, and production
-  /// CATCHES it: `applyMirroring` runs `MirrorVerification.unhonoured` after
-  /// the commit and throws, so it surfaces as a refusal rather than as a
-  /// silently divergent topology.
+  /// Accept the batch and change nothing: the platform shape where a configuration
+  /// returns success without honouring the request. Production catches it, since
+  /// `applyMirroring` runs `MirrorVerification.unhonoured` and throws.
   var acceptMirrorButLeaveTopologyUnchanged: Bool {
     get { lock.withLock { _acceptMirrorButLeaveTopologyUnchanged } }
     set { lock.withLock { _acceptMirrorButLeaveTopologyUnchanged = newValue } }
@@ -187,10 +174,9 @@ final class FakeSynthesisWorld: @unchecked Sendable {
     set { lock.withLock { _physicalKeepsOwnModeWhileMirrored = newValue } }
   }
 
-  /// The opposite half: `displays()` reports nobody mirroring anybody while
-  /// the mirror really stands, so `currentMode` still substitutes the master's
-  /// geometry. The apply itself IS honoured, so `MirrorVerification` passes and
-  /// only the caller's own snapshot check can catch it.
+  /// The opposite half: `displays()` reports nobody mirroring while the mirror really
+  /// stands. The apply is honoured, so `MirrorVerification` passes and only the
+  /// caller's own snapshot check can catch it.
   var displaysHidesTheMirror: Bool {
     get { lock.withLock { _displaysHidesTheMirror } }
     set { lock.withLock { _displaysHidesTheMirror = newValue } }
@@ -203,11 +189,9 @@ final class FakeSynthesisWorld: @unchecked Sendable {
     set { lock.withLock { _panelStaysOnMasterGeometryAfterUnmirror = newValue } }
   }
 
-  /// The mirror comes off and the panel reports a descriptor that appears in
-  /// NO enumeration of its own: Phase 0's fabricated-mode shape, surviving the
-  /// break. Its geometry is not the rendered size either, so the only half of
-  /// SS10's last step that can catch it is "the panel reports a mode it
-  /// publishes".
+  /// The mirror comes off and the panel reports a descriptor in no enumeration of its
+  /// own: a fabricated mode surviving the break. Its geometry is not the rendered
+  /// size either, so only "the panel reports a mode it publishes" catches it.
   var panelReportsAnUnlistedModeAfterUnmirror: Bool {
     get { lock.withLock { _panelReportsAnUnlistedModeAfterUnmirror } }
     set { lock.withLock { _panelReportsAnUnlistedModeAfterUnmirror = newValue } }
@@ -261,12 +245,10 @@ final class FakeSynthesisWorld: @unchecked Sendable {
     }
   }
 
-  /// The host's shape exactly: the slot entry is dropped BEFORE the release, so
-  /// a display that did not depart leaves the slot looking free while the
-  /// display is still online. Only the return value says what happened, and a
-  /// slot already recorded as stranded keeps saying so however often it is
-  /// asked: the display is still there, and there is no entry left to find it
-  /// by.
+  /// The host's shape exactly: the slot entry is dropped BEFORE the release, so a
+  /// display that did not depart leaves the slot looking free while still online.
+  /// Only the return value says what happened, and a slot already recorded as
+  /// stranded keeps saying so: there is no entry left to find it by.
   func destroy(slot: Int) -> Bool {
     lock.withLock {
       _calls.append(.destroyVirtualDisplay(slot: slot))
@@ -319,11 +301,9 @@ final class FakeSynthesisWorld: @unchecked Sendable {
     }
   }
 
-  /// The mode a display reports NOW.
-  ///
-  /// While mirrored this is Phase 0's synthetic descriptor: the master's
-  /// logical and pixel geometry under the slave's OWN refresh, with a
-  /// fabricated `ioModeID` that appears in no enumeration.
+  /// The mode a display reports now. While mirrored that is a synthetic descriptor:
+  /// the master's geometry under the slave's own refresh, with a fabricated
+  /// `ioModeID` that appears in no enumeration.
   func currentMode(for id: CGDirectDisplayID) -> DisplayMode? {
     lock.withLock {
       guard let panel = _panels[id] else { return nil }
@@ -385,12 +365,10 @@ final class FakeSynthesisWorld: @unchecked Sendable {
           }
         }
       }
-      // THE SAME post-commit check production runs, on the same rule, and
-      // deliberately LAST: the batch is recorded and the topology has already
-      // moved before this throws, because a commit that diverged still
-      // committed. Without it the fake accepts a topology CoreGraphics would
-      // have refused, and the caller's own snapshot check could be deleted with
-      // every test still green.
+      // The same post-commit check production runs, deliberately last: the batch is
+      // recorded and the topology has moved before this throws, because a commit that
+      // diverged still committed. Without it the fake accepts a topology CoreGraphics
+      // would have refused.
       if MirrorVerification.unhonoured(in: changes, achievedParent: { id in
         _mirrors[id] ?? kCGNullDirectDisplay
       }) != nil {
@@ -432,10 +410,9 @@ final class FakeSynthesisVirtualDisplays: VirtualDisplayAchievedModeReporting, @
   }
 }
 
-/// `DisplayConfiguring` over the shared world. Everything the synthesis engine
-/// does not use records `.unexpected` rather than answering quietly, so a test
-/// can assert the engine never applied a mode or rotated anything. `modes(for:)`
-/// left that set when SS10's last disengage step began reading it.
+/// `DisplayConfiguring` over the shared world. Everything the synthesis engine does
+/// not use records `.unexpected` rather than answering quietly, so a test can assert
+/// the engine never applied a mode or rotated anything.
 final class FakeSynthesisConfigurator: DisplayConfiguring, @unchecked Sendable {
   let world: FakeSynthesisWorld
 

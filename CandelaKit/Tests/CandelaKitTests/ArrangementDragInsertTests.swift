@@ -38,11 +38,10 @@ struct ArrangementDragInsertTests {
   }
 
   /// Optionals are bound with `#require` rather than force-unwrapped, and that
-  /// is a rule for the whole file. A behaviour change that leaves a landing nil
-  /// trapped on the force-unwrap instead, and the trap signal-kills the runner:
-  /// the failure came back as a crash with no test name, and every suite that
-  /// had not run yet reported nothing at all. `#require` turns the same nil into
-  /// one named failure and lets the rest of the run finish.
+  /// is a rule for the whole file: a force-unwrap trap signal-kills the runner,
+  /// so the failure came back as a crash with no test name and every suite that
+  /// had not run yet reported nothing. `#require` gives one named failure and
+  /// lets the run finish.
   @Test func draggingTheEndOfARowOntoTheFirstSeamLandsAsAnInsert() throws {
     // 150 canvas points left is 1_500 display points, which puts display 3 at
     // x = 500: squarely across the seam at 1_000, and nowhere near a snap.
@@ -79,9 +78,8 @@ struct ArrangementDragInsertTests {
   }
 
   @Test func nothingButTheDraggedDisplayMovesBeforeTheRelease() {
-    // The rule the feature is now built around: a drag rearranges nothing.
-    // Displays the user is not holding keep their origins until the drop,
-    // whichever gesture the drag turns out to be.
+    // A drag rearranges nothing. Displays the user is not holding keep their
+    // origins until the drop, whichever gesture the drag turns out to be.
     let insert = ArrangementDragPolicy.propose(
       dragging: 3, by: CanvasPoint(x: -150, y: 0), from: row, transform: tenToOne
     )
@@ -107,9 +105,8 @@ struct ArrangementDragInsertTests {
       dragging: 2, by: CanvasPoint(x: 100, y: -300), from: pair, transform: tenToOne
     ))
 
-    // Rendered where the pointer is, and still reported as illegal. Both are
-    // deliberate: the tile has to follow the pointer, and it has to be visibly
-    // not-there-yet.
+    // Rendered where the pointer is, and still reported as illegal: the tile has
+    // to follow the pointer and be visibly not-there-yet.
     #expect(origin(proposal, 2) == DisplayPoint(x: 2_000, y: -3_000))
     #expect(proposal.problems == [.disconnected(2)])
     #expect(proposal.isValid == false)
@@ -186,20 +183,18 @@ struct ArrangementDragInsertTests {
   }
 
   @Test func aLegalDropOverASeamCommitsWhereItWasDropped() {
-    // AR3: what the canvas draws is what the release applies. This drop is
-    // legal exactly where the pointer left it AND strictly straddles a seam, so
-    // it is the case where the two gestures collide. The insert branch used to
-    // run whether or not the rendered layout had problems, and `commitment`
-    // prefers a landing whenever one exists, so a drop like this rendered clean,
-    // reddened nothing (a drop with a landing reddens nothing), and then
-    // committed a layout in which display 4, which the user never touched, sat
+    // AR3: what the canvas draws is what the release applies. This drop is legal
+    // exactly where the pointer left it AND strictly straddles a seam, so it is
+    // where the two gestures collide. The insert branch used to run whether or
+    // not the rendered layout had problems, and `commitment` prefers a landing
+    // whenever one exists, so a drop like this rendered clean, reddened nothing,
+    // and then committed a layout in which display 4, untouched by the user, sat
     // 200 points lower than the map had just shown it.
     //
     // Display 3 is dragged down and left until it straddles the seam on display
-    // 2's bottom edge. The snap abuts it to that edge, which is where the drop
-    // is legal: it comes to rest on display 2 above and display 4 to its left,
-    // and it overlaps neither. The insert would land display 3 in the very same
-    // place, and pay for it by shoving display 4 out of the way.
+    // 2's bottom edge. The snap abuts it there, which is where the drop is legal:
+    // display 2 above, display 4 to its left, overlapping neither. The insert
+    // would land display 3 in the same place and shove display 4 out of the way.
     let baseline = ArrangementFixtures.arrangement([
       (1, rect(0, 0, 400, 900)),
       (2, rect(400, 0, 500, 200)),
@@ -244,16 +239,14 @@ struct ArrangementDragInsertTests {
   }
 
   @Test func theSeamGuideIsDrawnInTheBaselineEvenWhenTheInsertReAnchors() throws {
-    // The drag policy's own call to `ArrangementInsertPolicy.guide` went
-    // unpinned for a while: every other insert fixture here lands on a layout
-    // AR14 did not re-anchor, so handing that function the insertion's own
-    // arrangement instead of the baseline left the whole suite green.
+    // Every other insert fixture here lands on a layout AR14 did not re-anchor,
+    // so handing `ArrangementInsertPolicy.guide` the insertion's own arrangement
+    // instead of the baseline left the whole suite green.
     //
-    // This drop re-anchors, because the dragged display is the one sitting at
-    // the origin and the insert puts it somewhere else, so AR14 translates the
-    // whole layout back onto it. The translation has a y component, which is
-    // what an x-seam guide's extent is measured along, so here the two
-    // arrangements finally disagree.
+    // This drop re-anchors: the dragged display is the one at the origin and the
+    // insert puts it elsewhere, so AR14 translates the whole layout back onto it.
+    // The translation has a y component, which is what an x-seam guide's extent
+    // is measured along, so here the two arrangements finally disagree.
     let baseline = ArrangementFixtures.arrangement([
       (1, rect(0, 0, 400, 400)),
       (2, rect(0, 400, 400, 400)),

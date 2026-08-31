@@ -41,8 +41,8 @@ struct SliderSnapTests {
   }
 
   @Test func alwaysClampsToTheLegalRangeInBothModes() {
-    // A drag that overshoots the capsule must still land on a writable value —
-    // the controllers take 0…1 and this is the only place the drag is bounded.
+    // A drag that overshoots the capsule must still land on a writable value.
+    // The controllers take 0…1 and this is the only place the drag is bounded.
     #expect(SliderSnap.snapped(1.4, enabled: true) == 1)
     #expect(SliderSnap.snapped(-0.3, enabled: true) == 0)
     #expect(SliderSnap.snapped(1.4, enabled: false) == 1)
@@ -50,24 +50,23 @@ struct SliderSnapTests {
   }
 
   @Test func clampHappensBeforeSnappingSoAnOvershootCannotEscapeTheRange() {
-    // Pins the ordering claim in `snapped`'s doc comment (review lens 4, L5):
-    // 1.02 is inside the tolerance window of the `1` stop either way, but
-    // -0.5 is 0.5 away from every stop — snap-then-clamp would return it
-    // unsnapped and then need a second clamp that does not exist.
+    // Pins the ordering claim in `snapped`'s doc comment. 1.02 is inside the
+    // `1` stop's window either way, but -0.5 is 0.5 from every stop, so
+    // snap-then-clamp returns it unsnapped and needs a clamp that does not exist.
     #expect(SliderSnap.snapped(1.02, enabled: true) == 1)
     #expect(SliderSnap.snapped(-0.5, enabled: true) == 0)
     #expect(SliderSnap.snapped(-0.5, enabled: true, stops: SliderSnap.stopsWithoutZero) == 0)
   }
 
   @Test func theZeroFreeStopSetNeverSnapsAVolumeDragIntoAHardwareMute() {
-    // D29 / lens 3 M4: `DDCValueController.apply` treats volume 0 as a MUTE
-    // event (VCP 0x8D = 1 when enableMuteUnmute). A 3-point capture window on
+    // D29: `DDCValueController.apply` treats volume 0 as a MUTE event
+    // (VCP 0x8D = 1 when enableMuteUnmute). A 3-point capture window on
     // the `0` stop would turn the bottom 3 % of every volume drag into a
     // persistent hardware mute, so volume rows use this stop set.
     #expect(SliderSnap.stopsWithoutZero == [0.25, 0.5, 0.75, 1])
     #expect(SliderSnap.snapped(0.02, enabled: true, stops: SliderSnap.stopsWithoutZero) == 0.02)
     #expect(SliderSnap.snapped(0.01, enabled: true, stops: SliderSnap.stopsWithoutZero) == 0.01)
-    // Deliberately reaching 0 still mutes — the user has to actually go there.
+    // Deliberately reaching 0 still mutes: the user has to go there.
     #expect(SliderSnap.snapped(0, enabled: true, stops: SliderSnap.stopsWithoutZero) == 0)
     // Every other stop still snaps.
     #expect(SliderSnap.snapped(0.27, enabled: true, stops: SliderSnap.stopsWithoutZero) == 0.25)
@@ -89,9 +88,8 @@ struct SliderSnapTests {
   }
 
   @Test func steppingWithSnappingOnMovesOneWholeStop() {
-    // The whole point of the fix: with the snapping pref on, a step is 25%, not
-    // 5% with an occasional snap. The measured defect was 45/40/35/30 with
-    // "Snap to 25% steps" verified on.
+    // With the snapping pref on a step is 25%, not 5% with an occasional snap.
+    // The measured defect was 45/40/35/30 with "Snap to 25% steps" on.
     #expect(SliderSnap.stepped(from: 0.45, up: false, step: 0.05, toStops: true) == 0.25)
     #expect(SliderSnap.stepped(from: 0.45, up: true, step: 0.05, toStops: true) == 0.5)
     #expect(SliderSnap.stepped(from: 0.5, up: true, step: 0.05, toStops: true) == 0.75)

@@ -12,14 +12,10 @@ import CandelaKit
 import os
 
 /// The software-dimming shade: one black, click-through, full-screen window per
-/// display, whose alpha carries the dimming.
-///
-/// Used when gamma dimming is unavailable or unwanted (virtual/AirPlay displays,
-/// or after a gamma-interference fallback). AppKit island behind
-/// `ShadeRendering` so the engine never touches `NSWindow`/`NSScreen`.
-///
-/// The dimming control point is the **content view's** alpha, not the window's;
-/// `OverlayWindow` carries the recipe and the reason.
+/// display, whose content-view alpha carries the dimming. Used when gamma
+/// dimming is unavailable or unwanted (virtual/AirPlay displays, or a
+/// gamma-interference fallback), behind `ShadeRendering` so the engine never
+/// touches `NSWindow`/`NSScreen`.
 ///
 /// These windows are this class's alone. OLED care runs its own overlays over
 /// the same displays and the two must never share instances: `removeAllShades`
@@ -34,10 +30,9 @@ final class ShadeOverlay: ShadeRendering {
 
   @discardableResult
   func setShadeAlpha(_ alpha: Double, on displayID: CGDirectDisplayID) -> Bool {
-    // DT17: `false` is the honest answer when no shade could be created, and it
-    // is what stops the engine memoising a dimming that never happened. The
-    // fork — and Candela until now — returned void here, so a mirrored display
-    // stopped dimming entirely with nothing propagated anywhere.
+    // DT17: `false` when no shade could be created is what stops the engine
+    // memoising a dimming that never happened. The fork returns void here, so a
+    // mirrored display stopped dimming with nothing propagated anywhere.
     guard let shade = self.shade(for: displayID) else {
       return false
     }
@@ -49,12 +44,10 @@ final class ShadeOverlay: ShadeRendering {
     guard let shade = self.shades.removeValue(forKey: displayID) else {
       return
     }
-    // DIVERGENCE (fork bug): the fork parks every closed shade in a
-    // `shadeGrave` array that is never drained — an unbounded NSWindow leak
-    // across reconfiguration cycles. We close and drop the window. Closing a
-    // borderless, non-released-when-closed window we still hold the only
-    // reference to is safe; `isReleasedWhenClosed` is explicitly false at
-    // creation so ARC (not AppKit) owns the lifetime.
+    // DIVERGENCE (fork bug): the fork parks every closed shade in a `shadeGrave`
+    // array it never drains, leaking an NSWindow per reconfiguration cycle. We
+    // close and drop it. `isReleasedWhenClosed` is false at creation, so ARC
+    // owns the lifetime and we hold the only reference.
     shade.close()
     Self.log.info("Shade removed for display \(displayID, privacy: .public)")
   }
@@ -70,9 +63,8 @@ final class ShadeOverlay: ShadeRendering {
   func repinFrames() {
     for (displayID, shade) in self.shades {
       guard let screen = OverlayWindow.screen(for: displayID) else {
-        // The display is gone (or not yet back). Leave the window alone rather
-        // than guessing a frame; whoever owns reconfiguration decides whether
-        // this shade should survive at all.
+        // Display gone, or not back yet. Leave the frame alone rather than
+        // guess it; reconfiguration decides whether this shade survives.
         continue
       }
       shade.setFrame(screen.frame, display: true)
@@ -95,12 +87,10 @@ final class ShadeOverlay: ShadeRendering {
   }
 
   private func createShade(on displayID: CGDirectDisplayID) -> NSWindow? {
-    // The ID arriving here is ALREADY RESOLVED to a drawable display by
-    // `BrightnessController` (DT15), so a mirror set has ONE shade and it is on
-    // the master — which is where the pixels are. (The fork created and framed
-    // shades under the raw ID but set alpha under the mirror-resolved one, so a
-    // mirrored slave grew a shade nothing ever dimmed.) A lookup that still
-    // fails is a genuine failure and is reported, not swallowed.
+    // The ID is ALREADY RESOLVED to a drawable display by `BrightnessController`
+    // (DT15), so a mirror set has ONE shade and it sits on the master, where the
+    // pixels are. The fork framed shades under the raw ID but set alpha under
+    // the resolved one, so a mirrored slave grew a shade nothing ever dimmed.
     guard let screen = OverlayWindow.screen(for: displayID) else {
       Self.log.info("No screen matches display \(displayID, privacy: .public); shade not created")
       return nil
@@ -108,18 +98,14 @@ final class ShadeOverlay: ShadeRendering {
     let shade = NSWindow(
       contentRect: OverlayWindow.seedRect, styleMask: OverlayWindow.styleMask,
       backing: .buffered, defer: false)
-    // DIVERGENCE (deliberate): the fork's collection behaviour is
-    // `[.stationary, .canJoinAllSpaces, .ignoresCycle]`. `OverlayWindow`
-    // adds `.fullScreenAuxiliary` so the shade keeps dimming over full-screen
-    // apps instead of being dropped when a space goes full-screen.
+    // DIVERGENCE (deliberate): the fork omits `.fullScreenAuxiliary`, so its
+    // shade is dropped when a space goes full-screen. `OverlayWindow` adds it.
     OverlayWindow.configure(
       shade, title: "Candela Window Shade for Display \(displayID)", covering: screen.frame)
-    // DIVERGENCE (fork bug, cosmetic): the fork passes the *window* frame
-    // (screen coordinates) as a *view* dirty rect. The view's own bounds are
-    // the correct space.
+    // DIVERGENCE (fork bug, cosmetic): the fork passes the window frame (screen
+    // coordinates) as a view dirty rect. The view's own bounds are that space.
     shade.contentView?.setNeedsDisplay(shade.contentView?.bounds ?? .zero)
-    // Last, not first: the shade is fully configured and already sitting on the
-    // display's frame by the time it reaches the screen.
+    // Last, so the shade is configured and framed before it reaches the screen.
     shade.orderFrontRegardless()
     Self.log.info("Shade created for display \(displayID, privacy: .public)")
     return shade

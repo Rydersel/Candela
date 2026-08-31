@@ -4,11 +4,10 @@ import Testing
 @testable import CandelaKit
 
 /// The call log as it stood when the hook fired, captured from the hook itself.
-///
-/// A snapshot rather than a marker appended to the shared log: the log's cases
-/// are things the engine did to a BACKEND, and the hook is not one of those. A
-/// snapshot answers the ordering question directly ("what had already happened
-/// when this fired") without teaching the fakes about a call they never receive.
+/// A snapshot rather than a marker appended to the shared log: the log's cases are
+/// things the engine did to a BACKEND, and the hook is not one. The snapshot
+/// answers the ordering question without teaching the fakes about a call they
+/// never receive.
 private final class HookWitness: @unchecked Sendable {
   private let lock = NSLock()
   private var _callsAtFire: [[SynthesisCall]] = []
@@ -35,15 +34,13 @@ private func isCreate(_ call: SynthesisCall) -> Bool {
   return false
 }
 
-/// The early-stamp window (wave-level finding from Task 11's review).
-///
-/// `MirrorTopologySampler` writes the topology store synchronously at
-/// `didChangeScreenParameters`, un-debounced. The mirror engages in the middle
-/// of the engine's multi-second engage, so a consumer that learned about the
-/// pairing only when engage RETURNED would answer `isInMirrorSet` true and
-/// `isSynthesisSet` false for the engaging panel for the rest of the sequence.
-/// OLED care's forget edge wipes static-region history irreversibly on that
-/// answer.
+/// The early-stamp window. `MirrorTopologySampler` writes the topology store
+/// synchronously at `didChangeScreenParameters`, un-debounced, and the mirror
+/// engages in the middle of the engine's multi-second engage. A consumer that
+/// learned about the pairing only when engage RETURNED would answer
+/// `isInMirrorSet` true and `isSynthesisSet` false for the engaging panel for the
+/// rest of the sequence, and OLED care's forget edge wipes static-region history
+/// irreversibly on that answer.
 @Suite struct ModeSynthesisEngineHookTests {
   private static let physical: CGDirectDisplayID = 2
 
@@ -90,11 +87,10 @@ private func isCreate(_ call: SynthesisCall) -> Bool {
     #expect(world.calls.contains(where: isApplyMirroring))
   }
 
-  /// The failure the stamp is most exposed to: the mirror is refused, so the
-  /// engine unwinds and reports it. The announcement still went out, which is
-  /// deliberate (over-stamping a display nobody mirrors changes no predicate);
-  /// taking it back is the consumer's post-sequence refresh from the pairing
-  /// table, which is empty here.
+  /// The failure the stamp is most exposed to: the mirror is refused, so the engine
+  /// unwinds and reports it. The announcement still went out, deliberately, since
+  /// over-stamping a display nobody mirrors changes no predicate; taking it back is
+  /// the consumer's refresh from the pairing table, empty here.
   @Test func theHookStillFiresWhenTheMirrorIsRefusedAndTheEngineKeepsNoPairing() async {
     let world = Self.world()
     world.mirrorFailure = DisplayConfigError(cgErrorCode: CGError.failure.rawValue)

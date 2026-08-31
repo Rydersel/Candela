@@ -34,7 +34,7 @@ struct PanelPolicyTests {
   }
 
   @Test func orderIsAscendingNotTheForksDescending() {
-    // D7 / controller-findings: the fork's comparator returns
+    // D7: the fork's comparator returns
     // `localizedStandardCompare(...) == .orderedDescending`, listing displays Z→A.
     let entries = [Entry(hardwareName: "Studio Display"),
                    Entry(hardwareName: "ASUS PB278"),
@@ -70,10 +70,9 @@ struct PanelPolicyTests {
     // Two identical panels are a real rig; the panel must not reshuffle them
     // between refreshes.
     //
-    // 24 entries, not 2 (review lens 4, M3): `sorted(by:)` is stable only below
-    // its insertion-sort threshold, so a two-element case passes even with the
-    // explicit `lhs.offset < rhs.offset` tie-break deleted. 24 crosses the
-    // threshold, so deleting the tie-break fails this test.
+    // 24 entries, not 2: `sorted(by:)` is stable only below its insertion-sort
+    // threshold, so a two-element case passes even with the explicit
+    // `lhs.offset < rhs.offset` tie-break deleted. 24 crosses the threshold.
     let entries = (0 ..< 24).map { Entry(hardwareName: "HW\($0)", friendlyName: "Same") }
     #expect(order(entries) == entries.map(\.hardwareName))
   }
@@ -136,9 +135,8 @@ struct PanelPolicyTests {
     #expect(MenuIconPolicy.pickerOrder == [.show, .sliderOnly, .externalOnly, .hide])
     #expect(MenuIconPolicy.pickerOrder != MenuIcon.allCases)
     #expect(Set(MenuIconPolicy.pickerOrder) == Set(MenuIcon.allCases))
-    // Count, not just set equality (review lens 4, M11): a Set comparison alone
-    // is satisfied by [.show, .show, .sliderOnly, .externalOnly, .hide], which
-    // would render a duplicate popup row.
+    // Count, not just set equality: a Set comparison alone is satisfied by
+    // [.show, .show, .sliderOnly, .externalOnly, .hide], a duplicate popup row.
     #expect(MenuIconPolicy.pickerOrder.count == MenuIcon.allCases.count)
   }
 

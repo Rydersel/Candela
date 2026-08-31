@@ -3,17 +3,13 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// Records the engage/disengage sequence the session drives, in order, and keeps
-/// a pairing table so `pairing(forPhysical:)` answers what the engine would.
-///
-/// Order is the assertion that matters here: every safety property of this
-/// session is a statement about which call happened, on which display, and in
-/// what order.
+/// Records the engage/disengage sequence in order, since every safety property
+/// of this session is a claim about which call happened, where, and when.
 ///
 /// `@unchecked Sendable` is justified by confinement: every stored property
-/// lives behind `lock` and the accessors below are the only way in. The tests
-/// need that because the session is an actor, so its calls into this fake run
-/// on the actor's executor while the test body reads `calls` from its own task.
+/// lives behind `lock` and the accessors are the only way in. The session is an
+/// actor, so its calls run on the actor's executor while the test body reads
+/// `calls` from its own task.
 final class FakeSynthesisDriver: SynthesisDriving, @unchecked Sendable {
   enum Call: Equatable {
     case engage(SyntheticSize, CGDirectDisplayID, String)
@@ -86,12 +82,8 @@ final class FakeSynthesisDriver: SynthesisDriving, @unchecked Sendable {
 }
 
 /// A driver whose engage and disengage PARK until the test lets them through.
-///
-/// The reason the suite needs it: the immediate fake above never suspends, so it
-/// cannot exercise the one thing that makes this session different from its
-/// siblings. Every hardware step here is awaited, which means another task can
-/// enter the actor in the middle of one, and the states that costs are not
-/// reachable by any test whose driver returns straight away.
+/// Every hardware step is awaited, so another task can enter the actor mid-call,
+/// and a driver that returns straight away cannot reach those states.
 actor ParkedSynthesisDriver: SynthesisDriving {
   enum Call: Equatable {
     case engage(CGDirectDisplayID)
@@ -155,10 +147,9 @@ actor ParkedSynthesisDriver: SynthesisDriving {
     table[displayID]
   }
 
-  /// Cancellation releases everything parked. Without that the time limits on
-  /// the reentrancy tests below could not fire: a regression that lets a second
-  /// entrant reach this driver blocks the TEST's task on a continuation, and a
-  /// cancelled task waiting on a plain continuation waits forever.
+  /// Cancellation releases everything parked, or the reentrancy tests' time
+  /// limits could not fire: a cancelled task waiting on a plain continuation
+  /// waits forever.
   private func park() async {
     guard isParking else { return }
     await withTaskCancellationHandler {
@@ -493,11 +484,9 @@ struct SynthesisPreviewSessionTests {
 
   // MARK: - Reentrancy, driven through a parked driver
 
-  // Time-limited: each of these holds the session inside a driver call, so a
-  // regression that lets a second entrant reach the parked driver blocks the
-  // test's own task rather than failing an expectation. The limit plus the
-  // driver's cancellation handling turns that into an ordinary failure instead
-  // of a suite that never finishes.
+  // Time-limited: a regression that lets a second entrant reach the parked
+  // driver blocks the test's own task rather than failing an expectation. The
+  // limit turns that into a failure instead of a suite that never finishes.
 
   @Test(.timeLimit(.minutes(1))) func aConfirmLandingInsideTheExpirysDisengageNeverReportsAKeep() async {
     let driver = ParkedSynthesisDriver()

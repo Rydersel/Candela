@@ -4,32 +4,27 @@ import Foundation
 ///
 /// Everything here is a compile-time constant on purpose: macOS writes ONE
 /// permanent colour profile and ONE device registration per display identity
-/// into system-scope ColorSync state and never removes either (S1 §5B and the
-/// device-registration follow-up on #14). Fixed identities bound Candela's
-/// permanent footprint at one file per slot, forever, on any machine (VD8).
-/// A previous rig that varied identity per run left 143 orphaned profiles and
+/// into system-scope ColorSync state and never removes either (S1 §5B). Fixed
+/// identities bound Candela's permanent footprint at one file per slot, forever
+/// (VD8). A rig that varied identity per run left 143 orphaned profiles and
 /// drove the ColorSync daemons to 59% CPU.
 ///
 /// The PRODUCT varies per slot, never the serial: macOS keys its
 /// duplicate-display refusal on vendor+product+physical size, ignoring serial
-/// and name entirely (the twins measurement, tools/vdrig/src/vdrig.h: twins
-/// sharing the whole triple coexist only because their sizeInMillimeters
-/// differ). Every slot shares one physical size, so the product is the
-/// field doing the separating; two slots standing at once is measured
-/// (VERIFICATION-STATUS 2026-08-13). The product range 0x2001+ is disjoint
-/// from vdrig's 0x1001..0x1003 so rig displays and app displays read apart
-/// in any topology dump.
+/// and name entirely (the twins measurement: twins sharing the whole triple
+/// coexist only because their sizeInMillimeters differ). Every slot shares one
+/// physical size, so the product is the field doing the separating. The product
+/// range 0x2001+ is disjoint from the vdrig rig's 0x1001..0x1003, so rig and app
+/// displays read apart in any topology dump.
 ///
 /// `DisplayConfigIdentity` is NOT extended and gains no virtual case: its key
 /// format is frozen on-disk schema. The extension is entirely on the INPUTS,
-/// which is possible because Candela chooses them; descriptor
-/// vendorID/productID/serialNum come back verbatim as
-/// CGDisplayVendorNumber/ModelNumber/SerialNumber (measured in S1).
+/// which works because descriptor vendorID/productID/serialNum come back
+/// verbatim as CGDisplayVendorNumber/ModelNumber/SerialNumber (measured in S1).
 public enum VirtualDisplayIdentity {
-  /// Reserved for displays Candela creates. NEVER user-settable. Bit 15 is
-  /// set, and an EDID manufacturer ID packs three letters into five bits each
-  /// with the top bit reserved zero, so no compliant EDID can produce it; an
-  /// argument worth having and deliberately not load-bearing.
+  /// Reserved for displays Candela creates. NEVER user-settable. Bit 15 is set,
+  /// and an EDID manufacturer ID packs three letters into five bits each with
+  /// the top bit reserved zero, so no compliant EDID can produce it.
   public static let vendorID: UInt32 = 0xCA1D
 
   /// Every slot the host will stand, user and engine alike. The host's guard
@@ -41,17 +36,16 @@ public enum VirtualDisplayIdentity {
   /// converges, the probe's `vd create`) is clamped to this.
   public static let userSlotRange = 1 ... 3
 
-  /// Engine-internal slots for synthesized sizes (SS6). They never appear in
-  /// the pane and are never allocated by a user action; the family stays two
-  /// wide because each advertised identity leaks one permanent ColorSync
-  /// profile (S1 §5B), so the cost of a slot is paid once and forever.
+  /// Engine-internal slots for synthesized sizes (SS6). Never in the pane,
+  /// never allocated by a user action; the family stays two wide because each
+  /// advertised identity leaks one permanent ColorSync profile (S1 §5B).
   public static let synthesisSlotRange = 4 ... 5
 
-  /// Ceiling for `maxPixelsWide/High`. The real control surface for HiDPI:
+  /// Ceiling for `maxPixelsWide/High`, and the real control surface for HiDPI:
   /// macOS emits a 2x variant only for modes whose doubled framebuffer fits
-  /// under it (S1 §4). 8192 x 4320 leaves a 4K logical size at 2x inside the
-  /// ceiling. Constant because it feeds the advertised EDID and a new EDID
-  /// may mint a new colour profile.
+  /// under it (S1 §4). 8192 x 4320 leaves a 4K logical size at 2x inside it.
+  /// Constant because it feeds the advertised EDID, and a new EDID may mint a
+  /// new colour profile.
   public static let maxPixels = (wide: 8192, high: 4320)
 
   public static func productID(slot: Int) -> UInt32 { 0x2000 + UInt32(slot) }

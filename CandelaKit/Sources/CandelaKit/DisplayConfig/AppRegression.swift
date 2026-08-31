@@ -3,19 +3,16 @@ import Foundation
 /// The app-behaviour invariants `candela-probe regress` asserts, as pure
 /// verdicts over what the probe's instruments measured.
 ///
-/// The split is deliberate. The DRIVERS live in the probe, because they shell
-/// out to the unified log, the defaults domain, the media-key poster and the
-/// accessibility API, none of which a unit test can reach. The JUDGEMENT lives
-/// here, because a judgement that only ever runs on the rig is a judgement
-/// nobody has watched fail, and this repo's own history says an invariant
-/// never observed failing is not yet a test.
+/// The DRIVERS live in the probe, because they shell out to the unified log,
+/// the defaults domain, the media-key poster and the accessibility API, none of
+/// which a unit test can reach. The JUDGEMENT lives here, because a judgement
+/// that only ever runs on the rig is one nobody has watched fail.
 ///
-/// Every verdict splits three ways rather than two. A check whose positive
-/// control did not fire is `.inconclusive`: not a pass, because nothing was
-/// demonstrated, and not a fail, because the app was never observed
-/// misbehaving. `.fail` is reserved for a control that fired over a
-/// measurement that then came out wrong. That is the whole point of the layer:
-/// a check whose failure mode is silence is not a check.
+/// Every verdict splits three ways. A check whose positive control did not fire
+/// is `.inconclusive`: nothing was demonstrated, and the app was never observed
+/// misbehaving. `.fail` is reserved for a control that fired over a measurement
+/// that then came out wrong. A check whose failure mode is silence is not a
+/// check.
 public enum AppRegression {
   // MARK: - The measured constants the D28 verdict asserts
 
@@ -57,9 +54,9 @@ public enum AppRegression {
   /// would still pass if something were is not asserting what it says.
   public static let combinedCrossoverDDCValue: UInt16 = 50
 
-  /// The register maximum both of the values above were derived against. Named
-  /// so the derivation's one assumption is a symbol the checks and their pins
-  /// compare against rather than a 100 spelled out in several places.
+  /// The register maximum both of the values above were derived against. A
+  /// symbol so the derivation's one assumption is not a 100 spelled out in
+  /// several places.
   ///
   /// It is an ASSUMPTION about this panel, not a reading of it: the panel
   /// answers no capabilities read, so nothing here has ever seen its real
@@ -69,9 +66,7 @@ public enum AppRegression {
   public static let assumedRegisterMaximum: Double = 100
 
   /// How close a native brightness write has to land to what it asked for
-  /// before the read back counts as having achieved it. Named for the same
-  /// reason every other threshold here is: a number spelled inline at its one
-  /// call site is a threshold nobody can find or argue with.
+  /// before the read back counts as having achieved it.
   public static let nativeBrightnessLandingTolerance = 0.01
 
   /// The stored brightness the floor numbers above were measured at, and the
@@ -90,26 +85,21 @@ public enum AppRegression {
   // MARK: - Composing a controlled check
 
   /// The ONE rule for building a check that carries a positive control, kept
-  /// here rather than in the driver because it is a judgement and this repo's
-  /// history says a judgement nobody has watched fail is not yet a test. It
-  /// lived in the probe, where nothing could reach it, and drifted: an
-  /// inconclusive verdict was demoting the control to failed.
+  /// here rather than in the driver so a test can watch it fail. In the probe it
+  /// drifted: an inconclusive verdict was demoting the control to failed.
   ///
-  /// Two states in, three out, and the third is the point of the whole design:
+  /// Two states in, three out:
   ///
-  /// - **The control did not fire.** The verdict is never consulted, the
-  ///   outcome is inconclusive carrying the control's own reason, and the
-  ///   control records as failed. Nothing was demonstrated.
-  /// - **The control fired.** The control records as FIRED whatever the
-  ///   verdict says, inconclusive included, and the control's evidence
-  ///   sentence is appended to the detail. A fired control over an unjudgeable
-  ///   measurement is a distinct, recordable state: it separates "the
-  ///   instrument is dead" from "the instrument worked and the answer could
-  ///   not be read", and collapsing the two throws away the sentence that
-  ///   tells them apart.
+  /// - **The control did not fire.** The verdict is never consulted, the outcome
+  ///   is inconclusive carrying the control's own reason, and the control
+  ///   records as failed. Nothing was demonstrated.
+  /// - **The control fired.** The control records as FIRED whatever the verdict
+  ///   says, inconclusive included, and its evidence sentence is appended to the
+  ///   detail. That separates "the instrument is dead" from "the instrument
+  ///   worked and the answer could not be read".
   ///
-  /// There is therefore no path that pairs a pass with a failed control, and
-  /// none that reports a control as failed when it was observed firing.
+  /// So no path pairs a pass with a failed control, and none reports a control
+  /// as failed when it was observed firing.
   public static func controlledCheck(
     name: String, controlFired: Bool, control sentence: String,
     verdict: () -> PlatformConformance.Outcome
@@ -316,22 +306,21 @@ public enum AppRegression {
   ///
   /// Not the same question as "is this panel in the hardware zone", and the
   /// difference is a false failure measured on the rig. The zone is
-  /// `stored >= switching`, but every drive here presses DOWN first, and a
-  /// panel sitting exactly ON the switching value crosses into the software
-  /// zone on that press: no write, by the app's own design, and the press back
-  /// up restores a register value the coalescer drops as a repeat. The window
-  /// then carries zero writes on a healthy app, and the instrument blames the
-  /// Accessibility grant, the event tap and the DDC path instead: three named
-  /// causes, none of them true.
+  /// `stored >= switching`, but every drive presses DOWN first, so a panel
+  /// sitting exactly ON the switching value crosses into the software zone on
+  /// that press: no write, by design, and the press back up restores a register
+  /// value the coalescer drops as a repeat. A healthy app then shows zero writes
+  /// and the instrument blames the Accessibility grant, the event tap and the
+  /// DDC path instead.
   ///
-  /// So a drive needs a whole step of headroom rather than a boundary. Exactly
-  /// one step is enough: the press lands ON the switching value, whose register
-  /// portion is zero, which is a real delta from wherever it started.
+  /// So a drive needs a whole step of headroom rather than a boundary. One step
+  /// is enough: the press lands ON the switching value, whose register portion
+  /// is zero, a real delta from wherever it started.
   ///
-  /// Compared exactly rather than within a tolerance. Both sides are dyadic
-  /// (the grid is 1/16, the default switching value is 1/2), so a panel that
-  /// arrived here by key press sits on the boundary exactly, and a tolerance
-  /// would only widen the band this exists to exclude.
+  /// Compared exactly, not within a tolerance. Both sides are dyadic (a 1/16
+  /// grid, a default switching value of 1/2), so a panel that arrived by key
+  /// press sits on the boundary exactly and a tolerance would only widen the
+  /// band this excludes.
   public static func survivesDownStep(stored: Double, switchingValue: Double) -> Bool {
     stored >= switchingValue + keyGridStep
   }
@@ -709,11 +698,10 @@ public enum AppRegression {
   ///
   /// `ps` reports a process's executable by its RESOLVED path, while the path a
   /// check was handed is whatever a person typed. On macOS `/tmp` is a symlink
-  /// to `/private/tmp`, as `/var` is to `/private/var`, so a build launched
-  /// from a worktree under `/tmp` comes back spelled `/private/tmp`. Compared
-  /// as strings, a rig that IS in the state its teardown claims reports that it
-  /// is not: the same false conviction this file exists to refuse, in
-  /// miniature.
+  /// to `/private/tmp`, as `/var` is to `/private/var`, so a build launched from
+  /// a worktree under `/tmp` comes back spelled `/private/tmp`. Compared as
+  /// strings, a rig that IS in the state its teardown claims reports that it is
+  /// not.
   public static func sameFile(_ lhs: String, _ rhs: String) -> Bool {
     resolvedPath(lhs) == resolvedPath(rhs)
   }
@@ -753,13 +741,12 @@ public enum AppRegression {
   /// the job reads a record that is not the newest and reports an outstanding
   /// count for the wrong run. This function is the one definition of the shape.
   ///
-  /// It does not validate the token it is handed, and deliberately: a short or
-  /// mistyped `--commit` lands in the ledger as a well-formed filename naming a
-  /// build that does not exist. What catches that is the ledger job's positive
-  /// control, which resolves the record's own `commit` field with `git cat-file
-  /// -e` and reddens when it does not name a real commit. Rejecting it here
-  /// would be a second definition of what a commit is, in the layer least able
-  /// to answer the question.
+  /// It does not validate the token it is handed, deliberately: a mistyped
+  /// `--commit` lands in the ledger as a well-formed filename naming a build
+  /// that does not exist. The ledger job's positive control catches that by
+  /// resolving the record's `commit` field with `git cat-file -e`. Rejecting it
+  /// here would be a second definition of what a commit is, in the layer least
+  /// able to answer.
   public static func recordFilename(commit: String, date: Date) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")

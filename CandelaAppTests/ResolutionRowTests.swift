@@ -144,10 +144,6 @@ struct ResolutionRowTests {
 /// A catalog shaped like the MacBook's own panel: a 3024x1964 native
 /// framebuffer, a scaled ladder above it, and the 59.9/60.0 pair that makes
 /// refresh-rate quantization a real question rather than float noise.
-///
-/// Built here rather than shared with the external fixtures next door on
-/// purpose: what these tests are about is the panel class those fixtures do not
-/// cover.
 private enum BuiltInFixtures {
   static let native = mode(1, 1512, 982, 3024, 1964, hz: 120, isNative: true)
   static let defaultRung = mode(2, 1512, 982, 3024, 1964, hz: 120)

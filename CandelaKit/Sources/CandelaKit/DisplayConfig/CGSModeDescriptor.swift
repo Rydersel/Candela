@@ -2,11 +2,10 @@ import Foundation
 
 /// One entry from the private CGS display-mode list.
 ///
-/// Field offsets were verified byte-for-byte on three panels against macOS
-/// 26.6.1 (25G76) — see `docs/spikes/2026-08-06-cgs-mode-revelation.md` §3. Two
-/// of them (`pixelWidth`/`pixelHeight`, offsets 200 and 204) are not in the
-/// community-transcribed headers; they carry the framebuffer size directly,
-/// which is strictly better than multiplying logical by density and rounding.
+/// Field offsets verified byte-for-byte on three panels against macOS 26.6.1
+/// (25G76); see `docs/spikes/2026-08-06-cgs-mode-revelation.md` §3. Offsets 200
+/// and 204 carry the framebuffer size directly, which the community-transcribed
+/// headers omit and which beats multiplying logical by density and rounding.
 public struct CGSModeDescriptor: Sendable, Equatable, Hashable {
   /// Also the index it was read at, and the same ID space as
   /// `CGDisplayMode.ioDisplayModeID` (S6 §4).
@@ -16,7 +15,7 @@ public struct CGSModeDescriptor: Sendable, Equatable, Hashable {
   public let logicalHeight: Int
   public let pixelWidth: Int
   public let pixelHeight: Int
-  /// **Truncated, not rounded** — CoreGraphics' 59.9998 arrives here as 59.
+  /// **Truncated, not rounded**: CoreGraphics' 59.9998 arrives here as 59.
   /// Never compare this to a CoreGraphics refresh for equality (CR1).
   public let refreshHz: Int
   public let density: Double

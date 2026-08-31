@@ -18,10 +18,9 @@ struct MirrorPreviewSessionTests {
     MirrorTopologyPolicy.engage(topology, master: 2)
   }
 
-  /// The shipped countdown, pinned. Every test here passes an explicit
-  /// `countdownSeconds`, so the default the app actually gets was covered by
-  /// nothing — and it is a product decision (thirty seconds, deliberately the
-  /// same as `ModePreviewSession`), not an implementation detail.
+  /// The shipped countdown, pinned: every other test passes an explicit
+  /// `countdownSeconds`. Thirty seconds is a product decision, deliberately the
+  /// same as `ModePreviewSession`.
   @Test func theDefaultCountdownIsThirtySeconds() async {
     let fake = FakeConfigurator()
     fake.configuredDisplays = unmirroredPair()
@@ -52,9 +51,9 @@ struct MirrorPreviewSessionTests {
     #expect(await session.previewedTopology?.confirmationDisplayID == 2)
   }
 
-  /// THE safety property. Timing out must restore the topology that was
-  /// captured before the preview — computed against the LIVE list, so a
-  /// display that moved in the meantime is not stranded.
+  /// THE safety property. A timeout restores the topology captured before the
+  /// preview, computed against the LIVE list so a display that moved meanwhile
+  /// is not stranded.
   @Test func theCountdownDefaultsToRevertingNotKeeping() async {
     let fake = FakeConfigurator()
     let session = makeSession(fake, seconds: 2)
@@ -69,10 +68,10 @@ struct MirrorPreviewSessionTests {
     #expect(await session.hasOutstandingPreview == false)
   }
 
-  /// Confirming commits the changes that were PREVIEWED, at session scope —
-  /// not whatever the topology reports at confirm time. The two differ exactly
-  /// when something went wrong, and committing the drifted value would make an
-  /// unapproved topology outlive the process while reporting success.
+  /// Confirming commits the changes that were PREVIEWED at session scope, not
+  /// whatever the topology reports at confirm time. The two differ exactly when
+  /// something went wrong, and committing the drift would make an unapproved
+  /// topology outlive the process while reporting success.
   @Test func confirmingCommitsWhatWasPreviewedRatherThanWhatIsLive() async {
     let fake = FakeConfigurator()
     let session = makeSession(fake)
@@ -93,8 +92,7 @@ struct MirrorPreviewSessionTests {
 
   /// Disengage commits directly and never enters the session: a countdown there
   /// would re-mirror a rig the user just un-mirrored, while they were still
-  /// looking for the confirmation window on a screen that had only just come
-  /// back.
+  /// hunting for the confirmation window on a screen that had only just come back.
   @Test func onlyAnEngageDecisionCanBePreviewed() async {
     let fake = FakeConfigurator()
     let session = makeSession(fake)
@@ -108,14 +106,12 @@ struct MirrorPreviewSessionTests {
     #expect(fake.appliedMirroring.isEmpty)
   }
 
-  /// A PARTIAL break is refused on exactly the same terms as a total one, and
-  /// that is the point: `.disengage` carries `residualMembers` because a set
-  /// containing a locked slave only partly breaks, and the outcome has to say
-  /// what survived. A `begin` that took the disengage path would have to either
-  /// carry that residue through the countdown or drop it — and dropping it is
-  /// the T3 defect, success reported over a set still on screen, re-created one
-  /// layer out. Refusing leaves the residue with the caller, which is the only
-  /// place it can be reported.
+  /// A PARTIAL break is refused on the same terms as a total one. `.disengage`
+  /// carries `residualMembers` because a set containing a locked slave only
+  /// partly breaks, and a `begin` on that path would have to carry the residue
+  /// through the countdown or drop it. Dropping it reports success over a set
+  /// still on screen. Refusing leaves the residue with the caller, the only place
+  /// it can be reported.
   @Test func aPartialDisengageIsRefusedRatherThanPreviewedWithItsResidueDropped() async {
     let fake = FakeConfigurator()
     let session = makeSession(fake)
@@ -151,15 +147,14 @@ struct MirrorPreviewSessionTests {
     #expect(await session.hasOutstandingPreview == false)
   }
 
-  /// A revert that threw left the topology where it was, so the record of how
-  /// to move it back is still the truth — and trying again is the whole
-  /// recovery path.
+  /// A revert that threw left the topology where it was, so the record of how to
+  /// move it back is still the truth and trying again is the recovery path.
   ///
-  /// The injected failure lands on a NON-empty batch, deliberately: the fake
-  /// checks its empty-batch guard before its injection point precisely so a
-  /// test cannot enshrine a "revert failed" branch that shipped code cannot
-  /// reach. Here the live topology really is mirrored and the capture really is
-  /// not, so `changes(from:to:)` stages one change and the failure is real.
+  /// The injected failure lands on a NON-empty batch on purpose: the fake checks
+  /// its empty-batch guard before its injection point, so a test cannot enshrine
+  /// a "revert failed" branch shipped code cannot reach. Here the live topology
+  /// is mirrored and the capture is not, so one change is staged and the failure
+  /// is real.
   @Test func aFailedRevertKeepsThePreviewOutstandingSoItCanBeRetried() async {
     let fake = FakeConfigurator()
     let session = makeSession(fake)
@@ -193,10 +188,10 @@ struct MirrorPreviewSessionTests {
     #expect(await session.hasOutstandingPreview)
   }
 
-  /// The MASTER went away. The preview is REVERTED, not dropped — and the
-  /// departed master needs no special case: `changes(from:to:)` iterates the
-  /// LIVE list, so the surviving slave is staged back to unmirrored and the
-  /// master that is gone is never staged at all.
+  /// The MASTER went away and the preview is REVERTED, not dropped. The departed
+  /// master needs no special case: `changes(from:to:)` iterates the LIVE list, so
+  /// the surviving slave is staged back to unmirrored and the master that is gone
+  /// is never staged at all.
   @Test func theMastersDepartureRevertsTheMembersThatRemain() async {
     let fake = FakeConfigurator()
     let session = makeSession(fake)
@@ -211,10 +206,9 @@ struct MirrorPreviewSessionTests {
     ))
   }
 
-  /// A SLAVE departing resolves the preview rather than abandoning it. With a
-  /// single slave the distinction is invisible — losing it un-mirrors the set
-  /// anyway, so the revert stages nothing and succeeds as a no-op. The two-slave
-  /// case below is the one that makes the difference visible.
+  /// A SLAVE departing resolves the preview rather than abandoning it. With one
+  /// slave the distinction is invisible, since losing it un-mirrors the set
+  /// anyway; the two-slave case below is where it shows.
   @Test func aSlavesDepartureResolvesThePreviewRatherThanAbandoningIt() async {
     let fake = FakeConfigurator()
     let session = makeSession(fake)
@@ -230,11 +224,10 @@ struct MirrorPreviewSessionTests {
   /// THE case this behaviour exists for. Preview `{1→2, 3→2}`, and display 3 is
   /// unplugged inside the countdown window.
   ///
-  /// Dropping the preview here would leave display 1 STILL mirroring 2 at
-  /// `.preview` scope, with the countdown cancelled and the confirmation window
-  /// dismissed — a topology the user never approved, with no UI and no timer,
-  /// recoverable only by quitting the app. Reverting puts display 1 back and
-  /// stages nothing for the display that left.
+  /// Dropping the preview would leave display 1 STILL mirroring 2 at `.preview`
+  /// scope, countdown cancelled and confirmation window dismissed: a topology the
+  /// user never approved, no UI, no timer, recoverable only by quitting the app.
+  /// Reverting puts display 1 back and stages nothing for the display that left.
   @Test func aDepartureFromATwoSlaveSetRevertsTheSlaveThatRemains() async {
     let fake = FakeConfigurator()
     fake.configuredDisplays = [
@@ -282,10 +275,9 @@ struct MirrorPreviewSessionTests {
 
   // MARK: - Breaking a set while a preview is outstanding
 
-  /// The rig the supersede rule exists for: a set ALREADY EXISTS (1 mirroring
-  /// 3), so the topology a preview captures contains it. Reverting that capture
-  /// re-mirrors 1 onto 3 — which is exactly what must not happen when the user
-  /// has just asked for the mirroring to stop.
+  /// The rig the supersede rule exists for: a set ALREADY EXISTS (1 mirroring 3),
+  /// so the topology a preview captures contains it, and reverting that capture
+  /// re-mirrors 1 onto 3 just as the user asked the mirroring to stop.
   private func preexistingSetTrio() -> [ConfiguredDisplay] {
     [
       MirrorFixtures.display(1, mirrors: 3, builtIn: true),
@@ -294,10 +286,9 @@ struct MirrorPreviewSessionTests {
     ]
   }
 
-  /// Drives the real sequence: a set exists, a preview builds a different one
-  /// around display 2, and the user then stops the set they can see. The break's
-  /// change list is DECIDED from the live topology exactly as the app decides
-  /// it, so the test pins the list that actually ships.
+  /// The real sequence: a set exists, a preview builds a different one around
+  /// display 2, then the user stops the set they can see. The break's change list
+  /// is DECIDED from the live topology exactly as the app decides it.
   private func breakChanges(_ fake: FakeConfigurator, containing member: CGDirectDisplayID)
     -> [MirrorChange]
   {
@@ -312,8 +303,8 @@ struct MirrorPreviewSessionTests {
 
   /// THE defect. A break resolves the outstanding preview WITHOUT reverting it:
   /// the capture describes a topology the user has just contradicted, and
-  /// re-applying it would fight an explicit choice. Nothing is applied by the
-  /// supersede itself — the only two batches are the preview and the break.
+  /// re-applying it would fight an explicit choice. The supersede itself applies
+  /// nothing, so the only batches are the preview and the break.
   @Test func breakingASetSupersedesTheOutstandingPreviewRatherThanRevertingIt() async {
     let fake = FakeConfigurator()
     fake.configuredDisplays = preexistingSetTrio()
@@ -355,11 +346,10 @@ struct MirrorPreviewSessionTests {
 
   /// The second, more reachable path to the same harm: the confirmation card is
   /// still on screen when the break lands, and Keep is the obvious answer to a
-  /// window that still appears to be asking. It must commit NOTHING — committing
-  /// re-mirrors the rig at session scope with no countdown left to undo it.
-  ///
-  /// The app also dismisses the card, and its queue orders a click behind the
-  /// break; this is the backstop under both, and the only one a test can reach.
+  /// window that still appears to be asking. It must commit NOTHING, or the rig
+  /// re-mirrors at session scope with no countdown left to undo it. The app also
+  /// dismisses the card; this is the backstop under that, and the only one a test
+  /// can reach.
   @Test func answeringASupersededPreviewCommitsNothing() async {
     let fake = FakeConfigurator()
     fake.configuredDisplays = preexistingSetTrio()
@@ -380,8 +370,8 @@ struct MirrorPreviewSessionTests {
 
   /// The mirror image of `begin` refusing a `.disengage`. Every change a break
   /// stages names `kCGNullDirectDisplay`; an ENGAGE arriving here would apply at
-  /// session scope with no preview, no countdown and no fallback — and would
-  /// supersede the outstanding preview on its way past.
+  /// session scope with no preview, no countdown and no fallback, and supersede
+  /// the outstanding preview on its way past.
   @Test func onlyABreakCanBeAppliedThroughTheDisengagePath() async {
     let fake = FakeConfigurator()
     let session = makeSession(fake)
@@ -395,8 +385,8 @@ struct MirrorPreviewSessionTests {
     #expect(await session.isCountingDown)
   }
 
-  /// The ordinary case — no preview outstanding — still applies at session
-  /// scope, unchanged from applying straight through the configurator.
+  /// The ordinary case, no preview outstanding, still applies at session scope,
+  /// unchanged from applying straight through the configurator.
   @Test func breakingASetWithNoPreviewOutstandingAppliesAtSessionScope() async {
     let fake = FakeConfigurator()
     fake.configuredDisplays = preexistingSetTrio()
@@ -408,13 +398,12 @@ struct MirrorPreviewSessionTests {
     #expect(MirrorTopology(fake.displays()).masters.isEmpty)
   }
 
-  /// The DELIBERATE cost of superseding before applying, pinned so it is a
-  /// decision rather than a surprise: a break that throws has already resolved
-  /// the preview, so the previewed topology stands with no countdown left to
-  /// take it back. It is still at `.preview` scope, the caller surfaces the
-  /// error, and pressing the button again is the retry. The alternative ordering
-  /// buys this back at the price of a window in which the expiry re-mirrors the
-  /// set the break just dissolved.
+  /// The DELIBERATE cost of superseding before applying, pinned so it stays a
+  /// decision: a break that throws has already resolved the preview, so the
+  /// previewed topology stands with no countdown left to take it back. It is
+  /// still at `.preview` scope and pressing the button again is the retry. The
+  /// other ordering trades that for a window where the expiry re-mirrors the set
+  /// the break just dissolved.
   @Test func aBreakThatThrowsHasStillSupersededThePreview() async {
     let fake = FakeConfigurator()
     fake.configuredDisplays = preexistingSetTrio()
@@ -433,10 +422,9 @@ struct MirrorPreviewSessionTests {
     #expect(fake.appliedMirroring.count == 1)
   }
 
-  /// A display that was never in the previewed set leaves the preview — and its
-  /// countdown — exactly where they were. Otherwise any unrelated unplug would
-  /// silently strand a rig in an unapproved topology with nothing left to take
-  /// it back.
+  /// A display that was never in the previewed set leaves the preview and its
+  /// countdown exactly where they were. Otherwise an unrelated unplug would
+  /// strand a rig in an unapproved topology with nothing left to take it back.
   @Test func discardingAnUnrelatedDisplayLeavesThePreviewOutstanding() async {
     let fake = FakeConfigurator()
     let session = makeSession(fake)

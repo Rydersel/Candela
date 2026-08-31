@@ -32,15 +32,15 @@ enum OnboardingPage: Equatable, Hashable, Identifiable {
 }
 
 /// Pure derivation of the flow from an environment snapshot plus the one piece
-/// of in-flow state that reshapes it (the OLED designation set). Tested in
-/// CandelaAppTests; the flow model calls this and nothing else decides pages.
+/// of in-flow state that reshapes it (the OLED designation set). The flow model
+/// calls this, and nothing else decides pages.
 enum OnboardingPlan {
   static func pages(
     for environment: OnboardingEnvironment,
     designatedOleds: Set<String>
   ) -> [OnboardingPage] {
-    // Displays lead: detection and the size suggestion are the payoff pages,
-    // so they come before the permission ask (Ryder's ordering, 2026-08-19).
+    // Displays lead: detection and the size suggestion are the payoff pages, so
+    // they come before the permission ask.
     var pages: [OnboardingPage] = [.welcome]
     if environment.displays.isEmpty {
       pages.append(.noDisplays)

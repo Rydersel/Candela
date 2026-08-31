@@ -2,8 +2,8 @@ import Foundation
 
 /// Which software backend is carrying a software dimming leg.
 ///
-/// Named for what the user sees, never for the pref behind it (D25):
-/// `avoidGamma` never reaches a label.
+/// Cases are named for what the user sees, never for the pref behind them
+/// (D25): `avoidGamma` never reaches a label.
 public enum SoftwareDimmingBackend: Sendable, Equatable {
   /// The display's color profile (gamma table).
   case gamma
@@ -13,39 +13,31 @@ public enum SoftwareDimmingBackend: Sendable, Equatable {
 
 /// Why nothing is moving this display's brightness.
 ///
-/// A separate type rather than a `String`, because DT30 rule (a) requires every
-/// "unavailable" row to draw its reason from a TYPED value — a reason composed
-/// in the view is a reason that drifts from the branch that produced it.
+/// Typed rather than a `String` (DT30 rule (a)): a reason composed in the view
+/// drifts from the branch that produced it.
 public enum BrightnessPathBlock: Sendable, Equatable {
-  /// No leg carries the value: DDC brightness is turned off for this display
-  /// AND there is no software leg to fall back on — either because combined
-  /// dimming is off (branch 4 of `applyPaths` submits nothing at all), or
-  /// because combined dimming is on with the switching point at 0, which gives
-  /// the software leg a band of zero width.
+  /// DDC brightness is turned off and there is no software leg to fall back
+  /// on, either because combined dimming is off or because its switching point
+  /// is 0, which gives the software leg a band of zero width.
   case ddcTurnedOffWithNoSoftwareLeg
-  /// The same zero-width corner, reached because the WIRE stopped answering.
-  /// Its own case because the two are different sentences to the person reading
-  /// them: only one names a switch that can be put back.
+  /// The same corner, reached because the WIRE stopped answering. Its own case
+  /// because only one of the two names a switch the user can put back.
   case ddcUnresponsiveWithNoSoftwareLeg
 }
 
 /// Why a display CONFIGURED for a hardware leg is nevertheless running on the
 /// software leg alone.
 ///
-/// The sibling of `BrightnessPathBlock`, and typed for the same reason (DT30
-/// rule (a)). The two are kept apart because the consequences differ and the
-/// user-visible sentence differs with them: a block means nothing at all
-/// responds, while this means part of the range still responds and the rest
-/// does not.
+/// Typed for the same reason as `BrightnessPathBlock` (DT30 rule (a)), and
+/// kept apart from it: a block means nothing responds, this means part of the
+/// range still does.
 public enum SoftwareOnlyReason: Sendable, Equatable {
   /// DDC brightness is turned off for this display (`unavailableDDC` on the
-  /// brightness command), so combined mode's hardware submit is skipped and
-  /// only its software half runs.
+  /// brightness command), so only combined mode's software half runs.
   case ddcTurnedOff
-  /// The display's DDC writes have been failing in a row (`DDCWireHealth`), so
-  /// combined mode's hardware half submits into a wire that is not carrying it.
-  /// Apart from `ddcTurnedOff` because the two look identical on the slider and
-  /// only one of them is something the user did.
+  /// DDC writes have been failing in a row (`DDCWireHealth`), so combined
+  /// mode's hardware half submits into a wire that is not carrying it. Apart
+  /// from `ddcTurnedOff` because only one is something the user did.
   case ddcUnresponsive
 }
 
@@ -60,18 +52,12 @@ public enum BrightnessPath: Sendable, Equatable {
   /// Split: below `switchingValue` the software leg dims and DDC holds at its
   /// floor; above it, DDC carries the whole range.
   ///
-  /// Reachable ONLY with a live DDC leg — see `BrightnessPathPolicy.path`, and
-  /// the ruling recorded there.
+  /// Reachable ONLY with a live DDC leg; see `BrightnessPathPolicy.path`.
   case combined(switchingValue: Double, backend: SoftwareDimmingBackend)
   /// Combined dimming is configured but its hardware half is not running, so
-  /// the software leg is carrying the display by itself over a PARTIAL range:
-  /// values below `dimsBelow` dim, and values at or above it move nothing,
-  /// because `DimmingMath.combinedSplit` hands the software leg a flat `1`
-  /// there and hands the rest to a DDC submit that never happens.
-  ///
-  /// `dimsBelow` is always greater than 0 — a zero-width software band is a
-  /// `.unavailable(.ddcTurnedOffWithNoSoftwareLeg)`, not a leg that dims below
-  /// nothing.
+  /// the software leg carries a PARTIAL range: below `dimsBelow` it dims, at or
+  /// above it nothing moves. `dimsBelow` is always greater than 0; a zero-width
+  /// band is `.unavailable(.ddcTurnedOffWithNoSoftwareLeg)`.
   case softwareOnly(
     backend: SoftwareDimmingBackend, reason: SoftwareOnlyReason, dimsBelow: Double
   )
@@ -80,18 +66,14 @@ public enum BrightnessPath: Sendable, Equatable {
 }
 
 public extension BrightnessPath {
-  /// Whether this path puts the display's brightness REGISTER under Candela's
-  /// control. Read it as a question about the wire, not about the slider: a
-  /// path can move the display (the software leg does) and still answer false.
+  /// Whether this path drives the display's brightness REGISTER. A question
+  /// about the wire, not the slider: the software leg moves the display and
+  /// still answers false.
   ///
-  /// The false answers are what matter, and #143 is why they are worth naming.
-  /// Software dimming can only ever subtract from whatever the panel is already
-  /// emitting, so it assumes a register at full range. A path that stops
-  /// driving the register therefore inherits wherever the previous path left
-  /// it, and combined mode leaves it at the hardware floor for every value
-  /// below the switching point: the app then reports 100% over a panel at its
-  /// minimum backlight, with the gamma table already at 1.0 and nothing left to
-  /// brighten with.
+  /// Software dimming only subtracts, so it assumes a register at full range. A
+  /// path that stops driving the register inherits wherever the last one left
+  /// it, and combined mode leaves it at the hardware floor below the switching
+  /// point: the app then reports 100% over a panel at minimum backlight.
   var drivesDDCBrightness: Bool {
     switch self {
     case .combined, .hardware: true
@@ -100,14 +82,12 @@ public extension BrightnessPath {
   }
 }
 
-/// The four-branch path table from `BrightnessController.applyPaths`, stated
-/// ONCE, in the Kit, under test.
+/// The path table from `BrightnessController.applyPaths`, stated ONCE, in the
+/// Kit, under test.
 ///
-/// The engine CONSULTS this (Task 3) rather than carrying its own copy. That is
-/// what makes "the diagnostics pane cannot drift from the engine" structural
-/// instead of a promise: `applyPaths`, `usesNative` and `softwareBackendChoice`
-/// are all private, so a pane would otherwise have to re-derive path selection
-/// from prefs — a second copy of a four-branch table, which drifts.
+/// The engine consults this rather than carrying its own copy. `applyPaths`,
+/// `usesNative` and `softwareBackendChoice` are private, so a pane would
+/// otherwise re-derive path selection from prefs and drift from it.
 public enum BrightnessPathPolicy {
   public struct Inputs: Sendable, Equatable {
     public let role: DisplayRole
@@ -130,8 +110,8 @@ public enum BrightnessPathPolicy {
       disableCombinedBrightness: Bool,
       unavailableDDC: Bool,
       switchingValue: Double,
-      // Defaulted for the call sites with no wire to speak of: the standalone
-      // predicate's callers and the pane-side projections. The engine passes it.
+      // Defaulted for callers with no wire: the standalone predicate and the
+      // pane-side projections. The engine passes it.
       wireUnresponsive: Bool = false
     ) {
       self.role = role
@@ -148,32 +128,16 @@ public enum BrightnessPathPolicy {
   /// ORDER IS THE CONTRACT, and it is the fork's order (dossier §2/§10):
   /// native, then force-software, then combined, then pure DDC.
   ///
-  /// The `unavailableDDC` check is deliberately placed INSIDE the combined
-  /// branch, and both halves of that placement are load-bearing:
+  /// `unavailableDDC` is checked INSIDE the combined branch. Hoisting it above
+  /// would report a display that still dims on its software leg as dead;
+  /// ignoring it inside would hand out `.combined`, which `DisplayCardPolicy`
+  /// captions as hardware control over a wire that is off (ruling R-A). The
+  /// separate case makes that untruth unrepresentable.
   ///
-  /// - Not ABOVE it. Hoisting it is the tempting simplification and it is
-  ///   wrong: in combined mode the software leg still dims, so answering
-  ///   `.unavailable` there would report a display that visibly responds to the
-  ///   slider as dead.
-  /// - Not IGNORED inside it either — controller ruling R-A, and the reason
-  ///   this file is worth having. `.combined` means "DDC carries the top of the
-  ///   range", which is exactly what a display with its DDC leg turned off is
-  ///   NOT doing; `DisplayCardPolicy` projects `.combined` to "Hardware (DDC)
-  ///   control", so returning it here would caption a dead wire as hardware
-  ///   control in the one feature built to tell the truth about that. The
-  ///   untruth is unrepresentable rather than merely avoided: this state has
-  ///   its own case, so no consumer switching over `BrightnessPath` can receive
-  ///   a `.combined` whose hardware half is not running.
-  ///
-  /// `wireUnresponsive` sits BELOW `unavailableDDC` in both branches, and the
-  /// order is the ruling, not an accident: a control the user turned off is
-  /// reported as turned off, whatever the wire is doing behind it. Native and
-  /// force-software outrank both.
-  ///
-  /// `switchingValue == 0` (pref point −8, "pure hardware") is the corner of
-  /// that same state where the software band has zero width — `combinedSplit`'s
-  /// hardware branch always wins — so nothing moves at all and the honest
-  /// answer is the block, not a leg advertised as dimming below 0%.
+  /// `wireUnresponsive` sits BELOW `unavailableDDC` in both branches: a control
+  /// the user turned off reads as turned off whatever the wire is doing.
+  /// `switchingValue == 0` gives the software band zero width, so nothing moves
+  /// and the honest answer is the block.
   public static func path(_ inputs: Inputs) -> BrightnessPath {
     if usesNative(role: inputs.role, isHDRActive: inputs.isHDRActive) {
       return .native
@@ -204,24 +168,22 @@ public enum BrightnessPathPolicy {
     guard !inputs.unavailableDDC else {
       return .unavailable(.ddcTurnedOffWithNoSoftwareLeg)
     }
-    // FULL-RANGE software leg, not a partial one: there is no combined split to
-    // respect here, and the point of the demotion is that the display dims.
+    // Full-range software leg: no combined split to respect here, and the
+    // demotion exists so the display still dims.
     if inputs.wireUnresponsive {
       return .software(backend)
     }
     return .hardware
   }
 
-  /// The native predicate on its own, for the hot paths that need it without
+  /// The native predicate on its own, for hot paths that need it without
   /// building an `Inputs`.
   ///
-  /// Live HDR is the condition; Candela's own HDR *mode* is deliberately not
-  /// an input, and both directions of that were paid for. With HDR off the
+  /// Live HDR is the condition, never Candela's own HDR mode. With HDR off the
   /// MAG341C answers `DisplayServicesSetBrightness` with SUCCESS and changes
-  /// nothing, so a mode alone must never route native. And System Settings can
-  /// engage HDR with our mode still `.off` — where DDC writes cannot land — so
-  /// live HDR must route native whoever turned it on (#52). Role `.builtIn` is
-  /// constitutively native — no DDC wire, no combined/software routing.
+  /// nothing, so a mode alone must not route native; System Settings can engage
+  /// HDR while our mode is `.off`, where DDC writes cannot land, so live HDR
+  /// routes native whoever turned it on. Role `.builtIn` has no DDC wire.
   public static func usesNative(role: DisplayRole, isHDRActive: Bool) -> Bool {
     role == .builtIn || isHDRActive
   }

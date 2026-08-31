@@ -3,8 +3,6 @@ import Testing
 
 @testable import CandelaKit
 
-/// #110 — the wire-timing guard.
-///
 /// A revealed mode is scaled by definition, so the display controller binds it
 /// to some real wire timing. When the panel advertises no native-width timing
 /// at that refresh it gets bound to an arbitrary same-refresh timing instead,
@@ -29,8 +27,8 @@ struct WireTimingGuardTests {
       guardsWireTiming: guarded)
   }
 
-  /// One member of the MAG's exact-2:1 family. Geometry is identical across the
-  /// family — only the refresh differs, which is the whole point.
+  /// One member of the MAG's exact-2:1 family. Geometry is identical across it;
+  /// only the refresh differs.
   private func magRung(id: Int32, refresh: Int) -> CGSModeDescriptor {
     CGSModeDescriptor(
       modeNumber: id, flags: 0x0020_0001,
@@ -43,9 +41,9 @@ struct WireTimingGuardTests {
   /// glass; the rest are the rule's predictions.
   private static let magLadder:
     [(id: Int32, refresh: Int, admitted: Bool, measured: Bool)] = [
-      (109, 120, false, true),  // OSD read 2560x1440 — pillarboxed + cropped
-      (110, 100, true, true),  // OSD read 3440x1440 @ 100 — correct
-      (111, 75, false, true),  // OSD read 1280x1024 — broken
+      (109, 120, false, true),  // OSD read 2560x1440: pillarboxed + cropped
+      (110, 100, true, true),  // OSD read 3440x1440 @ 100: correct
+      (111, 75, false, true),  // OSD read 1280x1024: broken
       (112, 72, false, false),
       (113, 70, false, false),
       (114, 60, true, true),  // correct, full panel
@@ -83,19 +81,19 @@ struct WireTimingGuardTests {
   /// native-width parent is untouched, at 2:1 and at every other revealed size.
   @Test func revealedModesAtAParentRefreshPassThrough() {
     let result = revealMag([
-      CGSModeFixtures.magRevealedNativeAt2x100,  // 100 — parent id 71
-      CGSModeFixtures.magRevealedNativeAt2x60,  // 60 — parent id 72
-      CGSModeFixtures.magRevealed1920x804,  // 175 — parent id 69
-      CGSModeFixtures.magRevealed2048x858,  // 175 — parent id 69
+      CGSModeFixtures.magRevealedNativeAt2x100,  // 100: parent id 71
+      CGSModeFixtures.magRevealedNativeAt2x60,  // 60: parent id 72
+      CGSModeFixtures.magRevealed1920x804,  // 175: parent id 69
+      CGSModeFixtures.magRevealed2048x858,  // 175: parent id 69
     ])
     #expect(result.modes.count == 4)
     #expect(result.dropped.noNativeParentTiming == 0)
   }
 
-  /// THE TRAP. CoreGraphics publishes 120 Hz on this panel — at 2560x1440, a
-  /// narrower framebuffer. A guard that asked "does the display run at this
-  /// refresh at all?" would admit the rung measured to crop ~880 columns off
-  /// the right of the desktop. The parent must be native-WIDTH.
+  /// THE TRAP. CoreGraphics publishes 120 Hz on this panel at 2560x1440, a
+  /// narrower framebuffer, so a guard asking "does the display run at this
+  /// refresh at all?" admits the rung measured to crop ~880 columns off the
+  /// desktop. The parent must be native-WIDTH.
   @Test func aRefreshPublishedOnlyAtANarrowerFramebufferIsNotAParent() {
     let published = RevealedModeFixtures.magExistingCG()
     // The premise: 120 Hz really is in the CoreGraphics list.
@@ -120,9 +118,8 @@ struct WireTimingGuardTests {
   }
 
   /// Second panel, and the one the rule has NOT been measured on. The Dell's
-  /// single 2:1 rung sits at 75 Hz, a refresh it advertises no timing for at
-  /// all — so the guard withholds it and the issue's hardware pass is what
-  /// will confirm or refute the prediction.
+  /// single 2:1 rung sits at 75 Hz, a refresh it advertises no timing for, so
+  /// the guard withholds it as a prediction a hardware pass still has to judge.
   @Test func theDellsOnlyExact2to1RungIsWithheld() {
     let result = CGSModeRevelation.reveal(
       cgs: [CGSModeFixtures.dellRevealedNativeAt2x],
@@ -154,9 +151,8 @@ struct WireTimingGuardTests {
     #expect(result.modes.first?.refreshHz == 60)
   }
 
-  /// NTSC is real — the built-in offers both 59.94 and 60 at one size — so the
-  /// quantization that absorbs noise must still keep genuinely distinct rates
-  /// apart. A 59.94-only panel is no parent for a 60 Hz rung.
+  /// NTSC is real: the built-in offers both 59.94 and 60 at one size, so the
+  /// quantization that absorbs noise must keep distinct rates apart.
   @Test func aNearbyButDistinctRefreshIsNotAParent() {
     let ntscOnly = [
       DisplayMode(

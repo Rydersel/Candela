@@ -8,10 +8,10 @@ VirtualDisplayHost.handleEngageHelperInvocation()
 
 var arguments = Array(CommandLine.arguments.dropFirst())
 
-// Backlog #2: `--display <id>` narrows every subcommand to one display —
-// without it, `native set`/`hdr on` fan out to the built-in and every
-// external on a multi-monitor desk. Parsed once here, ahead of the switch,
-// so the DDC subcommands inherit it for free.
+// `--display <id>` narrows every subcommand to one display: without it,
+// `native set`/`hdr on` fan out to the built-in and every external on a
+// multi-monitor desk. Parsed ahead of the switch so the DDC subcommands
+// inherit it.
 var displayFilter: CGDirectDisplayID?
 if let flagIndex = arguments.firstIndex(of: "--display") {
   guard flagIndex + 1 < arguments.count, let id = UInt32(arguments[flagIndex + 1]) else {
@@ -59,17 +59,15 @@ usage: candela-probe [--display <id>] <subcommand>
 """
 
 /// The DDC subcommands need a DDC-capable external display. The private-API
-/// subcommands (native/hdr/gamma/watch) work on any online display — including
-/// the built-in, and including an external whose DDC is locked by HDR mode.
+/// subcommands (native/hdr/gamma/watch) work on any online display, including
+/// the built-in and an external whose DDC is locked by HDR mode.
 struct ProbeDisplay {
   let id: CGDirectDisplayID
-  /// The display's own title, as the app itself publishes it: its sidebar row's
-  /// accessibility description and its settings window title.
+  /// The title the app publishes: the sidebar row's accessibility description
+  /// and the settings window title.
   let title: String
-  /// The label the probe PRINTS, which appends the display id so two panels of
-  /// the same model can be told apart. Kept as a separate reading of the same
-  /// display because the two are consumed by different things: a person reads
-  /// this one, and the accessibility layer matches the title.
+  /// What the probe prints. The id disambiguates two panels of the same model;
+  /// the accessibility layer matches on `title` instead.
   var name: String { "\(title) [\(id)]" }
 }
 
@@ -107,13 +105,13 @@ func parseHexByte(_ text: String) -> UInt8? {
   return UInt8(body, radix: 16)
 }
 
-/// Generic DDC read/write over `found`, shared by volume/contrast/mute/vcp.
+/// Generic DDC read over `found`, shared by volume/contrast/mute/vcp.
 func ddcGet(code: UInt8, label: String) async {
   requireDDCDisplays()
   for entry in found {
     let result = await entry.writer.read(command: code)
-    // A read failure is normal on write-only panels (e.g. the MAG 341C, which
-    // ACKs every write and returns all-zeros for every read) — not a tool fault.
+    // A read failure is normal on write-only panels (the MAG 341C ACKs every
+    // write and returns all-zeros for every read), not a tool fault.
     print("\(entry.display.name): \(label) \(result.map { "\($0.current)/\($0.max)" } ?? "read failed (panel may be write-only, or DDC is locked by HDR)")")
   }
 }
@@ -155,9 +153,9 @@ func CandelaVDIsOnlineFresh(_ id: CGDirectDisplayID) -> Bool {
   return ids.prefix(Int(count)).contains(id)
 }
 
-/// Re-executes this binary to get an online answer from a snapshot taken after
-/// the destroy. Returns false when the child cannot be run or does not answer,
-/// so an unusable check never manufactures a departure it did not witness.
+/// Re-executes this binary so the online answer comes from a snapshot taken
+/// after the destroy. False when the child cannot run or does not answer, so an
+/// unusable check never manufactures a departure it did not witness.
 func freshProcessSaysDeparted(_ id: CGDirectDisplayID) -> Bool {
   let child = Process()
   child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
@@ -170,12 +168,11 @@ func freshProcessSaysDeparted(_ id: CGDirectDisplayID) -> Bool {
   return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) == "0"
 }
 
-/// The one conformance check that must live in the probe: invariant 8 needs a
-/// process whose EXIT reverts the preview apply, and only this binary knows
-/// its own path. The child runs `modeapply` at preview scope through the real
-/// configurator, whose post-commit verification throws on a reassigned id, so
-/// "achieved the requested id" is checked by the same machinery the app
-/// trusts; the parent then watches the revert land after the child exits.
+/// The one conformance check that must live in the probe: it needs a process
+/// whose EXIT reverts the preview apply, and only this binary knows its own
+/// path. The child runs `modeapply` at preview scope through the real
+/// configurator, whose post-commit verification throws on a reassigned id; the
+/// parent then watches the revert land after the child exits.
 func conformApplyPreview(
   configurator: CoreGraphicsDisplayConfigurator,
   applyDestructive: Bool,
@@ -190,9 +187,8 @@ func conformApplyPreview(
   let candidates = configurator.displays().sorted { !$0.isBuiltIn && $1.isBuiltIn }
   for display in candidates where limit == nil || display.id == limit {
     let modes = configurator.modes(for: display.id)
-    // The largest revealed rung, so the bounce is the least visually violent
-    // one the panel offers. A display revealing nothing is cgs.reveals'
-    // business, not this check's.
+    // The largest revealed rung, so the bounce is the least violent one the
+    // panel offers. A display revealing nothing is cgs.reveals' business.
     guard let revealed = modes.filter(\.isRevealed)
       .max(by: { $0.logicalWidth * $0.logicalHeight < $1.logicalWidth * $1.logicalHeight }),
           let before = configurator.currentMode(for: display.id)
@@ -237,10 +233,9 @@ func conformApplyPreview(
 
 switch arguments.first {
 case nil:
-  // Usage prints on ANY machine, with no hardware precondition: someone with
-  // nothing attached is exactly who needs to read it, and routing a bare
-  // invocation into `list` sent them "No DDC-capable external displays found"
-  // and exit 1 instead.
+  // No hardware precondition: someone with nothing attached is exactly who
+  // needs to read this. Routing a bare invocation into `list` sent them "No
+  // DDC-capable external displays found" and exit 1.
   print(usage)
 case "list":
   requireDDCDisplays()
@@ -275,10 +270,10 @@ case "topology":
   print("ddc-pool=\(pool.map(String.init).joined(separator: ","))")
 
 case "vd":
-  // Exercises the SHIPPING VirtualDisplayHost without the app: creation,
-  // appearance, departure, and (with --hold and an external kill -9) the
-  // crash-reclaim behavior. Colour profile counts print around the create so
-  // a repeat-run growth is visible immediately (VD11).
+  // Exercises the shipping VirtualDisplayHost without the app: creation,
+  // appearance, departure, and (with --hold plus an external kill -9) crash
+  // reclaim. Colour profile counts print around the create so repeat-run growth
+  // shows up immediately (VD11).
   let profilesDir = "/Library/ColorSync/Profiles/Displays"
   func profileCount() -> Int {
     (try? FileManager.default.contentsOfDirectory(atPath: profilesDir).count) ?? -1
@@ -330,11 +325,9 @@ case "vd":
     if departed {
       print("destroyed=1 departed=1")
     } else {
-      // Not a retry and not a second chance for the same check: the in-process
-      // answer is known to be unable to change, so this asks a process whose
-      // snapshot was taken after the destroy. Printing both keeps the verdict
-      // honest either way, rather than reporting a display still standing that
-      // has already gone.
+      // Not a retry: the in-process answer cannot change, so this asks a process
+      // whose snapshot postdates the destroy. Printing both keeps the verdict
+      // honest rather than reporting a display that has already gone.
       let goneForFreshProcess = freshProcessSaysDeparted(handle.displayID)
       print("destroyed=1 departed=\(goneForFreshProcess ? 1 : 0) in-process-wait=timed-out"
         + (goneForFreshProcess
@@ -348,22 +341,21 @@ case "vd":
 
 case "modes":
   // Reports the merged list THROUGH CoreGraphicsDisplayConfigurator, so what
-  // prints here is exactly what the app's pickers see — revelation included.
+  // prints here is exactly what the app's pickers see, revelation included.
   let configurator = CoreGraphicsDisplayConfigurator()
   print(
     "hidden-mode revelation: \(configurator.revealsHiddenModes ? "available" : "UNAVAILABLE")")
   // The probe reads its OWN defaults domain, not the app's, so this is the
-  // guard's default rather than whatever the app is running with (#110).
+  // guard's default rather than whatever the app is running with.
   print("wire-timing guard: \(configurator.guardsWireTiming ? "on" : "OFF")")
   for display in online where displayFilter == nil || display.id == displayFilter {
     let all = configurator.modes(for: display.id)
     let published = all.filter { $0.provenance == .coreGraphics }
     let revealed = all.filter { $0.provenance == .coreGraphicsServices }
     let withheld = configurator.modesWithheldByWireTimingGuard(for: display.id)
-    // #95's regression detector. Rows alike in every field the pickers render
-    // are rows a person cannot choose between, and the count is only meaningful
-    // against real hardware: the duplicates came from CoreGraphics itself, so no
-    // fixture can produce them.
+    // Regression detector. Rows alike in every field the pickers render are rows
+    // a person cannot choose between, and the count only means anything against
+    // real hardware: the duplicates come from CoreGraphics, not from a fixture.
     let rendered = all.map {
       "\($0.logicalWidth)x\($0.logicalHeight)|\($0.pixelWidth)x\($0.pixelHeight)|\($0.refreshHz)"
     }
@@ -393,10 +385,10 @@ case "modes":
     }
   }
 case "synthstops":
-  // The synthesized-size ladder exactly as the launch reapply computes it:
-  // raw configurator rows, native from the native flag, and the stored-stop
-  // resolution beside it. Built for the #186 pass, where the pane and the
-  // launch path disagreed and nothing could print the launch path's view.
+  // The synthesized-size ladder exactly as the launch reapply computes it: raw
+  // configurator rows, native from the native flag, and the stored-stop
+  // resolution beside it. The pane and the launch path can disagree, and nothing
+  // else prints the launch path's view.
   guard let target = displayFilter else {
     print("synthstops requires --display <id>")
     exit(2)
@@ -418,16 +410,13 @@ case "synthstops":
     if stops.isEmpty { print("stop: NONE") }
   }
 case "curated":
-  // What the DEFAULT picker actually shows, after DisplayModeCatalog curation.
+  // What the DEFAULT picker shows, after DisplayModeCatalog curation.
   //
-  // Geometry is built and passed, so this mirrors the app's DENSITY floor
-  // rather than the fraction-of-native fallback. The two disagree on real
-  // panels (that is what the density floor is for), and without this the app
-  // and the probe would print different curated lists for the same display,
-  // which a hardware pass has no way to read as anything but a bug.
-  //
-  // The physical size comes off the discovery pass already made at startup, so
-  // nothing extra is read and nothing new goes on the DDC wire.
+  // Geometry is built and passed, so this mirrors the app's DENSITY floor rather
+  // than the fraction-of-native fallback. The two disagree on real panels, and
+  // without this the app and the probe would print different curated lists for
+  // the same display. The physical size comes off the startup discovery pass, so
+  // nothing new goes on the DDC wire.
   let cur = CoreGraphicsDisplayConfigurator()
   for display in online where displayFilter == nil || display.id == displayFilter {
     let all = cur.modes(for: display.id)
@@ -606,11 +595,11 @@ case "provenance":
     exit(4)
   }
 case "conform":
-  // #82: does the platform still behave as this app assumes? Non-destructive
-  // by default; --apply adds the checks that reconfigure hardware (a preview
-  // mode apply, the rotation no-op calls, a same-value brightness write).
-  // The exit code is the interface: 0 only when something passed and nothing
-  // failed, so a run that demonstrated nothing exits non-zero.
+  // Does the platform still behave as this app assumes? Non-destructive by
+  // default; --apply adds the checks that reconfigure hardware (a preview mode
+  // apply, the rotation no-op calls, a same-value brightness write). The exit
+  // code is the interface: 0 only when something passed and nothing failed, so a
+  // run that demonstrated nothing exits non-zero.
   let applyDestructive = arguments.contains("--apply")
   let conformConfigurator = CoreGraphicsDisplayConfigurator()
   var report = await PlatformConformance.run(
@@ -625,10 +614,9 @@ case "conform":
   for line in report.lines() { print(line) }
   exit(report.exitCode)
 case "regress":
-  // The other half of `conform`: that command asks whether the platform still
-  // behaves as this app assumes, this one asks whether the app still behaves
-  // as its own rulings say it must, against the build that is running. Same
-  // report type, same exit-code rule, separate baselines.
+  // The other half of `conform`: that one asks whether the platform still
+  // behaves as this app assumes, this one whether the app still behaves as its
+  // own rulings say, against the running build. Separate baselines.
   switch Regress.parseOptions(Array(arguments.dropFirst())) {
   case let .failure(usage):
     print(usage.message)
@@ -650,11 +638,8 @@ case "regress":
     // that reports its verdict and drops it.
     switch Regress.writeRecords(report: report, options: options, timestamp: Date()) {
     case let .failure(usage):
-      // On stdout as well as stderr. Stdout is where a run says where its
-      // record landed, so it is where it has to say when none did: a reader
-      // watching that stream would otherwise see the report and no line about
-      // the record at all, which is the shape of a run that was never asked
-      // for one.
+      // On stdout as well as stderr: stdout is where a run says where its record
+      // landed, so it is where it has to say when none did.
       print("record NOT written: \(usage.message)")
       FileHandle.standardError.write(Data("\(usage.message)\n".utf8))
       exit(2)
@@ -689,7 +674,7 @@ case "set":
     print("\(entry.display.name): write \(value) -> \(ok ? "ok" : "FAILED")")
   }
 case "ramp":
-  // Sweeps VCP 0x10 in-process with Task.sleep pacing — no UI, no coalescer.
+  // Sweeps VCP 0x10 in-process with Task.sleep pacing: no UI, no coalescer.
   // Isolates the monitor's DDC apply-path latency from everything app-side.
   requireDDCDisplays()
   guard arguments.count == 5,
@@ -717,8 +702,8 @@ case "ramp":
     print("\(entry.display.name): ramp done in \(start.duration(to: .now))")
   }
 case "native":
-  // DisplayServices (private, dlsym'd). Succeeds on Apple displays and — the
-  // point of M3 — on an external display while macOS HDR owns its brightness.
+  // DisplayServices (private, dlsym'd). Succeeds on Apple displays, and on an
+  // external display while macOS HDR owns its brightness.
   requireOnlineDisplays()
   switch arguments.count > 1 ? arguments[1] : nil {
   case "get":
@@ -760,11 +745,10 @@ case "hdr":
       let issued = await service.setHDR(displayID: display.id, enabled: enabled)
       print("\(display.name): setHDR(\(enabled)) -> \(issued ? "issued" : "FAILED (lock busy or unavailable)")")
       guard issued else { continue }
-      // `setHDR` invalidates the cache rather than seeding it with the request
-      // (#65), so a poll now reads the panel. The per-tick clear stays: what
-      // `isHDREnabled` MEASURES is still cached for 2 s, which would otherwise
-      // pin this loop to its first reading for the first two of its five
-      // seconds.
+      // `setHDR` invalidates the cache rather than seeding it with the request,
+      // so a poll now reads the panel. The per-tick clear stays: what
+      // `isHDREnabled` measures is cached for 2 s, which would otherwise pin this
+      // loop to its first reading for two of its five seconds.
       let start = ContinuousClock.now
       var settled = false
       while start.duration(to: .now) < .seconds(5) {
@@ -785,9 +769,9 @@ case "hdr":
     exit(2)
   }
 case "gamma":
-  // Public Quartz gamma — the software-dimming backend. NOTE: Quartz restores
-  // this process's gamma the instant the process exits, so a one-shot set is
-  // just a flash; we hold, then reset explicitly.
+  // Public Quartz gamma, the software-dimming backend. Quartz restores this
+  // process's gamma the instant the process exits, so a one-shot set is just a
+  // flash; we hold, then reset explicitly.
   requireOnlineDisplays()
   guard arguments.count >= 2 else {
     print("usage: candela-probe gamma <0-1> [holdSeconds=15] | gamma reset")
@@ -864,7 +848,7 @@ case "mute":
   // VCP spec (and fork) wire values: 1 = mute, 2 = unmute.
   await ddcSet(code: VCP.audioMuteScreenBlank, value: arguments[1] == "on" ? 1 : 2, label: "mute")
 case "vcp":
-  // Fully generic prober — the escape hatch for remap experiments.
+  // Fully generic prober: the escape hatch for remap experiments.
   switch arguments.count > 1 ? arguments[1] : nil {
   case "get":
     guard arguments.count == 3, let code = parseHexByte(arguments[2]) else {

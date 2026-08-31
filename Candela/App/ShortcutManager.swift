@@ -15,18 +15,17 @@ extension KeyboardShortcuts.Name {
 /// Custom-shortcut dispatch (fork KeyboardShortcutsManager): handlers are
 /// registered once and guard on the CURRENT mode at fire time.
 ///
-/// These are Carbon hotkeys, not the CGEvent tap — they work without the
+/// These are Carbon hotkeys, not the CGEvent tap: they work without the
 /// Accessibility grant, which is why `KeyModePolicy.requiresAccessibility`
 /// ignores the custom modes.
 ///
-/// **Task 12 divergence from fork parity.** The fork keeps every hotkey
-/// REGISTERED regardless of mode and only guards at fire time. A Carbon hotkey
-/// registration is exclusive and system-wide, so an assigned shortcut whose
-/// mode is off still swallows its key combination in every other app while
-/// doing nothing here — an invisible dead zone with no control that explains
-/// it. `syncRegistration()` makes registration follow the mode instead. The
-/// fire-time guards below are KEPT as a backstop: a `defaults write` to a mode
-/// pref bypasses the pane and therefore this sync.
+/// **DIVERGENCE from the fork.** The fork keeps every hotkey REGISTERED
+/// regardless of mode and guards only at fire time. A Carbon registration is
+/// exclusive and system-wide, so an assigned shortcut whose mode is off still
+/// swallows its combination in every other app while doing nothing here, an
+/// invisible dead zone with no control that explains it. `syncRegistration()`
+/// makes registration follow the mode. The fire-time guards stay as a backstop:
+/// a `defaults write` to a mode pref bypasses the pane and this sync.
 @MainActor
 final class ShortcutManager {
   private let model: AppModel
@@ -66,18 +65,13 @@ final class ShortcutManager {
   /// unregisters them otherwise, so a combination assigned under a mode that is
   /// now off goes back to the rest of the system.
   ///
-  /// Static because the only other caller — the Keyboard pane — has no
-  /// reference to the instance (`StatusItemController` holds it privately), and
-  /// there is nothing instance-scoped to do: `KeyboardShortcuts`' registry is
-  /// global, and the modes are read from prefs.
+  /// Static because the Keyboard pane, the only other caller, holds no reference
+  /// to the instance, and there is nothing instance-scoped to do: the
+  /// `KeyboardShortcuts` registry is global and the modes come from prefs.
   ///
   /// Safe against the recorder: `Recorder` suspends dispatch with
   /// `KeyboardShortcuts.isPaused` while recording, never `enable`/`disable`, so
-  /// it cannot silently re-register a disabled name. A shortcut recorded while
-  /// its name is disabled is stored but stays unregistered
-  /// (`registerIfNeeded(for:)` consults `disabledNames`) — which cannot happen
-  /// from the pane anyway, since the recorders are only shown for the modes
-  /// that enable them.
+  /// it cannot silently re-register a disabled name.
   static func syncRegistration() {
     let prefs = DisplayPrefs(persistenceKey: "app")
     setRegistered(KeyModePolicy.firesCustomShortcuts(prefs.keyboardBrightness), brightnessNames)

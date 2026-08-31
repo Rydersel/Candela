@@ -74,8 +74,8 @@ struct OnboardingFlowView: View {
       .padding(.horizontal, 22)
       .padding(.top, 16)
       Spacer()
-      // Skip Setup lives under each page's primary action now; the rail
-      // carries only the dots.
+      // Skip Setup lives under each page's primary action; the rail carries
+      // only the dots.
       stepDots
         .padding(.bottom, 12)
     }

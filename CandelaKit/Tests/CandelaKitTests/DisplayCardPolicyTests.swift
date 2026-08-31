@@ -4,12 +4,9 @@ import Testing
 
 @Suite("Display card policy")
 struct DisplayCardPolicyTests {
-  /// The card has three words and the engine has six paths. `native` and
-  /// `unavailable` map to nil ON PURPOSE — the card has no vocabulary for them,
-  /// and the diagnostics section states both in full. Rendering nil as
-  /// "Hardware (DDC) control" is the defect this nil exists to prevent: it is
-  /// what the shipped `controlMethod(forceSoftware:avoidGamma:)` did on the
-  /// built-in panel, which has no DDC wire at all.
+  /// `native` and `unavailable` map to nil on purpose: the card has no vocabulary
+  /// for them and diagnostics states both in full. Rendering that nil as "Hardware
+  /// (DDC) control" is the defect, and it captioned the built-in panel that way.
   @Test func theCardHasNoWordForNativeOrForNothingAtAll() {
     #expect(DisplayCardPolicy.controlMethod(for: .native) == nil)
     #expect(DisplayCardPolicy.controlMethod(
@@ -19,9 +16,8 @@ struct DisplayCardPolicyTests {
 
   @Test func pureDDCAndCombinedBothReadAsHardwareControl() {
     #expect(DisplayCardPolicy.controlMethod(for: .hardware) == .hardwareDDC)
-    // Combined is the DEFAULT path and DDC carries the top of its range, so
-    // the card's three-way summary calls it hardware. The SPLIT is stated in
-    // the diagnostics section, which has room for a sentence.
+    // Combined is the default path and DDC carries the top of its range, so the
+    // card calls it hardware. Diagnostics has room to state the split.
     #expect(DisplayCardPolicy.controlMethod(
       for: .combined(switchingValue: 0.47, backend: .gamma)
     ) == .hardwareDDC)
@@ -35,12 +31,9 @@ struct DisplayCardPolicyTests {
     #expect(DisplayCardPolicy.controlMethod(for: .software(.overlay)) == .softwareOverlay)
   }
 
-  /// Ruling R-A, enforced one layer above the type that makes it
-  /// unrepresentable. `.softwareOnly` is combined mode with its hardware half
-  /// not running; answering `.hardwareDDC` here would put "Hardware (DDC)
-  /// control" back on a display whose DDC wire is switched off — the exact
-  /// untruth the case was carved out of `.combined` to end. The type cannot
-  /// catch it, because `.hardwareDDC` is a perfectly well-formed answer.
+  /// Ruling R-A. `.softwareOnly` is combined mode with its hardware half stopped,
+  /// so answering `.hardwareDDC` captions a display whose DDC wire is switched off
+  /// as hardware-controlled. The type cannot catch it: that answer is well-formed.
   @Test func aDeadDDCLegIsNeverCaptionedAsHardwareControl() {
     for backend: SoftwareDimmingBackend in [.gamma, .overlay] {
       let expected: DisplayControlMethod = backend == .overlay ? .softwareOverlay : .softwareGamma
@@ -50,11 +43,9 @@ struct DisplayCardPolicyTests {
     }
   }
 
-  /// The card word is a function of the PATH alone. Nothing about a display's
-  /// prefs may reach this projection except through `BrightnessPathPolicy`: a
-  /// prefs-shaped overload is how the shipped row drifted from the engine in the
-  /// first place, so the property worth pinning is that every path the policy
-  /// can produce already has an answer here.
+  /// The card word is a function of the path alone. A prefs-shaped overload is how
+  /// the shipped row drifted from the engine, so nothing about a display's prefs
+  /// reaches this projection except through `BrightnessPathPolicy`.
   @Test func everyPathTheEngineCanProduceHasAnAnswer() {
     var reached = Set<String>()
     for path in Self.everyReachablePath() {
@@ -77,9 +68,8 @@ struct DisplayCardPolicyTests {
     #expect(reached.count == 6, "reached \(reached.sorted())")
   }
 
-  /// Every path the policy can produce, swept over the whole input product
-  /// rather than over a hand-picked list — a hand-picked list is what a new
-  /// seventh case would silently fall out of.
+  /// Swept over the whole input product rather than a hand-picked list, which a new
+  /// `BrightnessPath` case would silently fall out of.
   private static func everyReachablePath() -> [BrightnessPath] {
     var paths: [BrightnessPath] = []
     let flags = [true, false]
@@ -128,11 +118,9 @@ struct DisplayCardPolicyTests {
     #expect(DisplayCardPolicy.ddcTrafficBlock(for: .software(.overlay)) == .hardwareControlOff)
   }
 
-  /// The direction that would COST the user controls. Both of these paths are
-  /// reached from the BRIGHTNESS command's own `unavailableDDC`, and that says
-  /// nothing whatever about volume or contrast — they still write over the same
-  /// wire. Greying the grid here would remove two working controls to report a
-  /// third one's setting.
+  /// Both paths are reached from the brightness command's own `unavailableDDC`,
+  /// which says nothing about volume or contrast: they still write over the same
+  /// wire. Greying the grid here removes working controls to report another's setting.
   @Test func aBrightnessOnlyBlockNeverGreysVolumeAndContrast() {
     for backend: SoftwareDimmingBackend in [.gamma, .overlay] {
       #expect(DisplayCardPolicy.ddcTrafficBlock(
@@ -151,9 +139,8 @@ struct DisplayCardPolicyTests {
     ) == nil)
   }
 
-  /// Same sweep, same reason as `everyPathTheEngineCanProduceHasAnAnswer`: the
-  /// property is over every path the engine can actually produce, not over a
-  /// hand-picked list a seventh case would fall out of.
+  /// Same sweep and same reason as `everyPathTheEngineCanProduceHasAnAnswer`: over
+  /// every path the engine can produce, not a hand-picked list.
   @Test func everyPathTheEngineCanProduceHasATrafficVerdict() {
     var reached = Set<String>()
     for path in Self.everyReachablePath() {

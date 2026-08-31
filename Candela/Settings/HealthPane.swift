@@ -5,50 +5,28 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The Health pillar's settings-side front door (SC4): what each display's
-/// record says, and every control that decides what goes into it.
+/// record says, and the controls that decide what goes into it. The cards are
+/// summaries; the Heat Map window is the reading surface.
 ///
-/// The cards at the top are summaries, never instruments. The reading surface
-/// is the Heat Map window, which stays content-sized (OCR-A1 stands), and
-/// every card that has a record to show opens it.
+/// Measurement and record only, never a dimming behavior (Ryder, 2026-08-20):
+/// anything that changes what the screen looks like belongs on the display's
+/// OLED Care page (OCR2). Every pref written here is per-display (SC10).
 ///
-/// Below the cards is what used to be OLED Care's Measurement & Data page,
-/// moved here whole when SC5 retired it: the measurement toggle and its Screen
-/// Recording consent site, the permission-free observation, the hours counter,
-/// what has been collected so far, and the temporary model comparison. Nothing
-/// was re-derived on the way over; every control keeps its `PrefName` write
-/// through `SettingsActions` (D27).
-///
-/// **Measurement and record only, never a dimming behavior** (Ryder,
-/// 2026-08-20). The static-region dim arrived here with that page and went
-/// back out to the display's OLED Care page, which is where everything that
-/// dims lives (OCR2); it depends on the two measurement settings above and
-/// says so from there. Anything that changes what the screen looks like
-/// belongs on that page, not this one.
-///
-/// **Per display, not global.** Every pref written here is per-display, as it
-/// was on the page it came from (SC10), so this pane names the display it is
-/// acting on and switches between them rather than quietly promoting a
-/// per-display setting to an app-level one. The cards above are the scope's
-/// visible half: one per display, each carrying that display's own state.
-///
-/// `@MainActor` is load-bearing for `DisplayDetailView`'s reason: a `View`'s
-/// stored and computed properties are nonisolated under complete concurrency
-/// checking, and these read `AppModel` from outside `body`.
+/// `@MainActor`: a `View`'s stored and computed properties are nonisolated
+/// under complete concurrency checking, and these read `AppModel` outside `body`.
 @MainActor
 struct HealthPane: View {
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
 
-  /// The display the controls below the cards act on, or nil to follow the
-  /// connected set. Deliberately not seeded once at appearance: a key pinned
-  /// on arrival would outlive the display's unplug, and resolving the default
-  /// on every render means a departure falls back to a connected display
-  /// instead of leaving the section acting on nothing.
+  /// The display the controls below act on, or nil to follow the connected set.
+  /// Not seeded at appearance: a pinned key outlives the display's unplug, while
+  /// resolving per render falls back to a connected display.
   @State private var scopedKey: String?
 
   var body: some View {
     // Prefs are plain `UserDefaults` and not observable, so this is the only
-    // thing that re-reads them after a write from here or from anywhere else.
+    // thing that re-reads them after a write.
     let _ = model.prefsRevision
     SettingsPageScaffold {
       SettingsPageHeader(
@@ -57,10 +35,8 @@ struct HealthPane: View {
           + "Health is where Candela's record is read: hours of use, and where on the screen the light has fallen."
       )
 
-      // The exceptional state leads, before the cards, which is the OLED Care
-      // overview's placement rule and for a sharper reason here: every figure
-      // below is stored history, and the hours switch reads ON for a counter
-      // that is not counting.
+      // Leads the cards: every figure below is stored history, and the hours
+      // switch reads ON for a counter that is not counting.
       if model.isSafeMode {
         safeModeNote
       }
@@ -73,18 +49,13 @@ struct HealthPane: View {
         OledModelComparisonSection(persistenceKey: scoped.display.persistenceKey)
       }
     }
-    // The care cross-link's one-shot scope handoff (SC4). Adopted here rather
-    // than observed: `pendingHealthScope` is set by a link on ANOTHER pane, so
-    // this pane is never on screen when it is written and every reveal reaches
-    // it through a fresh appearance. Cleared on adoption, so a later visit by
-    // the sidebar keeps the pane's own state.
+    // One-shot scope handoff from a link on another pane (SC4). Cleared on
+    // adoption, so a later visit from the sidebar keeps this pane's own state.
     .onAppear {
       guard let pending = actions.pendingHealthScope else { return }
       actions.pendingHealthScope = nil
-      // A key that no longer names a connected display is dropped rather than
-      // stored: `scoped` would fall back anyway, but a stale key parked in
-      // `scopedKey` would move the switcher by itself when that display came
-      // back.
+      // A key naming no connected display is dropped: parked in `scopedKey` it
+      // would move the switcher by itself when that display came back.
       if displays.contains(where: { $0.display.persistenceKey == pending }) {
         scopedKey = pending
       }
@@ -93,20 +64,13 @@ struct HealthPane: View {
 
   // MARK: - Safe Mode
 
-  /// D11's visibility rule on the pane that most needs it. `OledCareCoordinator.start`
-  /// returns at its safe-mode guard before the driver loop is built, so nothing
-  /// on this pane is measuring, sampling or counting, while the cards' figures
-  /// and the hours switch below both look live.
-  ///
-  /// Pane-level rather than per-card: `OledCareCardCopy.measurementLine` returns
-  /// the bare hours string under safe mode by design (its own test pins that),
-  /// and the OLED Care overview's card prepends the pause itself. Saying it once
-  /// at the top covers the cards, the hours switch and the histogram together,
-  /// which no per-control note reaches.
+  /// D11's visibility rule. `OledCareCoordinator.start` returns at its safe-mode
+  /// guard, so nothing here is measuring while the figures and the hours switch
+  /// look live. Pane-level, because no per-control note covers the cards, the
+  /// switch and the histogram at once.
   private var safeModeNote: some View {
     SettingsCard {
-      // Surfaceless: the card is the surface. Same shape as the OLED Care
-      // overview's note, same sentence, from `SafeModeCopy`.
+      // Surfaceless: the card is the surface.
       SettingsNotice(drawsSurface: false) {
         Text(verbatim: SafeModeCopy.careSessionNotice)
           .font(.callout.weight(.medium))
@@ -119,13 +83,11 @@ struct HealthPane: View {
 
   // MARK: - Scope
 
-  /// External displays only: nothing measures the built-in, so it never
-  /// appears here or in the switcher.
+  /// External displays only: nothing measures the built-in.
   private var displays: [AppModel.DisplayState] { model.displays }
 
-  /// The chosen display, or the first connected one. Falling back rather than
-  /// going empty is what keeps the controls reachable after the chosen display
-  /// is unplugged.
+  /// The chosen display, or the first connected one; falling back rather than
+  /// going empty keeps the controls reachable after an unplug.
   private var scoped: AppModel.DisplayState? {
     displays.first { $0.display.persistenceKey == scopedKey } ?? displays.first
   }
@@ -138,29 +100,26 @@ struct HealthPane: View {
 
   // MARK: - Displays
 
-  /// One card per display, every display, enrollment notwithstanding (SC4).
-  /// Several cards rather than one section, so the sentence under them stands
-  /// on the canvas instead of inside a card, which is the OLED Care overview's
-  /// rhythm and the shape a reader arrives from.
+  /// One card per display, enrollment notwithstanding (SC4). Separate cards so
+  /// the sentence under them stands on the canvas rather than inside a card.
   private var displaysSection: some View {
     VStack(alignment: .leading, spacing: 8) {
       SettingsSectionTitle(text: "Displays")
 
-      // Once for the page, not once per card: repeating it under each would read
-      // as a different file per display.
+      // Once for the page: repeated under each card it would read as a
+      // different file per display.
       SettingsRowNote(verbatim: ProvenanceCopy.note)
 
-      // Keyed by `persistenceKey`, never `DisplayState.id`: IDs reassign
-      // across a replug (measured, the MAG and the Dell swapped across one
-      // dock cycle), and a `ForEach` keyed on a reused id hands the OLD view
-      // instance to the OTHER display's card.
+      // Keyed by `persistenceKey`, never `DisplayState.id`: IDs reassign across
+      // a replug (measured, the MAG and the Dell swapped over one dock cycle),
+      // and a reused id hands the OLD view instance to the OTHER card.
       ForEach(displays, id: \.display.persistenceKey) { state in
         HealthDisplayCard(state: state)
       }
 
       if displays.isEmpty {
-        // On a card of its own, because a bare sentence on the canvas where
-        // the cards would be reads as a page that failed to load.
+        // Carded: a bare sentence where the cards would be reads as a page
+        // that failed to load.
         SettingsCard {
           SettingsCaption("Connect an external display to start a record for it. Nothing is measured on the built-in display.")
         }
@@ -170,9 +129,9 @@ struct HealthPane: View {
 
   // MARK: - Measurement
 
-  /// The retired page's controls, with the display they act on named at the
-  /// top. The switcher's contract is `SubPageHeader`'s (SO23): a persistence
-  /// key out, and nothing here reaching into navigation state it does not own.
+  /// The measurement controls, scoped to one named display. The switcher's
+  /// contract is `SubPageHeader`'s (SO23): a persistence key out, and nothing
+  /// here reaching into navigation state it does not own.
   @ViewBuilder private func measurementSection(for state: AppModel.DisplayState) -> some View {
     let key = state.display.persistenceKey
     VStack(alignment: .leading, spacing: 5) {
@@ -193,9 +152,8 @@ struct HealthPane: View {
         }
       }
 
-      // Only where there is a choice to be misread. With one display attached
-      // the controls' own "this display" is unambiguous, and the sentence
-      // would be answering a question nobody asked.
+      // Only where there is a choice to be misread: with one display attached
+      // the controls' own "this display" is unambiguous.
       if displays.count > 1 {
         SettingsCaption(
           verbatim: "These settings are \(name(state))'s alone; every display is measured on its own."
@@ -244,15 +202,12 @@ struct HealthPane: View {
     }
   }
 
-  /// The wear signal's first reader (OC20 built it; nothing displayed it):
-  /// how long this display has run at each brightness, and the share of
-  /// MASK-COULD-APPLY time spent in a protective dim, which is OC17's own gate
-  /// number. Both are counts of seconds; neither is a model.
+  /// How long this display ran at each brightness, and the share of
+  /// MASK-COULD-APPLY time spent in a protective dim (OC17's gate number).
   ///
-  /// The two do NOT share a denominator, ruled 2026-08-18: the bars cover every
-  /// state, the percentage covers only the time the mask could act in. That is
-  /// what the caption below is for, and it is the reason the percentage is not
-  /// rewritten to match the bars.
+  /// The two do NOT share a denominator (ruled 2026-08-18): the bars cover every
+  /// state, the percentage only the time the mask could act in. That is what the
+  /// caption is for, and why the percentage is not rewritten to match the bars.
   private func usageHistogram(tracker: WearSignalTracker, buckets: [Double]) -> some View {
     let fraction = tracker.wearWeightableFraction
     return VStack(alignment: .leading, spacing: 6) {
@@ -268,8 +223,8 @@ struct HealthPane: View {
         }
       }
       OledBrightnessHistogram(secondsByBucket: buckets)
-      // Only where both numbers are on screen: with no percentage beside the
-      // bars there are not two readings to tell apart.
+      // Only with the percentage on screen: otherwise there are not two
+      // readings to tell apart.
       if let fraction, fraction > 0 {
         Text(verbatim: OledCareCopy.wearFractionScope)
           .font(.caption)
@@ -282,24 +237,17 @@ struct HealthPane: View {
 
 // MARK: - One display's card
 
-/// A display's record at a glance, and the doorway to the window that reads it
-/// properly (SC4). Not a navigation row like the OLED Care overview's card:
-/// this one carries an explicit button, because the destination is a separate
-/// window rather than a push and a whole-card tap that opens a window is a
-/// surprise the overview's chevron does not promise.
-///
-/// A display with no record says why, in the one shape SC4 allows: measurement
-/// currently runs on displays enrolled in OLED care, stated as the fact it is,
-/// with the way there beside it. Decoupling measurement from enrollment is
-/// filed as its own work; until it lands, hiding the coupling would be the
-/// dishonest option.
+/// A display's record at a glance, with an explicit button to the Heat Map
+/// (SC4): the destination is a separate window, which a whole-card tap does not
+/// promise. A display with no record names the enrollment coupling rather than
+/// hiding it; decoupling measurement from enrollment is filed as its own work.
 @MainActor
 private struct HealthDisplayCard: View {
   let state: AppModel.DisplayState
 
   @State private var justCopied = false
   /// Cancelled and replaced on every copy, so a second click restarts the two
-  /// seconds instead of letting the first click's timer clear the label early.
+  /// seconds instead of inheriting the first click's timer.
   @State private var confirmationTask: Task<Void, Never>?
   @State private var saveError: String?
 
@@ -339,8 +287,8 @@ private struct HealthDisplayCard: View {
           if recording {
             Button("Open Heat Map") { actions.openDisplayHealth(persistenceKey) }
               .buttonStyle(SettingsSecondaryButtonStyle())
-              // Repeated verbatim on every card otherwise, which tells a
-              // VoiceOver user which button but not which display.
+              // Otherwise every card speaks the same label, naming the button
+              // but not the display.
               .accessibilityLabel(Text(verbatim: "Open Heat Map for \(name)"))
           } else {
             Button("Open OLED Care") { actions.reveal(.pane(.oledCare)) }
@@ -359,8 +307,8 @@ private struct HealthDisplayCard: View {
             .accessibilityLabel(Text(verbatim: "Export provenance for \(name)"))
           Button(justCopied ? ProvenanceCopy.copied : ProvenanceCopy.copySummary) { copySummary() }
             .buttonStyle(SettingsSecondaryButtonStyle())
-            // The visible title flips to "Copied", so the label flips with it or
-            // VoiceOver never hears the confirmation.
+            // The visible title flips to "Copied", so the label flips with it
+            // or VoiceOver never hears the confirmation.
             .accessibilityLabel(
               Text(verbatim: justCopied
                 ? "Copied provenance summary for \(name)"
@@ -380,8 +328,8 @@ private struct HealthDisplayCard: View {
     }
   }
 
-  /// The kit's own encoder, so an exported file is byte-identical to any other
-  /// copy of the same record and the verifier answers the same on all of them.
+  /// The kit's own encoder, so two exports of one record are byte-identical and
+  /// the verifier answers the same on both.
   private func exportProvenance() {
     let record = ProvenanceExporter.record(for: state, model: model)
     let panel = NSSavePanel()
@@ -409,14 +357,9 @@ private struct HealthDisplayCard: View {
     }
   }
 
-  /// The card's words. An un-enrolled display states the coupling; every other
-  /// state is `OledCareCardCopy`'s line, the same one the OLED Care overview's
-  /// card carries, so the two surfaces cannot report one display's readings
-  /// differently.
-  ///
-  /// The dim state the overview prepends is deliberately absent: what is
-  /// dimming right now is OLED Care's subject, and this pane is about what has
-  /// been recorded.
+  /// Shares `OledCareCardCopy` with the OLED Care overview, so the two surfaces
+  /// cannot report one display's readings differently. The dim state the
+  /// overview prepends is left off: this pane is about what was recorded.
   private func statusLine(summary: PanelHealthSummary, recording: Bool) -> String {
     guard recording else {
       return "Not measured yet. Measurement currently runs on displays enrolled in OLED care."
@@ -431,13 +374,8 @@ private struct HealthDisplayCard: View {
 
 // MARK: - The moved controls
 
-/// The two data sources behind a display's record, in the order they cost
-/// the user something: the one that needs a system permission first, then the
-/// one that needs none.
-///
-/// Moved here from `OledCareMeasurementPage` when SC5 retired it. The copy,
-/// the ordering and the write paths are that page's exactly; what changed is
-/// which surface hosts them.
+/// The two data sources behind a display's record, ordered by what they cost:
+/// the one that needs a system permission first, then the one that needs none.
 @MainActor
 private struct MeasurementControls: View {
   let persistenceKey: String
@@ -451,27 +389,21 @@ private struct MeasurementControls: View {
   }
 
   var body: some View {
-    // Spec §4's prompt copy, used verbatim as the toggle's own explanation so
-    // the reason is on screen BEFORE macOS's own dialog, which says "record
-    // the contents of your screen" and can say nothing else. The only
-    // substitution is the product name, which every other caption in this file
-    // interpolates for the same reason (the working name is not final).
+    // Spec §4's prompt copy, verbatim, so the reason is on screen BEFORE
+    // macOS's own dialog, which can only say "record the contents of your
+    // screen". The product name is interpolated: the working name is not final.
     SettingRow(caption: SettingsCaption("\(AppInfo.productName) measures how bright each part of the display is, at about the resolution of this grid, once a minute. Nothing is recorded or stored as an image, and nothing leaves this Mac.")) {
       VStack(alignment: .leading, spacing: 8) {
         Toggle("Measure how bright each part of this display is", isOn: Binding(
           get: { prefs.oledTelemetry },
           set: { on in
-            // One of the two places in the app that raise the Screen
-            // Recording prompt; the guided setup flow's measured choice is
-            // the other. The sampler itself is preflight-only on purpose: a
-            // background loop that raises a TCC dialog on its own schedule is
-            // a permission request with no explanation attached to it.
+            // One of two sites that raise the Screen Recording prompt (guided
+            // setup is the other); the sampler itself is preflight-only, so no
+            // background loop raises a TCC dialog unexplained.
             //
-            // The pref is written whether or not the grant arrives. macOS
+            // The pref is written whether or not the grant arrives: macOS
             // returns false from the request that merely SHOWS the dialog, so
-            // gating the switch on the return value would leave it stuck off
-            // on the first click; instead the switch records the decision and
-            // the note below says the grant has not landed.
+            // gating the switch on the return value leaves it stuck off.
             if on { _ = CGRequestScreenCaptureAccess() }
             writer.write(.oledTelemetry) { $0.oledTelemetry = on }
           }
@@ -480,26 +412,14 @@ private struct MeasurementControls: View {
         .prefIdentifier(.oledTelemetry, persistenceKey: persistenceKey)
         // What "the resolution of this grid" means, at the size it means it.
         PanelGridMark()
-        // The ONE control on this pane that gets its own safe-mode note, and
-        // only because it is the one that spends something: the setter above
-        // raises the Screen Recording dialog whenever it is switched ON
-        // (turning measurement off asks for nothing), so without this
-        // a safe-mode session grants a system permission to a sampler that
-        // cannot run until the next normal launch, with every visible signal
-        // (switch on, no not-granted note) saying it worked.
-        //
-        // What covers everything else on this pane is the pane-level note at
-        // the top, NOT the cards: `OledCareCardCopy.measurementLine` returns
-        // the bare hours string under safe mode (pinned by
-        // `HealthCardCopyTests.safeModeSaysNothingAboutReadings`) and this
-        // pane's card adds no prefix of its own. An earlier version of this
-        // comment claimed the cards said it, which was a justification a test
-        // contradicted.
+        // The one control here with its own safe-mode note, because it is the
+        // one that spends something: switching it ON raises the Screen Recording
+        // dialog, so without this a safe-mode session grants a permission to a
+        // sampler that cannot run until the next normal launch, with every
+        // visible signal saying it worked.
         //
         // Safe Mode WINS over the grant note rather than joining it: both are
-        // true at once, but two notes giving two reasons for one silence read
-        // as a bug, and the grant is the reason that cannot be acted on
-        // usefully this session.
+        // true, but two reasons for one silence read as a bug.
         if model.isSafeMode {
           OledInlineNote(Text("Safe Mode is on for this session, so nothing is being measured whatever this is set to, and Screen Recording is not needed until the next normal launch."))
         } else if prefs.oledTelemetry, !CGPreflightScreenCaptureAccess() {
@@ -510,13 +430,12 @@ private struct MeasurementControls: View {
 
     SettingsCardDivider()
 
-    // The battery clause is stated ONCE, on the last row of the measurement
-    // group, because `OledCareCoordinator.samplingQualifies` gates BOTH toggles
-    // on the same signal: below the threshold both counters freeze, and nothing
-    // on any surface said so. The number mirrors
-    // `OledCareSignalSources.lowBatteryPercent` (20, at or below, and only on
-    // battery power); a vaguer "on low battery" would not tell anyone whether
-    // what they are seeing is the gate or a broken counter.
+    // The battery clause is stated ONCE, on the last row of the group:
+    // `OledCareCoordinator.samplingQualifies` gates BOTH toggles on the same
+    // signal, so below the threshold both counters freeze. The number mirrors
+    // `OledCareSignalSources.lowBatteryPercent` (20, at or below, on battery
+    // only); "on low battery" would not say whether a frozen counter is the
+    // gate or a bug.
     SettingRow("Needs no permission: reads each on-screen window's position and the name of the app that owns it, never window titles and never their contents. This is what puts an app's name next to an area of the display. Both measurements pause while the Mac is running on battery at 20% charge or less.") {
       Toggle("Note which apps are on this display", isOn: Binding(
         get: { prefs.oledWindowObservation },
@@ -528,18 +447,14 @@ private struct MeasurementControls: View {
   }
 }
 
-/// "Hours of use", never "panel hours", in every visible string (SO14: the
-/// hardware is a display; "panel" survives only in type names like
-/// `PanelHoursTracker` and in comments).
+/// "Hours of use", never "panel hours", in every visible string (SO14).
 ///
-/// The second sentence is the honest limit of the number: macOS reports
-/// a DPMS-blanked panel as awake, at full resolution, with no reconfiguration,
-/// so a panel held in soft standby is indistinguishable from a lit one.
-/// "can still be counted" is deliberately hedged. Whether the monitor's own
-/// power button reaches soft standby or instead deasserts hot-plug detect
-/// (a real departure, handled correctly) is untested per monitor.
-/// Display sleep, system sleep and mirroring are all handled correctly, so
-/// don't let the caption imply otherwise in either direction.
+/// The caption's second sentence is the honest limit of the number: macOS
+/// reports a DPMS-blanked panel as awake at full resolution, so soft standby is
+/// indistinguishable from a lit panel. Whether a monitor's own power button
+/// reaches soft standby or deasserts hot-plug detect (a real departure, handled
+/// correctly) is untested per monitor. Display sleep, system sleep and mirroring
+/// are all handled correctly, so don't let the caption imply otherwise.
 @MainActor
 private struct HoursToggle: View {
   let persistenceKey: String

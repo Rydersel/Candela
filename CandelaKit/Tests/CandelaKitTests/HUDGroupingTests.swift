@@ -82,11 +82,9 @@ struct HUDGroupingTests {
 
   // MARK: - Synthesis sets (SS1)
 
-  /// A synthesized size is ONE panel as far as the person pressing the key is
-  /// concerned. The pill still has to be drawn on the virtual display, which
-  /// owns the framebuffer and is the only member with a screen, but it must
-  /// name the panel and count nothing: "+ 1 more" would announce a display
-  /// nobody can look at, created by the app to serve the size.
+  /// A synthesized size is one panel to the person pressing the key. The pill is
+  /// drawn on the virtual display, which owns the framebuffer, but names the panel
+  /// and counts nothing: "+ 1 more" would announce a display nobody can look at.
   @Test func aSynthesisSetNamesThePanelAndCountsNoOtherMembers() {
     let topology = MirrorFixtures.synthesisPair()
     #expect(

@@ -2,10 +2,9 @@ import AppKit
 import CandelaKit
 import Testing
 
-/// The field covers the whole panel at shielding level with no chrome, so these
-/// flags fail silently and expensively: a lower level lets the screen saver
-/// paint over it, and click-through sends the tap underneath. Host-free:
-/// nothing is ordered on screen, so nothing touches the pointer.
+/// The field covers the whole panel at shielding level with no chrome, and these
+/// flags fail quietly: a lower level lets the screen saver paint over it, and
+/// click-through sends the tap underneath. Nothing here is ordered on screen.
 @MainActor
 @Suite("Checkup field window")
 struct CheckupFieldWindowTests {

@@ -2,19 +2,17 @@ import CoreAudio
 import Foundation
 import os
 
-/// Minimal CoreAudio wrapper (D4) — SimplyCoreAudio is archived, and this is
-/// the whole surface Candela needs from it.
+/// Minimal CoreAudio wrapper (D4): SimplyCoreAudio is archived, and this is all
+/// Candela needs from it.
 public final class CoreAudioDeviceProvider: AudioDeviceProviding, Sendable {
   private let handlerLock = OSAllocatedUnfairLock<(@Sendable () -> Void)?>(initialState: nil)
   private let listenerInstalled = OSAllocatedUnfairLock(initialState: false)
   private let listenerQueue = DispatchQueue(label: "com.rydersel.Candela.audio-listener")
-  /// Change-refreshed snapshot (concurrency F7): the blocking HAL read runs
-  /// on the listener queue at change time (and lazily on first read), never
-  /// on the MainActor re-arm path — coreaudiod is most likely to stall
-  /// exactly when the default-output listener fires. D4's "recompute at key
-  /// time" mandate concerns the display MATCH SET, not the device fetch:
-  /// matching against a change-refreshed snapshot still fixes the fork's
-  /// stale-cache defect. Outer nil = never fetched; inner nil = no device.
+  /// Change-refreshed snapshot: the blocking HAL read runs on the listener queue at
+  /// change time (and lazily on the first read), never on the MainActor re-arm path,
+  /// because coreaudiod is most likely to stall exactly when the default-output
+  /// listener fires. D4's "recompute at key time" governs the display MATCH SET, not
+  /// the device fetch. Outer nil = never fetched; inner nil = no device.
   private let snapshot = OSAllocatedUnfairLock<AudioOutputDevice??>(initialState: AudioOutputDevice??.none)
   /// Second change-refreshed snapshot, same rules as `snapshot`: the device
   /// LIST changes on its own events (plug/unplug), not on default-output
@@ -47,8 +45,8 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, Sendable {
       return true
     }
     guard install else { return }
-    // Prime off the caller's thread so the first defaultOutputDevice() never
-    // pays a HAL round-trip on the MainActor (review T5-Q4).
+    // Prime off the caller's thread so the first defaultOutputDevice() never pays
+    // a HAL round-trip on the MainActor.
     listenerQueue.async { [weak self] in
       guard let self else { return }
       let fresh = self.readDefaultOutputDevice()
@@ -57,9 +55,8 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, Sendable {
       self.outputNames.withLock { $0 = names }
     }
     // Device-list listener: refreshes the output-name snapshot only. It
-    // deliberately does NOT notify the handler — the handler re-arms the key
-    // tap, whose rule depends on the DEFAULT output, and the panel re-reads
-    // names on every menu open.
+    // deliberately does NOT notify the handler, which re-arms the key tap on a rule
+    // that depends on the DEFAULT output.
     var deviceListAddress = Self.deviceListAddress
     AudioObjectAddPropertyListenerBlock(
       AudioObjectID(kAudioObjectSystemObject), &deviceListAddress, listenerQueue
@@ -73,10 +70,9 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, Sendable {
       AudioObjectID(kAudioObjectSystemObject), &address, listenerQueue
     ) { [weak self] _, _ in
       guard let self else { return }
-      // Snapshot on the listener queue BEFORE notifying, so the notified
-      // MainActor re-arm reads the cache instead of blocking on HAL. The HAL
-      // read stays OUTSIDE the lock — holding it across ~ms of coreaudiod IPC
-      // would stall any concurrent reader (review T5-Q1).
+      // Snapshot on the listener queue BEFORE notifying, so the MainActor re-arm
+      // reads the cache instead of blocking on HAL. The read stays OUTSIDE the lock:
+      // holding it across ~ms of coreaudiod IPC would stall any concurrent reader.
       let fresh = self.readDefaultOutputDevice()
       self.snapshot.withLock { $0 = .some(fresh) }
       self.handlerLock.withLock { $0 }?()
@@ -98,9 +94,9 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, Sendable {
     )
   }
 
-  /// Every device that has at least one output channel, by name. A display
-  /// only appears here when its EDID declares an audio sink, which is the
-  /// closest passive signal macOS offers for "this panel can play sound".
+  /// Every device with at least one output channel, by name. A display appears here
+  /// only when its EDID declares an audio sink, the closest passive signal macOS
+  /// offers for "this panel can play sound".
   private func readOutputDeviceNames() -> [String] {
     var address = Self.deviceListAddress
     var size: UInt32 = 0
@@ -161,14 +157,12 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, Sendable {
   }
 
   private func canSetVolume(_ deviceID: AudioObjectID) -> Bool {
-    // kAudioHardwareServiceDeviceProperty_VirtualMainVolume ('vmvc') is
-    // declared in AudioToolbox's deprecated AudioHardwareService.h — spelled
-    // literally to keep the import surface at CoreAudio alone.
-    // DIVERGENCE (deliberate, stricter than the fork — fork-parity F3): the
-    // fork's SimplyCoreAudio canSetVirtualMainVolume(scope: .output) only
-    // checks the property EXISTS; Candela additionally requires it to be
-    // SETTABLE — a device exposing 'vmvc' read-only cannot actually set its
-    // own volume, so its keys stay watched by Candela.
+    // kAudioHardwareServiceDeviceProperty_VirtualMainVolume ('vmvc') is declared in
+    // AudioToolbox's deprecated AudioHardwareService.h, spelled literally here to
+    // keep the imports at CoreAudio alone.
+    // DIVERGENCE (deliberate, stricter than the fork): the fork only checks that the
+    // property EXISTS; Candela also requires it SETTABLE, since a device exposing
+    // 'vmvc' read-only cannot set its own volume, so its keys stay watched.
     var address = AudioObjectPropertyAddress(
       mSelector: AudioObjectPropertySelector(0x766D_7663), // 'vmvc'
       mScope: kAudioObjectPropertyScopeOutput,

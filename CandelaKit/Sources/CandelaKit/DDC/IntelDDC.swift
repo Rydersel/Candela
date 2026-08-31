@@ -114,9 +114,9 @@ public class IntelDDC {
           os_log("Reading %{public}@ took %u tries.", type: .info, String(reflecting: command), i)
         }
         let (mh, ml, sh, sl) = (replyData[6], replyData[7], replyData[8], replyData[9])
-        // Was `UInt16(mh << 8) + UInt16(ml)`, which shifts in UInt8 and is
-        // therefore ALWAYS zero — the high byte of both values was discarded,
-        // so any panel reporting a max above 255 decoded wrong. Widen first.
+        // Widen before shifting. `UInt16(mh << 8)` shifts in UInt8, is always
+        // zero, and discards the high byte, so any panel reporting a max above
+        // 255 decodes wrong.
         let maxValue = DDCReplyFrame.value(high: mh, low: ml)
         let currentValue = DDCReplyFrame.value(high: sh, low: sl)
         return (currentValue, maxValue)

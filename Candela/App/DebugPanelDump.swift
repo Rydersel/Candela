@@ -4,72 +4,47 @@
   import os
 
   /// Writes the menu-bar panel's ROW MODEL to os_log, so a rig pass can assert
-  /// panel content from a script with the menu never opened.
+  /// panel content without opening the menu. The panel is `NSMenu`-hosted: it
+  /// publishes nothing to Accessibility and `screencapture` cannot reach its
+  /// tracking window, so its pixels are unreadable.
   ///
-  /// The panel is the least observable surface in the app: it is an
-  /// `NSMenu`-hosted `NSHostingView`, which publishes nothing to Accessibility,
-  /// and `screencapture` cannot reach the menu's tracking window. Its pixels and
-  /// its drags stay out of reach; this makes the model behind them readable.
+  /// The file and its call site are both inside `#if DEBUG`, so Release keeps no
+  /// residue by construction rather than by discipline.
   ///
-  /// The WHOLE file is inside `#if DEBUG`, and so is its call site: the `#if` in
-  /// `StatusItemController` wraps the calls themselves, not their bodies, so
-  /// Release keeps no residue of it at all. Compiled out of Release BY
-  /// CONSTRUCTION, not by remembering to delete it: the standing review step
-  /// (grep EVERY Mach-O in the Release bundle for debug markers, with a Debug
-  /// positive control, because a Debug app's code lives in `Candela.debug.dylib`
-  /// and grepping only the stub passes vacuously) is what proves it, and a
-  /// `CANDELA_TOOLBAR_STYLE` env switch once reached a Release build precisely
-  /// because it was guarded by discipline instead.
-  ///
-  /// Trigger: the `CANDELA_DEBUG_PANEL` environment variable, read ONCE and
-  /// cached. An env var rather than a pref or a hidden menu item because it
-  /// cannot be set by accident on a user's machine and leaves no residue: a
-  /// plain `open` of the app never sets it. Any value enables it. Usage:
+  /// Trigger: `CANDELA_DEBUG_PANEL`, read once, any value. An env var cannot be
+  /// set by accident on a user's machine and a plain `open` never sets it.
   ///
   ///   CANDELA_DEBUG_PANEL=1 Candela.app/Contents/MacOS/Candela &
   ///   /usr/bin/log show --last 2m --info --debug \
   ///     --predicate 'subsystem == "com.rydersel.Candela"' | grep paneldump=
   ///
   /// `--info` is not optional: these lines are `.info` and `log show` hides that
-  /// level by default. A launch WITHOUT the variable is the control that proves
-  /// the grep can come back empty, before an empty result gets read as a panel
-  /// with no rows.
+  /// level by default. Launch once without the variable as the control that
+  /// proves the grep can come back empty.
   ///
-  /// Format: one `paneldump=header` line per dump, then one `paneldump=row` line
-  /// per panel row, in render order (the built-in first when it is shown). Every
-  /// field is `key=value`, values with spaces are double-quoted, and booleans are
-  /// spelled yes/no so a grep for `=no` cannot also match a number.
+  /// Format: one `paneldump=header` line per dump, then one `paneldump=row` per
+  /// row in render order. Fields are `key=value`, values with spaces quoted, and
+  /// booleans spelled yes/no so a `=no` grep cannot match a number. One dump
+  /// after the first display refresh, then one per reconfiguration pass; a
+  /// re-dump is a relaunch.
   ///
-  /// Cadence: one dump after the first display refresh, then one per
-  /// reconfiguration pass. No timer and no polling, and no dump-on-demand
-  /// channel: a re-dump is a relaunch. `pass=1` is the launch dump by
-  /// construction.
-  ///
-  /// Every field comes from `PanelView`'s own derivations (`visibleDisplays`,
-  /// `showsBuiltIn`, `title`, the two slider predicates) and from the model
-  /// accessors the panel's body calls. Nothing is re-derived here, so the dump
-  /// cannot describe a panel other than the one that renders, and the
-  /// `CandelaAppTests` row-model tests over the same functions cannot drift from
-  /// either: the fixtures prove the logic, the dump proves the live wiring.
-  ///
-  /// It reads published state only, never the wire. No DDC read, no capabilities
-  /// probe, nothing that submits a write: a dump must never be able to change
-  /// what it is reporting, and the values it prints are last-written state, which
-  /// is all a write-only panel has anyway.
+  /// Every field comes from `PanelView`'s own derivations and the model accessors
+  /// its body calls, so the dump cannot describe a panel other than the one that
+  /// renders. Published state only: no DDC read, no capabilities probe, nothing
+  /// that submits a write.
   @MainActor
   enum DebugPanelDump {
     static let environmentKey = "CANDELA_DEBUG_PANEL"
 
-    /// Read once. The dump runs on every refresh, and re-reading the environment
-    /// per pass would suggest it can change under a running process.
+    /// Read once: re-reading per pass would suggest the environment can change
+    /// under a running process.
     static let isEnabled = ProcessInfo.processInfo.environment[environmentKey] != nil
 
     private static let log = Logger(subsystem: "com.rydersel.Candela", category: "PanelDump")
 
     private static var pass = 0
 
-    /// Deliberately silent when the variable is unset: that is every ordinary
-    /// Debug launch, and a line there would be noise in all of them.
+    /// Silent when the variable is unset, which is every ordinary Debug launch.
     static func dumpIfRequested(_ model: AppModel) {
       guard isEnabled else { return }
       pass += 1
@@ -127,19 +102,15 @@
         ("brightnessReason", quoted(model.brightnessSliderCompactReason(state) ?? "none")),
       ]
       guard !isBuiltIn else {
-        // The built-in section is a name and a brightness slider, full stop:
-        // its volume and contrast controllers are inert placeholders on a
-        // `NoopDDCWriter`, so `PanelView`'s body renders value rows for
-        // `model.displays` alone and never asks either predicate about this
-        // slot. Reporting the predicates here would answer a question the panel
-        // does not ask.
+        // The built-in section is a name and a brightness slider: its volume and
+        // contrast controllers are inert placeholders on a `NoopDDCWriter`, and
+        // `PanelView` never asks either predicate about this slot.
         fields.append(("volumeSlider", "notRendered"))
         fields.append(("contrastSlider", "notRendered"))
         return fields
       }
-      // Both inputs are printed beside each verdict, so a hidden or greyed row
-      // says WHICH input hid or greyed it without the reader re-deriving the
-      // rule from the verdict.
+      // Both inputs print beside each verdict, so a hidden or greyed row says
+      // WHICH input hid or greyed it.
       let showsVolume = PanelView.showsVolumeSlider(for: state, prefs: prefs)
       let volumeEnabled = model.volumeSliderEnabled(state)
       fields += [
@@ -149,8 +120,7 @@
         ("volumeEnabled", yesNo(volumeEnabled)),
         ("volumeSupport", support(model.volumeSupport[key])),
         ("muteSupport", support(model.muteSupport[key])),
-        // The panel's own hover copy, so the dump quotes the sentence on screen
-        // rather than a second account of the same decision.
+        // The panel's own hover copy, not a second account of the same decision.
         ("volumeReason", quoted(model.volumeSliderCompactReason(state) ?? "none")),
         ("volume", value(state.volume.value)),
         ("muted", yesNo(state.volume.isMuted)),
@@ -162,11 +132,9 @@
       return fields
     }
 
-    /// One line per call. `privacy: .public` because every field here is app
-    /// state a rig script has to read back, and an interpolated string is
-    /// `<private>` by default: the redaction would leave the line's shape intact
-    /// and its content gone, which reads as a bug in the panel rather than in
-    /// the logging.
+    /// `privacy: .public` because an interpolated string is `<private>` by
+    /// default, and redaction leaves the line's shape intact with its content
+    /// gone, which reads as a panel bug rather than a logging one.
     private static func emit(_ fields: [(String, String)]) {
       let line = fields.map { "\($0)=\($1)" }.joined(separator: " ")
       log.info("\(line, privacy: .public)")
@@ -175,9 +143,8 @@
     /// Never true/false: a `=no` grep must not also match a value.
     private static func yesNo(_ flag: Bool) -> String { flag ? "yes" : "no" }
 
-    /// Absent reads as unknown, exactly as every consumer of these dictionaries
-    /// resolves it (D24), so the dump cannot report a fourth state nothing acts
-    /// on.
+    /// Absent reads as unknown, as every consumer of these dictionaries resolves
+    /// it (D24), so the dump cannot report a fourth state nothing acts on.
     private static func support(_ verdict: VCPSupport?) -> String {
       switch verdict ?? .unknown {
       case .supported: "supported"

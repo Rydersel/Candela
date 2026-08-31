@@ -26,9 +26,8 @@ actor RecordingApplier: BrightnessApplying {
   func appliedTargets() async -> [HardwareTarget] { applied }
 }
 
-/// Fake epoch checker: a lock-flipped Bool standing in for DisplayManager's
-/// "is this reconfiguration epoch still current" answer (Task 4 wires the
-/// real one).
+/// A lock-flipped Bool standing in for `DisplayManager`'s "is this reconfiguration
+/// epoch still current" answer.
 final class FakeEpochGate: Sendable {
   private let current = OSAllocatedUnfairLock(initialState: true)
 
@@ -78,11 +77,10 @@ final class FakeEpochGate: Sendable {
   #expect(applied.last == .ddc(raw: 20)) // latest target always lands last
 }
 
-/// A target equal to the one already on the hardware must not reach an
-/// applier (duplicate-skip, kept from round 2 — duplicate re-sends saturate
-/// the DDC/I2C bus) while still completing its generation. Targets are what
-/// hit hardware, so the same target carried by a *different* applier is
-/// still a duplicate.
+/// A target equal to the one already on the hardware must not reach an applier,
+/// because duplicate re-sends saturate the DDC/I2C bus, but its generation still
+/// completes. Targets are what hit hardware, so a different applier carrying the
+/// same target is still a duplicate.
 @Test func coalescerSkipsDuplicateTargets() async {
   let applier = RecordingApplier()
   let otherApplier = RecordingApplier()
@@ -247,11 +245,10 @@ actor GatedApplier: BrightnessApplying {
   func appliedTargets() async -> [HardwareTarget] { applied }
 }
 
-/// A reset that lands while an apply is in flight must not be lost: if the
-/// apply then succeeds, it must NOT resurrect `lastApplied` — the reset was
-/// issued because that hardware state is no longer trustworthy (rebind: the
-/// in-flight value landed on the OLD panel). The next same-target write must
-/// reach hardware again, not be duplicate-skipped (review I1).
+/// A reset that lands mid-apply must not be lost: a later success must not
+/// resurrect `lastApplied`, because the reset was issued when that hardware state
+/// stopped being trustworthy (on a rebind the in-flight value landed on the old
+/// panel). The next same-target write reaches hardware rather than being skipped.
 @Test func resetDuplicateStateDuringInFlightApplyIsNotLost() async {
   let applier = GatedApplier()
   let coalescer = BrightnessWriteCoalescer()
@@ -325,14 +322,11 @@ actor GatedApplier: BrightnessApplying {
   #expect(await fake.recordedWrites().isEmpty)
 }
 
-/// `rebind(writer:panelIdentity:)` swaps the writer for subsequent writes (the
-/// applier is built per submit) and resets the duplicate memo, so re-asserting
-/// the same value after a replug reaches the new hardware.
-///
-/// The identity is UNCHANGED here (nil on both sides), deliberately: the memo
-/// reset is not conditional on the panel, and this pins that. The memo is a
-/// claim that a value is already in the register, reached through a service we
-/// no longer hold — which is true of every rebind, panel swap or not.
+/// `rebind(writer:panelIdentity:)` swaps the writer and resets the duplicate memo,
+/// so re-asserting the same value after a replug reaches the new hardware. The
+/// identity is unchanged here on purpose: the memo claims a value is already in a
+/// register reached through a service we no longer hold, which is true of every
+/// rebind, panel swap or not.
 @MainActor
 @Test func rebindSwapsWriterAndResetsDuplicateState() async {
   let first = FakeDDC()
@@ -351,13 +345,10 @@ actor GatedApplier: BrightnessApplying {
 
 // MARK: - Last write outcome (B4)
 
-/// The `Bool` that `DDCCommandApplier` hands back used to advance the
-/// duplicate memo and then evaporate: nothing anywhere retained "the last
-/// write to this display failed", so the diagnostics section could not tell a
-/// display that is accepting commands from one that has been refusing every
-/// one of them since the cable was plugged in. These pin the two facts the
-/// coalescer now keeps — and, just as importantly, the cases where it must
-/// keep NEITHER.
+/// The `Bool` from `DDCCommandApplier` used to advance the duplicate memo and then
+/// evaporate, so diagnostics could not tell a display accepting commands from one
+/// refusing every command since the cable went in. These pin the two facts the
+/// coalescer keeps, and the cases where it must keep neither.
 @Suite("Last DDC write outcome (B4)")
 struct LastAppliedTargetTests {
   /// A fresh controller has written nothing, and "nothing written" must not
@@ -380,10 +371,9 @@ struct LastAppliedTargetTests {
     coalescer.finishSubmissions()
   }
 
-  /// A failed apply must NOT advance `lastApplied` — that is the shipped
-  /// duplicate-skip rule (a failure that advanced the memo would make the
-  /// retry of the same value look like a duplicate and strand the panel at
-  /// the old level) — and must still be reportable.
+  /// A failed apply must not advance `lastApplied`, or the retry of the same value
+  /// looks like a duplicate and strands the panel at the old level. It must still
+  /// be reportable.
   @Test func aFailedApplyIsRememberedAndDoesNotBecomeTheLastTarget() async {
     let applier = RecordingApplier(scriptedResults: [false])
     let coalescer = BrightnessWriteCoalescer()
@@ -423,11 +413,9 @@ struct LastAppliedTargetTests {
     coalescer.finishSubmissions()
   }
 
-  /// Review I1 applied to the failure flag as well as to the target: a reset
-  /// that lands while an apply is in flight must win over that apply's
-  /// OUTCOME, whichever way the outcome went. The failing write went to the
-  /// old panel; recording it after the rebind would make the new one look
-  /// broken before it had been asked for anything.
+  /// The same rule for the failure flag as for the target: a reset landing mid-apply
+  /// wins over that apply's outcome either way. The failing write went to the old
+  /// panel, so recording it after a rebind makes the new one look broken.
   @Test func aResetDuringAnInFlightFailingApplyStillClearsTheFailure() async {
     let applier = GatedFailingApplier()
     let coalescer = BrightnessWriteCoalescer()
@@ -442,9 +430,8 @@ struct LastAppliedTargetTests {
   }
 }
 
-/// `GatedApplier`'s sibling for the failure race: same block-until-released
-/// shape, but every apply reports failure. Separate rather than a flag on
-/// `GatedApplier` so the existing I1 test's expectations stay untouched.
+/// `GatedApplier`'s sibling for the failure race: same block-until-released shape,
+/// but every apply reports failure.
 actor GatedFailingApplier: BrightnessApplying {
   nonisolated let accepts = HardwareTargetKind.ddc
 
@@ -482,11 +469,9 @@ actor GatedFailingApplier: BrightnessApplying {
   }
 }
 
-/// The controller's B4 accessors are pass-throughs over the coalescer's
-/// existing lock (the `_duplicateResetCount()` precedent), so what they need
-/// pinning for is the WIRING: that they read the coalescer this controller
-/// actually writes through, and that a real DDC failure — not a synthetic
-/// applier — shows up in them.
+/// The controller's B4 accessors are pass-throughs over the coalescer's lock, so
+/// what needs pinning is the wiring: they read the coalescer this controller writes
+/// through, and a real DDC failure shows up in them.
 @MainActor
 @Test func controllerReportsTheLastWriteOutcomeItActuallyPerformed() async {
   let fake = FakeDDC()

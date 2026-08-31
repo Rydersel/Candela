@@ -6,10 +6,9 @@ public enum ArrangementProblem: Sendable, Equatable {
   case overlap(CGDirectDisplayID, CGDirectDisplayID)
   case disconnected(CGDirectDisplayID)
 
-  /// The two kinds are not interchangeable to a drop. A display touching
-  /// nothing has an obvious repair (put it against the nearest edge) and a
-  /// display on top of another does not, so `ArrangementDragPolicy` attaches
-  /// the first and springs the second back under AR7.
+  /// A display touching nothing has an obvious repair and a display on top of another
+  /// does not, so `ArrangementDragPolicy` attaches the first and springs the second
+  /// back under AR7.
   var isDisconnection: Bool {
     if case .disconnected = self { return true }
     return false
@@ -19,9 +18,9 @@ public enum ArrangementProblem: Sendable, Equatable {
 /// drag-canvas §3.2. An arrangement is valid iff no pair of displays overlaps and
 /// every display is reachable from every other along shared edges.
 ///
-/// macOS cannot be made to hold an invalid arrangement — it silently moves things
-/// to somewhere of its own choosing instead (§3.1) — so the UI refuses the drop
-/// rather than letting the map lie about where the displays ended up (AR7).
+/// macOS cannot be made to hold an invalid arrangement; it silently moves things
+/// somewhere of its own choosing (§3.1). So the UI refuses the drop rather than
+/// letting the map lie about where the displays ended up (AR7).
 public enum ArrangementRules {
   public static func isValid(_ arrangement: DisplayArrangement) -> Bool {
     problems(in: arrangement).isEmpty
@@ -31,8 +30,8 @@ public enum ArrangementRules {
     let tiles = arrangement.tiles
     guard tiles.count > 1 else { return [] }
 
-    // `DisplayArrangement` sorts its tiles by id, so this visits each pair once
-    // with the lower id first.
+    // `DisplayArrangement` sorts tiles by id, so each pair is visited once with the
+    // lower id first.
     var overlaps: [ArrangementProblem] = []
     for i in tiles.indices {
       for j in (i + 1) ..< tiles.count where tiles[i].rect.overlaps(tiles[j].rect) {
@@ -40,19 +39,17 @@ public enum ArrangementRules {
       }
     }
 
-    // Overlapping displays are "connected" in the graph sense while being an
-    // illegal layout, so an overlap manufactures a disconnection report of its
-    // own. One cause, one report.
+    // Overlapping displays are "connected" in the graph sense, so an overlap would
+    // manufacture a disconnection report of its own. One cause, one report.
     guard overlaps.isEmpty else { return overlaps }
 
     let groups = connectedGroups(tiles)
     guard groups.count > 1 else { return [] }
 
     // The largest group is the layout; everything else is stranded. Blaming the
-    // smaller groups reddens the fewest tiles, and the tiles it reddens are the
-    // ones that have to move. Groups arrive in ascending order of their lowest
-    // id and only a strictly larger one displaces the incumbent, so equal-sized
-    // groups are broken by the lowest display id.
+    // smaller groups reddens the fewest tiles, and those are the ones that have to
+    // move. Groups arrive in ascending order of lowest id and only a strictly larger
+    // one displaces the incumbent, so equal-sized groups break on the lowest id.
     var kept = groups[0]
     for group in groups.dropFirst() where group.count > kept.count { kept = group }
 
@@ -62,8 +59,8 @@ public enum ArrangementRules {
 
   /// Connected components of the edge-adjacency graph, as indices into `tiles`.
   ///
-  /// A flood fill, not a pairwise check: a three-display row is one component
-  /// even though its ends never touch each other.
+  /// A flood fill, not a pairwise check: a three-display row is one component even
+  /// though its ends never touch.
   private static func connectedGroups(_ tiles: [ArrangementTile]) -> [[Int]] {
     var seen = Set<Int>()
     var groups: [[Int]] = []

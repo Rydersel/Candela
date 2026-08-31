@@ -1,10 +1,8 @@
-/// How the on-screen indicator pill draws, app-level like its two position
-/// keys (one choice covers every kind and every display). Raw values are
-/// shipped on-disk schema: add cases, never renumber.
+/// How the on-screen indicator pill draws, app-level like its two position keys.
+/// Raw values are shipped on-disk schema: add cases, never renumber.
 ///
-/// The geometry each case names is pinned in the Keyboard & Menu Bar redesign
-/// spec (KMR-A3) so the real pill (`BrightnessHUD`) and the Menu Bar pane's
-/// miniature preview draw the same thing from one definition.
+/// The geometry each case names is pinned in KMR-A3 so the real pill and the Menu
+/// Bar pane's preview draw the same thing from one definition.
 public enum HUDStyle: Int, Sendable, CaseIterable {
   /// The shipped look, styled after the native macOS pill: name label over an
   /// icon-flanked continuous bar.
@@ -15,8 +13,7 @@ public enum HUDStyle: Int, Sendable, CaseIterable {
   /// A smaller, name-less pill: icons and the bar only.
   case compact = 2
 
-  /// Reading order for pickers. Matches raw order today; consumed anyway so a
-  /// future case slots into the right place without reordering raws (the same
-  /// contract as `MenuIconPolicy.pickerOrder` and `HUDPlacement.pickerOrder`).
+  /// Reading order for pickers. Matches raw order today, consumed anyway so a
+  /// future case can slot in without renumbering raws.
   public static let pickerOrder: [HUDStyle] = [.system, .segments, .compact]
 }

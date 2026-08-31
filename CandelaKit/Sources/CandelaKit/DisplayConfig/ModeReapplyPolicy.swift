@@ -1,49 +1,38 @@
 import CoreGraphics
 import Foundation
 
-/// What the reapply pass has to TELL the user about one display.
+/// What the reapply pass has to tell the user about one display.
 ///
-/// Reapply runs unattended — at launch and when a display arrives — so there is
-/// nobody watching to notice that the mode they asked for is not the mode they
-/// got. Every case here exists because staying quiet about it would mean the
-/// user asked for one thing, silently received another, and had no way to find
-/// out (spec §8: "any outcome past step 1 is surfaced to the user rather than
-/// applied silently").
+/// Reapply runs unattended, at launch and on arrival, so nobody is watching to
+/// notice that the mode they asked for is not the mode they got. Every case
+/// here exists because staying quiet leaves no way to find out.
 public enum ModeReapplyNotice: Sendable, Equatable {
-  /// The stored descriptor resolved to something adjacent — a different refresh
-  /// rate, a different framebuffer, or a different size. Carries what is on the
+  /// The stored descriptor resolved to an adjacent mode. Carries what is on the
   /// display now, which is not what was stored.
   case substituted(DisplayMode)
   /// Nothing on this display was an acceptable candidate. Nothing was changed.
   case unavailable
-  /// The apply itself failed, including the descriptor-mismatch throw that
+  /// The apply failed, including the descriptor-mismatch throw
   /// `CoreGraphicsDisplayConfigurator.apply` raises when a reassigned
-  /// `ioModeID` resolves to a different mode. Nothing was (reliably) changed —
-  /// which is exactly why it cannot be swallowed: the alternative is a display
-  /// left on some third mode with the app believing it restored the stored one.
+  /// `ioModeID` resolves to a different mode. Swallowing it would leave a
+  /// display on some third mode with the app believing it restored the stored
+  /// one.
   case failed(DisplayConfigError)
 }
 
-/// One display's reapply decision: what to apply, and what to say.
-///
-/// The two are independent on purpose. A display already sitting on the
-/// substitute needs no apply and still needs the notice — the stored choice is
-/// no more honoured than if we had just moved it there.
+/// One display's reapply decision: what to apply, and what to say. Independent
+/// on purpose, because a display already sitting on the substitute needs no
+/// apply and still needs the notice.
 public struct ModeReapplyDecision: Sendable, Equatable {
   /// nil means "change nothing".
   public let modeToApply: DisplayMode?
-  /// nil means "the stored choice was honoured exactly" — the only case that
-  /// says nothing at all.
+  /// nil means the stored choice was honoured exactly.
   public let notice: ModeReapplyNotice?
-  /// "Not now" as distinct from "nothing to do". Nothing is applied and nothing
-  /// is reported, and the caller is being told to give the arrival back
-  /// (`DisplayArrivalTracker.release`) so a later event tries again.
-  ///
-  /// A third outcome is needed because the two fields above cannot express it:
-  /// they say what to DO about this arrival, and this says the arrival has not
-  /// been dealt with at all. Silently returning `.doNothing` would mark the
-  /// display handled, and — since a display that never leaves is never an
-  /// arrival again (DM7) — "not now" would quietly mean "never until replug".
+  /// "Not now", as distinct from "nothing to do": nothing is applied, nothing
+  /// is reported, and the caller hands the arrival back
+  /// (`DisplayArrivalTracker.release`) so a later event retries. `.doNothing`
+  /// would mark the display handled, and since a display that never leaves is
+  /// never an arrival again (DM7), "not now" would mean "never until replug".
   public let isDeferred: Bool
 
   public init(modeToApply: DisplayMode?, notice: ModeReapplyNotice?, isDeferred: Bool = false) {
@@ -61,24 +50,21 @@ public struct ModeReapplyDecision: Sendable, Equatable {
 /// The unattended half of stored-mode handling: given what was stored and what
 /// the display now offers, decide whether to move it and what to report.
 ///
-/// Pure and separate from the CoreGraphics calls because this is the path with
-/// no user in front of it. A preview that goes wrong is answered by a person
-/// within thirty seconds; a reapply that goes wrong is discovered days later,
-/// so the rules it follows are stated once, here, and tested.
+/// Pure and separate from the CoreGraphics calls because nobody is watching. A
+/// preview that goes wrong is answered in thirty seconds; a reapply that goes
+/// wrong is found days later.
 public enum ModeReapplyPolicy {
   /// - Parameters:
-  ///   - isEnabled: the per-display opt-in (DM5). Deliberately part of THIS
-  ///     decision rather than a call-site guard: "a display nobody opted in for
-  ///     is never moved" is the property most worth having under test, and a
-  ///     guard at the call site is a property of the caller instead.
-  ///   - isMirroringAnotherDisplay: this display is the SLAVE of a mirror set
-  ///     (`ConfiguredDisplay.isMirrorSlave`). Deferred, never applied: the
-  ///     pixels on it are the master's, so a resolution change there is
-  ///     something the user neither asked for nor can watch the consequences
-  ///     of — and the online list this pass reads makes every mirror slave look
-  ///     like an arrival. The MASTER is not this, and is a legitimate target.
+  ///   - isEnabled: the per-display opt-in (DM5). Part of this decision rather
+  ///     than a call-site guard, so "a display nobody opted in for is never
+  ///     moved" is a property under test here.
+  ///   - isMirroringAnotherDisplay: the SLAVE of a mirror set
+  ///     (`ConfiguredDisplay.isMirrorSlave`). Deferred, never applied: its
+  ///     pixels are the master's, and the online list this pass reads makes
+  ///     every mirror slave look like an arrival. The master is a legitimate
+  ///     target.
   ///   - current: what the display is running, or nil when it could not be
-  ///     read. Deferred, not guessed at — see the `guard` below.
+  ///     read. Deferred, not guessed at.
   public static func decide(
     isEnabled: Bool,
     isMirroringAnotherDisplay: Bool = false,
@@ -87,31 +73,23 @@ public enum ModeReapplyPolicy {
     current: DisplayMode?
   ) -> ModeReapplyDecision {
     guard isEnabled, let stored else { return .doNothing }
-    // Both gates below are deliberately BEFORE resolution, and both defer
-    // rather than decide. Their common cause is that the display is not in a
-    // state to be reconfigured OR to be described: a display that cannot report
-    // its current mode generally cannot report a trustworthy mode list either,
-    // so resolving here would just as easily produce a `.unavailable` notice —
-    // a failure report about a display that was merely asleep.
+    // Both gates run before resolution and both defer rather than decide: a
+    // display that cannot report its current mode cannot report a trustworthy
+    // mode list either, so resolving would raise `.unavailable` about a display
+    // that was merely asleep.
     guard !isMirroringAnotherDisplay else { return .deferred }
-    // Applying to a display whose current mode is unreadable used to be the
-    // recoverable answer, on the grounds that skipping would silently drop the
-    // reapply. It no longer is, in both halves. A blind apply is now the more
-    // dangerous move — it is precisely the sleeping and mirrored displays that
-    // read as unreadable, and an apply that fails there produces a failure
-    // report that stands until the display is physically replugged, because a
-    // wake is no longer a departure/arrival cycle. And skipping is no longer
-    // silent: deferring hands the arrival back, so the next topology event —
-    // the wake itself produces one — tries again with a display that can answer.
+    // A blind apply is the more dangerous move: sleeping and mirrored displays
+    // are exactly the ones that read as unreadable, and a failure there stands
+    // until a physical replug, because a wake is not a departure/arrival cycle.
+    // Deferring hands the arrival back and the wake itself produces an event.
     guard let current else { return .deferred }
 
     switch ModePersistence.resolve(stored, in: available) {
     case let .exact(mode):
-      // The skip is not an optimisation. Applying the mode a display is already
-      // running still triggers a full CoreGraphics reconfiguration — which
-      // suspends DDC writes, fires the topology callback, and would arrive back
-      // here as another event. Doing it for every display at every launch is
-      // visible screen-blanking in exchange for nothing.
+      // Not an optimisation. Applying the mode a display already runs still
+      // triggers a full CoreGraphics reconfiguration, which suspends DDC writes
+      // and fires the topology callback: visible blanking in exchange for
+      // nothing, on every display at every launch.
       return isAlreadyRunning(mode, current)
         ? .doNothing
         : ModeReapplyDecision(modeToApply: mode, notice: nil)
@@ -127,10 +105,8 @@ public enum ModeReapplyPolicy {
     }
   }
 
-  /// The predicate is `DisplayMode.matchesGeometry(of:)`, shared with the apply
-  /// cross-check (#68); this name is kept because "is the display already
-  /// running this" is the question, and the shared predicate is the rule that
-  /// answers it.
+  /// Wraps `DisplayMode.matchesGeometry(of:)`, the same predicate the apply
+  /// cross-check uses.
   private static func isAlreadyRunning(_ mode: DisplayMode, _ current: DisplayMode) -> Bool {
     current.matchesGeometry(of: mode)
   }

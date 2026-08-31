@@ -2,33 +2,30 @@ import AppKit
 import CandelaKit
 import SwiftUI
 
-/// The AppKit island that hosts the guided setup flow. An `LSUIElement` app
-/// has no ordinary window scene, and a `Window` scene would be permanently
-/// listed in the Window menu (and a `WindowGroup` opened the settings window
-/// on plain launch, a measured regression), so this is a plain `NSWindow`
-/// created on demand.
+/// The AppKit island that hosts the guided setup flow. An `LSUIElement` app has
+/// no ordinary window scene, and a `Window` scene would be permanently listed in
+/// the Window menu (a `WindowGroup` opened the settings window on plain launch,
+/// a measured regression), so this is a plain `NSWindow` created on demand.
 ///
 /// D14's load-bearing detail lives in `windowWillClose`: completion is recorded
-/// when the window goes away (by the flow's finish, by ⌘W, or by the close
-/// button), never at launch. Force-quitting mid-Setup therefore re-runs it,
-/// which the fork could not do (it set `appAlreadyLaunched` two statements
-/// after presenting the window).
+/// when the window goes away, never at launch, so force-quitting mid-Setup
+/// re-runs it. DIVERGENCE from the fork, which set `appAlreadyLaunched` two
+/// statements after presenting the window.
 @MainActor
 final class OnboardingWindowController: NSObject, NSWindowDelegate {
   private let model: AppModel
   private let actions: SettingsActions
   private let onCompletion: () -> Void
   /// Fires after the window closes ONLY when the close came from the finish
-  /// page's "Start Using …" action, the explicit "I'm done, show me the app"
-  /// action. ⌘W, the red close button and Skip Setup complete Setup (D14) but
-  /// stay quiet: the user asked to dismiss a window, not to be handed a menu.
+  /// page's "Start Using …" button. ⌘W, the red close button and Skip Setup
+  /// complete Setup (D14) but stay quiet: the user asked to dismiss a window,
+  /// not to be handed a menu.
   var onFinishedByButton: (() -> Void)?
   private var closedByFinishButton = false
-  /// Constructed once and reused, exactly like the window, and that is only
-  /// safe because `isEnabled` is a LIVE read of `SMAppService.mainApp.status`
-  /// (D10). This object holds no copy of the registration state, so there is
-  /// nothing here to go stale after a settings reset unregisters the login
-  /// item.
+  /// Constructed once and reused like the window, which is only safe because
+  /// `isEnabled` is a LIVE read of `SMAppService.mainApp.status` (D10). No copy
+  /// of the registration state is held, so nothing here goes stale after a
+  /// settings reset unregisters the login item.
   private let loginItem = LoginItem()
   private var window: NSWindow?
   /// The live flow, rebuilt on every fresh presentation so the environment is
@@ -52,39 +49,35 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     if !window.isVisible {
       installFlow(in: window)
     }
-    // Belt and braces on top of the live read and `LoginItem`'s own
-    // didBecomeActive observer: a presentation is the one moment we know the
-    // toggle is about to be looked at, and `refresh()` is an integer bump.
+    // On top of the live read and `LoginItem`'s didBecomeActive observer: a
+    // presentation is the one moment we know the toggle is about to be looked
+    // at, and `refresh()` is an integer bump.
     loginItem.refresh()
     window.center()
     // MUST be `activate(ignoringOtherApps: true)`, NOT the modern
     // `NSApp.activate()`: the modern call cannot activate an accessory
     // (LSUIElement) app from inside a status-item menu tracking session, so
-    // Setup opens BEHIND the frontmost app. Measured on an isolated harness
-    // (4/4 runs). The deprecation is accepted deliberately here.
+    // Setup opens BEHIND the frontmost app (measured, 4/4 runs). The deprecation
+    // is accepted deliberately.
     //
-    // The call must also stay inside the click's event context: every
-    // `DispatchQueue.main.async` variant lost the activation grant, and
-    // neither `makeKeyAndOrderFront` nor `orderFrontRegardless` rescues it.
+    // It must also stay inside the click's event context: every
+    // `DispatchQueue.main.async` variant lost the activation grant, and neither
+    // `makeKeyAndOrderFront` nor `orderFrontRegardless` rescues it.
     NSApp.activate(ignoringOtherApps: true)
     window.makeKeyAndOrderFront(nil)
-    // D13 safety net: `recordCurrentVersion` is otherwise written ONLY from
-    // `windowWillClose`. If presentation ever fails (an `LSUIElement` window
-    // that will not order front, a future AppKit change), the version key
-    // would never be written, the app would re-run Setup on every launch, and
-    // `migrateIfNeeded` would never have a stored version to advance.
-    // Recording it here in that case costs the (already broken) Setup window
-    // and keeps the schema honest.
+    // D13 safety net: completion is otherwise recorded ONLY from
+    // `windowWillClose`. If presentation ever fails, the version key would never
+    // be written, Setup would re-run on every launch, and `migrateIfNeeded`
+    // would never have a stored version to advance.
     if !window.isVisible {
       onCompletion()
     }
   }
 
-  /// Mirror of the app's ONE `AccessibilityPermission.startMonitoring`
-  /// closure, which `StatusItemController` owns for the media-key tap's
-  /// lifecycle. Called from an extension of that closure, never from a second
-  /// `startMonitoring`: a second call REPLACES the observer and callback, and
-  /// stealing the tap's would wedge its grant and revocation handling.
+  /// Called from the app's ONE `AccessibilityPermission.startMonitoring`
+  /// closure, which `StatusItemController` owns for the media-key tap. Never
+  /// from a second `startMonitoring`: that REPLACES the observer and callback,
+  /// and stealing the tap's would wedge its grant and revocation handling.
   func accessibilityGrantChanged(_ granted: Bool) {
     flowModel?.accessibilityGranted = granted
   }
@@ -159,11 +152,10 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
         DisplayPrefWriter(persistenceKey: key, actions: actions)
           .write(.oledCareEnrolled) { $0.oledCareEnrolled = true }
       },
-      // The enrollment toggle's own write, byte for byte. Its pref fan-out
-      // already reconciles enrollment and drops the display's state, so there
-      // is deliberately no teardown call here. The measurement pref is left
-      // alone for the reason Settings leaves it alone: a later re-enrollment
-      // should come back to the choice the user made, not to the default.
+      // The enrollment toggle's own write, byte for byte: its pref fan-out
+      // already reconciles enrollment and drops the display's state, so no
+      // teardown call belongs here. The measurement pref is left alone so a
+      // later re-enrollment returns to the user's choice, not the default.
       unenrollFromCare: { key in
         DisplayPrefWriter(persistenceKey: key, actions: actions)
           .write(.oledCareEnrolled) { $0.oledCareEnrolled = false }
@@ -212,14 +204,13 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
   }
 
   func windowWillClose(_: Notification) {
-    // The red close button and ⌘W bypass the flow's own skip route, so an
-    // open countdown is answered here with the revert the model already owns;
-    // idempotent when the flow closed itself.
+    // The red close button and ⌘W bypass the flow's own skip route, so an open
+    // countdown is answered here with the revert the model already owns.
+    // Idempotent when the flow closed itself.
     flowModel?.sizePageDisappeared()
-    // After the revert routed, the applier forgets any pending apply so its
-    // observation loop dies rather than staying armed behind a closed window.
-    // An answer still waiting on its first preview observation survives the
-    // cancel and is delivered when that preview appears.
+    // Once the revert has routed, the applier forgets any pending apply so its
+    // observation loop dies rather than staying armed behind a closed window. An
+    // answer still waiting on its first preview observation survives this.
     applier?.cancel()
     onCompletion()
     if closedByFinishButton {

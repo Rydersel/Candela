@@ -2,12 +2,9 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// The report card's title has to be true of the card it titles.
-///
-/// It was the fixed string "Arrangement not changed" over every `.report`
-/// presentation, including the two branches that only exist because the machine
-/// moved — so the surface built to report "a success that was not achieved" was
-/// itself reporting a state the machine was demonstrably not in.
+/// The report card's title has to be true of the card it titles. It was a fixed
+/// "Arrangement not changed" over every `.report`, including the two branches that
+/// exist only because the machine moved.
 @Suite("Arrangement report subject")
 struct ArrangementReportSubjectTests {
   private let error = DisplayConfigError(cgErrorCode: 1000)
@@ -34,10 +31,9 @@ struct ArrangementReportSubjectTests {
     ) == .nothingChanged)
   }
 
-  /// The uncertain branch. `apply(restored:)` reports `.failed` both for a plan
-  /// it could not express (nothing staged) and for the #53 post-commit check
-  /// (CoreGraphics committed a layout of its own choosing) — so this must claim
-  /// neither, and in particular must not claim "not changed".
+  /// `apply(restored:)` reports `.failed` both for a plan it could not express (nothing
+  /// staged) and for the post-commit check catching a layout CoreGraphics chose itself,
+  /// so this claims neither, and never "not changed".
   @Test func aFailedRestoreIsItsOwnSubjectAndNotNothingChanged() {
     let subject = ArrangementReportSubject.of(
       hasRecoverableLayout: false, restoreNotice: .failed(error)
@@ -46,10 +42,8 @@ struct ArrangementReportSubjectTests {
     #expect(subject != .nothingChanged)
   }
 
-  /// The known divergence. `noteRecoverableLayout` fires only after comparing
-  /// the live layout against the one from before the apply, so a recoverable
-  /// layout means the machine moved — the branch whose own caption reads "The
-  /// displays did not end up where they were asked to go".
+  /// `noteRecoverableLayout` fires only after comparing the live layout against the one
+  /// from before the apply, so a recoverable layout means the machine moved.
   @Test func aRecoverableLayoutReportsADivergence() {
     #expect(ArrangementReportSubject.of(
       hasRecoverableLayout: true, restoreNotice: nil

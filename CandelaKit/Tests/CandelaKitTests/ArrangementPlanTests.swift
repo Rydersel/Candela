@@ -36,15 +36,12 @@ enum ArrangementFixtures {
   }
 }
 
-/// Records what was applied so the tests can assert on scope, and moves its own
-/// layout to match — a fake that reported the pre-apply arrangement forever
-/// would let every "reconcile after the apply" test pass vacuously.
+/// Records what was applied and moves its own layout to match: a fake that reported the
+/// pre-apply arrangement forever would let every reconcile-after-apply test pass vacuously.
 ///
-/// `@unchecked Sendable` is justified by confinement: every stored property
-/// lives behind `lock` and the accessors below are the only way in. The tests
-/// need that because `ArrangementPreviewSession` (Task 10) is an actor — its
-/// calls into this fake run on the actor's executor while the test body reads
-/// `applied` from its own task.
+/// `@unchecked Sendable` is justified by confinement: every stored property lives behind
+/// `lock` and the accessors below are the only way in. `ArrangementPreviewSession` is an
+/// actor, so its calls run on the actor's executor while the test body reads `applied`.
 final class FakeArrangementConfigurator: DisplayArrangementConfiguring, @unchecked Sendable {
   struct Applied: Equatable {
     let plan: ArrangementPlan
@@ -72,25 +69,18 @@ final class FakeArrangementConfigurator: DisplayArrangementConfiguring, @uncheck
     set { lock.withLock { _failWith = newValue } }
   }
 
-  /// Accept the plan, commit it, and put the machine somewhere ELSE: the origin
-  /// each listed display ends up at, overriding what was requested. Anything
-  /// absent from the map follows the plan.
-  ///
-  /// This is #53 in the shape arrangement takes it — CoreGraphics returning
-  /// `.success` from every stage and from the complete while achieving
-  /// something else. ONE-SHOT, consumed by the apply it diverts, because the
-  /// point of a retry test is that the retry LANDS; a permanently diverting
-  /// fake would prove a loop rather than a recovery.
+  /// Accept the plan, commit it, and put the machine somewhere else: each listed display
+  /// ends up at the given origin, anything absent follows the plan. This is CoreGraphics
+  /// returning `.success` from every stage and the complete while achieving something
+  /// else. One-shot, so a retry test proves recovery rather than a loop.
   var divergeNextApplyTo: [CGDirectDisplayID: DisplayPoint]? {
     get { lock.withLock { _divergeNextApplyTo } }
     set { lock.withLock { _divergeNextApplyTo = newValue } }
   }
 
-  /// Online displays this fake reports INSTEAD of the ones its tiles imply.
-  /// Settable so a test can express the case the paired read exists for: a
-  /// display that is attached and has no tile, which is what an unreadable
-  /// `CGDisplayBounds` produces. `nil` derives them from the tiles, which is the
-  /// ordinary state and keeps every existing test's fake complete.
+  /// Online displays reported instead of the ones the tiles imply, so a test can express
+  /// a display that is attached with no tile, which is what an unreadable `CGDisplayBounds`
+  /// produces. `nil` derives them from the tiles.
   var onlineDisplays: [ConfiguredDisplay]? {
     get { lock.withLock { _onlineDisplays } }
     set { lock.withLock { _onlineDisplays = newValue } }
@@ -108,8 +98,7 @@ final class FakeArrangementConfigurator: DisplayArrangementConfiguring, @uncheck
 
   func apply(_ plan: ArrangementPlan, scope: DisplayConfigScope) throws -> DisplayArrangement {
     try lock.withLock {
-      // BEFORE any state change, because every failure production can inject
-      // here — a failed begin, a failed stage, a failed complete — cancels the
+      // Before any state change: a failed begin, stage or complete cancels the
       // transaction and leaves the machine where it was.
       if let _failWith { throw _failWith }
 
@@ -130,11 +119,10 @@ final class FakeArrangementConfigurator: DisplayArrangementConfiguring, @uncheck
         )
       })
 
-      // THE SAME post-commit check production runs, on the same rule, and
-      // deliberately LAST: CoreGraphics committed, so the apply is recorded and
-      // the layout has moved before this throws. A fake that unwound here would
-      // let a session test "prove" that a divergent apply changed nothing,
-      // which is the one thing #53 established it does not.
+      // The same post-commit check production runs, deliberately last: CoreGraphics
+      // committed, so the apply is recorded and the layout has moved before this throws.
+      // A fake that unwound here would let a session test prove a divergent apply
+      // changed nothing, which is the one thing the measured failure ruled out.
       if ArrangementVerification.unhonoured(plan: plan, achieved: _arrangement) != nil {
         throw DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
       }
@@ -147,14 +135,11 @@ final class FakeArrangementConfigurator: DisplayArrangementConfiguring, @uncheck
 struct ArrangementPlanTests {
   // MARK: - What refuses to become a plan
 
-  /// The proposal type is Task 6 and does not exist yet, so "a no-op proposal"
-  /// is expressed as the arrangement a no-op proposal would carry: one equal to
-  /// the baseline.
+  /// A no-op proposal is expressed as the arrangement one would carry: the baseline.
   @Test func aNoOpProposalProducesNoPlan() {
     #expect(ArrangementPlan(applying: ArrangementFixtures.pair, to: ArrangementFixtures.pair) == nil)
-    // …including the degenerate one, which is what keeps `changes` non-empty for
-    // every plan that exists: an empty arrangement can only pair with an empty
-    // baseline, since the display sets must match.
+    // Including the degenerate case, which keeps `changes` non-empty for every plan:
+    // an empty arrangement can only pair with an empty baseline.
     #expect(ArrangementPlan(
       applying: DisplayArrangement(tiles: []), to: DisplayArrangement(tiles: [])
     ) == nil)
@@ -181,9 +166,8 @@ struct ArrangementPlanTests {
     #expect(ArrangementPlan(applying: baseline, to: arrived) == nil)
   }
 
-  /// `CGConfigureDisplayOrigin` takes `int32_t`. An origin that does not fit is
-  /// not a request that can be made, so it is refused where it is expressible
-  /// rather than trapped on at the boundary.
+  /// `CGConfigureDisplayOrigin` takes `int32_t`, so an origin that does not fit is
+  /// refused where it is expressible rather than trapped at the boundary.
   @Test func anOriginOutsideInt32IsRefused() {
     let baseline = DisplayArrangement(tiles: [
       ArrangementFixtures.tile(1, DisplayRect(x: 0, y: 0, width: 100, height: 100)),
@@ -196,13 +180,10 @@ struct ArrangementPlanTests {
 
   // MARK: - Moving the main display (the anchoring rule)
 
-  /// Measured live on CoreGraphics (2026-08-07): a layout with no tile at
-  /// (0,0) is not a request CG can honour. The global space is anchored on the
-  /// main display, so a write to the main display's own origin is silently
-  /// dropped; every stage and the complete return success and nothing moves
-  /// (the #53 accept-and-ignore class). Moving the main display must therefore
-  /// be expressed re-anchored on the baseline's main: the same relative
-  /// layout, with every OTHER display moved by the inverse delta.
+  /// Measured on CoreGraphics: a layout with no tile at (0,0) is not a request CG can
+  /// honour. The global space is anchored on the main display, so a write to the main
+  /// display's own origin is dropped while every stage and the complete return success.
+  /// Moving it is expressed re-anchored: same relative layout, others moved by the inverse.
   @Test func movingTheMainDisplayReanchorsThePlanOnTheBaselineMain() throws {
     let baseline = ArrangementFixtures.pair
     // The user drags the main display up; nothing sits at (0,0) any more.
@@ -216,19 +197,16 @@ struct ArrangementPlanTests {
     #expect(plan.arrangement.relativeLayout == dragged.relativeLayout)
   }
 
-  /// An unanchored translation of the whole layout moves nothing relative to
-  /// anything and names no new main, so once it is re-anchored it IS the
-  /// baseline: no plan. Contrast with `aPureTranslationOfTheBaselineIsStillAPlan`,
-  /// whose translation puts a DIFFERENT display at (0,0) and so asks for a main
-  /// change.
+  /// An unanchored translation moves nothing relative to anything and names no new main,
+  /// so re-anchored it is the baseline. `aPureTranslationOfTheBaselineIsStillAPlan` puts a
+  /// different display at (0,0) and does ask for a main change.
   @Test func anUnanchoredTranslationOfTheBaselineIsANoOp() {
     let baseline = ArrangementFixtures.pair
     #expect(ArrangementPlan(applying: baseline.translated(dx: 640, dy: -480), to: baseline) == nil)
   }
 
-  /// No tile at (0,0) on either side: there is nothing to anchor the request
-  /// on, so it cannot be expressed to CG at all. A baseline like this comes
-  /// from a read that skipped the main display's unreadable bounds.
+  /// No tile at (0,0) on either side, so there is nothing to anchor the request on. A
+  /// baseline like this comes from a read that skipped the main display's unreadable bounds.
   @Test func aRequestThatCannotBeAnchoredIsRefused() {
     let baseline = ArrangementFixtures.arrangement([
       (1, ArrangementFixtures.rect(100, 0, 1920, 1080)),
@@ -238,10 +216,8 @@ struct ArrangementPlanTests {
     #expect(ArrangementPlan(applying: wanted, to: baseline) == nil)
   }
 
-  /// The invariant over randomized main-display moves: every plan that exists
-  /// names a tile at (0,0) and preserves the requested relative layout. This is
-  /// the property the live apply needs; a plan violating the first half is one
-  /// CoreGraphics accepts and ignores.
+  /// Over randomized main-display moves: every plan that exists names a tile at (0,0) and
+  /// keeps the requested relative layout. A plan failing the first half CG accepts and ignores.
   @Test func everyPlanForAMovedMainDisplayIsAnchoredAndPreservesTheRelativeLayout() throws {
     var seed: UInt64 = 0x9E3779B97F4A7C15
     func next(_ bound: Int) -> Int {
@@ -271,8 +247,8 @@ struct ArrangementPlanTests {
       ArrangementFixtures.tile(2, DisplayRect(x: 1920, y: 0, width: 1920, height: 1080)),
       ArrangementFixtures.tile(3, DisplayRect(x: 3840, y: 0, width: 1920, height: 1080)),
     ])
-    // ONE display moves. All three origins are still stated, because a display
-    // whose origin is not set is repositioned by CoreGraphics (§4.2).
+    // One display moves, but all three origins are stated: CoreGraphics repositions
+    // any display whose origin it was not given.
     let moved = baseline.moving(3, to: DisplayPoint(x: 1920, y: -1080))
     let plan = try #require(ArrangementPlan(applying: moved, to: baseline))
     #expect(plan.changes.map(\.id) == [1, 2, 3])
@@ -291,10 +267,8 @@ struct ArrangementPlanTests {
     #expect(!plan.changes.contains { $0.id == 9 })
   }
 
-  /// A slave that ALSO holds a tile is refused outright rather than filtered
-  /// out. Filtering would leave display 9's origin unstated, which is the
-  /// partial plan AR4 exists to make unrepresentable — one invariant cannot be
-  /// bought by breaking the other.
+  /// A slave that also holds a tile is refused rather than filtered out: filtering leaves
+  /// display 9's origin unstated, the partial plan AR4 exists to make unrepresentable.
   @Test func anArrangementGivingAMirrorSlaveATileIsRefused() {
     let baseline = DisplayArrangement(tiles: [
       ArrangementFixtures.tile(1, DisplayRect(x: 0, y: 0, width: 1920, height: 1080), mirroredIDs: [9]),
@@ -323,9 +297,8 @@ struct ArrangementPlanTests {
     #expect(ArrangementVerification.unhonoured(plan: plan, achieved: plan.arrangement) == nil)
   }
 
-  /// The renormalisation case, and the reason the comparison is on the relative
-  /// layout: macOS re-anchors the space on whichever display ends up at (0,0),
-  /// so a correct apply routinely reads back translated.
+  /// macOS re-anchors the space on whichever display ends up at (0,0), so a correct
+  /// apply routinely reads back translated. Hence comparing relative layouts.
   @Test func aTranslatedResultIsNotUnhonoured() throws {
     let baseline = ArrangementFixtures.pair
     let plan = try #require(ArrangementPlan(applying: baseline.makingMain(2), to: baseline))
@@ -334,8 +307,8 @@ struct ArrangementPlanTests {
     ) == nil)
   }
 
-  /// #53's shape: the platform commits, returns success, and puts a display
-  /// somewhere the plan never named.
+  /// The platform commits, returns success, and puts a display somewhere the plan
+  /// never named.
   @Test func aDisplayTheSystemPutSomewhereElseIsReportedUnhonoured() throws {
     let baseline = ArrangementFixtures.pair
     let requested = baseline.moving(2, to: DisplayPoint(x: 0, y: 1080)).makingMain(1)
@@ -351,9 +324,8 @@ struct ArrangementPlanTests {
     #expect(ArrangementVerification.unhonoured(plan: plan, achieved: achieved)?.id == 1)
   }
 
-  /// A display that arrived between the commit and the read-back must not make
-  /// every change look unhonoured — it moves the achieved bounding box, and the
-  /// normalisation is anchored on that box.
+  /// A display that arrived between commit and read-back moves the achieved bounding
+  /// box the normalisation anchors on, so it must not make every change look unhonoured.
   @Test func aDisplayThatArrivedAfterTheCommitDoesNotUnhonourTheWholePlan() throws {
     let baseline = ArrangementFixtures.pair
     let plan = try #require(ArrangementPlan(applying: baseline.makingMain(2), to: baseline))
@@ -363,8 +335,7 @@ struct ArrangementPlanTests {
     #expect(ArrangementVerification.unhonoured(plan: plan, achieved: achieved) == nil)
   }
 
-  /// A plan that asked macOS to close a gap gets no divergence report: the
-  /// adjustment is the documented behaviour (§4.1), and
+  /// Closing a gap is documented CoreGraphics behaviour, so it is no divergence;
   /// `ArrangementOutcomePolicy` is what tells the user about it.
   @Test func anAdjustmentToAGappyPlanIsNotReportedUnhonoured() throws {
     let baseline = ArrangementFixtures.pair
@@ -403,10 +374,8 @@ struct ArrangementPlanTests {
     #expect(fake.applied.isEmpty)
   }
 
-  /// The throw says "this is not what you asked for", NOT "nothing happened".
-  /// The divergent layout is standing and recorded — a test that let the fake
-  /// unwind here would enshrine the comfortable version of this failure rather
-  /// than the measured one.
+  /// The throw says this is not what you asked for, not that nothing happened: the
+  /// divergent layout is standing and recorded.
   @Test func aDivergentApplyThrowsAndLeavesTheAchievedLayoutStanding() throws {
     let fake = FakeArrangementConfigurator()
     fake.arrangement = ArrangementFixtures.pair
@@ -425,10 +394,8 @@ struct ArrangementPlanTests {
     #expect(fake.currentArrangement() == ArrangementFixtures.pair)
   }
 
-  /// The second interaction, not just the first: the divergence is one-shot, so
-  /// a retry computed from the LIVE layout lands. A retry that replayed the
-  /// plan that diverged is the failure this family of checks has produced
-  /// before — a no-op that reports success forever.
+  /// The divergence is one-shot, so a retry computed from the live layout lands.
+  /// Replaying the plan that diverged gives a no-op that reports success forever.
   @Test func theRetryAfterADivergentApplyIsComputedFromLiveAndLands() throws {
     let fake = FakeArrangementConfigurator()
     fake.arrangement = ArrangementFixtures.pair

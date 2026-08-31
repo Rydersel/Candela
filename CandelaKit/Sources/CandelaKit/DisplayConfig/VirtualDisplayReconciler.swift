@@ -6,11 +6,10 @@ import Foundation
 /// unconfigured after `launchNormalized` runs, so the stored fields survive
 /// as the slot's remembered setup without implying a display exists.
 public struct VirtualSlotDefinition: Sendable, Equatable {
-  /// The slot EXISTS as far as the user is concerned: it has a tile in the
-  /// pane whether or not a display is currently running. Added and removed
-  /// by the pane's Add/Remove; distinct from `configured` because a slot
-  /// whose create failed keeps its tile (to say why) while `configured`
-  /// flips off (so nothing silently retries a doomed create).
+  /// The slot EXISTS as far as the user is concerned: it has a tile in the pane
+  /// whether or not a display is running. Distinct from `configured` because a
+  /// slot whose create failed keeps its tile, to say why, while `configured`
+  /// flips off so nothing silently retries a doomed create.
   public var defined: Bool
   public var configured: Bool
   public var name: String
@@ -65,11 +64,10 @@ public enum VirtualDisplayReconciler {
     }
   }
 
-  /// - Parameter limitedTo: when set, only this slot's convergence is
-  ///   considered. This is the pane's per-slot Create/Apply/Remove semantics
-  ///   made structural (VD17): a Create on slot 3 must never recreate a
-  ///   drifted-but-not-applied slot 1, and in a Safe Mode session an explicit
-  ///   Create must bring up exactly the clicked slot. nil is the launch
+  /// - Parameter limitedTo: when set, only this slot converges. The pane's
+  ///   per-slot Create/Apply/Remove made structural (VD17): a Create on one slot
+  ///   must never recreate a drifted-but-not-applied other, and in Safe Mode an
+  ///   explicit Create brings up exactly the clicked slot. nil is the launch
   ///   sweep, where nothing is live yet so only creates can fire.
   public static func actions(
     definitions: [Int: VirtualSlotDefinition],
@@ -108,9 +106,8 @@ public enum VirtualDisplayReconciler {
 
   /// Launch prelude (the counterpart of VD13): a configured slot without
   /// recreate-at-launch died with the last session, and its pref must say so
-  /// before the first sync, or that sync would silently create a display
-  /// nobody asked this session for. Every other field survives as the slot's
-  /// remembered setup.
+  /// before the first sync, or that sync creates a display nobody asked for this
+  /// session. Every other field survives as the slot's remembered setup.
   public static func launchNormalized(
     definitions: [Int: VirtualSlotDefinition]
   ) -> ([Int: VirtualSlotDefinition], changedSlots: [Int]) {

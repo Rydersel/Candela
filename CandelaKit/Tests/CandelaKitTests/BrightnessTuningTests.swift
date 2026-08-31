@@ -11,7 +11,7 @@ private final class TuningHarness {
 
   init(configure: (DisplayPrefs) -> Void = { _ in }) {
     defaults = InMemoryDefaults()
-    // Full-range DDC leg — the M1/M2 shape, so raw values are directly legible.
+    // Full-range DDC leg, so raw values are directly legible.
     defaults.set(true, forKey: "disableCombinedBrightness")
     prefs = DisplayPrefs(defaults: defaults, persistenceKey: "bt")
     configure(prefs)
@@ -93,9 +93,8 @@ struct BrightnessTuningTests {
   }
 
   @Test func readSideUnappliesTheTuningLikeTheWriteSide() async {
-    // Test-design F5: the fork's read path is convDDCToValue WITH the tuning.
-    // A linear adoption on an inverted/curved panel would corrupt brightness
-    // at every launch — the read must mirror the write through ddcToValue.
+    // The fork reads through `convDDCToValue` with the tuning applied: a linear adoption
+    // on an inverted or curved panel would corrupt brightness at every launch.
     let h = TuningHarness { prefs in
       var tuning = prefs.tuning(for: .brightness)
       tuning.invert = true
@@ -107,8 +106,7 @@ struct BrightnessTuningTests {
   }
 
   @Test func stepFineIsNowFlatPointZeroOne() {
-    // D3: shared 16-chiclet step. The old default branch grid-snapped fine to
-    // 1/64 (0.5 → 0.515625); the shared math is a flat ±0.01.
+    // D3: the shared 16-chiclet step, with fine a flat ±0.01 rather than a 1/64 snap.
     let h = TuningHarness()
     #expect(h.controller.step(isUp: true, isFine: true) == 1.0) // rail from default 1.0
     h.controller.setBrightness(0.5)

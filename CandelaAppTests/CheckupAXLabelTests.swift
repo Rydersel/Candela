@@ -14,8 +14,7 @@ struct CheckupAXLabelTests {
   // MARK: - Reading the published tree
 
   /// SwiftUI builds no accessibility nodes until an assistive client attaches,
-  /// and a test process is not one. Without this flag every walk finds an empty
-  /// tree and passes on nothing.
+  /// and a test process is not one. Without this flag every walk finds an empty tree.
   private func attachAnAssistiveClient() {
     _ = NSApplication.shared
     (NSApp as NSObject).accessibilitySetValue(
@@ -181,9 +180,8 @@ struct CheckupAXLabelTests {
     #expect(labels == [CheckupCopy.export, CheckupCopy.copySummary])
   }
 
-  /// An `NSButton` falls back to its title when no label was set, so the label
-  /// alone cannot tell the two apart. Retitling separates them: a real label
-  /// survives, a fallback does not.
+  /// An `NSButton` falls back to its title when no label was set, so blanking the
+  /// titles separates them: a real label survives, a title fallback does not.
   @Test func theOnlyDisplayStripsAnswersCarryLabelsOfTheirOwn() throws {
     let window = CheckupFieldWindow(orderFront: false)
     var onlyDisplay = CheckupFixture.entry(

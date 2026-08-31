@@ -1,28 +1,22 @@
 import SwiftUI
 
-/// The settings window's visual vocabulary: the guided setup flow's palette at
-/// settings density (SV1, SV5).
+/// The settings window's visual vocabulary (SV1, SV5).
 ///
-/// Colors are aliases of `OnboardingStyle`'s rather than copies, so the two
+/// Colors alias `OnboardingStyle`'s rather than copying them, so the two
 /// surfaces cannot drift apart one hex value at a time. Geometry and motion are
-/// this window's own: a settings page is a working surface, tighter than a
-/// staged onboarding page.
+/// this window's own, tighter than a staged onboarding page.
 enum SettingsTheme {
   /// Content column width. Wider pages read as a web page, not an app.
   static let pageWidth: CGFloat = 620
   static let cardRadius: CGFloat = 9
 
-  /// A destination changing, in the sidebar and in the detail column.
-  ///
-  /// Half of SV8's stated 0.25: switching pages is the most repeated act in
-  /// this window, and at 0.25 the swap was still finishing when the next click
-  /// arrived. `canvasRelight` is halved with it, because the ratio between the
-  /// two is what SV8 is really asking for.
+  /// Half of SV8's stated 0.25: at 0.25 the swap was still finishing when the
+  /// next click arrived. `canvasRelight` is halved with it, since the ratio is
+  /// what SV8 is really asking for.
   static let selectionMotion: Animation = .easeInOut(duration: 0.125)
-  /// The canvas re-tinting under a new destination: slower than the selection
-  /// itself, so the light lags the click the way stage light does.
+  /// Slower than the selection, so the light lags the click.
   static let canvasRelight: Animation = .easeInOut(duration: 0.35)
-  /// Hover reveals, which `Motion` deliberately leaves to their own sites.
+  /// Hover reveals, which `Motion` leaves to their own sites.
   static let hoverMotion: Animation = .easeOut(duration: 0.15)
 
   static let titleColor = OnboardingStyle.titleColor
@@ -35,20 +29,18 @@ enum SettingsTheme {
   /// else in this window means "this is on".
   static let dangerTint = Color(red: 0.84, green: 0.42, blue: 0.40)
 
-  /// Half the gap between rows on a card. Whichever component supplies a row's
-  /// rhythm supplies exactly this, once: a grouped `Form` used to pad every row
-  /// from the container, and dropping it moved the job to the components, which
-  /// then have to agree.
+  /// Half the gap between rows on a card. With no `Form` container to pad
+  /// them, the components have to agree, so whichever one supplies a row's
+  /// rhythm supplies exactly this, once.
   static let rowVerticalPadding: CGFloat = 6
-  /// The card's own inner vertical padding. Named because `SettingsActionRow`
-  /// restates it under a row a divider follows, and the two must not drift.
+  /// Named because `SettingsActionRow` restates it under a divider-following
+  /// row, and the two must not drift.
   static let cardVerticalPadding: CGFloat = 10
 
   /// What `.disabled(true)` looks like on anything this theme paints itself.
   /// Native controls dim themselves and must never be given this on top.
   static let disabledOpacity = 0.45
 
-  /// A theme colour at the weight the surrounding enabled state calls for.
   static func dimmed(_ color: Color, isEnabled: Bool) -> Color {
     isEnabled ? color : color.opacity(disabledOpacity)
   }
@@ -64,21 +56,20 @@ private struct SettingsTextModifier: ViewModifier {
 }
 
 extension View {
-  /// Text a page paints itself, which is therefore text nothing else dims: a
-  /// page drawing its own labels beside themed controls reaches for this
-  /// instead of a bare `foregroundStyle`, or its card half-dims, which reads
-  /// worse than not dimming at all.
+  /// For labels a page paints itself, which nothing else dims. A bare
+  /// `foregroundStyle` beside themed controls leaves the card half-dimmed,
+  /// which reads worse than not dimming at all.
   ///
-  /// It reads `\.isEnabled` rather than the page's own predicate, so a section
+  /// Reads `\.isEnabled` rather than the page's own predicate, so a section
   /// disabled from an enclosing view dims with it.
   func settingsText(_ color: Color) -> some View {
     modifier(SettingsTextModifier(color: color))
   }
 }
 
-/// Set by whichever wrapper already supplied a row's vertical rhythm, so a row
-/// component nested inside one does not add a second helping. Without it a
-/// pop-up row is 12 pt bare and 24 pt wrapped, and one card shows both.
+/// Set by whichever wrapper already supplied a row's vertical rhythm, so a
+/// nested row component does not add a second helping. Without it a pop-up row
+/// is 12 pt bare and 24 pt wrapped, and one card shows both.
 private struct SettingsRowIsPaddedKey: EnvironmentKey {
   static let defaultValue = false
 }
@@ -90,35 +81,31 @@ extension EnvironmentValues {
   }
 }
 
-/// The stage lighting one destination provides: the hue its canvas, kickers,
-/// controls and glyphs all read from.
+/// The hue a destination's canvas, kickers, controls and glyphs all read from.
 ///
-/// A pair rather than a single color because the canvas needs two blobs; a
-/// value type rather than a view modifier because pages hand it to AppKit
-/// islands and to glyph parameters as well as into the environment.
+/// A pair because the canvas needs two blobs. A value type rather than a view
+/// modifier because pages hand it to AppKit islands and glyph parameters as
+/// well as into the environment.
 struct SettingsAccent: Equatable, Sendable {
   var accent: Color
   var secondary: Color
 
-  /// The environment default: white-forward, so a themed component rendered
-  /// outside an injected destination reads as chrome instead of borrowing a hue
-  /// nobody gave it. The secondary is the displays' own, which is the one hue
-  /// in the palette that belongs to no section.
+  /// White-forward, so a themed component rendered outside an injected
+  /// destination reads as chrome rather than borrowing a hue nobody gave it.
+  /// The secondary is the displays' own, the one hue that belongs to no
+  /// section.
   static let neutral = SettingsAccent(
     accent: .white, secondary: Color(red: 0.30, green: 0.41, blue: 0.84))
 
-  /// A display destination's lighting. The built-in has a fixed cool hue; the
-  /// externals cycle a short list by their position in the sidebar, so two
-  /// panels attached at once never light the window the same way.
+  /// The built-in has a fixed cool hue; externals cycle by sidebar position,
+  /// so two panels attached at once never light the window the same way.
   static func display(isBuiltIn: Bool, ordinal: Int) -> SettingsAccent {
     guard !isBuiltIn else {
       return SettingsAccent(
         accent: Color(red: 0.69, green: 0.76, blue: 0.90), secondary: neutral.secondary)
     }
-    // Both cool, and the second one deliberately so (SC8): it used to be the
-    // amber that now belongs to the CARE section, and warm light means CARE.
-    // A display page is a place you adjust a display, never a care pillar, so
-    // it must not light the window the way Health or OLED Care does.
+    // Both cool on purpose (SC8): warm light means CARE, and a display page is
+    // somewhere you adjust a display rather than a care pillar.
     let hues = [
       Color(red: 0.36, green: 0.57, blue: 0.90),
       Color(red: 0.38, green: 0.72, blue: 0.68),
@@ -133,8 +120,8 @@ private struct SettingsAccentKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-  /// Read by every themed component, so a page tints its whole subtree once
-  /// instead of threading an accent through every call site.
+  /// Read by every themed component, so a page tints its subtree once instead
+  /// of threading an accent through every call site.
   var settingsAccent: SettingsAccent {
     get { self[SettingsAccentKey.self] }
     set { self[SettingsAccentKey.self] = newValue }

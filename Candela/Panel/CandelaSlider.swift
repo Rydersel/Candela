@@ -6,12 +6,12 @@ import SwiftUI
 /// circular knob at the fill boundary, and a leading SF Symbol dimmed against
 /// the fill. Drag anywhere on the capsule to set the value.
 ///
-/// The white fill is deliberate in both appearances — Control Center's slider
-/// fill is white in light and dark mode — while the track, stroke, readout and
+/// The white fill is deliberate in both appearances: Control Center's slider
+/// fill is white in light and dark mode. The track, stroke, readout and
 /// surrounding chrome use adaptive styles.
 ///
-/// IMPORTANT: the binding setter is invoked synchronously from the drag
-/// gesture — no Task hops — so hardware writes stay live during a drag.
+/// IMPORTANT: the binding setter runs synchronously from the drag gesture, with
+/// no Task hops, so hardware writes stay live during a drag.
 /// `SliderSnap.snapped` is pure and runs inline; it does not break that.
 struct CandelaSlider: View {
   @Binding var value: Double  // 0...1
@@ -26,33 +26,29 @@ struct CandelaSlider: View {
   var snapsToZero: Bool = true
   /// Trailing whole-percent readout (app-level `enableSliderPercent`).
   var showsPercent: Bool = false
-  /// Lower bound for the KEYBOARD and VoiceOver routes only — a drag can still
-  /// reach 0. `nil` (the panel) means no floor, so nothing about the panel's
-  /// existing adjustment behaviour changes.
+  /// Lower bound for the KEYBOARD and VoiceOver routes only; a drag can still
+  /// reach 0. `nil` (the panel) means no floor.
   var keyboardFloor: Double?
 
   @FocusState private var focused: Bool
 
   /// `.disabled(_:)` only blocks the gesture. This control draws every pixel
-  /// itself, so nothing about it changed appearance and a dead slider still
-  /// looked live — you could only discover it by trying to drag it. AppKit
-  /// de-emphasises an unavailable control rather than merely inhibiting it
-  /// (`disabledControlTextColor` is the text-side equivalent), so we do both.
+  /// itself, so a dead slider still looked live and you could only discover it
+  /// by trying to drag it. AppKit de-emphasises an unavailable control rather
+  /// than merely inhibiting it, so this does both.
   @Environment(\.isEnabled) private var isEnabled
 
   private let height: CGFloat = 30
   private let strokeColor = Color.gray.opacity(0.5)
-  /// Wide enough for "100%" with monospaced digits, so the capsule never
-  /// resizes as the number changes width — and it scales with the readout's
-  /// text style, so a larger accessibility size widens the column instead of
-  /// truncating the number.
+  /// Wide enough for "100%" with monospaced digits, so the capsule never resizes
+  /// as the number changes width. It scales with the readout's text style, so a
+  /// larger accessibility size widens the column instead of truncating.
   @ScaledMetric(relativeTo: .caption2) private var readoutWidth: CGFloat = 34
 
   /// Applied to the whole control rather than per layer. The fill, knob and
-  /// glyph are tuned against each other — a black glyph sitting on a white
-  /// fill — so restyling them individually would break that relationship in
-  /// one appearance or the other. Uniform de-emphasis keeps the internal
-  /// contrast intact while the control reads as unavailable in both.
+  /// glyph are tuned against each other (a black glyph on a white fill), so
+  /// restyling them individually would break that relationship in one appearance
+  /// or the other.
   private var disabledDimming: Double { isEnabled ? 1 : 0.4 }
 
   /// Shadows go to zero when disabled rather than dimming with everything
@@ -72,7 +68,7 @@ struct CandelaSlider: View {
           .foregroundStyle(.secondary)
           .frame(width: readoutWidth, alignment: .trailing)
           // The row is one accessibility element and already publishes this
-          // number as its value — reading it twice is noise.
+          // number as its value; reading it twice is noise.
           .accessibilityHidden(true)
       }
     }
@@ -81,8 +77,8 @@ struct CandelaSlider: View {
     // `.disabled` inhibits the gesture, and this inhibits the keyboard route.
     .focusable(isEnabled)
     .focused($focused)
-    // The track draws the ring itself. AppKit's would enclose the whole row —
-    // capsule plus percentage readout — pointing at a region that is not the
+    // The track draws the ring itself. AppKit's would enclose the whole row,
+    // capsule plus percentage readout, pointing at a region that is not the
     // control.
     .focusEffectDisabled()
     // `.repeat` included so holding an arrow ramps the value, which is what a
@@ -96,27 +92,22 @@ struct CandelaSlider: View {
     }
     // Every pixel here is ours, so the platform has nothing to infer a role
     // from: a label, a value and an adjustable action on a custom element still
-    // reached the accessibility layer as AXUnknown with no value at all (#138),
-    // because SwiftUI has no "this is a slider" trait to attach. Standing in a
-    // real `Slider` is the supported route to a slider role, and it replaces
-    // only the accessibility tree: nothing about the drawing, the drag gesture
-    // or the arrow keys goes through it.
-    //
-    // The percent readout beside the track keeps its own `.accessibilityHidden`
-    // for the same reason as before, and the caption `panelHoverReason` draws
-    // below the row is a sibling of this view, so it stays a separate element.
+    // reached the accessibility layer as AXUnknown with no value at all, because
+    // SwiftUI has no "this is a slider" trait to attach. Standing in a real
+    // `Slider` is the supported route to a slider role, and it replaces only the
+    // accessibility tree: the drawing, the drag gesture and the arrow keys do
+    // not go through it.
     .accessibilityRepresentation {
-      // The label goes on twice on purpose: `.accessibilityLabel` is the one
-      // that wins, and the label view underneath it means the control is still
-      // named if a future SwiftUI drops the modifier across the representation
-      // boundary. Measured: naming it both ways yields ONE slider element with
-      // no extra children, so the redundancy costs nothing.
-      // `step` here is only how coarsely the represented slider rounds the
-      // value it proposes; it is NOT how far the control moves. `adjust` owns
-      // that, because the grid depends on the snapping pref and on whether 0 is
-      // a legal value for this command. Measured on hardware: AXValue still
-      // reports the raw fraction (0.897), so this rounding never reaches the
-      // controller.
+      // The label goes on twice on purpose: `.accessibilityLabel` wins, and the
+      // label view underneath keeps the control named if a future SwiftUI drops
+      // the modifier across the representation boundary. Measured: both ways
+      // yields ONE slider element with no extra children.
+      //
+      // `step` is only how coarsely the represented slider rounds the value it
+      // proposes, NOT how far the control moves. `adjust` owns that, because the
+      // grid depends on the snapping pref and on whether 0 is legal for this
+      // command. Measured on hardware: AXValue still reports the raw fraction,
+      // so this rounding never reaches the controller.
       Slider(value: adjustmentProxy, in: 0...1, step: Self.step) {
         Text(verbatim: accessibilityLabel)
       }
@@ -142,10 +133,10 @@ struct CandelaSlider: View {
   /// It has to be this way round. VoiceOver's increment arrives as an ordinary
   /// write of "current plus the represented slider's own step", indistinguishable
   /// from a script setting a value, so honouring the number would peg every
-  /// increment to that step and leave the snapping pref with no effect on this
-  /// route (measured on hardware: 5% steps with "Snap to 25% steps" verified on,
-  /// and a volume row walked down to 0 and muted the display). Taking the sign
-  /// instead puts both callers on `adjust`, which owns the grid.
+  /// increment to that step and leave the snapping pref with no effect here.
+  /// Measured on hardware: 5% steps with "Snap to 25% steps" on, and a volume
+  /// row walked down to 0 and muted the display. Taking the sign instead puts
+  /// both callers on `adjust`, which owns the grid.
   ///
   /// A script writing an absolute value therefore moves one step toward it per
   /// write rather than jumping. Repeated writes converge, and `AXIncrement` and
@@ -165,13 +156,13 @@ struct CandelaSlider: View {
   /// on the other.
   ///
   /// `SliderSnap.stepped` owns the grid, including the zero-free one that keeps
-  /// a volume row off 0 (D29). `snapped` deliberately has no part in this: it
-  /// captures only within `tolerance`, so on a volume row it hands back every
-  /// value between the stops untouched and a walk-down reaches 0 unimpeded.
-  /// That is exactly the defect this replaced.
+  /// a volume row off 0 (D29). `snapped` has no part in this: it captures only
+  /// within `tolerance`, so on a volume row it hands back every value between
+  /// the stops untouched and a walk-down reaches 0 unimpeded.
   ///
   /// Order is step-then-floor: `stepped` lands on the grid, then `keyboardFloor`
-  /// goes on top, so a grid point below the floor cannot pull the value under it.
+  /// goes on top, so a grid point below the floor cannot pull the value under
+  /// it.
   private func adjust(up: Bool, fine: Bool = false) {
     // The floor is clamped to the slider's own range: it raises the lower
     // bound, it can never push a write past 1 for the controllers downstream.
@@ -232,12 +223,11 @@ struct CandelaSlider: View {
           .foregroundStyle(.black.opacity(0.6))
           .frame(width: height, height: height)
         // OUTSIDE the capsule (negative padding), where AppKit puts a focus
-        // ring — inside, it would sit on the white fill and read as part of the
+        // ring; inside, it would sit on the white fill and read as part of the
         // value. It cannot disturb layout: the enclosing `GeometryReader` takes
         // its size from the parent's proposal, not from this ZStack's children.
-        // Absent entirely when unfocused, so the panel's pixels are unchanged.
-        // Whether a panel slider can take focus at all during NSMenu tracking
-        // is UNVERIFIED — nothing here enforces that it cannot.
+        // Whether a panel slider can take focus at all during NSMenu tracking is
+        // UNVERIFIED, and nothing here enforces that it cannot.
         if focused {
           Capsule()
             .strokeBorder(Color(nsColor: .keyboardFocusIndicatorColor), lineWidth: 3)
@@ -250,9 +240,9 @@ struct CandelaSlider: View {
       .gesture(
         DragGesture(minimumDistance: 0)
           .onChanged { gesture in
-            // Map the pointer to the knob center so the knob tracks the
-            // pointer exactly across the whole travel range. `snapped` also
-            // clamps, in both modes — it replaces the old min/max here.
+            // Map the pointer to the knob center so the knob tracks it exactly
+            // across the whole travel range. `snapped` clamps in both modes, so
+            // no separate min/max is needed.
             let raw = (gesture.location.x - height / 2) / travel
             value = SliderSnap.snapped(raw, enabled: snapsToStops, stops: stops)
           }

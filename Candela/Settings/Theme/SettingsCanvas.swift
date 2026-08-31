@@ -2,10 +2,9 @@ import SwiftUI
 
 /// The drifting glow ground under every settings page, tinted per destination.
 ///
-/// Same construction as the guided setup flow's canvas, but it takes hues
-/// directly: a settings destination is not an onboarding act, and the window
-/// keeps one canvas alive across every selection so the light moves rather than
-/// cutting. Reduce Motion holds it at its first frame (SV8).
+/// The window keeps ONE canvas alive across every selection so the light moves
+/// rather than cutting to a new one. Reduce Motion holds it at its first frame
+/// (SV8).
 struct SettingsCanvas: View {
   var accent: Color
   var secondary: Color
@@ -55,9 +54,8 @@ struct SettingsCanvas: View {
           )
       }
       // Keyed on BOTH hues. Two destinations can share a primary accent and
-      // differ only in their secondary (OLED Care and the second external
-      // display do, faithfully to the mock), and keyed on `accent` alone the
-      // second blob cut to its new colour instead of relighting.
+      // differ only in the secondary; keyed on `accent` alone the second blob
+      // cut to its new colour instead of relighting.
       .animation(
         SettingsTheme.canvasRelight,
         value: SettingsAccent(accent: accent, secondary: secondary))

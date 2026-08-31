@@ -6,11 +6,8 @@ import Foundation
 // world (AT3): tests reach the real engine, the real preview session and the
 // real gate, and no CoreGraphics call is made.
 //
-// Stateful on purpose. `ModeSynthesisEngine` verifies achieved state at three
-// points (the virtual display reached 2x, the panel is mirroring the master,
-// the panel reports the master's geometry), so a world that only records calls
-// cannot get past the first engage and nothing built on it would exercise the
-// path under test.
+// Stateful on purpose: `ModeSynthesisEngine` verifies achieved state at every
+// step, so a world that only records calls never gets past the first engage.
 
 /// The attached displays, and what a mirror does to them.
 ///
@@ -23,18 +20,16 @@ final class FakeDisplayWorld: @unchecked Sendable {
   private var modesByID: [CGDirectDisplayID: [DisplayMode]] = [:]
   private var currentByID: [CGDirectDisplayID: DisplayMode] = [:]
   /// The mode a display shows when it is NOT a slave, kept so a null-master
-  /// change can put it back. Without it a broken mirror leaves the panel
-  /// reporting the master's geometry forever, and the engine's unwind check
-  /// answers `unwindIncomplete` against a fake that did unwind.
+  /// change can put it back. Without it the panel reports the master's geometry
+  /// forever and every unwind check answers `unwindIncomplete`.
   private var ownModeByID: [CGDirectDisplayID: DisplayMode] = [:]
   private var nativeByID: [CGDirectDisplayID: (width: Int, height: Int)] = [:]
   private var _publishesMasterTwinsWhileMirrored = false
 
   /// While mirrored, the OS republishes the SLAVE's mode list around the
-  /// master's geometry: the native flag rides a twin at the master's size, and
-  /// `nativePixels` follows it. That is the poison the baseline cache exists to
-  /// keep out, and without it a fake makes an unstable pass compute exactly
-  /// what a stable one would, so caching it or not is unobservable.
+  /// master's geometry: the native flag rides a twin at the master's size and
+  /// `nativePixels` follows it. That is the poison the baseline cache keeps out,
+  /// and without it caching or not caching is unobservable.
   var publishesMasterTwinsWhileMirrored: Bool {
     get { lock.withLock { _publishesMasterTwinsWhileMirrored } }
     set { lock.withLock { _publishesMasterTwinsWhileMirrored = newValue } }
@@ -117,21 +112,17 @@ final class FakeDisplayWorld: @unchecked Sendable {
   }
 
   /// A slave takes its master's geometry and keeps its own refresh, which is
-  /// what a mirror does at the instant it lands (Phase 0). It models the world
-  /// BEFORE the engage tail, deliberately: on hardware the tail re-times the
-  /// slave onto its own mode about two seconds later, and `apply` here records
-  /// the call without moving the world, so a test that wants the retimed world
-  /// asserts on the recorded apply rather than on the readback. A null master
-  /// puts the display back on its OWN mode, matching the Kit's
-  /// `FakeSynthesisWorld`: without that half, the engine's unwind never sees
-  /// the panel return to its own geometry and every disengage answers
-  /// `unwindIncomplete` against a fake that did exactly what it was asked.
+  /// what a mirror does at the instant it lands (Phase 0). The world stays
+  /// BEFORE the engage tail on purpose: on hardware the tail re-times the slave
+  /// about two seconds later, and `apply` records the call without moving the
+  /// world, so a test wanting the retimed world asserts on the recorded apply.
+  /// A null master puts the display back on its OWN mode, matching the Kit's
+  /// `FakeSynthesisWorld`; without that half every disengage answers
+  /// `unwindIncomplete` against a fake that did what it was asked.
   ///
-  /// `isInMirrorSet` moves with the master, because CoreGraphics reports it for
-  /// a slave and every predicate written over "is this display mirrored" reads
-  /// that flag rather than `mirrorsDisplay`. A fake that left it false made a
-  /// mirrored panel indistinguishable from a standalone one to exactly the
-  /// carve-outs this world exists to exercise.
+  /// `isInMirrorSet` moves with the master because CoreGraphics reports it for a
+  /// slave, and every "is this display mirrored" predicate reads that flag
+  /// rather than `mirrorsDisplay`.
   func applyMirroring(_ changes: [MirrorChange]) {
     lock.withLock {
       mirrorChanges.append(changes)
@@ -163,22 +154,20 @@ final class FakeDisplayWorld: @unchecked Sendable {
 /// of any synthesis path; they record nothing and do nothing, so a test that
 /// wants them has a reason to extend this rather than a silent success.
 ///
-/// `@unchecked Sendable` justification: every field this type carries is either
-/// the `let world` (which does its own locking) or a plain test KNOB
-/// (`refusesMirroring`). The knobs are written on the test's main actor BEFORE
-/// the coordinator is asked to do anything, and the call that reads them is
-/// spawned by that same actor afterwards, so task creation supplies the
-/// happens-before and no read can race the write that configured it. A test that
-/// wants to flip a knob MID-operation would break that argument and needs a
-/// lock, not a comment.
+/// `@unchecked Sendable` justification: every field is either the `let world`
+/// (which locks its own state) or a plain test KNOB. The knobs are written on
+/// the test's main actor BEFORE the coordinator is asked to do anything, and the
+/// call that reads them is spawned by that same actor afterwards, so task
+/// creation supplies the happens-before. Flipping a knob MID-operation breaks
+/// that argument and needs a lock, not a comment.
 final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sendable {
   let world: FakeDisplayWorld
   /// Refuse the mirror, to reach the engine's `mirrorRefused` arm.
   var refusesMirroring = false
-  /// Runs on the ENGINE's executor immediately after a mirror has been applied
-  /// to the world, which is the one instant a test cannot otherwise reach: the
-  /// set stands, the pairing snapshot is still empty, and the work depth is
-  /// still raised. Anything it touches must be safe there on its own terms.
+  /// Runs on the ENGINE's executor right after a mirror is applied to the world,
+  /// the one instant a test cannot otherwise reach: the set stands, the pairing
+  /// snapshot is empty, the work depth is still raised. Anything it touches must
+  /// be safe there on its own terms.
   var onMirrorApplied: (@Sendable () -> Void)?
   /// Throw from `apply`, to reach the engage tail's bounce fallback.
   var refusesModeApplies = false
@@ -200,11 +189,10 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
   }
 
   /// Recorded, and the world is deliberately NOT moved. The engage tail's
-  /// re-time is a mode apply on a mirror SLAVE: on hardware the picture keeps
-  /// coming from the master while the wire changes timing, which no fake
-  /// readback models, so the assertion a test can honestly make is about the
-  /// call rather than about a readback. The tail's own achieved-state check
-  /// then answers false here, which is what puts the bounce under test.
+  /// re-time is a mode apply on a mirror SLAVE, and no fake readback models a
+  /// picture that keeps coming from the master, so the honest assertion is about
+  /// the call. The tail's achieved-state check then answers false, which is what
+  /// puts the bounce under test.
   func apply(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope _: DisplayConfigScope) throws {
     if refusesModeApplies { throw DisplayConfigError(cgErrorCode: CGError.failure.rawValue) }
     world.recordApply(mode, to: displayID)
@@ -228,14 +216,12 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
 /// attached to it, and the achieved mode is the spec's, so the engine's 2x
 /// check passes unless a test says otherwise.
 ///
-/// `@unchecked Sendable` justification, same shape as the configurator's: the
-/// mutable state that is READ AND WRITTEN across executors (`handles`,
-/// `nextDisplayID`) is under `lock`, and the rest (`isAvailable`, `achieves2x`,
-/// `onCreate`) are test knobs set on the main actor before the operation that
-/// reads them is spawned, so task creation is the happens-before. `onCreate` is
-/// invoked on the ENGINE's executor, which is the point of it: it is the one
-/// hook a test has into the middle of an engage, and anything it touches must
-/// be safe there on its own terms.
+/// `@unchecked Sendable` justification, same shape as the configurator's: state
+/// read and written across executors (`handles`, `nextDisplayID`) is under
+/// `lock`, and the rest are test knobs set on the main actor before the
+/// operation that reads them is spawned, so task creation is the happens-before.
+/// `onCreate` runs on the ENGINE's executor, which is the point of it, so
+/// anything it touches must be safe there on its own terms.
 final class FakeSynthesisVirtualDisplayHost: VirtualDisplayAchievedModeReporting, @unchecked Sendable {
   let world: FakeDisplayWorld
   var isAvailable = true
@@ -360,11 +346,9 @@ final class FakeSynthesisHDR: @unchecked Sendable {
         lock.withLock {
           let granted = enabled ? _achievesOn : _achievesOff
           if granted { _live = enabled }
-          // A leg that did not take leaves the state the fixture says it does:
-          // nil by default, which is what the real seam reports for a
-          // superseded call (it established nothing and the register is assumed
-          // locked). Modelling every failure as "still off" is what made the
-          // old on-leg give-up look safe.
+          // A leg that did not take leaves the state the fixture says: nil by
+          // default, the real seam's answer for a superseded call. Modelling
+          // every failure as "still off" made the old on-leg give-up look safe.
           if !granted, enabled { _live = _stateAfterFailedOn }
           _legs.append((enabled, granted))
           return granted

@@ -7,10 +7,6 @@ import Testing
 // covering full-screen apps still looks like a working shade until someone goes
 // full-screen, and a shade that stops being click-through eats clicks on live
 // UI. Every assertion below is on a property whose failure is silent.
-//
-// What is deliberately NOT here: anything that only restates the extraction of
-// `OverlayWindow` out of the two overlay classes. A test that would pass either
-// way buys nothing.
 @Suite("Overlay window") @MainActor
 struct OverlayWindowTests {
   // MARK: - The recipe, as a value

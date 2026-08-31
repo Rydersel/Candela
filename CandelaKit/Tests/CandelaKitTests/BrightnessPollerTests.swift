@@ -150,7 +150,7 @@ private func makePoller(
   #expect(probe.adoptions.isEmpty)
 }
 
-// MARK: - Converging bypass (review M33)
+// MARK: - Converging bypass
 
 @Test func convergingAdoptsEvenWithinTolerance() async {
   let probe = Probe(expected: 0.5, generation: 9, hardware: 0.5)
@@ -162,7 +162,7 @@ private func makePoller(
   #expect(probe.adoptions.first == Adoption(value: 0.5, generation: 9))
 }
 
-// MARK: - Epoch gate (review I15)
+// MARK: - Epoch gate
 
 @Test func staleEpochSkipsTheTickEntirely() async {
   let probe = Probe(expected: 0.5, generation: 1, hardware: 0.9)
@@ -198,14 +198,10 @@ private func makePoller(
 
 @Test func divergenceSwitchesToFastCadence() async {
   let probe = Probe(expected: 0.5, generation: 1, hardware: 0.9)
-  // The idle interval dwarfs waitUntil's whole window on purpose: run() ticks
-  // BEFORE it sleeps, so a poller that switches to fast produces five reads in
-  // ~40 ms, while one stuck on idle cannot produce read two inside 3 s. The
-  // gate below is therefore the cadence assertion. Its predecessor asserted
-  // elapsed time between reads with a 1 s bound, which starvation on a hosted
-  // runner crossed at 1.198 s while still on the fast cadence; no bound under
-  // the idle math survives that, so the elapsed check is gone rather than
-  // loosened again (it had already moved once, off spans of 387 and 512 ms).
+  // The idle interval dwarfs waitUntil's window on purpose: `run()` ticks before it
+  // sleeps, so a fast poller produces five reads in ~40 ms while an idle one cannot
+  // produce read two inside 3 s. The gate below is the cadence assertion; an elapsed-time
+  // bound crossed 1.198 s under runner starvation while still on the fast cadence.
   let poller = makePoller(probe, fast: .milliseconds(10), idle: .seconds(30))
   let task = Task { await poller.run() }
   let got = await waitUntil { probe.reads.count >= 5 }
@@ -217,17 +213,14 @@ private func makePoller(
   let probe = Probe(expected: 0.5, generation: 1, hardware: 0.5)
   let poller = makePoller(probe, fast: .milliseconds(5), idle: .milliseconds(200))
   let task = Task { await poller.run() }
-  // Await the first read rather than betting 250 ms produces one: a starved
-  // scheduler can delay the poller's first timeslice, and "it ran at all" is
-  // not the claim under test. Same shape as #114's fix, applied before it was
-  // observed failing (#115).
+  // Await the first read rather than betting 250 ms produces one: a starved scheduler
+  // can delay the poller's first timeslice, and "it ran at all" is not the claim.
   let started = await waitUntil { !probe.reads.isEmpty }
   try? await Task.sleep(for: .milliseconds(250))
   task.cancel()
   #expect(started)
-  // Idle cadence over the window: 2 reads. Fast cadence would be ~50, so only
-  // the upper bound can indicate the wrong cadence, and starvation moves the
-  // count the safe way.
+  // Idle cadence over this window is 2 reads and fast would be ~50, so only the upper
+  // bound can show the wrong cadence, and starvation moves the count the safe way.
   #expect(probe.reads.count <= 4)
 }
 

@@ -1,9 +1,8 @@
 import SwiftUI
 
-/// The window's standard action button: macOS bordered-button geometry
-/// (rounded rect, compact padding) with the destination accent carrying the
-/// primary. Quieter than the guided setup flow's glowing capsule, which is a
-/// stage control; this one sits in a card beside a switch.
+/// macOS bordered-button geometry with the destination accent. Quieter than
+/// the guided setup flow's glowing capsule: this one sits in a card beside a
+/// switch.
 struct SettingsPrimaryButtonStyle: ButtonStyle {
   func makeBody(configuration: Configuration) -> some View {
     HoverLabel(configuration: configuration)
@@ -75,8 +74,8 @@ struct SettingsSecondaryButtonStyle: ButtonStyle {
   }
 }
 
-/// The secondary in warning red: same macOS geometry, and deliberately not the
-/// destination accent, which everywhere else means "this is on".
+/// The secondary in warning red, deliberately not the destination accent,
+/// which everywhere else means "this is on".
 struct SettingsDangerButtonStyle: ButtonStyle {
   func makeBody(configuration: Configuration) -> some View {
     HoverLabel(configuration: configuration)

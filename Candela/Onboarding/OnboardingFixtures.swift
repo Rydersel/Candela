@@ -1,10 +1,9 @@
 #if DEBUG
   import Foundation
 
-  /// Stage 1's environment: the real rig as a committed snapshot, so the
-  /// mock flow is clickable end to end with no pref writes and no display
-  /// changes (OB11). The values mirror the panels in CLAUDE.md; if the rig
-  /// changes, update this to keep the mock honest.
+  /// The real rig as a committed snapshot, so the mock flow is clickable end to
+  /// end with no pref writes and no display changes (OB11). Update it when the
+  /// rig changes, or the mock stops matching what a run actually shows.
   enum OnboardingFixtures {
     static var rig: OnboardingEnvironment {
       OnboardingEnvironment(

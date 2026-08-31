@@ -52,15 +52,13 @@ public final class DDCValueController: PendingWireDraining {
   /// What the display's own capabilities string says about VCP 0x8D, read
   /// live at every mute decision.
   ///
-  /// A provider and not a stored verdict for two reasons: the capabilities
-  /// probe is asynchronous and lands long after this object exists, and a
-  /// controller is REUSED for whatever panel next appears on its display ID,
-  /// so a copy held here would have to be re-pointed anyway. The refresh pass
-  /// re-points this alongside the epoch pair, from the same verdict the slider
-  /// and the mute key read.
+  /// A provider and not a stored verdict: the capabilities probe is
+  /// asynchronous and lands long after this object exists, and a controller is
+  /// REUSED for whatever panel next appears on its display ID, so a stored copy
+  /// would have to be re-pointed anyway.
   ///
-  /// Defaults to `.unknown`, which D24 resolves to allowed: a controller
-  /// nobody has told anything still sends the display's mute command.
+  /// Defaults to `.unknown`, which D24 resolves to allowed: a controller nobody
+  /// has told anything still sends the display's mute command.
   @ObservationIgnored private var muteWireSupport: () -> VCPSupport = { .unknown }
   /// The mute strategy the last restore acted on (volume only), or nil until
   /// this controller has restored anything. Read by
@@ -70,11 +68,10 @@ public final class DDCValueController: PendingWireDraining {
   private let store: (any BrightnessStoring)?
   private let storageKey: String?
   /// Validated readback max (nil until a successful `.read` pass); feeds
-  /// `CommandTuning.effectiveMaxDDC`. `public private(set)` and OBSERVABLE
-  /// (B5) — `@ObservationIgnored` is gone deliberately: "the panel said 100"
-  /// and "we assumed 100 because the read failed" are different facts and the
-  /// pane has to be able to tell them apart. `nil` IS the second fact; nothing
-  /// else in this type records it.
+  /// `CommandTuning.effectiveMaxDDC`. Observable rather than
+  /// `@ObservationIgnored` (B5): "the panel said 100" and "we assumed 100
+  /// because the read failed" are different facts, and `nil` is the only record
+  /// of the second.
   public private(set) var readMax: Int?
 
   /// What this command's reads have proved (B3).
@@ -84,20 +81,16 @@ public final class DDCValueController: PendingWireDraining {
   /// them: the display-level verdict is `DDCReadEvidence.worst` of the three,
   /// folded at whatever reads them.
   ///
-  /// Scope: the verdict of the most recent pass that actually asked the panel
-  /// something, folded worst-wins over the FAILED attempts within that pass —
-  /// so a late `continue` still cannot erase an earlier zeros observation from
-  /// the same pass, and a pass that returns early (`startupAction != .read`,
-  /// `!isAvailable`, `tries == 0`) leaves the previous verdict standing.
+  /// Scope: the most recent pass that actually asked the panel something,
+  /// folded worst-wins over the FAILED attempts within that pass, so a late
+  /// `continue` cannot erase an earlier zeros observation and a pass that
+  /// returns early leaves the previous verdict standing.
   ///
-  /// What it is deliberately NOT is a fold across passes and across retries.
-  /// The retry loop exists because DDC reads are flaky, so the common healthy
-  /// case is attempt 1 returning nil and attempt 2 answering; folding those
-  /// monotonically published "this display does not reply" about a panel that
-  /// had just replied, then adopted its value in the same breath. A read that
-  /// eventually succeeded is a read that succeeded, so a successful attempt
-  /// supersedes the failures that preceded it in its pass. The ordering in
-  /// `DDCReadEvidence` is untouched; only the scope of the fold changed.
+  /// Deliberately NOT a fold across passes and retries. DDC reads are flaky, so
+  /// the common healthy case is attempt 1 returning nil and attempt 2
+  /// answering; folding those publishes "this display does not reply" about a
+  /// panel that just replied. A successful attempt supersedes the failures
+  /// before it in its pass.
   public private(set) var readEvidence: DDCReadEvidence = .notAttempted
 
   public init(
@@ -147,15 +140,13 @@ public final class DDCValueController: PendingWireDraining {
   /// Both halves are read live: the pref can be flipped from a settings row or
   /// a `defaults write`, and the verdict changes when the capabilities probe
   /// lands. The degrade is the point of the false case. Suppressing the 0x8D
-  /// write and skipping the volume write with it would leave the app recording
-  /// a mute no register carries, on a display still playing at its old level.
+  /// write and skipping the volume write with it would record a mute no
+  /// register carries, on a display still playing at its old level.
   ///
-  /// `audioSinkOverride` therefore also decides the STRATEGY, not just the
-  /// slider it is captioned for: "Always disabled" demotes this display to the
-  /// volume-register mute, and "Always enabled" keeps the dedicated command on
-  /// a display whose description denies it. That is the same escape hatch
-  /// working on the register the mute lands on, which is the only reading under
-  /// which the two surfaces cannot disagree.
+  /// `audioSinkOverride` therefore decides the STRATEGY, not just the slider it
+  /// is captioned for: "Always disabled" demotes this display to the
+  /// volume-register mute, "Always enabled" keeps the dedicated command on a
+  /// display whose description denies it.
   private var usesDedicatedMuteCommand: Bool {
     VolumeSliderPolicy.usesDedicatedMuteCommand(
       prefEnabled: prefs.enableMuteUnmute,
@@ -219,8 +210,8 @@ public final class DDCValueController: PendingWireDraining {
     }
   }
 
-  /// Mute toggle (fork toggleMute). Fresh presses only — this is backlog
-  /// #12b's `isFresh` consumer; key-repeat must not oscillate the state.
+  /// Mute toggle (fork toggleMute). Fresh presses only: key-repeat must not
+  /// oscillate the state.
   @discardableResult
   public func toggleMute(isFresh: Bool = true) -> Bool {
     guard command == .volume, isFresh, isAvailable else { return isMuted }
@@ -235,13 +226,11 @@ public final class DDCValueController: PendingWireDraining {
       // Ungated (D29 rule 3): this is the route back, and the display's own
       // verdict may have arrived after the mute it has to undo.
       if prefs.enableMuteUnmute { submitMuteWire(2) }
-      // One-shot unmute pair (wire 2 + value) rides two coalescers with no
-      // wire-order guarantee, but both orders CONVERGE (review R2): 0x8D=2
-      // never changes the volume register, and a 0x62 write at worst
-      // implicitly unmutes — the end state is identical either way.
-      // Documented instead of a composite ordered applier (YAGNI at this
-      // risk level). The REPEATED path (restoreToHardware) does not carry
-      // the pair at all — see its muted branch.
+      // The unmute pair (wire 2 + value) rides two coalescers with no
+      // wire-order guarantee, but both orders CONVERGE (R2): 0x8D=2 never
+      // changes the volume register, and a 0x62 write at worst implicitly
+      // unmutes. The REPEATED path (restoreToHardware) does not carry the pair
+      // at all; see its muted branch.
       submitValue(value)
     } else {
       setMuted(true)
@@ -262,16 +251,14 @@ public final class DDCValueController: PendingWireDraining {
   /// Puts the mute belief back after an unmute that could not be confirmed as
   /// applied, touching no register.
   ///
-  /// Both halves move together, and that is the point. The persisted flag is
-  /// what survives a relaunch; the live one is what keeps the ordinary mute
-  /// control honest and the recovery affordance on screen. Writing only the
-  /// pref (what the per-display reset did) leaves this object believing an
-  /// unmuted display, so the next press of the mute control MUTES a display
-  /// that never stopped being muted.
+  /// Both halves move together. The persisted flag survives a relaunch; the
+  /// live one keeps the mute control honest and the recovery affordance on
+  /// screen. Writing only the pref leaves this object believing an unmuted
+  /// display, so the next press MUTES a display that never stopped being muted.
   ///
   /// No second write, deliberately. The first could not be confirmed, and
-  /// repeating it would be another unconfirmed write rather than evidence; over
-  /// a register locked by HDR it is also how a memo comes to name a value the
+  /// repeating it is another unconfirmed write rather than evidence; over a
+  /// register locked by HDR it is also how a memo comes to name a value the
   /// panel never took.
   @discardableResult
   public func reassertUnconfirmedMute() -> Bool {
@@ -324,22 +311,20 @@ public final class DDCValueController: PendingWireDraining {
     }
   }
 
-  /// Asserts the PUBLISHED value onto the wire with no store gate: the sibling
-  /// of `BrightnessController.reassertHardware`, and it exists for the same one
-  /// caller. A settings reset republishes this command's assumed default (the
-  /// fork's volume 12.5% / contrast 75%) over a wiped store, and neither
-  /// existing door can send it. `restoreToHardware` returns early when the
-  /// store holds no saved value, which after a domain wipe is every display,
-  /// and `setValue` returns before the submit because the value it would set is
-  /// the value already published. Without a door that skips both gates the
-  /// slider comes back claiming a number the panel never took.
+  /// Asserts the PUBLISHED value onto the wire with no store gate, the sibling
+  /// of `BrightnessController.reassertHardware` and for the same one caller. A
+  /// settings reset republishes this command's assumed default over a wiped
+  /// store, and neither other door can send it: `restoreToHardware` returns
+  /// early when the store holds no saved value, which after a domain wipe is
+  /// every display, and `setValue` returns before the submit because the value
+  /// is already published. Without this the slider comes back claiming a number
+  /// the panel never took.
   ///
   /// Refuses to drive a MUTED display's volume register. A reset that could not
-  /// confirm an unmute carries the mute across the wipe on purpose (D29 rule 1,
-  /// and the reset's own `keepMuteStateFor`), so a value write here would either
-  /// contradict that decision or, under the default strategy where silence IS
-  /// the register at 0, leave a display that is supposed to be silent holding a
-  /// level nobody chose.
+  /// confirm an unmute carries the mute across the wipe on purpose (D29 rule 1),
+  /// so a value write here would either contradict that or, under the default
+  /// strategy where silence IS the register at 0, leave a display meant to be
+  /// silent holding a level nobody chose.
   public func reassertHardware() {
     guard isAvailable else { return }
     guard !(command == .volume && isMuted) else { return }
@@ -357,16 +342,14 @@ public final class DDCValueController: PendingWireDraining {
   /// silence. The same window opens on the first pass after a replug, where the
   /// verdict for the new panel starts absent again.
   ///
-  /// Nothing here is speculative: it fires only when the strategy the last
-  /// restore acted on is not the strategy now in force, and only while this
-  /// display is muted, which is the only restore branch the verdict changes.
+  /// It fires only when the strategy the last restore acted on is not the one
+  /// now in force, and only while this display is muted, which is the only
+  /// restore branch the verdict changes.
   ///
-  /// The memo reset is defence in depth, not the thing that makes this work
-  /// [MEASURED: removing it keeps the suite green]. The corrected write targets
-  /// a different register from the one it supersedes, and `performRestorePass`
-  /// resets the memos before every restore anyway. It stays because this is a
-  /// correction path, and a correction dropped as a duplicate of a value the
-  /// register never took is the failure it exists to undo.
+  /// The memo reset is defence in depth, not what makes this work [MEASURED:
+  /// removing it keeps the suite green]. It stays because this is a correction
+  /// path, and a correction dropped as a duplicate of a value the register never
+  /// took is the failure it exists to undo.
   @discardableResult
   public func restoreIfMuteStrategyChanged() -> Bool {
     guard command == .volume, isMuted,
@@ -399,18 +382,13 @@ public final class DDCValueController: PendingWireDraining {
     // setMuted(false)+persist over the user's fresh mute.
     let muteIssuedAtStart = issuedMuteGeneration
     // This pass's own evidence, folded from `.notAttempted` rather than from
-    // whatever the last pass concluded — see `readEvidence`. Only the FAILED
-    // attempts fold together (worst-wins, so a silent retry after a zeros
-    // answer still reports the more specific write-only finding); a success
-    // supersedes them outright, which is also why it needs no fold.
+    // what the last pass concluded (see `readEvidence`). Only the FAILED
+    // attempts fold, worst-wins; a success supersedes them outright.
     var passEvidence = DDCReadEvidence.notAttempted
     for _ in 0 ..< tries {
-      // The old single `guard … , result.max > 0 else { continue }` treated a
-      // silent bus and a panel that answers zeros as the same non-event (B3).
-      // They are different facts: only the second is the write-only signature,
-      // and it is the one the MAG 341C produces on every one of `tries`
-      // attempts. Same number of reads, same `continue`, same values — the
-      // loop's DDC behaviour is untouched; it just stops forgetting.
+      // Two guards, not one (B3): a silent bus and a panel that answers zeros
+      // are different facts. Only the second is the write-only signature, and
+      // it is the one the MAG 341C produces on every one of `tries` attempts.
       guard let result = await writer.read(command: readCode) else {
         passEvidence = DDCReadEvidence.worse(passEvidence, .noReply)
         readEvidence = passEvidence
@@ -527,78 +505,51 @@ public final class DDCValueController: PendingWireDraining {
     return await coalescer.appliedThrough() >= second
   }
 
-  /// Swaps the DDC writer, and — only when `panelIdentity` says the panel on
-  /// the other end has CHANGED — drops the read-derived facts that were
-  /// evidence about the old one.
+  /// Swaps the DDC writer, and drops the read-derived facts about the old panel
+  /// only when `panelIdentity` says the panel on the other end CHANGED.
   ///
-  /// The motivating defect is real: `AppModel.performRefresh` reuses these
-  /// controllers for any display whose `CGDirectDisplayID` reappears, and
-  /// macOS reassigns display IDs across a replug — so a different physical
-  /// monitor swapped onto the same port inherits this object, and without a
-  /// reset would inherit the previous panel's readback max and read verdict
-  /// about ITSELF. (`BrightnessController.rebind` carries the same reset,
-  /// under the same condition.)
+  /// `AppModel.performRefresh` reuses these controllers for any display whose
+  /// `CGDirectDisplayID` reappears, and macOS reassigns display IDs across a
+  /// replug, so a different monitor swapped onto the same port inherits this
+  /// object and, without a reset, the previous panel's readback max and read
+  /// verdict about ITSELF. `BrightnessController.rebind` carries the same reset.
   ///
-  /// WHY A PANEL IDENTITY AND NOT THE WRITER. The first version of this reset
-  /// fired on every `rebind` call, which was wrong because `performRefresh`
-  /// rebinds every KEPT display on EVERY pass — every wake, every
-  /// reconfiguration — not only on replug. A readable panel that reported a
-  /// max below 100 was therefore dropped back to the assumed 100 several times
-  /// a session, and the recovering re-read is a no-op unless
-  /// `startupAction == .read` and fails outright on a write-only panel. The
-  /// obvious repair — compare the writer instead — does not work, and the
-  /// reason is in the discovery path rather than here:
+  /// WHY A PANEL IDENTITY AND NOT THE WRITER. Resetting on every `rebind` was
+  /// wrong: `performRefresh` rebinds every KEPT display on every pass, not only
+  /// on replug, so a panel that reported a max below 100 was dropped back to the
+  /// assumed 100 several times a session. Comparing the writer does not work
+  /// either:
   ///
-  /// - `DisplayDiscovery.discover()` builds a FRESH `Arm64DDCService` on every
-  ///   pass, so object identity (`===`) changes every pass, replug or not.
-  /// - The `IOAVService` inside it is freshly created per pass too
-  ///   (`IOAVServiceCreateWithService(...).takeRetainedValue()` in
-  ///   `Arm64DDC.getIoregServicesForMatching`), and a plain CFTypeRef compares
-  ///   by pointer — so the underlying service handle changes every pass as
-  ///   well. There is no stable service identity to compare.
-  /// - `Arm64Service.serviceLocation` IS stable across passes, but it names
-  ///   the PORT, and is therefore unchanged in exactly the scenario this reset
-  ///   exists for: a different monitor plugged into the same port.
+  /// - `DisplayDiscovery.discover()` builds a FRESH `Arm64DDCService` per pass,
+  ///   so `===` changes every pass, replug or not.
+  /// - Its `IOAVService` is freshly created per pass too and a plain CFTypeRef
+  ///   compares by pointer, so there is no stable service handle either.
+  /// - `Arm64Service.serviceLocation` IS stable across passes, but it names the
+  ///   PORT, so it is unchanged in exactly the scenario this reset exists for.
   ///
-  /// What does distinguish the panels is the identity discovery already
-  /// computes for them — `ExternalDisplay.persistenceKey`, the EDID UUID with
-  /// a productName/manufacturer/serial fallback. It is also the key this
-  /// controller's own `storageKey` is derived from, so "the panel changed" and
-  /// "this controller's saved value belongs to someone else" are one fact, not
-  /// two. Its known limitation is inherited: identical twin monitors can share
-  /// an EDID UUID, so swapping one twin for another is not detected. Those two
-  /// panels also share a saved value and a prefs domain, so the verdict they
-  /// share is the least of that scenario's problems.
+  /// `ExternalDisplay.persistenceKey` (the EDID UUID, falling back to
+  /// productName/manufacturer/serial) does distinguish them, and `storageKey`
+  /// derives from it, so "the panel changed" and "this controller's saved value
+  /// belongs to someone else" are one fact. Identical twins can share an EDID
+  /// UUID and so are not detected; they also share a saved value and a prefs
+  /// domain, which is the larger problem in that scenario.
   ///
-  /// COST OF THE NARROWER TRIGGER: a rebind of the SAME panel through a new
-  /// route (different port, or a newly interposed dock that eats DDC) keeps
-  /// the old verdict until the next read pass overwrites it. That is the right
-  /// trade — the verdict is about a panel, the next pass that asks supersedes
-  /// it, and the alternative is the regression above, which fires on every
-  /// wake.
+  /// Cost of the narrower trigger: the SAME panel rebound through a new route
+  /// keeps the old verdict until the next read pass overwrites it.
   ///
-  /// `readMax` back to `nil` is the load-bearing reset and the only part of
-  /// this that moves bytes: `nil` means "assume 100", so a panel that had
-  /// reported a max BELOW 100 is, from an identity change until the next
-  /// successful read, written against 100 instead. That is the same state a
-  /// freshly discovered display starts in, and scaling writes against a
-  /// maximum the panel on the other end never reported is the worse of the
-  /// two. Stated here rather than buried, and pinned by
-  /// `arebindToADifferentPanelReturnsTheReadbackMaxToAssumed` /
-  /// `arebindToTheSamePanelKeepsWhatThatPanelReported`.
+  /// `readMax` back to `nil` is the reset that moves bytes: `nil` means "assume
+  /// 100", so a panel that reported a lower max is written against 100 until the
+  /// next successful read. That is where a freshly discovered display starts,
+  /// and scaling against a maximum this panel never reported is worse.
   ///
-  /// The 0x8D verdict is read-derived evidence about a panel too, and is
-  /// deliberately NOT reset here: it is not held here. `muteWireSupport` is a
-  /// provider, and the refresh pass that calls this re-points it for every
-  /// display in the same pass, so it names the new panel's verdict without a
-  /// reset step that could be forgotten.
+  /// The 0x8D verdict is NOT reset here because it is not held here.
+  /// `muteWireSupport` is a provider, and the refresh pass that calls this
+  /// re-points it for every display in the same pass.
   ///
-  /// The duplicate memos reset UNCONDITIONALLY, and the asymmetry is
-  /// deliberate: they are not evidence about anything, they are a claim that
-  /// a particular value is already sitting in the register. A rebind means the
-  /// register was reached through a service we no longer hold, so re-asserting
-  /// a value must not be suppressed as a duplicate (review I10) — the same
-  /// argument whether or not the panel changed.
+  /// The duplicate memos reset UNCONDITIONALLY: they are not evidence, they
+  /// claim a value is already sitting in the register. A rebind means the
+  /// register was reached through a service we no longer hold, so re-asserting a
+  /// value must not be suppressed as a duplicate.
   public func rebind(writer: any DDCWriting, panelIdentity: String?) {
     self.writer = writer
     if panelIdentity != boundPanelIdentity {

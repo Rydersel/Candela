@@ -20,9 +20,8 @@ struct ConfirmationPlacementTests {
     )
   }
 
-  /// An empty rect is not a window. `NSWindow.frame` can report one for a panel
-  /// that has never been sized, and treating it as an obstacle would push a
-  /// lone confirmation off the centre for no reason.
+  /// An empty rect is not a window: `NSWindow.frame` reports one for a panel that has
+  /// never been sized, and treating it as an obstacle pushes a lone confirmation off centre.
   @Test func anEmptyRectIsNotAnObstacle() {
     #expect(
       ConfirmationPlacement.origin(size: Self.size, in: Self.screen, avoiding: [.zero])
@@ -96,9 +95,8 @@ struct ConfirmationPlacementTests {
     #expect(strip.contains(placed))
   }
 
-  /// The compromise case, stated so a later reader does not mistake it for a
-  /// promise: a screen with room for one window gets an overlap, but never the
-  /// exact stack that hid the countdown, and never a window off the screen.
+  /// Stated so a later reader does not mistake it for a promise: a screen with room for
+  /// one window gets an overlap, but never the stack that hid the countdown.
   @Test func aScreenWithRoomForOneWindowStillOffsetsTheSecond() {
     let tight = CGRect(x: 0, y: 0, width: 500, height: 300)
     let size = CGSize(width: 420, height: 220)

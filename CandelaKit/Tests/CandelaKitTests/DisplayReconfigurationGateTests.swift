@@ -2,12 +2,9 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// The four-way exclusion (AR12).
-///
-/// Every test here has a mutation that makes it fail, and the two that matter
-/// most are the ones nobody would think to write: a gate that refuses the holder
-/// its own claim breaks superseding, and a gate that lets one claimant release
-/// another's claim fails OPEN — both silently.
+/// The exclusion between reconfiguring features (AR12). The two cases nobody would
+/// think to write are the ones that matter: a gate refusing the holder its own claim
+/// breaks superseding, and a gate letting one claimant release another's fails open.
 @Suite("Display reconfiguration gate (AR12)")
 struct DisplayReconfigurationGateTests {
   /// Every ordered pair, generated rather than listed: a fifth claimant is
@@ -33,7 +30,7 @@ struct DisplayReconfigurationGateTests {
     ])
   }
 
-  /// The whole exclusion, in both directions, for all twelve ordered pairs.
+  /// The whole exclusion, in both directions, for every ordered pair.
   @Test(arguments: orderedPairs)
   func aHeldGateRefusesEveryOtherClaimantAndNamesTheHolder(
     holder: ReconfigurationClaimant, other: ReconfigurationClaimant
@@ -48,10 +45,8 @@ struct DisplayReconfigurationGateTests {
     #expect(await gate.claim(holder) == .refused(by: other))
   }
 
-  /// A `begin` that threw applied nothing, so the claim taken a moment earlier
-  /// has nothing to protect. Left held it would wedge every OTHER display
-  /// feature for the rest of the session — the deadlock this type is most
-  /// dangerous without.
+  /// A `begin` that threw applied nothing, so its claim has nothing to protect.
+  /// Left held it wedges every other display feature for the rest of the session.
   @Test(arguments: orderedPairs)
   func aClaimIsReleasedWhenItsOwnersOperationFails(
     failing: ReconfigurationClaimant, next: ReconfigurationClaimant
@@ -66,10 +61,9 @@ struct DisplayReconfigurationGateTests {
     #expect(await gate.claim(next) == .granted)
   }
 
-  /// The owner departs mid-hold: the display set changed, the session dropped
-  /// its preview, and nobody ever answered the question. Nothing about that path
-  /// involves the user, so nothing about it can involve a button — the release
-  /// has to come from the same reconciliation that noticed the departure.
+  /// The owner departs mid-hold, so nobody ever answers the question. No part of
+  /// that path involves the user, so the release comes from the same reconciliation
+  /// that noticed the departure.
   @Test(arguments: orderedPairs)
   func aClaimIsNotStrandedWhenItsOwnerDepartsMidHold(
     departing: ReconfigurationClaimant, next: ReconfigurationClaimant
@@ -83,11 +77,9 @@ struct DisplayReconfigurationGateTests {
     #expect(await gate.claim(departing) == .refused(by: next))
   }
 
-  /// Superseding is a supported operation in three of the four claimants — a
-  /// mode `begin` on a second display, a mirror break over an outstanding
-  /// engage, a second drag during an arrangement preview. Refusing the holder
-  /// its own claim would break all three, and would look like the feature
-  /// ignoring a click.
+  /// Superseding is supported for most claimants: a mode `begin` on a second
+  /// display, a mirror break over an outstanding engage, a second drag during an
+  /// arrangement preview. Refusing the holder its own claim looks like a dead click.
   @Test func theHolderIsNeverRefusedItsOwnClaim() async {
     let gate = DisplayReconfigurationGate()
     #expect(await gate.claim(.arrangement) == .granted)
@@ -95,18 +87,11 @@ struct DisplayReconfigurationGateTests {
     #expect(await gate.holder == .arrangement)
   }
 
-  /// **That re-entrant grant does NOT nest, and two operations sharing one
-  /// claimant have to be written knowing it.** A single release frees the gate
-  /// however many times it was claimed, so an operation that claims, finishes
-  /// and releases hands back a claim another operation of the same claimant is
-  /// still relying on.
-  ///
-  /// Synthesized sizes made this live rather than theoretical: `.displayModes`
-  /// now covers the mode picker AND the synthesis engine, whose engage and
-  /// disengage run for tens of seconds and whose preview stands for thirty more.
-  /// The app's answer is ONE releasing funnel per claimant, releasing only when
-  /// nothing that claimant owns is outstanding. This is the property that makes
-  /// that mandatory rather than merely tidy.
+  /// The re-entrant grant does NOT nest: one release frees the gate however many
+  /// times it was claimed, so an operation that finishes hands back a claim another
+  /// operation of the same claimant still relies on. Live, not theoretical:
+  /// `.displayModes` covers both the mode picker and the synthesis engine. Hence one
+  /// releasing funnel per claimant, releasing only when nothing it owns is outstanding.
   @Test func aSecondClaimByTheSameClaimantDoesNotNest() async {
     let gate = DisplayReconfigurationGate()
     #expect(await gate.claim(.displayModes) == .granted)
@@ -149,10 +134,9 @@ struct DisplayReconfigurationGateTests {
     #expect(await gate.claim(.mirroring) == .granted)
   }
 
-  /// A late release from a claimant's PREVIOUS operation must not free the claim
-  /// somebody else took in between. The identity check is what makes that true,
-  /// and this is the ordering it actually happens in: two queued operations, the
-  /// first one's reconciliation landing after the second claimant is in.
+  /// A late release from a claimant's previous operation must not free the claim
+  /// somebody else took in between: two queued operations, the first one's
+  /// reconciliation landing after the second claimant is in.
   @Test func aLateReleaseFromAPreviousOperationDoesNotFreeTheNewHolder() async {
     let gate = DisplayReconfigurationGate()
     #expect(await gate.claim(.displayModes) == .granted)
@@ -165,9 +149,9 @@ struct DisplayReconfigurationGateTests {
     #expect(await gate.claim(.mirroring) == .refused(by: .arrangement))
   }
 
-  /// Four claimants racing for the gate from four tasks: exactly one is granted
-  /// and the other three are refused by that same one. The serialisation is the
-  /// actor's, and this is the only test that exercises it.
+  /// Every claimant racing for the gate from its own task: one is granted and the
+  /// rest are refused by that same one. The only test that exercises the actor's
+  /// serialisation.
   @Test func concurrentClaimsGrantExactlyOne() async {
     let gate = DisplayReconfigurationGate()
     let outcomes = await withTaskGroup(of: ReconfigurationClaimOutcome.self) { group in

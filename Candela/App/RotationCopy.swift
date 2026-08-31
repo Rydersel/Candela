@@ -5,14 +5,13 @@ import SwiftUI
 /// Every sentence the rotation feature says, in one place, so the settings row
 /// and the confirmation window cannot end up spelling one statement two ways.
 enum RotationCopy {
-  /// The hub row's label (spec §4 renamed it from "Orientation:" when the
-  /// control moved into the Display section, where the word carries the topic).
+  /// The hub row's label. Not "Orientation": the control sits in the Display
+  /// section, where this word carries the topic.
   static var label: LocalizedStringKey { "Rotation" }
 
-  /// The system's own wording. System Settings offers Standard / 90° / 180° /
-  /// 270°, and D25 says familiarity beats novelty — "Portrait" and "Landscape"
-  /// would be a second vocabulary for the same four values, and would be wrong
-  /// for an already-portrait panel.
+  /// The system's own wording. D25: familiarity beats novelty, and "Portrait"
+  /// and "Landscape" would be a second vocabulary for the same values, wrong for
+  /// an already-portrait panel.
   static func angle(_ rotation: DisplayRotation) -> LocalizedStringKey {
     LocalizedStringKey(angleText(rotation))
   }
@@ -27,10 +26,8 @@ enum RotationCopy {
     }
   }
 
-  // The old row captions (the thirty-second countdown and the RT11 persistence
-  // note) were retired with the hub restructure (spec §4): the countdown is
-  // runtime feedback the confirmation window states itself, and persistence is
-  // macOS's own behaviour for this control, matching System Settings.
+  // No row caption for the countdown or for persistence: the confirmation window
+  // states the countdown itself, and persistence is macOS's own behaviour here.
 
   static var unavailable: LocalizedStringKey {
     "This version of macOS does not expose display rotation to Candela."
@@ -51,13 +48,11 @@ enum RotationCopy {
     return name.isEmpty ? angle : "\(name): \(angle)"
   }
 
-  /// Every refusal states its own reason. No `default:` arm — a new
-  /// `RotationRefusal` case is a compile error here rather than a silently
-  /// generic sentence.
+  /// Every refusal states its own reason. No `default:` arm: a new
+  /// `RotationRefusal` case is a compile error rather than a generic sentence.
   ///
-  /// `unchanged` is present for exhaustiveness but is never shown: the
-  /// coordinator returns early on it, because telling someone "no" when the
-  /// display is already where they asked for it is a dialog with nothing to say.
+  /// `unchanged` is here for exhaustiveness and never shown; the coordinator
+  /// returns early on it.
   static func refusal(_ refusal: RotationRefusal) -> LocalizedStringKey {
     switch refusal {
     case .unavailable: unavailable
@@ -71,9 +66,9 @@ enum RotationCopy {
     "The display did not rotate, and nothing was changed."
   }
 
-  /// The RT8 case, and it is worth its own sentence: macOS accepted the change
-  /// and reported success, and the display did not move. "It failed" would be
-  /// the wrong shape of statement for a call that returned no error.
+  /// The RT8 case, worth its own sentence: macOS accepted the change, reported
+  /// success, and the display did not move. "It failed" is the wrong shape of
+  /// statement for a call that returned no error.
   static var resolveFailure: LocalizedStringKey {
     "The display could not be rotated back. Nothing retries this on its own. Try again."
   }

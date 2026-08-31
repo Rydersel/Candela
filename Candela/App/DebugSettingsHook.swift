@@ -2,114 +2,61 @@
   import Foundation
 
   /// Opens the settings window on a named destination so screenshot validation
-  /// (DT6) can reach a pane nothing else can reach: Accessibility is not
-  /// granted, so no agent can click the sidebar, and Candela has no URL scheme
-  /// (that is W4).
+  /// (DT6) can reach a pane nothing else can: Accessibility is not granted, so
+  /// no agent can click the sidebar, and Candela has no URL scheme.
   ///
-  /// The WHOLE file is inside `#if DEBUG`, and so are both call sites — the
-  /// `#if` in `SettingsRootView` wraps the `.onAppear` modifier itself, not its
-  /// closure body, so Release keeps no residue of it at all. Compiled out of
-  /// Release BY CONSTRUCTION, not by remembering to delete it — the standing
-  /// review step (grep EVERY Mach-O in the Release bundle for debug markers,
-  /// with a Debug positive control, because a Debug app's code lives in
-  /// `Candela.debug.dylib` and grepping only the stub passes vacuously) is what
-  /// proves it, and a `CANDELA_TOOLBAR_STYLE` env switch once reached a Release
-  /// build precisely because it was guarded by discipline instead.
+  /// The file and both call sites are inside `#if DEBUG`, so Release keeps no
+  /// residue by construction rather than by discipline.
   ///
-  /// Trigger: the `CANDELA_DEBUG_SETTINGS` environment variable, read ONCE at
-  /// launch. An env var rather than a notification or a hidden menu item
-  /// because it cannot be set by accident on a user's machine and leaves no
-  /// residue — a plain `open` of the app never sets it. Usage:
+  /// Trigger: `CANDELA_DEBUG_SETTINGS`, read ONCE at launch. An env var cannot be
+  /// set by accident on a user's machine and a plain `open` never sets it. Usage:
   ///
-  ///   CANDELA_DEBUG_SETTINGS=pane:general    Candela.app/Contents/MacOS/Candela
-  ///   CANDELA_DEBUG_SETTINGS=pane:menuBar    (also: pane:arrangement,
-  ///                                           pane:keyboard, pane:about,
-  ///                                           pane:health, pane:protection,
-  ///                                           pane:checkup)
-  ///   CANDELA_DEBUG_SETTINGS=pane:oledCare/first        (also /<persistenceKey>
-  ///                                           : opens OLED Care with that
-  ///                                           display's page pushed, as the
-  ///                                           hub's "All OLED Care Settings…"
-  ///                                           link does)
-  ///   CANDELA_DEBUG_SETTINGS=pane:oledCare/first/health
-  ///                                           (a further /<page>:
-  ///                                           /display is the spelled-out
-  ///                                           default; /health opens the
-  ///                                           Display Health WINDOW over the
-  ///                                           display page, since OCR-A1 it
-  ///                                           is not a pushed page. The
-  ///                                           route replaced
-  ///                                           CANDELA_DEBUG_PANEL_HEALTH,
-  ///                                           whose whole job was reaching
-  ///                                           the health surface when it was
-  ///                                           a sheet no capture could open.)
-  ///   CANDELA_DEBUG_SETTINGS=pane:keyboard/mods  (also /target: opens the
-  ///                                           Keyboard pane with that pushed
-  ///                                           page presented, KMR11; ids are
-  ///                                           KeyboardPage raw values)
-  ///   CANDELA_DEBUG_SETTINGS=setup:mock          (the guided setup flow over
-  ///                                           the committed rig fixture:
-  ///                                           commits recorded, permissions
-  ///                                           simulated. Stage 1 of the
-  ///                                           onboarding overhaul and the
-  ///                                           permanent screenshot route for
-  ///                                           the flow's pages.)
-  ///   CANDELA_DEBUG_SETTINGS=display:builtIn
-  ///   CANDELA_DEBUG_SETTINGS=display:first
-  ///   CANDELA_DEBUG_SETTINGS=display:<persistenceKey>
-  ///   CANDELA_DEBUG_SETTINGS=display:first/allModes   (also: /advanced,
-  ///                                           /diagnostics — opens the display
-  ///                                           destination with that sub-page
-  ///                                           already pushed; Task 9's stack
-  ///                                           has no pushing rows until the
-  ///                                           hub lands, and later capture
-  ///                                           runs want sub-pages directly)
+  ///   CANDELA_DEBUG_SETTINGS=pane:<PaneID>
+  ///   CANDELA_DEBUG_SETTINGS=pane:oledCare/<key|first>[/display|/health]
+  ///   CANDELA_DEBUG_SETTINGS=pane:keyboard/<KeyboardPage>   (KMR11)
+  ///   CANDELA_DEBUG_SETTINGS=setup:mock   (guided setup over the rig fixture)
+  ///   CANDELA_DEBUG_SETTINGS=display:<builtIn|first|key>[/<DisplaySubPage>]
+  ///
+  /// `/health` opens the Display Health WINDOW over the display page; since
+  /// OCR-A1 it is not a pushed page.
   ///
   /// Both id spaces are CASE-SENSITIVE and camelCase: `pane:menuBar`, not
-  /// `pane:menubar`; `display:builtIn`, not `display:builtin`. The valid pane
-  /// ids are exactly `PaneID.allCases`, and a rejection message lists them from
-  /// that enum rather than from this comment, so the spelling never has to be
-  /// guessed twice and this list cannot go stale into a lie.
+  /// `pane:menubar`. Valid ids come from the enums, and so does every rejection
+  /// message, so this comment cannot go stale into a lie.
   ///
-  /// `display:first` resolves the first connected EXTERNAL display's
-  /// persistence key, which is the one a capture script cannot know in advance.
+  /// `display:first` resolves the first connected EXTERNAL display's persistence
+  /// key, the one a capture script cannot know in advance.
   ///
-  /// Every outcome — resolved or rejected — prints ONE line to stderr tagged
-  /// `[CANDELA_DEBUG_SETTINGS]`. Without it, six different failures (unset var,
-  /// unparseable value, unknown pane, unknown display key, `display:first` with
-  /// no external attached, and a `SettingsOpener.open()` that took the branch
-  /// documented as a no-op on macOS 26) are one indistinguishable non-event,
-  /// and a capture run has to be repeated with different inputs just to learn
-  /// which one it hit. That truth table was built by hand once; the line means
-  /// nobody builds it again.
+  /// Every outcome, resolved or rejected, prints ONE line to stderr tagged
+  /// `[CANDELA_DEBUG_SETTINGS]`. Without it an unset variable, a bad value, an
+  /// unknown pane and a `SettingsOpener.open()` that no-ops are the same
+  /// non-event, and the capture run gets repeated just to learn which it hit.
   @MainActor
   enum DebugSettingsHook {
     static let environmentKey = "CANDELA_DEBUG_SETTINGS"
 
-    /// Set by `openIfRequested` and adopted by `SettingsRootView.onAppear`.
-    /// The root view owns its selection as `@State`, so there is nothing to
-    /// write to from outside until the view exists.
+    /// Set by `openIfRequested`, adopted by `SettingsRootView.onAppear`: the root
+    /// view owns its selection as `@State`, so there is nothing to write until it
+    /// exists.
     static var pendingSelection: SettingsDestination?
     /// Only ever set alongside a `.display` `pendingSelection`; the root view
     /// seeds that display's navigation path with it.
     static var pendingSubPage: DisplaySubPage?
-    /// Only ever set alongside `pane:oledCare`: the pushed-page path the pane
-    /// should open on, standing in for the hub link and the pane's own rows,
-    /// which cannot be clicked from a capture run (no Accessibility grant).
-    /// Without this the pushed pages have no route to a screenshot at all.
+    /// Only ever set alongside `pane:oledCare`: the pushed-page path to open on.
+    /// The hub link and the pane's rows cannot be clicked without an Accessibility
+    /// grant, so without this the pushed pages have no route to a screenshot.
     static var pendingOledPath: [OledCarePage]?
     /// Only ever set alongside `pane:keyboard`: same job as `pendingOledPath`
     /// for the Keyboard pane's pushed pages (KMR11).
     static var pendingKeyboardPath: [KeyboardPage]?
-    /// Only ever set alongside `pane:oledCare/<key>/health`: Display Health is
-    /// a WINDOW now, not a pushed page (OCR-A1, #185), so the capture route
-    /// opens it over the display page it used to sit behind.
+    /// Only ever set alongside `pane:oledCare/<key>/health`: Display Health is a
+    /// WINDOW (OCR-A1), not a pushed page, so the capture route opens it over the
+    /// display page.
     static var pendingHealthWindowKey: String?
 
-    /// A parse that carries its own reason for failing. The reason is the whole
-    /// point: `SettingsDestination?` cannot distinguish "you typo'd the pane
-    /// id" from "the display you asked for is not plugged in", and those want
-    /// opposite responses from whoever is driving the capture.
+    /// A parse that carries its own reason for failing: `SettingsDestination?`
+    /// cannot distinguish a typo'd pane id from a display that is not plugged in,
+    /// and those want opposite responses from whoever drives the capture.
     enum Resolution {
       case resolved(
         SettingsDestination, subPage: DisplaySubPage?, oledPath: [OledCarePage]?,
@@ -121,15 +68,13 @@
     }
 
     /// Parsed separately from the opening so a bad value is a REPORTED no-op
-    /// rather than a silent open on some OTHER pane — a screenshot of the wrong
-    /// pane is worse than no screenshot, because it looks like evidence.
+    /// rather than a silent open on some OTHER pane: a screenshot of the wrong
+    /// pane looks like evidence.
     ///
-    /// Both branches validate against the real id space. `display:` validating
-    /// is not symmetry for its own sake: an unknown key is accepted by
-    /// `SettingsDestination` quite happily, and `SettingsRootView` then renders
-    /// `generalFallback` under a toolbar reading "General" with no sidebar row
-    /// selected — a window that looks exactly like a deliberate capture of the
-    /// General pane. That is the precise failure this type exists to prevent.
+    /// `display:` validates too, not for symmetry: `SettingsDestination` accepts
+    /// an unknown key happily and `SettingsRootView` then renders
+    /// `generalFallback` under a toolbar reading "General", which looks exactly
+    /// like a deliberate capture of the General pane.
     static func resolve(_ value: String, externalKeys: [String]) -> Resolution {
       let parts = value.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
       guard parts.count == 2 else {
@@ -146,16 +91,13 @@
             "unknown setup value \(quoted(body)); ids are case-sensitive: mock")
         }
       case "pane":
-        // Optional suffixes, accepted only on the panes with pushed pages:
-        // `oledCare` takes `/<displayKey>[/<page>]`, `keyboard` takes
-        // `/<page>` (KMR11). Rejected elsewhere rather than ignored, because
-        // a suffix that silently did nothing would capture the top of a pane
-        // and look like evidence that the landing position was tested.
+        // Optional suffixes, accepted only on the panes with pushed pages.
+        // Rejected elsewhere rather than ignored: a suffix that silently did
+        // nothing would capture the top of a pane and look like evidence.
         let segments = body.split(separator: "/", omittingEmptySubsequences: false)
-        // Named rather than left to the unknown-pane message, for the retired
-        // measurement page's reason: capture scripts written before the merge
-        // still ask for it, and a bare "unknown pane" would not say where the
-        // update controls went.
+        // Named rather than left to the unknown-pane message: capture scripts
+        // written before the merge still ask for it, and "unknown pane" would
+        // not say where the update controls went.
         if segments[0] == "updates" {
           return .rejected("the Updates pane merged into About; its controls are the About page's now, so use 'pane:about'")
         }
@@ -205,9 +147,9 @@
           case "display": break
           // A window, not a page (OCR-A1): the display page stays behind it.
           case "health": healthWindowKey = key
-          // Named rather than left to the default, because capture scripts
-          // written before SC5 still ask for it and "unknown page" would not
-          // tell anyone where the controls went.
+          // Named rather than left to the default: capture scripts written
+          // before SC5 still ask for it, and "unknown page" would not say where
+          // the controls went.
           case "measurement":
             return .rejected("the OLED Care measurement page retired; its controls are on the Health pane, so use 'pane:health'")
           default:
@@ -218,9 +160,8 @@
           .pane(id), subPage: nil, oledPath: path, keyboardPath: nil,
           healthWindowKey: healthWindowKey)
       case "display":
-        // Optional `/subPage` suffix pushes that sub-page onto the display's
-        // navigation stack. Validated like everything else here: a typo'd
-        // sub-page must not silently capture the hub.
+        // Optional `/subPage` suffix. Validated like everything else here: a
+        // typo'd sub-page must not silently capture the hub.
         let segments = body.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
         let keyBody = String(segments[0])
         var subPage: DisplaySubPage?
@@ -232,7 +173,7 @@
           subPage = page
         }
         // The built-in is not in `externalKeys` (AppModel keeps it in its own
-        // slot), but it IS a real destination — `SettingsRootView` routes the
+        // slot) but it IS a real destination: `SettingsRootView` routes the
         // literal key "builtIn" to `BuiltInDisplayPane`.
         let known = ["builtIn"] + externalKeys
         if keyBody == "first" {
@@ -251,8 +192,7 @@
       }
     }
 
-    /// Kept as the brief's named interface, and as the shape most callers want.
-    /// `resolve` is the one that can say why.
+    /// The shape most callers want; `resolve` is the one that can say why.
     static func destination(from value: String, externalKeys: [String]) -> SettingsDestination? {
       guard case let .resolved(destination, _, _, _, _) = resolve(value, externalKeys: externalKeys)
       else {
@@ -261,12 +201,11 @@
       return destination
     }
 
-    /// Called once, at the end of launch and AFTER the first display refresh —
+    /// Called once, at the end of launch and AFTER the first display refresh:
     /// `display:first` needs the display list to exist.
     static func openIfRequested(externalKeys: [String]) {
       guard let value = ProcessInfo.processInfo.environment[environmentKey] else {
-        // Deliberately silent: this is the normal case for every ordinary Debug
-        // launch, and a line here would be noise in every single one.
+        // Silent: this is every ordinary Debug launch.
         return
       }
       switch resolve(value, externalKeys: externalKeys) {
@@ -313,9 +252,8 @@
 
     private static func quoted(_ value: some StringProtocol) -> String { "'\(value)'" }
 
-    /// stderr, not `print`: a capture run redirects the app's output to a log
-    /// and reads it back, and stdout is where anything else the app prints
-    /// would land. One tag, one line, greppable.
+    /// stderr, not `print`: a capture run reads the app's output back, and stdout
+    /// is where everything else it prints lands. One tag, one line, greppable.
     private static func log(_ message: String) {
       FileHandle.standardError.write(Data("[\(environmentKey)] \(message)\n".utf8))
     }

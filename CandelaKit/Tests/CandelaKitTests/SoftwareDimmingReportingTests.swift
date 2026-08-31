@@ -37,9 +37,8 @@ struct SoftwareDimmingReportingTests {
     )
   }
 
-  /// The gamma WRITE keeps the panel's own ID — gamma is per-display and the
-  /// slave's panel is what we want dimmed — while the activity enforcer goes to
-  /// the display that actually has a compositor.
+  /// Gamma is per-display, so the WRITE keeps the slave panel's own ID. The
+  /// activity enforcer goes to the display that has a compositor.
   @Test func theGammaWriteStaysOnThePanelWhileTheEnforcerMovesToTheMaster() {
     let shade = RecordingShade()
     let gamma = RecordingGamma()
@@ -66,10 +65,9 @@ struct SoftwareDimmingReportingTests {
     #expect(shade.alphaCalls.last?.id == Self.masterID)
   }
 
-  /// THE DEFECT. A software write that did not land must not be memoised as
-  /// applied: today `lastAppliedSw` is set before the backend is even asked, so
-  /// the identical value is deduped away forever and the display never dims
-  /// again — while the engine reports a brightness it never achieved.
+  /// THE DEFECT. Setting `lastAppliedSw` before the backend is asked dedupes an
+  /// identical value away forever, so the display never dims again while the
+  /// engine reports a brightness it never achieved.
   @Test func aFailedShadeWriteIsRetriedRatherThanMemoisedAsApplied() {
     let shade = RecordingShade()
     let gamma = RecordingGamma()
@@ -163,9 +161,8 @@ private final class SelectiveGamma: GammaApplying {
   func resetAllGamma() {}
 }
 
-/// SS15, amended by Phase 0 (d): a synthesis set has two display IDs and
-/// nothing in software can say which one's transfer table reaches the glass, so
-/// the dimming scale is written to both.
+/// SS15: a synthesis set has two display IDs and nothing in software can say
+/// which one's transfer table reaches the glass, so both get the dimming scale.
 @Suite("Gamma dimming under an engaged synthesis set (SS15)")
 @MainActor
 struct SynthesisGammaRoutingTests {
@@ -199,12 +196,10 @@ struct SynthesisGammaRoutingTests {
     )
   }
 
-  /// Every restore to 1.0 has to reach both legs, or the companion is a virtual
-  /// display left holding a dark framebuffer that nothing else hands back. Three
-  /// doors reach it, and each is pinned below.
-  /// Counted in PAIRS rather than pinned to exactly one: an HDR entry clears the
-  /// leg twice by design (the stale-cache fall-through re-runs it), and what
-  /// matters is that no restore is ever a lone panel write.
+  /// Every restore to 1.0 must reach both legs, or the companion is a virtual
+  /// display left holding a dark framebuffer nothing hands back. Counted in
+  /// PAIRS, since an HDR entry clears the leg twice by design and what matters
+  /// is that no restore is ever a lone panel write.
   private func expectBothLegsRestored(
     _ gamma: SelectiveGamma, sourceLocation: SourceLocation = #_sourceLocation
   ) {
@@ -236,11 +231,10 @@ struct SynthesisGammaRoutingTests {
     #expect(gamma.writes.allSatisfy { $0.enforcer == Self.virtualID })
   }
 
-  /// THE DEFECT the first round shipped. The companion went through the ordinary
-  /// leg, which refuses a display whose baseline it could not capture, and the
-  /// creating process measurably cannot read a virtual display's table: the
-  /// second write was issued and never made. The panel keeps the ordinary leg,
-  /// which must keep refusing rather than flattening a real colour profile.
+  /// The ordinary leg refuses a display whose baseline it could not capture, and
+  /// the creating process measurably cannot read a virtual display's table, so a
+  /// companion routed there is issued and never made. The panel keeps the
+  /// ordinary leg, which must keep refusing rather than flatten a real profile.
   @Test func theCompanionLegAssumesALinearBaselineAndThePanelLegDoesNot() {
     let gamma = SelectiveGamma()
     let controller = controller(
@@ -308,11 +302,10 @@ struct SynthesisGammaRoutingTests {
     #expect(gamma.writes.map(\.target) == [2])
   }
 
-  /// Only the PANEL's write decides whether the dimming landed. The process that
-  /// created a virtual display cannot read it back, so its write can refuse for
-  /// reasons that say nothing about the dimming; letting that clear the dedupe
-  /// memo would re-attempt on every drag event, which is the live-lock DT17's
-  /// reporting rule was written to avoid.
+  /// Only the PANEL's write decides whether the dimming landed. A companion
+  /// write can refuse for reasons that say nothing about it, and clearing the
+  /// dedupe memo off that re-attempts on every drag event (the live-lock DT17's
+  /// reporting rule avoids).
   @Test func aRefusedCompanionWriteDoesNotUnMemoiseTheValue() {
     let gamma = SelectiveGamma()
     gamma.refuses = [Self.virtualID]

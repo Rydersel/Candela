@@ -4,16 +4,13 @@ import Testing
 
 @testable import CandelaKit
 
-/// A revealed mode must survive the whole lifecycle a published mode does:
-/// preview with a revert-by-default countdown, commit on confirm, and match
-/// back after a replug through a geometry-keyed descriptor.
-///
-/// These paths were previously covered only for `.coreGraphics` modes. The
-/// engine routes on provenance now, so "it works for published modes" stopped
-/// being evidence that it works at all.
+/// A revealed mode must survive the lifecycle a published mode does: preview
+/// with a revert-by-default countdown, commit on confirm, and match back after
+/// a replug. The engine routes on provenance, so coverage of published modes is
+/// not evidence these paths work.
 @Suite("Revealed mode lifecycle")
 struct RevealedModeLifecycleTests {
-  /// The MAG's 1920x804 at 2x — the mode the hardware pass actually applies.
+  /// The MAG's 1920x804 at 2x, the mode the hardware pass actually applies.
   private func revealed(_ id: Int32 = 101) -> DisplayMode {
     DisplayMode(
       ioModeID: id, logicalWidth: 1920, logicalHeight: 804,
@@ -60,8 +57,8 @@ struct RevealedModeLifecycleTests {
     #expect(fake.applied.last?.modeID == 69)
   }
 
-  /// A revealed mode that the display refuses must not be recorded as applied —
-  /// the caller reverts on a throw, and there is no other signal.
+  /// A revealed mode the display refuses must not be recorded as applied: the
+  /// caller reverts on a throw, and there is no other signal.
   @Test func aFailedRevealedPreviewSurfacesTheError() async {
     let fake = FakeConfigurator()
     fake.current = published()
@@ -99,9 +96,9 @@ struct RevealedModeLifecycleTests {
     #expect(found.ioModeID == 140)
   }
 
-  /// If revelation goes away — a macOS update moves the struct, or the symbol
-  /// vanishes — a stored revealed mode must degrade honestly rather than
-  /// silently resolving to the blurry 1x mode at the same logical size.
+  /// If revelation goes away (a macOS update moves the struct, the symbol
+  /// vanishes), a stored revealed mode must degrade honestly rather than
+  /// resolve to the blurry 1x mode at the same logical size.
   @Test func aStoredRevealedModeDoesNotSilentlyBecomeItsOneXTwin() {
     let stored = revealed().descriptor
     let oneXTwin = DisplayMode(

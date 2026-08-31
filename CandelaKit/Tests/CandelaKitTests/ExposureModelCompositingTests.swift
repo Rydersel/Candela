@@ -3,14 +3,11 @@ import Testing
 
 @testable import CandelaKit
 
-// The per-window luminance term and the compositing mode it needs.
-//
-// The comparison gate measured today's model at Pearson 0.522 but 1-in-10 cell
-// agreement and a hottest multiple of 2.02x against a measured 3.17x. The cause
-// is structural: one global prior for all covered area means every fully
-// covered cell gets the identical value, so the model can only express the
-// partial-coverage fraction at window edges. These tests pin the generalisation
-// that gives it a luminance term without changing what ships today.
+// The per-window luminance term and the compositing mode it needs. The comparison
+// gate measured a hottest multiple of 2.02x against a measured 3.17x, and the cause
+// is structural: one global prior for all covered area gives every fully covered
+// cell the identical value, so only the edge fraction can vary. These pin the
+// generalisation without changing what ships today.
 @Suite("Exposure model compositing")
 struct ExposureModelCompositingTests {
 
@@ -67,9 +64,8 @@ struct ExposureModelCompositingTests {
     }
   }
 
-  /// The two modes are interchangeable at baseline (that is MP13), so nothing
-  /// else in this suite can notice if the shipped default flips. Pin it
-  /// directly: which branch ships is a decision, not an implementation detail.
+  /// The two modes are interchangeable at baseline (MP13), so nothing else here
+  /// notices if the shipped default flips. Which branch ships is a decision.
   @Test("the shipped default composites by the clamped sum")
   func baselinePinsItsCompositingMode() {
     #expect(ExposureModelParameters.baseline.compositing == .summedCoverage)
@@ -125,19 +121,12 @@ struct ExposureModelCompositingTests {
     #expect(abs(grid[0] - 0.9) < 1e-12)
   }
 
-  /// The approximation, written down as a number rather than left implicit.
-  ///
-  /// Coverage is per cell, not per region, so the walk cannot tell "the two
-  /// windows sit on the same 0.6 of this cell" from "they sit on different
-  /// halves of it". It assumes they do not overlap until the cell fills, so a
-  /// window that is totally hidden still claims whatever fraction the front one
-  /// left and books its own luminance there.
-  ///
-  /// Under the single-prior model that only mis-sized the covered fraction and
-  /// cost nothing, since every claim carried the same luminance. With per-app
-  /// priors it mis-ATTRIBUTES: below, a window nobody can see moves the cell.
-  /// The true value under exact occlusion would be 0.82, which is what
-  /// `0.6 * 0.9` plus 0.4 of the uncovered fallback comes to.
+  /// The approximation, written down as a number. Coverage is per cell, not per
+  /// region, so the walk cannot tell two windows on the same 0.6 of a cell from two
+  /// on different halves; it assumes no overlap until the cell fills, and a hidden
+  /// window still claims what the front one left. Under one global prior that only
+  /// mis-sized the fraction. With per-app priors it mis-attributes: a window nobody
+  /// can see moves the cell, where exact occlusion would give 0.82.
   @Test("a partly-overlapped window behind still claims what the front one left")
   func aPartlyCoveringFrontWindowLeavesRoomForAHiddenOne() {
     // 0.6 of cell 0: the grid is 24x10 on a 2400x1000 display, so a cell is
@@ -222,20 +211,14 @@ struct ExposureModelCompositingTests {
     #expect(abs(value(owner: "Other", layer: 0) - ExposureModel.lightAppearancePrior) < 1e-12)
   }
 
-  /// The remaining-fraction invariant, which is the thing the walk can get
-  /// wrong: claimed plus remaining is exactly one in every cell.
+  /// Claimed plus remaining is exactly one in every cell, which is what the walk can
+  /// get wrong. Neither `accumulated` nor `remaining` is observable from here, so the
+  /// same windows run twice: at luminance 1 over black, where the answer is the
+  /// claimed fraction, and at 0 over white, where it is the remainder.
   ///
-  /// Neither `accumulated` nor `remaining` is observable from here, so they are
-  /// read out through the luminances instead. Run the same 40 windows twice:
-  /// once with every window at 1 over a black wallpaper, where the answer IS
-  /// the claimed fraction, and once with every window at 0 over a white one,
-  /// where it is the remaining fraction. Their sum has to be 1.
-  ///
-  /// This replaces an assertion that could not fail. "Every value lies in 0 to
-  /// 1" holds by construction whenever the priors and the wallpaper do, clamp
-  /// or no clamp, because the result is then a convex combination of them: a
-  /// reviewer's 20 mutations, including one that over-claims and one that
-  /// accumulates five times too much, were caught by none of it.
+  /// The obvious "every value lies in 0 to 1" cannot fail, clamp or no clamp, because
+  /// the result is a convex combination of the priors and the wallpaper. It caught
+  /// none of a reviewer's mutations, including an over-claim.
   @Test("claimed and remaining sum to exactly one in every cell")
   func theRemainingFractionIsConserved() {
     var windows: [WindowSnapshot] = []
@@ -274,11 +257,9 @@ struct ExposureModelCompositingTests {
     #expect(claimed.contains { $0 > 1e-9 && $0 < 1 - 1e-9 })
   }
 
-  /// `modelledGrid` promises `0...1` whichever branch runs. Only the
-  /// topmost-wins branch enforced it, which was safe while the parameters were
-  /// private to the fit and clamped there; the type is public and every field
-  /// is settable, so an out-of-range prior is reachable from outside and the
-  /// summed branch would have passed it straight through.
+  /// `modelledGrid` promises `0...1` whichever branch runs, but only topmost-wins
+  /// enforced it. Safe while the parameters were private to the fit; the type is
+  /// public and settable, so an out-of-range prior reaches the summed branch.
   @Test("an out-of-range prior cannot push a cell outside 0 to 1, in either branch")
   func theOutputStaysInRangeUnderAnOutOfRangePrior() {
     let cellRect = CGRect(x: 0, y: 0, width: 100, height: 100)
@@ -302,13 +283,10 @@ struct ExposureModelCompositingTests {
     }
   }
 
-  /// The two appearance priors are the only free parameters ladder rung V3
-  /// varies, and nothing read them from the parameters: swapping both lookups
+  /// Nothing read the appearance priors from the parameters: swapping both lookups
   /// for `ExposureModel`'s shipped constants passed every test in both suites,
-  /// because no test ever set them to anything else. A fit could then report a
-  /// refitted prior it never applied.
-  ///
-  /// The values are deliberately unlike the shipped 0.7 and 0.12, and ordered
+  /// because no test set them to anything else, so a fit could report a refitted
+  /// prior it never applied. The values here are unlike the shipped ones and ordered
   /// the other way round, so a light-for-dark mix-up fails too.
   @Test("the appearance priors are read from the parameters, not from the constants")
   func appearancePriorsComeFromTheParameters() {
@@ -340,14 +318,11 @@ struct ExposureModelCompositingTests {
 
 // Chrome admission by coverage.
 //
-// The layer range excludes everything below zero because the desktop backdrop
-// fills the screen, and counting it would read the wallpaper as full-screen
-// window coverage. That reasoning is about AREA, not layer, so a coverage bound
-// expresses it directly while admitting the menu-bar strips the measured
-// capture contains and the model has never seen.
-//
-// These exist because the offline harness modelled chrome the shipped type
-// could not express, which would have made a passing rung unimplementable.
+// The layer range excludes everything below zero because the desktop backdrop fills
+// the screen, and counting it reads the wallpaper as full-screen window coverage.
+// That reasoning is about AREA, not layer, so a coverage bound says it directly
+// while admitting the menu-bar strips the measured capture contains. Without it the
+// offline harness models chrome the shipped type cannot express.
 @Suite("Chrome admission by coverage")
 struct ChromeCoverageAdmissionTests {
 
@@ -404,10 +379,9 @@ struct ChromeCoverageAdmissionTests {
     #expect(abs(with[0] - 1.0) < 1e-12)
   }
 
-  /// Admission is an admission rule, not a topmost-wins feature, and both
-  /// branches run it. Nothing said so: disabling chrome under
-  /// `.summedCoverage` passed every test in this file, because every chrome
-  /// test above chose `.topmostWins`.
+  /// Both branches run the admission rule. Nothing said so: disabling chrome under
+  /// `.summedCoverage` passed every test here, since the chrome tests above all
+  /// chose `.topmostWins`.
   @Test("chrome is admitted under summed coverage too, not only under topmost-wins")
   func chromeIsAdmittedUnderSummedCoverageAsWell() {
     let strip = window(
@@ -435,11 +409,10 @@ struct ChromeCoverageAdmissionTests {
     #expect(value(chromeLimit: 0.5)[PanelGrid.cols] == 0.0)
   }
 
-  /// A limit above 1 is meaningless and dangerous: a full-display backdrop
-  /// covers exactly 1 and nothing covers more, so any greater value admits the
-  /// blanket that would delete the wallpaper term on every display. Read as
-  /// `min(1, limit)` where it is used, because the field is public and settable
-  /// and a check in `init` would only cover the callers that never assign.
+  /// A full-display backdrop covers exactly 1 and nothing covers more, so a limit
+  /// above 1 admits the blanket that deletes the wallpaper term on every display.
+  /// Read as `min(1, limit)` at use, since the field is public and settable and an
+  /// `init` check would miss every later assignment.
   @Test("a limit above 1 still refuses a full-display backdrop")
   func anOutOfRangeLimitCannotAdmitABackdrop() {
     let dockLayer = -2_147_483_624

@@ -1,9 +1,9 @@
 import AppKit
 import CoreGraphics
 
-/// Fork `getCurrentDisplay(byFocus: true)`: the display hosting the frontmost
-/// app's frontmost window. nil when nothing resolves — callers fall back to the
-/// pointer display.
+/// The display hosting the frontmost app's frontmost window (the fork's
+/// `getCurrentDisplay(byFocus: true)`). nil when nothing resolves; callers fall
+/// back to the pointer display.
 @MainActor
 enum FocusedDisplay {
   static func frontmostWindowDisplayID() -> CGDirectDisplayID? {

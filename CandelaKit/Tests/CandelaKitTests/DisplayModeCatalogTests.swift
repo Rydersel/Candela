@@ -28,10 +28,9 @@ struct DisplayModeCatalogTests {
     #expect(dell.contains { min($0.logicalWidth, $0.logicalHeight) < floor })
   }
 
-  /// The acceptance case for the density floor. All three rungs are real,
-  /// aspect-correct and at the panel's own 175 Hz, and every one has a minor
-  /// axis under 720 purely because the panel is 21:9. The flat floor cut them;
-  /// the density floor keeps them.
+  /// The acceptance case for the density floor: real aspect-correct rungs at the
+  /// panel's own rate, each with a minor axis under 720 only because it is 21:9.
+  /// The flat floor cut them.
   @Test func densityFloorReturnsTheMAGMidLadderRungs() {
     let modes = mag + DisplayModeFixtures.magRevealedMidLadder
     let rows = DisplayModeCatalog.curated(
@@ -56,16 +55,11 @@ struct DisplayModeCatalogTests {
     #expect(!sizes.contains("1024x429"))
   }
 
-  /// The safety property for the whole change: a person who has been choosing
-  /// a size from this list must still find it there. Both new floors are
-  /// measured against the SHIPPED one, the flat 720 minor axis, because that
-  /// is what "currently curated" means.
-  ///
-  /// Not against the nil-geometry call: that path is itself new here, and it
-  /// is the LOOSEST of the three (0.33 of 1440 is 475 on the MAG, where the
-  /// shipped floor was 720). Treating it as the baseline would demand the
-  /// density floor keep six sizes nothing ever showed (640x480 among them),
-  /// and would fail for the right reason on the wrong claim.
+  /// Someone choosing a size from this list must still find it there. Both new
+  /// floors are measured against the shipped flat 720 minor axis, which is what
+  /// "currently curated" means. Not against the nil-geometry call: that path is the
+  /// loosest of the three and would demand the density floor keep sizes nothing
+  /// ever showed.
   @Test func noCurrentlyCuratedRowDisappearsOnAnyPanel() {
     for (modes, native, geometry) in [
       (DisplayModeFixtures.mag, DisplayModeFixtures.magNativePixels,
@@ -75,10 +69,9 @@ struct DisplayModeCatalogTests {
       (DisplayModeFixtures.builtIn, DisplayModeFixtures.builtInNativePixels,
        PanelDensityModelTests.builtIn),
     ] {
-      // Zero native pixels reaches the flat floor, so the baseline runs
-      // through the SAME grouping and representative ranking as the two rows
-      // being compared against it. A hand-filtered list would not: curation
-      // returns one row per size, so its ids are representatives, not members.
+      // Zero native pixels reaches the flat floor, so the baseline runs through the
+      // same grouping and ranking as the rows compared against it. A hand-filtered
+      // list would not: curation returns representatives, not members.
       let before = Set(DisplayModeCatalog.curated(
         modes, nativePixelWidth: 0, nativePixelHeight: 0
       ).map(\.mode.ioModeID))
@@ -99,10 +92,9 @@ struct DisplayModeCatalogTests {
     }
   }
 
-  /// A virtual display declares an invented physical size, so a density taken
-  /// from it is fiction. The floor refuses such a geometry itself rather than
-  /// relying on callers to strip it: forgetting once would silently floor a
-  /// panel against a made-up 600x340 mm size.
+  /// A virtual display declares an invented physical size, so a density taken from
+  /// it is fiction. The floor refuses that geometry itself rather than trusting
+  /// callers to strip it, since forgetting once floors a panel against a made-up size.
   @Test func virtualGeometryFloorsExactlyAsNoGeometryDoes() {
     let native = DisplayModeFixtures.magNativePixels
     let virtualGeometry = PanelGeometry(
@@ -133,10 +125,9 @@ struct DisplayModeCatalogTests {
     #expect(!sizes.contains("300x400"))
   }
 
-  /// The state the flat constant still serves, and it is not hypothetical:
-  /// `DisplayModeCoordinator` passes `native?.width ?? 0` when the native flag
-  /// could not be read, so with no physical size either there is nothing left
-  /// to take a fraction of.
+  /// Not hypothetical: `DisplayModeCoordinator` passes `native?.width ?? 0` when the
+  /// native flag could not be read, and with no physical size either there is
+  /// nothing left to take a fraction of.
   @Test func theFlatFloorIsTheLastResortWhenNothingAboutThePanelIsKnown() {
     let rows = DisplayModeCatalog.curated(dell, nativePixelWidth: 0, nativePixelHeight: 0)
     #expect(rows.allSatisfy {
@@ -156,10 +147,9 @@ struct DisplayModeCatalogTests {
     #expect(sizes.contains("900x1600"))
   }
 
-  /// The ultrawide's exact-2x native mode is 1720x720, the single most
-  /// important mode on that panel. It has to survive every one of the three
-  /// floors, since which one applies depends on what could be read about the
-  /// panel and the mode is the same either way.
+  /// The ultrawide's exact-2x native mode is the most important one on that panel,
+  /// and which floor applies depends on what could be read about the panel, so it
+  /// has to survive all three.
   @Test func theUltrawidesNativeHiDPIModeSurvivesEveryFloor() {
     func keepsNative(_ rows: [DisplayModeRow]) -> Bool {
       rows.contains { $0.mode.logicalWidth == 1720 && $0.mode.logicalHeight == 720 }
@@ -199,9 +189,8 @@ struct DisplayModeCatalogTests {
   /// framebuffer exists. Curation must not invent anything.
   @Test func theStandardPPIPanelHasNoModeAboveItsNativeFramebuffer() {
     let native = DisplayModeFixtures.magNativePixels
-    // The exact curated result, in order — a tautology like "nothing exceeds
-    // the native framebuffer" cannot fail for any input, since curation never
-    // synthesizes modes. This pins the floor AND the grouping by name.
+    // The exact curated result, in order. "Nothing exceeds the native framebuffer"
+    // cannot fail for any input, since curation never synthesizes modes.
     let rows = DisplayModeCatalog.curated(mag,
                                           nativePixelWidth: native.0,
                                           nativePixelHeight: native.1,
@@ -210,15 +199,10 @@ struct DisplayModeCatalogTests {
     #expect(rows.first?.mode.logicalWidth == 1720)
   }
 
-  /// The fraction fallback's cost, pinned rather than left to be discovered.
-  ///
-  /// 0.33 was calibrated on the Dell, where it lands at 713 and reproduces the
-  /// old flat 720 exactly. On a 21:9 panel the same fraction of 1440 is only
-  /// 475, so six sizes the flat floor hid come back, 640x480 among them. That
-  /// is the price of a floor that must not drop a row it cannot measure, and
-  /// it is paid ONLY when the panel declares no physical size: the MAG really
-  /// declares 80x34 cm, so production takes the density path above and gets
-  /// two rows.
+  /// The fraction fallback's cost. 0.33 was calibrated on the Dell, where it lands
+  /// at 713 and reproduces the old flat 720; on a 21:9 panel the same fraction of
+  /// 1440 is 475, so sizes the flat floor hid come back. Paid only where the panel
+  /// declares no physical size, which the MAG does, so production takes the density path.
   @Test func theFractionFallbackIsLooserOnAnUltrawideThanTheFlatFloorWas() {
     let native = DisplayModeFixtures.magNativePixels
     let rows = DisplayModeCatalog.curated(mag,
@@ -260,13 +244,10 @@ struct DisplayModeCatalogTests {
   }
 }
 
-/// SO18: a size row states what pressing it DOES.
-///
-/// Every expectation here is a prediction of `DisplayModeCoordinator.Catalog
-/// .modeKeepingCurrentRefreshRate`, which resolves the row's geometry at the
-/// display's current rate through `ModePersistence.resolve`. A prediction that
-/// disagrees with the applier is worse than no prediction: the row would warn
-/// about a drop that does not happen, or stay silent through one that does.
+/// SO18: a size row states what pressing it does. Every expectation here predicts
+/// `DisplayModeCoordinator.Catalog.modeKeepingCurrentRefreshRate`. A prediction that
+/// disagrees with the applier warns about a drop that does not happen, or stays
+/// silent through one that does.
 @Suite("Size selection outcomes (SO18)")
 struct SizeSelectionOutcomeTests {
   private var ladder: [DisplayMode] { DisplayModeFixtures.magRateLadder }
@@ -290,11 +271,9 @@ struct SizeSelectionOutcomeTests {
                                        currentHz: 60, in: ladder) == nil)
   }
 
-  /// The applier takes the rate NEAREST the current one, not the size's
-  /// fastest (`ModePersistence.closerRefresh`, reached through step 1 of
-  /// `resolve`). At 75 Hz — a rate both development panels really offer — a
-  /// size holding 60 and 120 lands on 60, so a prediction of "the fastest
-  /// rate applies" would promise 120 and suppress the warning for a real drop.
+  /// The applier takes the rate nearest the current one, not the size's fastest
+  /// (`ModePersistence.closerRefresh`). At 75 Hz a size holding 60 and 120 lands on
+  /// 60, so predicting "the fastest applies" promises 120 and hides a real drop.
   @Test func outcomeTakesTheNearestRateTheApplierWouldPickNotTheFastest() {
     let modes = [
       DisplayModeFixtures.mode(1, logical: (1600, 900), pixels: (1600, 900), hz: 60),
@@ -306,10 +285,9 @@ struct SizeSelectionOutcomeTests {
     #expect(outcome?.lowersCurrentRate == true)
   }
 
-  /// The applier resolves at the ROW's framebuffer, and the row for a size is
-  /// its curated representative — HiDPI over 1x. A revealed HiDPI variant
-  /// offering only 60 therefore caps a 175 Hz display, even though the 1x
-  /// variant at the same logical size still lists 175.
+  /// The applier resolves at the row's framebuffer, and the row for a size is its
+  /// curated representative, HiDPI over 1x. A HiDPI variant offering only 60 caps a
+  /// fast display even where the 1x variant at that size still lists 175.
   @Test func outcomeAnswersForTheRepresentativesFramebufferNotTheWholeLogicalSize() {
     let modes = [
       DisplayModeFixtures.mode(1, logical: (1920, 804), pixels: (3840, 1608), hz: 60),
@@ -326,14 +304,10 @@ struct SizeSelectionOutcomeTests {
     #expect(outcome?.lowersCurrentRate == true)
   }
 
-  /// The prediction, executed against the engine it predicts.
-  ///
-  /// `modeKeepingCurrentRefreshRate` lives in the app target and cannot be
-  /// called from here, but everything it decides comes from
-  /// `ModePersistence.resolve` over the curated row's descriptor at the
-  /// current rate — so that call is reproduced exactly, for every curated row
-  /// against every rate the list contains. A drift in either implementation
-  /// fails here rather than showing a wrong warning on a settings row.
+  /// `modeKeepingCurrentRefreshRate` lives in the app target and cannot be called
+  /// from here, but everything it decides comes from `ModePersistence.resolve` over
+  /// the row's descriptor, so that call is reproduced exactly for every row and
+  /// rate. Drift in either implementation fails here, not on a settings row.
   @Test(arguments: [DisplayModeFixtures.magRateLadder, DisplayModeFixtures.mag,
                     DisplayModeFixtures.dell])
   func outcomeAgreesWithTheApplierForEveryRowAndRate(modes: [DisplayMode]) {
@@ -365,13 +339,9 @@ struct SizeSelectionOutcomeTests {
     }
   }
 
-  /// The `currentHz` contract, both halves, as executable fact rather than
-  /// prose a caller has to trust.
-  ///
-  /// Passing the row's own rate is what the applier does when the display has
-  /// no current mode (`current?.refreshHz ?? row.mode.refreshHz`), and it must
-  /// come back silent — there is no drop when the comparison point IS the
-  /// destination.
+  /// Passing the row's own rate is what the applier does when the display has no
+  /// current mode (`current?.refreshHz ?? row.mode.refreshHz`), and it must come
+  /// back silent: there is no drop when the comparison point is the destination.
   @Test func theRowsOwnRateIsTheAppliersFallbackAndNeverWarns() {
     let ladder = DisplayModeFixtures.magRateLadder
     for row in DisplayModeCatalog.curated(ladder, nativePixelWidth: 3440,
@@ -385,11 +355,9 @@ struct SizeSelectionOutcomeTests {
     }
   }
 
-  /// The trap the parameter documentation warns about, pinned so the warning
-  /// cannot drift from the behavior: a `0` placeholder makes every gap equal
-  /// to the rate itself, so the SLOWEST rate wins — and nothing is below zero,
-  /// so the caps warning goes quiet exactly where it is needed. Callers with
-  /// no current mode must suppress the outcome, not substitute a number.
+  /// A `0` placeholder makes every gap equal to the rate itself, so the slowest rate
+  /// wins, and nothing is below zero, so the caps warning goes quiet exactly where
+  /// it is needed. Callers with no current mode suppress the outcome, not pass 0.
   @Test func aZeroPlaceholderSilentlyPredictsTheSlowestRateWithNoWarning() {
     let outcome = DisplayModeCatalog.outcome(selectingWidth: 3440, selectingHeight: 1440,
                                              currentHz: 0,

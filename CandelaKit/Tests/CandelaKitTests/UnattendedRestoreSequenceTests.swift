@@ -2,18 +2,12 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// The two unattended restore passes must not starve each other.
-///
-/// Both claim the same `DisplayReconfigurationGate`, and a refused pass hands its
-/// arrival claims back and returns — which only works if something calls it
-/// again. The mechanism relied on was the holder's own reconfiguration event, and
-/// **neither pass produces one when it decides to apply nothing**, which is the
-/// dominant case for both: no stored modes, or no saved layout, or a layout the
-/// machine is already in. Fired back-to-back, whichever claimed second lost its
-/// arrival for good.
-///
-/// `withoutSequencing…` below is the positive control for the rest of this suite:
-/// it reproduces the loss, so the assertions that follow can fail.
+/// The two unattended restore passes must not starve each other. Both claim the
+/// same `DisplayReconfigurationGate`, and a refused pass hands its arrival claims
+/// back and returns, which only works if the holder's reconfiguration event calls
+/// it again. Neither pass produces one when it applies nothing, the dominant case
+/// for both, so fired back-to-back the second claimant lost its arrival for good.
+/// `withoutSequencing…` is the positive control: it reproduces the loss.
 @Suite("Unattended restore sequence")
 @MainActor
 struct UnattendedRestoreSequenceTests {
@@ -42,12 +36,10 @@ struct UnattendedRestoreSequenceTests {
     func noteRefused(_ claimant: ReconfigurationClaimant) { refused.append(claimant) }
   }
 
-  /// POSITIVE CONTROL — the defect, reproduced. The mode pass is mid-flight
-  /// holding the gate; the layout pass, fired back-to-back onto its own queue,
-  /// claims, is refused, gives its arrivals back and returns. The mode pass then
-  /// finishes having applied nothing, so no reconfiguration event follows and
-  /// `TopologyArrivalTracker` — which re-arms only on an observed absence or a
-  /// signature change — never offers that arrival again.
+  /// POSITIVE CONTROL: the defect reproduced. The layout pass is refused while
+  /// the mode pass holds the gate, the mode pass applies nothing so no
+  /// reconfiguration follows, and `TopologyArrivalTracker` re-arms only on an
+  /// observed absence or a signature change, so that arrival never returns.
   @Test func withoutSequencingAFirstPassThatAppliesNothingStarvesTheSecond() async {
     let gate = DisplayReconfigurationGate()
     let log = PassLog()
@@ -78,9 +70,8 @@ struct UnattendedRestoreSequenceTests {
     #expect(await gate.holder == nil)
   }
 
-  /// The reciprocal, which is the worse direction: the layout pass claiming first
-  /// and applying nothing must not silently skip the stored-mode reapply — a
-  /// regression to a shipped, hardware-verified feature.
+  /// The worse direction: the layout pass claiming first and applying nothing
+  /// must not silently skip the stored-mode reapply.
   @Test func theReciprocalOrderStarvesNobodyEither() async {
     let gate = DisplayReconfigurationGate()
     let log = PassLog()
@@ -116,9 +107,9 @@ struct UnattendedRestoreSequenceTests {
   }
 
   /// A dock connect emits several callbacks, so two topology events can queue
-  /// their pairs a moment apart. Their halves must not interleave — a layout
-  /// restore from the first event landing after the second event's mode reapply
-  /// would tile against footprints from the wrong instant.
+  /// their pairs a moment apart. Their halves must not interleave: a first-event
+  /// layout restore landing after a second-event mode reapply tiles against
+  /// footprints from the wrong instant.
   @Test func aSecondCallsPassesWaitForTheFirstCalls() async {
     let gate = DisplayReconfigurationGate()
     let first = PassLog()

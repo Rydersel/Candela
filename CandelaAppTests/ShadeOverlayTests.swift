@@ -15,11 +15,10 @@ import Testing
 // levels; both are silent when they break.
 //
 // A note on the windows these cases build. They are real `NSWindow`s on the
-// attached displays, but a host-free test bundle's windows never reach the
-// screen: measured 2026-08-17, `CGWindowListCopyWindowInfo` does not list them
-// at any option set, on screen or otherwise, while `NSApplication.shared.windows`
-// does. Nothing here can dim a panel, and there is no window-server route to
-// checking teardown from in here (see `removingAShadeThatWasNeverCreatedIsANoOp`).
+// attached displays, but a host-free bundle's windows never reach the screen:
+// measured 2026-08-17, `CGWindowListCopyWindowInfo` does not list them at any
+// option set while `NSApplication.shared.windows` does. Nothing here can dim a
+// panel, and no window-server route to checking teardown exists from in here.
 @Suite("Shade overlay") @MainActor
 struct ShadeOverlayTests {
   /// The windows `body` adds to this process, identified by difference rather
@@ -55,9 +54,8 @@ struct ShadeOverlayTests {
     overlay.removeShade(for: OverlayWindowTests.unmatchedDisplayID)
     overlay.removeAllShades()
     overlay.repinFrames()
-    // Surviving the three calls is the assertion; the expectation states it so
-    // the case reports a result rather than an absence of one, and so the
-    // overlay is proven still usable afterwards.
+    // Surviving the three calls is the assertion; stating it makes the case
+    // report a result, and proves the overlay is still usable afterwards.
     #expect(overlay.setShadeAlpha(0.5, on: OverlayWindowTests.unmatchedDisplayID) == false)
   }
 

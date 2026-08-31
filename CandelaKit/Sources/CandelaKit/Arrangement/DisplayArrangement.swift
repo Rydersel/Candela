@@ -52,9 +52,9 @@ public struct DisplayArrangement: Sendable, Equatable {
     tiles.first { $0.id == id }
   }
 
-  /// AR5 — derived, never stored. The global display space is *defined* with its
-  /// origin at the main display's top-left, so a stored flag would be a second
-  /// source of truth able to disagree with the geometry it describes.
+  /// AR5, derived and never stored: display space is *defined* with its origin at
+  /// the main display's top-left, so a stored flag could disagree with the geometry
+  /// it describes.
   public var mainDisplayID: CGDirectDisplayID? {
     tiles.first { $0.rect.origin == .zero }?.id
   }
@@ -67,8 +67,8 @@ public struct DisplayArrangement: Sendable, Equatable {
     DisplayArrangement(tiles: tiles.map { $0.offset(dx: dx, dy: dy) })
   }
 
-  /// A pure translation of the whole arrangement, so relative geometry is
-  /// provably unchanged — "make main" cannot rearrange anything.
+  /// A pure translation of the whole arrangement, so relative geometry is provably
+  /// unchanged: "make main" cannot rearrange anything.
   public func makingMain(_ id: CGDirectDisplayID) -> DisplayArrangement {
     guard let tile = tile(id) else { return self }
     return translated(dx: -tile.rect.x, dy: -tile.rect.y)

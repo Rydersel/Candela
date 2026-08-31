@@ -1,23 +1,16 @@
 import Testing
 @testable import CandelaKit
 
-/// The seam between the wire and the parser.
-///
-/// These tests exist because a real panel broke on it. The whole-string-wrap
-/// rule in `CapabilityString.outerGroupInterior` is correct and hard-won — it
-/// stops an unwrapped string from volunteering its own first group and
-/// manufacturing a denial — but it means anything the WIRE appends has to be
-/// removed before the parser sees it. That is this type's whole job, and the
-/// asymmetric treatment of trailing versus interior NULs is the decision it
-/// encodes.
+/// The seam between the wire and the parser. The whole-string-wrap rule in
+/// `CapabilityString.outerGroupInterior` stops an unwrapped string from volunteering its
+/// own first group and manufacturing a denial, but it means anything the wire appends has
+/// to come off first. The asymmetry between trailing and interior NULs is the decision.
 @Suite("Capability payload reassembly (D24)")
 struct CapabilityPayloadTests {
-  /// [MEASURED 2026-08-04, `candela-probe caps`] The DELL U2725QE's capability
-  /// string, verbatim, minus the one trailing NUL the panel sends after it.
-  /// 606 bytes. Quirks preserved on purpose — the stray leading space in
-  /// `60( 19 0F 11)`, the unspaced `66(00F2)`, the three-and-four-digit value
-  /// tokens in `F5(...)` — because each is a real thing a shipping display
-  /// emits and a parser change that trips on one of them should fail here.
+  /// [MEASURED 2026-08-04, `candela-probe caps`] The DELL U2725QE's capability string
+  /// verbatim, minus the one trailing NUL the panel sends. The quirks are preserved on
+  /// purpose (the stray space in `60( 19 0F 11)`, the unspaced `66(00F2)`, the long value
+  /// tokens in `F5(...)`): each is real, and a parser change tripping on one fails here.
   static let dell =
     "(prot(monitor)type(lcd)model(U2725QE)cmds(01 02 03 07 0C E3 F3)vcp(02 04 05 08 10 12 14(01 "
       + "04 05 06 08 09 0B 0C) 16 18 1A 52 60( 19 0F 11) 66(00F2) 67 68 87 AA(00 01 04 02) AC AE B2 "
@@ -32,8 +25,7 @@ struct CapabilityPayloadTests {
 
   // MARK: - The panel that found the bug
 
-  /// The fixture itself, before any trimming question: this string is fully
-  /// understood, end to end.
+  /// The fixture itself, before any trimming question: this string parses end to end.
   @Test func theDellStringParsesCompletely() {
     #expect(Self.dell.count == 606)
     #expect(CapabilityString.codes(in: Self.dell)?.count == 44)
@@ -42,12 +34,10 @@ struct CapabilityPayloadTests {
     #expect(CapabilityString.tag("type", in: Self.dell) == "lcd")
   }
 
-  /// The user-visible defect, in one assertion. 0x62 is absent from a list this
-  /// display stated in full, so the honest verdict is `.unsupported` — the one
-  /// denial D24 permits, because the string parsed cleanly and does not contain
-  /// the code. Before the trim it was `.unknown`, which D24 resolves to
-  /// *enabled*, leaving a volume slider on a display that ignores volume
-  /// writes.
+  /// The user-visible defect in one assertion: 0x62 is absent from a list this display
+  /// stated in full, so `.unsupported` is the honest verdict. Before the trim it was
+  /// `.unknown`, which D24 resolves to enabled, leaving a live volume slider on a display
+  /// that ignores volume writes.
   @Test func theDellDoesNotListVolumeAndSaysSoCleanly() {
     #expect(CapabilityString.support(forVCP: 0x62, in: Self.dell) == .unsupported)
     // Codes it does list, as the other side of the same evidence: a blanket
@@ -66,9 +56,8 @@ struct CapabilityPayloadTests {
     #expect(CapabilityString.support(forVCP: 0x62, in: reassembled ?? "") == .unsupported)
   }
 
-  /// What the untrimmed code did, kept as the record of why the trim is here.
-  /// Every one of these is a false statement about a display that answered
-  /// completely.
+  /// What the untrimmed code did: every one of these is a false statement about a
+  /// display that answered completely.
   @Test func theUntrimmedBytesWereTheDefect() {
     let untrimmed = String(decoding: Self.dellOnTheWire, as: UTF8.self)
     #expect(CapabilityString.codes(in: untrimmed) == nil)
@@ -96,9 +85,8 @@ struct CapabilityPayloadTests {
     #expect(CapabilityPayload.string(from: Array("   \0\0".utf8)) == nil)
   }
 
-  /// Only NUL and whitespace are trimmable. A trailing 0x01 has no documented
-  /// meaning at the end of a string, so removing it would be guessing at the
-  /// display's intent; it stays in and the parser declines to understand it.
+  /// Only NUL and whitespace are trimmable: a trailing 0x01 has no documented meaning,
+  /// so removing it would be guessing at the display's intent.
   @Test func otherTrailingControlBytesAreNotTrimmed() {
     let payload = CapabilityPayload.string(from: Array("(vcp(10))".utf8) + [0x01])
     #expect(payload == "(vcp(10))\u{01}")
@@ -107,13 +95,10 @@ struct CapabilityPayloadTests {
 
   // MARK: - The interior-NUL decision
 
-  /// Interior NULs REJECT the payload rather than being stripped or passed on.
-  ///
-  /// A NUL in the middle is not a terminator: it means what we reassembled is
-  /// not what the panel sent — a hole, inter-fragment padding, or an offset
-  /// bug. Stripping it splices the two halves together and hands the parser
-  /// something that can parse *cleanly*, and a clean parse is the only route to
-  /// `.unsupported`, the one verdict that greys a control.
+  /// Interior NULs reject the payload rather than being stripped or passed on. A NUL in
+  /// the middle means what we reassembled is not what the panel sent: a hole, padding, or
+  /// an offset bug. Stripping it splices the halves into something that parses cleanly,
+  /// and a clean parse is the only route to `.unsupported`, the verdict that greys a control.
   @Test func anInteriorNULRejectsThePayload() {
     #expect(CapabilityPayload.string(from: Array("(prot(monitor)\0vcp(10))".utf8)) == nil)
     // Including one that sits inside the vcp list itself.
@@ -124,13 +109,10 @@ struct CapabilityPayloadTests {
     #expect(CapabilityPayload.string(from: Array("(prot(monitor)\0vcp(10))\0".utf8)) == nil)
   }
 
-  /// Why rejecting is not paranoia: passing an interior NUL through to the
-  /// parser is NOT the safe default. Outside the vcp list, a NUL clears every
-  /// gate the parser has — the string is balanced, it is one wrapped group, and
-  /// the tag boundary check reads NUL as a non-identifier character exactly
-  /// like a space — so it reaches `.unsupported` on the strength of bytes we
-  /// know are damaged. That is a denial manufactured from a bad read, which is
-  /// the direction D24 forbids.
+  /// Passing an interior NUL to the parser is not the safe default. Outside the vcp list
+  /// a NUL clears every gate: the string is balanced, it is one wrapped group, and the tag
+  /// boundary check reads NUL like a space, so it reaches `.unsupported` on bytes known to
+  /// be damaged. That is a denial manufactured from a bad read, which D24 forbids.
   @Test func anInteriorNULWouldOtherwiseManufactureADenial() {
     let spliced = "(prot(monitor)\0vcp(10))"
     #expect(CapabilityString.support(forVCP: 0x62, in: spliced) == .unsupported)
@@ -141,11 +123,9 @@ struct CapabilityPayloadTests {
 
   // MARK: - What the trim must NOT rescue
 
-  /// The whole-string-wrap requirement is untouched. Trimming removes transport
-  /// bytes; it does not invent a wrapper for a string that never had one. If a
-  /// future widening of the trim ever made these parse, the nine measured
-  /// `unknown → .unsupported` moves that rule prevents would come straight
-  /// back.
+  /// Trimming removes transport bytes; it does not invent a wrapper for a string that
+  /// never had one. Widening the trim until these parse brings back the nine measured
+  /// `unknown → .unsupported` moves the rule prevents.
   @Test func trimmingDoesNotRescueAStringWithNoOuterWrapper() {
     for raw in ["vcp(10)", "vcp(vcp(60(01 03)))", "(vcp(10))(vcp(20))", "junk(vcp(10))"] {
       let payload = CapabilityPayload.string(from: Array(raw.utf8) + [0x00])

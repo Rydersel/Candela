@@ -41,11 +41,11 @@ public enum DimmingMath {
   }
 
   /// Splits a combined user value into its hardware and software components
-  /// (fork `OtherDisplay.setDirectBrightness`). Both components are produced on
-  /// every call regardless of which side of `s` the value falls on — the DDC
-  /// write pins the panel to hardware minimum inside the software zone, and the
-  /// sw value sits at 1 (dimming off) inside the hardware zone. That is what
-  /// makes boundary crossings self-consistent without tracking a "mode".
+  /// (fork `OtherDisplay.setDirectBrightness`). Both components come back on
+  /// every call whichever side of `s` the value falls on: the DDC write pins the
+  /// panel to hardware minimum inside the software zone, and the sw value sits
+  /// at 1 inside the hardware zone. That is what makes boundary crossings
+  /// self-consistent without tracking a "mode".
   ///
   /// - `v >= s`: DDC portion `(v − s) / (1 − s)`, sw value `1`.
   /// - `v < s`: DDC portion `0`, sw value `v / s`.
@@ -55,8 +55,8 @@ public enum DimmingMath {
   public static func combinedSplit(value v: Double, switching s: Double) -> (ddc: Double, sw: Double) {
     let value = clamp01(v)
     let switching = clamp01(s)
-    // `switchingValue` can never return 1 (its max is 0.9375), but the argument
-    // is free-standing — guard rather than emit NaN.
+    // `switchingValue` never returns 1 (its max is 0.9375), but the argument is
+    // free-standing: guard rather than emit NaN.
     guard switching < 1 else { return (ddc: 0, sw: value) }
     if value >= switching {
       return (ddc: (value - switching) * (1 / (1 - switching)), sw: 1)

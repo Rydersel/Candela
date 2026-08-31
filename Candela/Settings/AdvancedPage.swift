@@ -5,12 +5,9 @@ import SwiftUI
 /// displays never need, plus the escape hatches A1 promoted out of
 /// `defaults write`.
 ///
-/// Owns its whole page: the navigation shell hands this view the header's
-/// inputs and nothing else.
-///
-/// `@MainActor` because a `View`'s stored and computed properties other than
-/// `body` are nonisolated under complete concurrency, and these read
-/// main-actor types (`DisplayPrefWriter`, the display's controllers).
+/// `@MainActor` because a `View`'s properties other than `body` are nonisolated
+/// under complete concurrency, and these read main-actor types
+/// (`DisplayPrefWriter`, the display's controllers).
 @MainActor
 struct AdvancedPage: View {
   let state: AppModel.DisplayState
@@ -25,19 +22,16 @@ struct AdvancedPage: View {
 
   @State private var confirmingRestore = false
 
-  /// The traffic block as the CAPTION renders it, mirroring `trafficBlock` one
-  /// update behind. The block is derived from the engine's brightness path,
-  /// which changes without this view writing anything, so nothing here is
-  /// inside a transaction the way a click is: the mirror is what puts the
-  /// explanation's arrival AND departure inside one. Only the caption reads it:
-  /// SO12's greying stays instant, and the safety sentence spoken on the
-  /// hardware-control toggle keeps reading the live value.
+  /// The traffic block as the caption renders it, one update behind
+  /// `trafficBlock`: the engine changes the block outside any transaction, so
+  /// this mirror is what animates the explanation in and out. Only the caption
+  /// reads it, so SO12's greying stays instant.
   @State private var shownTrafficBlock: DDCTrafficBlock?
 
   private var persistenceKey: String { state.display.persistenceKey }
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: persistenceKey) }
-  /// The two gates this page's sections hang off (`disableCombinedBrightness`,
-  /// `startupAction`) are app-level; the startup policy's control lives on the
+  /// The gates this page's sections hang off (`disableCombinedBrightness`,
+  /// `startupAction`) are app-level; the startup control lives on the
   /// Protection pane (SC6).
   private var appPrefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
   private var writer: DisplayPrefWriter {
@@ -48,12 +42,10 @@ struct AdvancedPage: View {
   /// about which display is the built-in.
   private var isBuiltIn: Bool { model.builtIn?.id == state.id }
 
-  /// SO23's switcher, minus the built-in — this page has no built-in content at
-  /// all, so offering it would push someone onto the empty fallback below
-  /// rather than onto a comparison. `SubPageHeader` does not filter, and
-  /// `switcherDisplays` includes the built-in, so the filter has to happen here.
+  /// SO23's switcher, minus the built-in: this page has no built-in content,
+  /// and `SubPageHeader` does not filter, so the filter happens here.
   ///
-  /// The built-in's own entry is kept when it IS the display being shown: a
+  /// The built-in's own entry stays when it IS the display being shown. A
   /// `Picker` whose selection matches no tag renders blank, and on the fallback
   /// page the switcher is the only way off it.
   private var switcherDisplays: [(key: String, name: String)] {
@@ -64,8 +56,7 @@ struct AdvancedPage: View {
 
   var body: some View {
     // `DisplayPrefs` is plain UserDefaults and not observable, so this is what
-    // re-evaluates the page after any write — including the hub's Advanced
-    // preview going the other way (SO3).
+    // re-evaluates the page after any write.
     let _ = model.prefsRevision
     SettingsPageScaffold {
       SubPageHeader(
@@ -74,13 +65,10 @@ struct AdvancedPage: View {
         displays: switcherDisplays,
         onSwitch: onSwitch
       )
-      // `BuiltInDisplayPane` never pushes `.advanced`, but the switcher above
-      // and the debug sub-page hook can both land here with the built-in
-      // selected — and every section below is about a DDC wire the built-in
-      // does not have. It used to render them anyway, greyed, under
-      // "This display is in HDR mode…", which is a false sentence about a panel
-      // that is constitutively native. This guard is what makes the
-      // external-only claim in `blockExplanation` true rather than asserted.
+      // The switcher above and the debug sub-page hook can both land here with
+      // the built-in selected, and every section below is about a DDC wire it
+      // does not have. This guard is what makes `blockExplanation`'s
+      // external-only claim true rather than asserted.
       if isBuiltIn {
         SettingsCardSection {
           SettingsCaption("This display has no hardware-control settings.")
@@ -97,8 +85,8 @@ struct AdvancedPage: View {
 
   // MARK: - DDC traffic blocking (SO12)
 
-  /// Why no DDC command is reaching this display, if none is — read from the
-  /// ENGINE'S OWN path, so this page cannot disagree with Diagnostics or with
+  /// Why no DDC command is reaching this display, if none is. Read from the
+  /// engine's own path, so this page cannot disagree with Diagnostics or with
   /// the tuning grid's captions.
   private var trafficBlock: DDCTrafficBlock? {
     DisplayCardPolicy.ddcTrafficBlock(
@@ -109,16 +97,13 @@ struct AdvancedPage: View {
 
   private var isBlocked: Bool { trafficBlock != nil }
 
-  /// Stated ONCE, at the foot of Control Method: the section above the three the
-  /// block greys out (SO12). Both sentences are the two-sentence safety
-  /// allowance SO15 grants the HDR block.
+  /// Stated ONCE, at the foot of Control Method, above the sections the block
+  /// greys out (SO12). The copy lives on `SafetySentence` because the HDR half
+  /// is also spoken in the hardware-control toggle's label, the one control a
+  /// block greys BEFORE a VoiceOver user reaches this caption.
   ///
-  /// The copy lives on `SafetySentence` because the HDR half is also spoken as
-  /// part of the hardware-control toggle's label, which is the one control a
-  /// block greys BEFORE a VoiceOver user reaches this caption. The `isBuiltIn`
-  /// guard in `body` is what makes `.macOSDrivesBrightness` external-only here,
-  /// and `BrightnessPathPolicy.usesNative` has exactly one way to answer yes for
-  /// an external: HDR is live, whoever engaged it (#52).
+  /// `BrightnessPathPolicy.usesNative` has exactly one way to answer yes for an
+  /// external: HDR is live, whoever engaged it.
   private func blockExplanation(_ block: DDCTrafficBlock) -> SettingsCaption {
     SettingsCaption(verbatim: SafetySentence.trafficBlockExplanation(block))
   }
@@ -127,11 +112,10 @@ struct AdvancedPage: View {
 
   @ViewBuilder private var controlMethodSection: some View {
     SettingsCardSection(title: "Control Method") {
-      // A safety row (accessibility contract 3). Under live HDR this toggle is
-      // the only control a block greys BEFORE the page's one explanation, which
-      // sits at the foot of this section, so a VoiceOver user would otherwise
-      // hear "dimmed" with no reason for it. The sentence is spoken as part of
-      // the label and is NOT repeated as a caption here: SO12 states it once.
+      // A safety row (accessibility contract 3): under live HDR this toggle
+      // greys BEFORE the explanation at the foot of the section, so a VoiceOver
+      // user would otherwise hear "dimmed" with no reason. The sentence rides in
+      // the label and is never repeated as a caption; SO12 states it once.
       SettingRow(
         safety: .hdrBlock(trafficBlock),
         label: "Use hardware (DDC) control",
@@ -140,26 +124,20 @@ struct AdvancedPage: View {
         Toggle(label, isOn: Binding(
           get: { !prefs.forceSoftware },
           set: { useDDC in
-            // D29 rule 1 — the THIRD mute-stranding path, and the only one that
-            // was unrecoverable. `isAvailable` is
-            // `!tuning.unavailableDDC && !prefs.forceSoftware`, and `toggleMute`
-            // guards on it. Turning DDC control off while the display is
-            // 0x8D-muted used to make the unmute refuse FOREVER: the key path is
-            // gone, the menu bar drops the volume slider, `restoreToHardware` is
-            // gated on the same flag, and both UI escape hatches are disabled in
-            // exactly that state. Unmute BEFORE persisting the disabling value.
+            // D29 rule 1: unmute BEFORE persisting the disabling value.
+            // `toggleMute` guards on `isAvailable`, which `forceSoftware`
+            // clears, so turning DDC control off on a 0x8D-muted display strands
+            // it muted with no route back from inside the app.
             if !useDDC, state.volume.isMuted {
               _ = state.volume.toggleMute()
             }
             writer.write(.forceSw) { $0.forceSoftware = !useDDC }
           }
         ))
-        // SO12 greys the DDC-dependent controls — but this one is gated ONLY by
-        // live HDR, never by `.hardwareControlOff`. `.hardwareControlOff` IS
-        // this toggle being off (it is the only route to `BrightnessPath`'s
-        // `.software`), so disabling it there would be D29 rule 3 exactly: the
-        // control that recovers the state, disabled in the state it recovers
-        // from, with no other route back inside the app.
+        // Gated ONLY by live HDR, never by `.hardwareControlOff`, which IS this
+        // toggle being off. Greying it there would be D29 rule 3 exactly: the
+        // recovery control disabled in the state it recovers from, with no other
+        // route back inside the app.
         .themedSwitch()
         .disabled(trafficBlock == .macOSDrivesBrightness)
         .prefIdentifier(.forceSw, persistenceKey: persistenceKey)
@@ -171,12 +149,10 @@ struct AdvancedPage: View {
         Toggle("Dim with a screen overlay", isOn: Binding(
           get: { prefs.avoidGamma },
           set: { overlay in
-            // D28: the seam's `.reapplyDimming` reaches `reapplyAfterPrefChange()`,
-            // which TEARS DOWN the abandoned backend before re-applying. Without
-            // that teardown `applySoftware` writes the newly selected backend and
-            // leaves the other one engaged — the shade at alpha 1 − 0.8^1.5 on top
-            // of a gamma table still at 0.8 — so the display drops to roughly the
-            // product of the two and stays there until a topology change.
+            // D28: `.reapplyDimming` reaches `reapplyAfterPrefChange()`, which
+            // TEARS DOWN the abandoned backend before re-applying. Without that,
+            // the shade and the gamma table both stay engaged and the display
+            // sits at roughly their product until a topology change.
             writer.write(.avoidGamma) { $0.avoidGamma = overlay }
           }
         ))
@@ -186,9 +162,8 @@ struct AdvancedPage: View {
 
       SettingsCardDivider()
 
-      // Candela's OWN volume/mute HUD pills, and volume only — brightness and
-      // contrast pills are unaffected, and the monitor's built-in OSD is not
-      // ours to suppress, which is why "on-screen display" never appears here.
+      // Candela's OWN volume/mute HUD pills only. The monitor's built-in OSD is
+      // not ours to suppress, so "on-screen display" never appears here.
       SettingRow("Turn off if macOS already shows its own volume indicator for this display.") {
         Toggle("Show the volume indicator", isOn: Binding(
           get: { !prefs.hideOsd },
@@ -197,9 +172,8 @@ struct AdvancedPage: View {
         .themedSwitch()
         .prefIdentifier(.hideOsd, persistenceKey: persistenceKey)
       }
-      // The caption's mirror hooks hang on the row above, the last row of this
-      // section that is always present: hooks on the caption itself would only
-      // exist while the caption does, so nothing would be watching for it to
+      // The hooks hang on the row above, which always renders: on the caption
+      // they would exist only while it does, so nothing would watch for it to
       // arrive. Un-animated on appear, or opening the page under live HDR would
       // fade the explanation in as though HDR had just engaged.
       .onAppear { shownTrafficBlock = trafficBlock }
@@ -209,8 +183,7 @@ struct AdvancedPage: View {
 
       if let shownTrafficBlock {
         // A `Group`'s modifier reaches each child, so the hairline and the
-        // sentence arrive and leave together. Never the card's first row: the
-        // three switches above always render.
+        // sentence arrive and leave together, never as the card's first row.
         Group {
           SettingsCardDivider()
             .padding(.top, 6)
@@ -236,66 +209,56 @@ struct AdvancedPage: View {
     .disabled(isBlocked)
   }
 
-  /// SO13's promoted per-command decisions. A labeled sub-header, deliberately
-  /// NOT a `DisclosureGroup`: a disclosure toggles only from its chevron glyph
-  /// and never from its label text (measured), so fronting the only route to
-  /// these fields with one hides them from most people who look straight at it.
+  /// SO13's promoted per-command decisions. NOT a `DisclosureGroup`: a
+  /// disclosure toggles from its chevron glyph and never from its label text
+  /// (measured), so it would hide these fields from most people who look at it.
   @ViewBuilder private var vcpOverrides: some View {
     Text("VCP Overrides")
       .font(.callout.weight(.semibold))
-      // A sub-header over a blocked section must not outshine it, and no
-      // theme component owns this one. Off the environment rather than
-      // `isBlocked`, so it cannot disagree with what greyed the section.
+      // Off the environment rather than `isBlocked`, so the sub-header cannot
+      // disagree with what greyed the section.
       .settingsText(SettingsTheme.titleColor)
       .settingsHeading()
     SettingsCaption("For a display that puts a control somewhere non-standard, or responds unevenly across its range.")
       .padding(.top, 2)
     ForEach(DDCCommand.allCases, id: \.self) { command in
       // One hairline per command, so the curve and the control code below it
-      // read as that command's pair rather than as six loose rows.
+      // read as that command's pair rather than as loose rows.
       SettingsCardDivider()
         .padding(.vertical, 8)
       ThemedChoiceRow(
         label: "\(DDCCommandCopy.title(command)) response curve",
         selection: curveBinding(command)
       ) {
-        // The engine's fine 1–9 range stays a `defaults write` key (SO13): only
-        // the three decisions a person can make are offered here. 0 (unset) and
-        // 5 are both linear in `DimmingMath.curveMultiplier`, so a display
-        // carrying the fork's explicit 5 reads as Linear and is NOT rewritten
-        // unless the user picks something else.
+        // The engine's fine 1–9 range stays a `defaults write` key (SO13). 0
+        // (unset) and 5 are both linear in `DimmingMath.curveMultiplier`, so a
+        // display carrying the fork's explicit 5 reads as Linear and is NOT
+        // rewritten unless the user picks something else.
         Text("Linear").tag(0)
         Text("Favor low brightness").tag(3)
         Text("Favor high brightness").tag(7)
-        // A hand-set fine value keeps its own item rather than being silently
-        // snapped to one of the three above — the picker would otherwise rewrite
-        // a `defaults write` the moment the page rendered.
+        // A hand-set fine value keeps its own item; snapping it to a listed one
+        // would rewrite a `defaults write` the moment the page rendered.
         if let custom = customCurveIndex(command) {
           Text(verbatim: "Custom (\(custom))").tag(custom)
         }
       }
-      // Belt, per control, kept from the grouped-form shape this page used to
-      // be: the card's own `.disabled` reaches every row now, and a promoted
-      // control that stayed live under a traffic block would take a write that
-      // reaches nothing (SO12). The grid beside these fields carries the same
-      // belt.
+      // Belt, per control: one left live under a traffic block would take a
+      // write that reaches nothing (SO12).
       .disabled(isBlocked)
       .prefIdentifier(.curveDDC, command: command, persistenceKey: persistenceKey)
 
       LabeledContent("\(DDCCommandCopy.title(command)) control code") {
-        // An empty title + explicit prompt, the audio-name field's shape: a
-        // TITLE of "Standard" was rendered wrapped inside the 100 pt frame
-        // ("Stan-/dard", combined pass D6); a PROMPT lays out as single-line
-        // placeholder text. The border matches the tuning grid's fields one
-        // section up, and so does the commit: leaving the box applies the code
-        // (#144).
+        // Empty title plus explicit prompt: a TITLE of "Standard" wrapped
+        // inside the 100 pt frame ("Stan-/dard"), a PROMPT lays out single-line.
+        // Leaving the box applies the code, like the tuning grid's fields.
         CommitOnBlurField(
           stored: { storedRemapText(command) },
           commit: { commitRemap(command, $0) },
           prompt: Text("Standard"),
-          // Not a `SettingRow` caption: the sub-group's one caption covers all
-          // six controls, and repeating it under three fields would read as
-          // three separate settings.
+          // Not a `SettingRow` caption: the sub-group's one caption covers
+          // every control, and repeating it per field would read as separate
+          // settings.
           fieldHint: Text("Hex control codes this display uses instead of the standard one."),
           width: 100
         )
@@ -311,27 +274,19 @@ struct AdvancedPage: View {
 
   // MARK: - Combined Dimming
 
-  /// SO12, as amended by the controller 2026-08-06: this section greys WITH the
-  /// other three, and there is no carve-out why-line.
-  ///
-  /// The spec's original carve-out ("combined dimming works in software, so it
-  /// stays available") rested on a premise that is false in both blocked
-  /// states. `.hardwareControlOff` routes `BrightnessPath.software`, which
-  /// covers the whole range and never consults the switching point at all;
-  /// `.macOSDrivesBrightness` routes `.native`, which does no software dimming
-  /// whatsoever. The handoff point is reachable only from `.combined` and
-  /// `.softwareOnly`, and a traffic block excludes both — so a live control
-  /// here would be the "looks functional while `ddcTrafficBlock` voids it" case
-  /// SO12 exists to forbid, wearing SO12's own exemption.
+  /// Greys with the other sections under SO12, with no carve-out. The handoff
+  /// point is reachable only from `.combined` and `.softwareOnly`, and both
+  /// blocked states route elsewhere: `.hardwareControlOff` to `.software`,
+  /// `.macOSDrivesBrightness` to `.native`. A live control here would be the
+  /// "looks functional while `ddcTrafficBlock` voids it" case SO12 forbids.
   @ViewBuilder private var combinedDimmingSection: some View {
     SettingsCardSection(title: "Combined Dimming") {
       if appPrefs.combinedBrightness {
         SettingRow("Where dimming hands off from the display's hardware to software.") {
           VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
-              // `ThemedSlider` carries no value labels of its own, so the two
-              // ends are composed beside it: they are this row's words, not
-              // the control's, and they name a DIRECTION rather than a number
+              // `ThemedSlider` carries no value labels, so the ends are
+              // composed beside it. They name a DIRECTION, never a number
               // (SO13).
               Text("Earlier")
                 .settingsText(SettingsTheme.faintColor)
@@ -339,11 +294,10 @@ struct AdvancedPage: View {
               ThemedSlider(
                 value: crossoverBinding,
                 range: crossoverRange,
-                // The engine's integer detents: 16 stops across the whole
-                // sweep, which is also the grid a keyboard or VoiceOver step
-                // lands on.
+                // The engine's integer detents, which is also the grid a
+                // keyboard or VoiceOver step lands on.
                 step: 1,
-                // SO13: the stored −8…+7 never renders, in the readout OR to
+                // SO13: the stored integer never renders, in the readout OR to
                 // VoiceOver, which would otherwise announce the raw position.
                 accessibilityValueText: crossoverDescription
               )
@@ -369,18 +323,16 @@ struct AdvancedPage: View {
           .disabled(isBlocked) // belt, as on the VCP fields
         }
       } else {
-        // SO11: the effective state read-only, with an inline enabler that does
-        // the write here — never a disabled control whose enabler lives on
-        // another page.
+        // SO11: the effective state read-only, with an inline enabler here,
+        // never a disabled control whose enabler lives on another page.
         LabeledContent("Combined dimming", value: "Off")
         SettingsCardDivider()
         SettingRow("A global setting: applies to every display.") {
           Button("Turn On Dim Past the Display's Minimum") {
             // No persistence key: `.disableCombinedBrightness` carries
-            // `.reapplyDimming`, and the seam scopes that by key — passing this
-            // display's key (or "app", which matches no display at all) would
-            // skip the re-apply on every other display the global pref just
-            // changed. General's own toggle passes nil for the same reason.
+            // `.reapplyDimming` and the seam scopes that by key, so passing one
+            // would skip the re-apply on every other display this global pref
+            // just changed.
             appPrefs.combinedBrightness = true
             actions.prefDidChange(.disableCombinedBrightness)
           }
@@ -394,21 +346,18 @@ struct AdvancedPage: View {
     .disabled(isBlocked)
   }
 
-  /// The engine's own range, never a literal pair — `DisplayPrefs` clamps
-  /// writes to it, so a slider with wider bounds would offer positions that
-  /// silently snap back.
+  /// The engine's own range, never a literal pair: `DisplayPrefs` clamps writes
+  /// to it, so wider bounds would offer positions that silently snap back.
   private var crossoverRange: ClosedRange<Double> {
     Double(DimmingMath.switchingPointRange.lowerBound)
       ... Double(DimmingMath.switchingPointRange.upperBound)
   }
 
-  /// Written straight through rather than through a drag draft: `step: 1`
-  /// means the slider emits at most 16 distinct values across a full sweep, and
-  /// the guard drops the repeats, so the D28 re-apply runs once per detent and
-  /// the change is visible while the handle is still under the pointer. A draft
-  /// committed on `onEditingChanged` would leave the pref and the handle
-  /// disagreeing for any adjustment that does not report an editing session
-  /// (keyboard and VoiceOver among them).
+  /// Written straight through, no drag draft: `step: 1` plus the repeat guard
+  /// runs the D28 re-apply once per detent, while the handle is still under the
+  /// pointer. A draft committed on `onEditingChanged` would leave the pref and
+  /// the handle disagreeing for keyboard and VoiceOver adjustments, which report
+  /// no editing session.
   private var crossoverBinding: Binding<Double> {
     Binding(
       get: { Double(prefs.combinedSwitchingPoint) },
@@ -420,8 +369,8 @@ struct AdvancedPage: View {
     )
   }
 
-  /// The handoff position in words. "Default" at the centre, and a direction
-  /// with a distance either side — never the stored number (SO13).
+  /// The handoff position in words: "Default" at the centre, a direction and a
+  /// distance either side, never the stored number (SO13).
   private var crossoverDescription: String {
     let point = prefs.combinedSwitchingPoint
     if point == 0 { return "Default" }
@@ -433,9 +382,8 @@ struct AdvancedPage: View {
   @ViewBuilder private var readingValuesSection: some View {
     SettingsCardSection(title: "Reading Values From the Display") {
       if readbackNeverAnswered {
-        // SO25: state the verdict rather than offering escalation. Retrying a
-        // panel that has already proved it never answers is not a decision
-        // worth presenting as one.
+        // SO25: state the verdict, don't offer escalation. Retrying a panel
+        // that has proved it never answers is not a decision worth presenting.
         SettingsCaption(verbatim: "This display has never answered a read. Values are tracked as last written.")
       } else if appPrefs.startupAction == .read {
         SettingRow("How many times to ask before giving up.") {
@@ -449,15 +397,14 @@ struct AdvancedPage: View {
             Text("Heavy").tag(PollingMode.heavy)
             Text("Custom").tag(PollingMode.custom)
           }
-          // Belt, per control — same reason as the VCP fields above.
+          // Belt, per control, same reason as the VCP fields above.
           .disabled(isBlocked)
           .prefIdentifier(.pollingMode, persistenceKey: persistenceKey)
         }
-        // D11: safe mode suppresses the startup readback outright, so a retry
-        // policy shown as live here would describe behavior that is not
-        // happening — the same defect the Protection pane's notice exists to
-        // avoid. `appPrefs` is built without the safe-mode flag deliberately:
-        // the picker shows the PERSISTED choice, which is right for a setting.
+        // D11: safe mode suppresses the startup readback, so a retry policy
+        // shown as live would describe behavior that is not happening.
+        // `appPrefs` ignores the safe-mode flag on purpose: the picker shows the
+        // PERSISTED choice, which is right for a setting.
         if model.isSafeMode {
           SettingsCaption("Safe Mode is on for this session, so nothing is read from the display at startup.")
         }
@@ -477,7 +424,7 @@ struct AdvancedPage: View {
           .prefIdentifier(.pollingCount, persistenceKey: persistenceKey)
         }
       } else {
-        // SO11 again — the same shape as Combined Dimming above.
+        // SO11 again, the same shape as Combined Dimming above.
         LabeledContent("Startup readback", value: "Off")
         SettingsCardDivider()
         SettingRow("A global setting: applies to every display.") {
@@ -495,13 +442,10 @@ struct AdvancedPage: View {
     .disabled(isBlocked)
   }
 
-  /// Deliberately NOT `DDCReadEvidence.worst(...)`, which the hub's chevron
-  /// preview uses. Worst-wins is right for a one-word verdict, but the sentence
-  /// this gates says "has NEVER answered a read" — and a display whose
-  /// brightness answered while its volume came back all zeros folds to
-  /// `.allZeros`, which would make that sentence false. So an `.answered`
-  /// anywhere disqualifies it, and the exhaustive switch keeps a future
-  /// evidence case from defaulting into either branch.
+  /// NOT `DDCReadEvidence.worst(...)`: worst-wins folds a display whose
+  /// brightness answered but whose volume came back all zeros to `.allZeros`,
+  /// which would make "has never answered a read" false. One `.answered`
+  /// anywhere disqualifies it.
   private var readbackNeverAnswered: Bool {
     let evidence = [
       state.controller.readEvidence,
@@ -521,12 +465,8 @@ struct AdvancedPage: View {
 
   private var restoreSection: some View {
     SettingsCardSection {
-      // The window's destructive style, red at rest and never the destination
-      // accent. SO20's "plain at rest" was presentation, which this redesign
-      // supersedes; what survives is the part that was never about looks, the
-      // destructive ROLE staying on the alert's confirm button rather than on
-      // the button that only opens the alert. The style reads `isEnabled`
-      // itself, so nothing here dims the button by hand.
+      // The destructive ROLE stays on the alert's confirm button, not on the
+      // button that only opens the alert. The style reads `isEnabled` itself.
       // Never disabled by `isBlocked`: under `.hardwareControlOff` this button
       // is the scoped way back out (D29 rule 3).
       Button("Restore Advanced Defaults…") { confirmingRestore = true }
@@ -543,16 +483,13 @@ struct AdvancedPage: View {
     }
   }
 
-  /// Scoped repair, proportional to this page (SO20) — every pref this page can
-  /// write and nothing else. `enableMuteUnmute` is deliberately untouched: it
-  /// lives on the hub, and the display was muted under whatever strategy is in
-  /// force, which has to STILL be in force for the unmute below to send the
-  /// right wire value.
+  /// Scoped repair (SO20): every pref this page can write and nothing else.
+  /// `enableMuteUnmute` stays untouched, because the strategy the display was
+  /// muted under has to STILL be in force for the unmute to send the right value.
   ///
-  /// ORDER (D29 rule 2): the availability prefs are cleared FIRST, in the batch,
-  /// and the unmute comes SECOND. The other order is a silent no-op —
-  /// `toggleMute` returns unchanged while `isAvailable` is false, and the user
-  /// is left believing they unmuted.
+  /// ORDER (D29 rule 2): clear the availability prefs FIRST, in the batch, and
+  /// unmute SECOND. The other order is a silent no-op: `toggleMute` returns
+  /// unchanged while `isAvailable` is false, and the user believes they unmuted.
   private func restoreAdvancedDefaults() {
     writer.writeAll([
       .forceSw, .avoidGamma, .hideOsd, .combinedSwitchingPoint,
@@ -571,12 +508,10 @@ struct AdvancedPage: View {
         prefs.setTuning(.unset, for: command)
       }
     }
-    // `brightnessPath` re-reads prefs, so by here the only block left is live
-    // HDR — and under HDR the monitor locks its DDC registers. An unmute there
-    // would report success, change nothing, and clear the persisted `muted`
-    // flag, which ALSO retires the hub's stranded-mute recovery block. That is
-    // the "reported a success that was not achieved" class again; leaving the
-    // display honestly muted keeps the recovery reachable.
+    // By here the only block left is live HDR, where the monitor locks its DDC
+    // registers. An unmute would report success, change nothing, clear the
+    // persisted `muted` flag and so retire the hub's stranded-mute recovery.
+    // Leaving the display honestly muted keeps that recovery reachable.
     if state.volume.isMuted, trafficBlock != .macOSDrivesBrightness {
       _ = state.volume.toggleMute()
     }
@@ -615,20 +550,18 @@ struct AdvancedPage: View {
 
   // MARK: - Control-code remap
 
-  /// Rendered from the PARSED codes, never from the raw string on disk: the
-  /// engine drops empty, zero and non-hex tokens (`DisplayPrefs.parseRemapCodes`),
-  /// so this is what actually survived — which is the field's whole contract.
+  /// Rendered from the PARSED codes, never the raw string on disk:
+  /// `DisplayPrefs.parseRemapCodes` drops empty, zero and non-hex tokens, so the
+  /// field shows what actually survived.
   private func storedRemapText(_ command: DDCCommand) -> String {
     prefs.tuning(for: command).remapCodes
       .map { String(format: "%02x", $0) }
       .joined(separator: ", ")
   }
 
-  /// Return and focus loss both arrive here, so the two routes cannot come to
-  /// different conclusions about the same typed text (#144). Codes that parse
-  /// to what is already stored write nothing: a re-write would fan out to a
-  /// pointless `reapplyAfterPrefChange()`. Same rule as the tuning grid's
-  /// override commits and the hub's name commit.
+  /// Return and focus loss both arrive here, so the two routes cannot disagree
+  /// about the same typed text. Codes that parse to what is already stored write
+  /// nothing; a re-write would fan out to a pointless `reapplyAfterPrefChange()`.
   private func commitRemap(_ command: DDCCommand, _ text: String) {
     var tuning = prefs.tuning(for: command)
     let codes = DisplayPrefs.parseRemapCodes(text)

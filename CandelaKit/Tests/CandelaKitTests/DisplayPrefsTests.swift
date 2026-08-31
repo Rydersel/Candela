@@ -4,8 +4,7 @@ import Testing
 
 @Suite("Per-display prefs")
 struct DisplayPrefsTests {
-  /// Each test gets a throwaway in-memory store, so nothing touches disk or
-  /// the user's defaults.
+  /// A throwaway in-memory store per test, so nothing touches the user's defaults.
   private func withSuite(_ body: (UserDefaults) -> Void) {
     let defaults = InMemoryDefaults()
     body(defaults)
@@ -21,8 +20,8 @@ struct DisplayPrefsTests {
     }
   }
 
-  /// #110's escape hatch defaults ON, so absence must read as guarded — the
-  /// one bug that would make the hatch a hazard rather than a hatch.
+  /// The escape hatch defaults ON, so absence must read as guarded: the one bug
+  /// that would make the hatch a hazard.
   @Test func theWireTimingGuardIsOnUntilExplicitlyTurnedOff() {
     withSuite { defaults in
       let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "app")
@@ -49,9 +48,9 @@ struct DisplayPrefsTests {
     }
   }
 
-  /// The forms a person actually types. `defaults write … NO` stores a STRING,
-  /// and an escape hatch that ignores the commonest spelling of itself is worse
-  /// than none — the user believes the guard is off while it is still on.
+  /// `defaults write … NO` stores a STRING. An escape hatch that ignores the
+  /// commonest spelling of itself is worse than none: the user believes the guard
+  /// is off while it is still on.
   @Test func theWireTimingGuardAcceptsEveryFalseSpellingDefaultsWriteProduces() {
     for stored in ["NO", "no", "false", "0"] as [Any] + [0, false] {
       withSuite { defaults in
@@ -328,8 +327,8 @@ struct DisplayPrefsTests {
     }
   }
 
-  // Persisted-schema pins (review T2-F1/F2): these raws compose on-disk key
-  // strings and stored values — a rename or renumber is a silent migration.
+  // These raws compose on-disk key strings and stored values, so a rename or
+  // renumber is a silent migration.
   @Test func persistedRawValuesNeverDrift() {
     #expect(DDCCommand.allCases.map(\.rawValue) == ["brightness", "volume", "contrast"])
     #expect(PollingMode.allCases.map(\.rawValue) == [-2, -1, 0, 1, 2])
@@ -433,8 +432,7 @@ struct DisplayPrefsTests {
   @Test func hudPositionsAreAppLevelAndDefaultToTheShippedTopCenter() {
     let d = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: d, persistenceKey: "irrelevant")
-    // An untouched install gets the shipped default, top center (Ryder,
-    // 2026-08-17, KMR spec amendment).
+    // The shipped default is top center (KMR amendment).
     #expect(prefs.hudPositionBrightness == .topCenter)
     #expect(prefs.hudPositionVolume == .topCenter)
 
@@ -459,9 +457,8 @@ struct DisplayPrefsTests {
   }
 
   @Test func unknownStoredRawValuesFallBackRatherThanTrap() {
-    // Raw 0 is a VALID case for three of these four enums, so the default-value
-    // assertions above cannot reach the `?? fallback` at all. D13's downgrade
-    // story (and the retired-HDRMode-raw-1 precedent) rests entirely on it.
+    // Raw 0 is a valid case for most of these enums, so the default-value assertions
+    // above never reach the `?? fallback`. D13's downgrade story rests on it.
     let d = InMemoryDefaults()
     for key in ["menuIcon", "menuItemStyle", "keyboardBrightness",
                 "keyboardVolume", "multiKeyboardBrightness",
@@ -509,9 +506,8 @@ struct DisplayPrefsTests {
     prefs.useFineScaleBrightness = true
     prefs.useFineScaleVolume = true
     prefs.disableAltBrightnessKeys = true
-    // 1. setter keys — these four are read by name in shipped M1–M4 code
-    // (AppModel.tapConfig, the tap's KeyRouterConfig, the poller fan-out), so a
-    // drift here silently unhooks the engine.
+    // These keys are read by name in `AppModel.tapConfig`, the tap's
+    // `KeyRouterConfig` and the poller fan-out, so drift silently unhooks the engine.
     #expect(d.bool(forKey: "enableBrightnessSync"))
     #expect(d.bool(forKey: "useFineScaleBrightness"))
     #expect(d.bool(forKey: "useFineScaleVolume"))
@@ -553,9 +549,9 @@ struct DisplayPrefsTests {
   }
 
   @Test func m5RawValuesNeverDrift() {
-    // Per CASE, not per multiset: `case show = 0, hide = 1, sliderOnly = 2` also
-    // satisfies `allCases.map(\.rawValue) == [0, 1, 2, 3]`, and under D22 it is
-    // the case↔value BINDING that is the shipped on-disk schema.
+    // Per case, not per multiset: `case show = 0, hide = 1, sliderOnly = 2` also
+    // satisfies `allCases.map(\.rawValue) == [0, 1, 2, 3]`, and under D22 the
+    // case-to-value binding is the shipped on-disk schema.
     #expect(MenuIcon.show.rawValue == 0)
     #expect(MenuIcon.sliderOnly.rawValue == 1)
     #expect(MenuIcon.hide.rawValue == 2)
@@ -580,9 +576,8 @@ struct DisplayPrefsTests {
   }
 
   @Test func safeModeGatesStartupTrafficWithoutTouchingStoredPrefs() {
-    // D11: session-only hardware gate. The getter-level override is the
-    // injection seam — one flag passed in at construction, never a global and
-    // never a UserDefaults lookup buried in the engine.
+    // D11: session-only hardware gate. One flag passed at construction, never a
+    // global and never a UserDefaults lookup buried in the engine.
     let d = InMemoryDefaults()
     let normal = DisplayPrefs(defaults: d, persistenceKey: "app")
     normal.startupAction = .write
@@ -598,8 +593,8 @@ struct DisplayPrefsTests {
   }
 
   @Test func safeModeSettersStillPersistForTheNextNormalSession() {
-    // Both gated getters, both directions (review lens 4, M10 — the original
-    // test asserted the override but never that a safe-mode WRITE survives).
+    // Both gated getters, both directions: a safe-mode write has to survive into
+    // the next normal session.
     let d = InMemoryDefaults()
     let normal = DisplayPrefs(defaults: d, persistenceKey: "app")
     let safe = DisplayPrefs(defaults: d, persistenceKey: "app", safeMode: true)
@@ -752,10 +747,9 @@ struct DisplayPrefsTests {
       prefs.oledTelemetry = true
       prefs.oledWindowObservation = false
       prefs.oledDetectionDimming = true
-      // Panel hours are NOT prefs — they live under `PanelHoursTracker`'s own
-      // keys and the reset must leave them alone. Written directly here
-      // because the tracker owns them, and because the sweep below needs them
-      // present to prove it distinguishes "kept" from "wiped".
+      // Panel hours are not prefs: they live under `PanelHoursTracker`'s own keys
+      // and the reset leaves them alone. Written directly because the tracker owns
+      // them, and the sweep below needs them to tell "kept" from "wiped".
       defaults.set(3600.0, forKey: "oledPanelSeconds.pk")
       defaults.set(120.0, forKey: "oledStandbySeconds.pk")
       defaults.set(true, forKey: "oledStandbyNoteDismissed.pk")
@@ -780,20 +774,15 @@ struct DisplayPrefsTests {
       #expect(prefs.oledWindowObservation == true)
       #expect(prefs.oledDetectionDimming == false)
 
-      // The sweep can only see keys something wrote above, so pin the
-      // population first: a thirteenth OLED pref fails HERE, which is the
-      // prompt to add its write — and only then can the sweep catch a
-      // `resetOledCare` that forgot to remove it.
+      // The sweep only sees keys something wrote above, so the population is pinned
+      // first: a new OLED pref fails here, which is the prompt to add its write.
       let oledPrefNames = PrefName.allCases.filter { $0.rawValue.hasPrefix("oled") }
       #expect(oledPrefNames.count == 13, "a new OLED pref needs a write above")
 
-      // A SWEEP of the store, not a second hand-written key list. They are
-      // already enumerated by hand in two other places and in two spellings —
-      // `PrefName` cases in the per-display reset's fan-out, and key strings in
-      // `resetOledCare`, where `oledLockDim` and `oledHoursTracking` carry the
-      // inverted `…Off` suffix. A third copy here would have the same defect
-      // the other two do: an eleventh pref compiles clean and silently survives
-      // the reset. Asking the store instead cannot miss one.
+      // A sweep of the store, not a third hand-written key list: the keys are already
+      // enumerated by hand as `PrefName` cases in the reset's fan-out and as strings
+      // in `resetOledCare`, where the inverted `…Off` spelling differs. Any such list
+      // lets a new pref compile clean and survive the reset; asking the store cannot.
       let keptHoursKeys: Set<String> = [
         "oledPanelSeconds.pk", "oledStandbySeconds.pk", "oledStandbyNoteDismissed.pk",
         "oledWearSeconds.pk", "oledWearSchema.pk",

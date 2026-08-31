@@ -30,26 +30,23 @@ public final class IOKitPowerAssertion: PowerAssertionHolding {
 
 /// Keeps the display awake for as long as it is on, and no longer.
 ///
-/// SESSION-ONLY, and that is the design rather than an omission: this defeats a
-/// power setting the user chose, so it has no pref, no storage and no schema
-/// key. A launch always starts off. Nothing here persists, so nothing here can
-/// leave a Mac awake across a restart.
+/// SESSION-ONLY by design: this defeats a power setting the user chose, so it
+/// has no pref, no storage and no schema key. A launch always starts off, and
+/// nothing here can leave a Mac awake across a restart.
 ///
-/// The assertion also dies with the process, which is what covers the crash
-/// case for free: an assertion is owned by the pid that took it, so a kill -9
-/// releases it as surely as `setOn(false)` does.
+/// The assertion dies with the process, which covers the crash case for free: an
+/// assertion is owned by the pid that took it, so a kill -9 releases it as surely
+/// as `setOn(false)` does.
 ///
-/// There is deliberately NO `deinit` release. A nonisolated deinit cannot touch
-/// this actor's state under strict concurrency, and the release it would perform
-/// is the one case the process already covers. What that costs is the only rule
-/// this type places on its owner: hold ONE of these for the life of the process.
-/// An owner that discards a live instance and builds another leaks the first
-/// assertion until the app quits, with no control left pointing at it.
+/// There is deliberately NO `deinit` release: a nonisolated deinit cannot touch
+/// this actor's state under strict concurrency, and process death already covers
+/// that case. The cost is the one rule this type places on its owner, hold ONE
+/// of these for the life of the process. An owner that discards a live instance
+/// and builds another leaks the first assertion until the app quits.
 ///
-/// PREVENT-DISPLAY-SLEEP only, never `PreventSystemSleep`: keeping the screen
-/// lit implies the system stays up, while the reverse would let the panel sleep
-/// under a control that says it will not. A user-initiated sleep is unaffected
-/// by either, which is the point of the "idle" in the assertion's name.
+/// PREVENT-DISPLAY-SLEEP only, never `PreventSystemSleep`: keeping the screen lit
+/// implies the system stays up, while the reverse would let the panel sleep under
+/// a control that says it will not.
 @MainActor
 @Observable
 public final class KeepAwake {
@@ -71,9 +68,8 @@ public final class KeepAwake {
   public func setOn(_ on: Bool) {
     guard on != isOn else { return }
     if on {
-      // `isOn` follows the SYSTEM, not the request. A refused assertion with
-      // the switch left on would be a control reporting a hold it does not
-      // have, on a screen that then sleeps anyway.
+      // `isOn` follows the SYSTEM, not the request: a refused assertion with the
+      // switch left on is a control reporting a hold it does not have.
       guard let id = holder.createPreventDisplaySleep(named: Self.assertionName) else { return }
       assertionID = id
       isOn = true

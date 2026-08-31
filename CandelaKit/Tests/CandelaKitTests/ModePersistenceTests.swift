@@ -66,10 +66,9 @@ struct ModePersistenceTests {
     #expect(store.storedMode(for: other) == kept)
   }
 
-  /// Both keys are UserDefaults key components and are frozen once shipped —
-  /// the same contract `DisplayConfigIdentity.key` and `DisplayPrefs` carry.
-  /// Pinned by exact literal, so a rename cannot orphan stored preferences
-  /// without failing here first.
+  /// Both keys are UserDefaults key components, frozen once shipped, the same
+  /// contract `DisplayConfigIdentity.key` and `DisplayPrefs` carry. Pinned by
+  /// exact literal, so a rename cannot orphan stored prefs without failing here.
   @Test func keysAreTheFrozenOnDiskSpelling() {
     let defaults = InMemoryDefaults()
     let store = ModePersistence(defaults: defaults)
@@ -93,8 +92,8 @@ struct ModePersistenceTests {
     #expect(ModePersistence.resolve(stored, in: [available]) == .refreshRateDiffers(available))
   }
 
-  /// Degrading a stored HiDPI choice to 1x is the worst outcome here — it
-  /// looks like the feature silently stopped working.
+  /// Degrading a stored HiDPI choice to 1x is the worst outcome here: it looks
+  /// like the feature silently stopped working.
   @Test func sameLogicalSizePrefersHiDPIOverOneX() {
     let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880)).descriptor
     let oneX = DisplayModeFixtures.mode(2, logical: (2560, 1440), pixels: (2560, 1440))
@@ -103,18 +102,15 @@ struct ModePersistenceTests {
     #expect(ModePersistence.resolve(stored, in: [oneX]) == .scaleDiffers(oneX))
   }
 
-  /// The test above cannot actually fail for its stated reason: its HiDPI
-  /// candidate has the SAME framebuffer as the stored descriptor, so step 2
-  /// (same geometry, nearest refresh) answers it and the HiDPI preference in
-  /// step 3 is never reached. Here the stored framebuffer is absent entirely,
-  /// so step 3 is the only branch that can answer and it has a real choice to
-  /// get wrong.
+  /// The test above cannot fail for its stated reason: its HiDPI candidate has the
+  /// SAME framebuffer as the stored descriptor, so step 2 answers it and step 3's
+  /// HiDPI preference is never reached. Here the stored framebuffer is absent, so
+  /// step 3 is the only branch that can answer.
   ///
   /// The stored 1.5x framebuffer is deliberate: `isHiDPI` is a hard `>= 2x`
   /// threshold, so a 3840x2160-backed 2560x1440 is NOT a HiDPI candidate. Real
-  /// macOS lists offer only 1x and 2x per logical size, which is exactly why
-  /// step 3's preference needs a test that constructs the choice rather than
-  /// hoping the enumeration supplies one.
+  /// macOS lists offer only 1x and 2x per logical size, so step 3's preference
+  /// needs a test that constructs the choice rather than hoping for one.
   @Test func aDifferentFramebufferStillPrefersHiDPIOverOneX() {
     let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (3840, 2160)).descriptor
     let oneX = DisplayModeFixtures.mode(2, logical: (2560, 1440), pixels: (2560, 1440))
@@ -125,9 +121,8 @@ struct ModePersistenceTests {
   }
 
   /// A substitute at a different framebuffer is a SCALE change, whatever its
-  /// refresh rate. Labelling it `.refreshRateDiffers` would tell the user
-  /// their refresh rate moved while their scaling silently changed instead —
-  /// step 3 is only ever reached when no same-geometry candidate exists.
+  /// refresh rate. Labelling it `.refreshRateDiffers` would tell the user their
+  /// refresh rate moved while their scaling silently changed instead.
   @Test func aScaleSubstituteIsNeverReportedAsARefreshChange() {
     let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (3840, 2160), hz: 60).descriptor
     let sameRateOtherScale = DisplayModeFixtures.mode(2, logical: (2560, 1440), pixels: (5120, 2880), hz: 60)
@@ -152,10 +147,9 @@ struct ModePersistenceTests {
     #expect(ModePersistence.resolve(stored, in: [far, near]) == .sizeDiffers(near))
   }
 
-  /// A real panel offers the nearest size at several framebuffers and half a
-  /// dozen refresh rates. Picking whichever CoreGraphics happened to enumerate
-  /// first would hand the user a 1x 24 Hz desktop and call it the nearest
-  /// match — the same HiDPI and refresh preferences apply here.
+  /// A real panel offers the nearest size at several framebuffers and half a dozen
+  /// refresh rates. Picking whichever CoreGraphics enumerated first would hand the
+  /// user a 1x 24 Hz desktop and call it the nearest match.
   @Test func theNearestSizeIsDisambiguatedNotLeftToEnumerationOrder() {
     let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 60).descriptor
     let oneXSlow = DisplayModeFixtures.mode(2, logical: (2400, 1350), pixels: (2400, 1350), hz: 24)
@@ -167,8 +161,8 @@ struct ModePersistenceTests {
       == .sizeDiffers(hiDPIRight))
   }
 
-  /// A 16:9 substitute on a 21:9 panel is worse than doing nothing — it
-  /// letterboxes or stretches, and the user did not ask for it.
+  /// A 16:9 substitute on a 21:9 panel is worse than doing nothing: it letterboxes
+  /// or stretches, and the user did not ask for it.
   @Test func aDifferentAspectRatioIsNeverSubstituted() {
     let stored = DisplayModeFixtures.mode(1, logical: (2580, 1080), pixels: (5160, 2160)).descriptor // 21:9
     let wrongShape = DisplayModeFixtures.mode(2, logical: (1920, 1080), pixels: (3840, 2160))        // 16:9
@@ -191,9 +185,9 @@ struct ModePersistenceTests {
     #expect(!ModePersistence.refreshMatches(59.997, 120))
   }
 
-  /// The tolerance must stay narrower than the gap between any two rates a
-  /// picker actually offers. It is NOT narrow enough to separate 59.94 from
-  /// 60 — see the note on `refreshMatches`; those two collapse deliberately.
+  /// The tolerance stays narrower than the gap between any two rates a picker
+  /// offers. It is NOT narrow enough to separate 59.94 from 60; those two collapse
+  /// deliberately, see the note on `refreshMatches`.
   @Test func theToleranceDoesNotSwallowAdjacentRealRates() {
     #expect(!ModePersistence.refreshMatches(50, 60))
     #expect(!ModePersistence.refreshMatches(24, 25))
@@ -203,14 +197,12 @@ struct ModePersistenceTests {
   /// 59.9 and 60 BOTH sit inside the 0.5 Hz window, so step 1 has to pick the
   /// NEARER one rather than the first one CoreGraphics happened to list.
   ///
-  /// A user-visible rule, not a tidiness one. `quantizedRefresh` keeps 59.9 and
-  /// 60 apart and the picker draws them as separate rows, so a picked 59.9
-  /// resolving to the 60 mode hands back a mode whose `ioModeID` is the one
-  /// already current — which `DisplayModeSection.apply` early-returns on. The
-  /// picker snapped back and nothing happened.
-  ///
-  /// Asserted in both list orders: passing in one ordering only is exactly what
-  /// an enumeration-order-dependent implementation looks like.
+  /// A user-visible rule. `quantizedRefresh` keeps 59.9 and 60 apart and the picker
+  /// draws them as separate rows, so a picked 59.9 resolving to the 60 mode hands
+  /// back a mode whose `ioModeID` is already current, which
+  /// `DisplayModeSection.apply` early-returns on: the picker snapped back and
+  /// nothing happened. Asserted in both list orders, since passing in one ordering
+  /// is what an enumeration-order-dependent implementation looks like.
   @Test func theNearerOfTwoRatesInsideTheToleranceWins() {
     let ntsc = DisplayModeFixtures.mode(3, logical: (2560, 1440), pixels: (5120, 2880), hz: 59.9)
     let sixty = DisplayModeFixtures.mode(2, logical: (2560, 1440), pixels: (5120, 2880), hz: 60)
@@ -226,15 +218,14 @@ struct ModePersistenceTests {
   // MARK: - Rotation
 
   /// The observed case: a choice recorded while the Dell enumerated un-rotated,
-  /// re-resolved against the portrait list the same panel publishes at 270°.
-  /// A quarter turn swaps every entry's axes, so nothing there can match the
-  /// stored landscape geometry literally even though the identical
-  /// panel-native mode is sitting in the list with its sides swapped.
+  /// re-resolved against the portrait list the same panel publishes at 270°. A
+  /// quarter turn swaps every entry's axes, so nothing there matches the stored
+  /// landscape geometry literally even though the identical panel-native mode is
+  /// in the list with its sides swapped.
   ///
-  /// Two assertions because the fixture keeps ONE rate per logical size (see
-  /// `DisplayModeFixtures.dell`): the stored 120 Hz the real panel offers is
-  /// absent there, so it exercises the transposed arm's refresh fallback,
-  /// while the fixture's own rate exercises the silent exact case.
+  /// Two assertions because the fixture keeps ONE rate per logical size: the
+  /// stored 120 Hz is absent there and exercises the transposed arm's refresh
+  /// fallback, while the fixture's own rate exercises the silent exact case.
   @Test func aStoredLandscapeChoiceFindsItsPortraitTwin() throws {
     let twin = try #require(DisplayModeFixtures.dell.first {
       $0.logicalWidth == 1440 && $0.logicalHeight == 2560
@@ -250,19 +241,18 @@ struct ModePersistenceTests {
       == .exact(twin))
   }
 
-  /// The negative control for the test above. Trying the other orientation
-  /// must not turn "nothing here fits" into a substitution: a 21:9 shape has no
-  /// twin on a 16:9 panel either way up, and the aspect-ratio guard has to hold
-  /// in both arms.
+  /// The negative control for the test above. Trying the other orientation must
+  /// not turn "nothing here fits" into a substitution: a 21:9 shape has no twin on
+  /// a 16:9 panel either way up, so the aspect guard has to hold in both arms.
   @Test func aSizeWithNoTwinInEitherOrientationStillResolvesToNothing() {
     let stored = DisplayModeFixtures.mode(1, logical: (2580, 1080), pixels: (5160, 2160)).descriptor
     #expect(ModePersistence.resolve(stored, in: DisplayModeFixtures.dell) == .none)
   }
 
-  /// Swapping the axes must not launder a SCALE difference into an exact
-  /// match. The stored choice here is 1x, its twin in the list is 2x, and the
-  /// transposed arm compares framebuffers exactly as the literal one does, so
-  /// the answer is a reported substitution rather than a silent apply.
+  /// Swapping the axes must not launder a SCALE difference into an exact match.
+  /// The stored choice is 1x, its twin in the list is 2x, and the transposed arm
+  /// compares framebuffers as the literal one does, so the answer is a reported
+  /// substitution rather than a silent apply.
   @Test func transposingDoesNotLaunderAScaleChange() throws {
     let twin = try #require(DisplayModeFixtures.dell.first {
       $0.logicalWidth == 1440 && $0.logicalHeight == 2560
@@ -272,10 +262,9 @@ struct ModePersistenceTests {
     #expect(ModePersistence.resolve(storedAtOneX, in: DisplayModeFixtures.dell) == .scaleDiffers(twin))
   }
 
-  /// The stored orientation is the one the user chose, so it wins whenever it
-  /// can be honoured. Both list orders, because "the literal arm ran first" and
-  /// "the literal mode happened to be enumerated first" look identical in one
-  /// ordering.
+  /// The stored orientation is the one the user chose, so it wins whenever it can
+  /// be honoured. Both list orders, because "the literal arm ran first" and "the
+  /// literal mode was enumerated first" look identical in one ordering.
   @Test func theStoredOrientationWinsWhenBothWouldBeExact() {
     let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 60)
     let sideways = DisplayModeFixtures.mode(2, logical: (1440, 2560), pixels: (2880, 5120), hz: 60)
@@ -283,15 +272,12 @@ struct ModePersistenceTests {
     #expect(ModePersistence.resolve(stored.descriptor, in: [sideways, stored]) == .exact(stored))
   }
 
-  /// Finding the stored LOGICAL SIZE in the list settles the orientation
-  /// question before quality is weighed at all: the record was saved in the
-  /// frame the display is in now, so a transposed twin sitting in that same
-  /// list is a different desktop shape rather than a rotation artifact.
-  /// Reshaping the screen to fix a refresh delta, or a scale delta, is what
-  /// this pins against.
-  ///
-  /// Both same-size outcomes, since each is its own branch of the rule, and
-  /// both list orders.
+  /// Finding the stored LOGICAL SIZE in the list settles orientation before
+  /// quality is weighed: the record was saved in the frame the display is in now,
+  /// so a transposed twin in that same list is a different desktop shape rather
+  /// than a rotation artifact. Reshaping the screen to fix a refresh or scale
+  /// delta is what this pins against. Both same-size outcomes and both list
+  /// orders, since each outcome is its own branch.
   @Test func aLiteralSubstituteAtTheStoredSizeBeatsATransposedExact() {
     let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 120).descriptor
     let otherRate = DisplayModeFixtures.mode(2, logical: (2560, 1440), pixels: (5120, 2880), hz: 60)
@@ -310,11 +296,10 @@ struct ModePersistenceTests {
       == .scaleDiffers(otherScale))
   }
 
-  /// The other side of that line, and the reason it is drawn at the stored SIZE
-  /// rather than anywhere lower. A nearest-size substitute is not an answer at
-  /// the stored size, so it settles nothing: the exact portrait twin outranks it
-  /// and wins. Letting `.sizeDiffers` short-circuit too would strand a rotated
-  /// display on a resized desktop with its own mode sitting in the list.
+  /// The other side of that line, and why it is drawn at the stored SIZE rather
+  /// than lower. A nearest-size substitute settles nothing, so the exact portrait
+  /// twin outranks it. Letting `.sizeDiffers` short-circuit too would strand a
+  /// rotated display on a resized desktop with its own mode sitting in the list.
   @Test func aNearestSizeSubstituteLosesToTheExactTransposedTwin() {
     let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880)).descriptor
     let smallerSameShape = DisplayModeFixtures.mode(2, logical: (2400, 1350), pixels: (4800, 2700))
@@ -338,8 +323,7 @@ struct ModePersistenceTests {
 
   /// The transposed twin of `aScaleSubstituteKeepsTheNearestRefreshRate`: every
   /// rule the literal arm follows still applies once the axes are swapped, so a
-  /// deliberate 60 Hz choice is not bumped to the panel's fastest rate on the
-  /// way through the rotated list.
+  /// deliberate 60 Hz choice is not bumped to the fastest rate on the way through.
   @Test func theTransposedArmStillKeepsTheNearestRefreshRate() {
     let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 60).descriptor
     let fast = DisplayModeFixtures.mode(2, logical: (1440, 2560), pixels: (2160, 3840), hz: 144)

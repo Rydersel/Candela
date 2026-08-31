@@ -35,9 +35,8 @@ protocol CheckupFieldPresenting: AnyObject {
   func hide()
 }
 
-/// The care hold a field takes on the panel it covers, for the life of the
-/// showing. A protocol so the field window can be exercised with nothing behind
-/// it, and so the checkup reaches OLED care through these two calls only.
+/// The care hold a field takes on the panel it covers. A protocol so the field
+/// window can be exercised alone, and so the checkup reaches care only here.
 @MainActor
 protocol CheckupCareHolding: AnyObject {
   func beginCheckupField(identityKey: String)

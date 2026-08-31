@@ -37,9 +37,9 @@ struct MirrorTopologyStoreTests {
     #expect(store.topology() == MirrorFixtures.mirroredTrio)
   }
 
-  /// A master that is itself unknown to the sample is still handed back
-  /// unchanged rather than resolved to something invented — the store adds no
-  /// judgement of its own on top of `MirrorTopology.drawableDisplayID(for:)`.
+  /// A master unknown to the sample is handed back unchanged rather than resolved
+  /// to something invented: the store adds no judgement of its own on top of
+  /// `MirrorTopology.drawableDisplayID(for:)`.
   @Test func anIDAbsentFromTheSampleIsHandedBackUnchanged() {
     let store = MirrorTopologyStore(MirrorFixtures.mirroredTrio)
     #expect(store.drawableDisplayID(for: 99) == 99)
@@ -66,8 +66,7 @@ struct MirrorTopologyStoreTests {
     #expect(store.topology().displays.count == 2 || store.topology().displays.count == 3)
   }
 
-  /// The seam the islands are handed is the PROTOCOL, not the class: Task 6
-  /// wires nine AppKit sites to it, and a test double must be substitutable
+  /// The islands are handed the PROTOCOL, not the class, so a double substitutes
   /// for the real store without either side changing.
   @Test func theProtocolIsWhatCallersDependOn() {
     let provider: any MirrorTopologyProviding = MirrorTopologyStore(MirrorFixtures.mirroredTrio)

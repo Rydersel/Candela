@@ -17,20 +17,17 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
   // alone and released exactly once in destroy paths.
   private let lock = NSLock()
   private var slots: [Int: (token: UnsafeMutableRawPointer, handle: VirtualDisplayHandle)] = [:]
-  /// What each live slot's display ACHIEVED, established while it was created
-  /// and never re-derived after. `achievedMode(slot:)` carries the reason a
-  /// live read cannot answer this question in the creating process.
+  /// What each live slot's display ACHIEVED, established at creation and never
+  /// re-derived. `achievedMode(slot:)` carries the reason a live read cannot
+  /// answer this in the creating process.
   private var achievedModes: [Int: (width: Int, height: Int, hiDPI: Bool)] = [:]
-  /// Slots with a create in flight. Reserved UNDER THE LOCK before the C call
-  /// so two concurrent creates cannot both pass the occupancy check and the
-  /// second overwrite the first's token (a leaked display with no destroy
-  /// path). Today every app create rides one serial queue; this makes the
-  /// invariant structural rather than a convention a future caller can break.
+  /// Slots with a create in flight. Reserved UNDER THE LOCK before the C call so
+  /// two concurrent creates cannot both pass the occupancy check and the second
+  /// overwrite the first's token, leaking a display with no destroy path.
   private var reserved: Set<Int> = []
-  /// Slots whose display did not depart at destroy. The token is gone, so the
-  /// display cannot be destroyed again, and its identity is still advertised;
-  /// a later create for the slot would only collect the duplicate-identity
-  /// refusal after a full timeout, so create refuses these up front.
+  /// Slots whose display did not depart at destroy. The token is gone and the
+  /// identity is still advertised, so a later create would only collect the
+  /// duplicate-identity refusal after a full timeout; create refuses up front.
   private var stranded: Set<Int> = []
   private let log = Logger(subsystem: "com.rydersel.Candela", category: "virtualdisplay")
 
@@ -121,36 +118,34 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
       return .failure(.wouldBecomeMainDisplay)
     }
 
-    // Registered BEFORE the profile check and the engage below: the display
-    // has been online since the C call's appearance poll, and its arrival
-    // fires a topology refresh whose DDC-pool exclusion reads
-    // `ownedDisplayIDs`. The engage can take seconds; a window that long with
-    // the owned set stale would leave the exclusion to the foreign predicate
-    // alone.
+    // Registered BEFORE the profile check and the engage below: the display has
+    // been online since the C call's appearance poll, and its arrival fires a
+    // topology refresh whose DDC-pool exclusion reads `ownedDisplayIDs`. The
+    // engage takes seconds, and a stale owned set that long would leave the
+    // exclusion to the foreign predicate alone.
     let handle = VirtualDisplayHandle(
       uuid: uuid, slot: slot, displayID: displayID,
       identity: VirtualDisplayIdentity.configIdentity(slot: slot), spec: normalized
     )
     lock.lock()
     slots[slot] = (token, handle)
-    // Provisional, and deliberately pessimistic: a display is 1x until the
-    // engage below proves otherwise, so a slot read during the seconds that
-    // engage takes reports what it currently is rather than what was asked for.
+    // Provisional and deliberately pessimistic: a display is 1x until the engage
+    // below proves otherwise, so a slot read during those seconds reports what
+    // it is rather than what was asked for.
     achievedModes[slot] = (normalized.logicalWidth, normalized.logicalHeight, false)
     reserved.remove(slot)
     lock.unlock()
 
     reportProfileGrowth(before: profilesBefore, slot: slot)
 
-    // A new virtual display engages the 1x variant even when the 2x mode is
-    // in its ladder (measured 2026-08-13: hiDPI=1, single declared
-    // 1920x1080 mode, ceiling 8192x4320, engaged pixels == logical). The
-    // Retina promise is only real if the 2x mode is ENGAGED, so engage it
-    // and verify; the pane reports achieved state, never this spec's claim.
+    // A new virtual display engages the 1x variant even when the 2x mode is in
+    // its ladder (measured 2026-08-13). The Retina promise is only real if the
+    // 2x mode is ENGAGED, so engage it and verify; the pane reports achieved
+    // state, never this spec's claim.
     //
     // Gated on the ceiling: macOS emits a 2x variant only when the doubled
-    // framebuffer fits under maxPixels, so a request it can never satisfy
-    // must not burn the two engage attempts before failing.
+    // framebuffer fits under maxPixels, so a request it can never satisfy must
+    // not burn the two engage attempts before failing.
     if normalized.hiDPI {
       let fitsCeiling = normalized.logicalWidth * 2 <= VirtualDisplayIdentity.maxPixels.wide
         && normalized.logicalHeight * 2 <= VirtualDisplayIdentity.maxPixels.high
@@ -170,8 +165,7 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
       // THE VERDICT IS KEPT, not just logged. It is the only evidence this
       // process will ever have that the 2x variant engaged: the helper ran the
       // readback in a process that could perform it, and nothing here can
-      // repeat that. Discarding it into a log was what left every consumer to
-      // re-derive it from a read that returns nil.
+      // repeat that.
       lock.lock()
       achievedModes[slot] = (normalized.logicalWidth, normalized.logicalHeight, engaged)
       lock.unlock()
@@ -195,13 +189,11 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
     lock.lock()
     achievedModes.removeValue(forKey: slot)
     guard let entry = slots.removeValue(forKey: slot) else {
-      // A slot this host no longer holds is normally nothing to destroy, and
-      // saying so is right. A STRANDED slot is the exception and it is the one
-      // that matters: the token was released while the display stayed online,
-      // so there is no entry left and the display is still there. Answering
-      // true would report a clean revert over it, and `ModeSynthesisEngine`'s
-      // unwind takes this return as its departure check (SS10), so a retried
-      // disengage would drop a pairing whose virtual display is still standing.
+      // A slot this host no longer holds is normally nothing to destroy. A
+      // STRANDED slot is the exception: the token was released while the display
+      // stayed online, so answering true reports a clean revert over a display
+      // that is still there, and `ModeSynthesisEngine`'s unwind takes this
+      // return as its departure check (SS10).
       let stillStranded = stranded.contains(slot)
       lock.unlock()
       return !stillStranded
@@ -210,9 +202,9 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
     breakMasteredMirrors(of: entry.handle.displayID)
     let departed = CandelaVDDestroy(entry.token, entry.handle.displayID, departureTimeout)
     if !departed {
-      // The token is released, so the display can never be destroyed again
-      // from this process; record the slot so create refuses it honestly
-      // instead of timing out into the duplicate-identity refusal.
+      // The token is released, so this process can never destroy the display
+      // again. Record the slot so create refuses it honestly instead of timing
+      // out into the duplicate-identity refusal.
       lock.lock()
       stranded.insert(slot)
       lock.unlock()
@@ -239,13 +231,12 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
   }
 
   /// The argv contract every executable embedding this host must honour at
-  /// startup, BEFORE any UI or app machinery: when launched as
+  /// startup, BEFORE any UI or app machinery: launched as
   /// `<binary> --vd-engage <displayID> <width> <height>`, perform the HiDPI
   /// engage in this fresh process and exit. A process can enumerate display
-  /// modes only for the FIRST virtual display it creates (the two-process
-  /// rig exists because of it, and both slots' in-process engages failed
-  /// measured 2026-08-13), so the engage must run in a process that created
-  /// nothing; re-executing our own binary is the smallest such process.
+  /// modes only for the FIRST virtual display it creates (measured 2026-08-13),
+  /// so the engage must run in a process that created nothing, and re-executing
+  /// our own binary is the smallest such process.
   public static func handleEngageHelperInvocation() {
     let arguments = ProcessInfo.processInfo.arguments
     guard arguments.count >= 2, arguments[1] == "--vd-engage" else { return }
@@ -285,15 +276,14 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
     return process.terminationStatus == 0
   }
 
-  /// Engage the true-HiDPI variant of the requested logical size and verify
-  /// it took. The mode list can lag the display's arrival, so an empty list
-  /// is retried briefly and then reported false rather than fought.
+  /// Engage the true-HiDPI variant of the requested logical size and verify it
+  /// took. The mode list can lag the display's arrival, so an empty list is
+  /// retried briefly and then reported false rather than fought.
   ///
   /// Reading `CGDisplayCopyDisplayMode` here does not violate the
-  /// nothing-is-read-back rule (VD5): that rule is about the private
-  /// CGVirtualDisplay object's own properties, which lie; the engaged mode is
-  /// public CoreGraphics topology state, the same source every mode feature
-  /// trusts.
+  /// nothing-is-read-back rule (VD5): that rule covers the private
+  /// CGVirtualDisplay object's own properties, which lie. The engaged mode is
+  /// public CoreGraphics topology state.
   private static func engageHiDPIModeInThisProcess(
     displayID: CGDirectDisplayID, logicalWidth: Int, logicalHeight: Int
   ) -> Bool {
@@ -330,22 +320,16 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
   /// process USUALLY cannot read its own virtual display back:
   /// `CGDisplayCopyDisplayMode` on it returned nil whenever it mattered
   /// (measured 2026-08-17), which is why `spawnEngageHelper` exists. Not
-  /// "never", and the difference is why `create` still tries in-process FIRST:
-  /// when that read works it is free, and a helper process is not. Do not read
-  /// this paragraph as saying the in-process leg is dead code.
+  /// "never", which is why `create` still tries in-process FIRST: when that read
+  /// works it is free and a helper process is not.
   ///
-  /// What follows from "usually" is that a caller may not gate on a read of its
-  /// own: the helper exits 0 only after checking `pixelWidth >= width * 2` in a
-  /// process that can always read the display, so its exit status is the
-  /// evidence, and it is kept when it lands rather than re-derived here from a
-  /// call that may answer nil. The earlier in-process-only read failed OPEN in
-  /// the one process that asks.
+  /// So no caller may gate on a read of its own. The helper exits 0 only after
+  /// checking `pixelWidth >= width * 2` in a process that can always read the
+  /// display, so its exit status is the evidence and is kept when it lands.
   ///
-  /// The `slots[slot] != nil` guard is load-bearing, not defensive tidiness: a
-  /// destroyed slot's verdict must not resurrect. `destroy` clears both maps,
-  /// but a slot recreated after a failed engage would otherwise be able to
-  /// answer with a verdict about a display that no longer exists, and the
-  /// synthesis engine gates its whole sequence on this answer.
+  /// The `slots[slot] != nil` guard is load-bearing: a destroyed slot's verdict
+  /// must not resurrect into an answer about a display that no longer exists,
+  /// and the synthesis engine gates its whole sequence on this answer.
   public func achievedMode(slot: Int) -> (width: Int, height: Int, hiDPI: Bool)? {
     lock.lock()
     defer { lock.unlock() }
@@ -376,11 +360,10 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
     Set((try? FileManager.default.contentsOfDirectory(atPath: Self.profilesDirectory)) ?? [])
   }
 
-  /// VD11: each slot identity mints ONE permanent profile on its first-ever
-  /// creation on a machine, and never again. A log rather than an assertion
-  /// because fixing requires root and the app never elevates; a REPEATING
-  /// growth for the same slot means an identity is varying, which is the
-  /// defect this check exists to surface.
+  /// VD11: each slot identity mints ONE permanent profile on its first creation
+  /// on a machine, and never again. A log rather than an assertion because
+  /// fixing requires root and the app never elevates; REPEATING growth for one
+  /// slot means an identity is varying.
   private func reportProfileGrowth(before: Set<String>, slot: Int) {
     let after = profileListing()
     let grown = after.subtracting(before).sorted()

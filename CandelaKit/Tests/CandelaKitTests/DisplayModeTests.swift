@@ -19,10 +19,9 @@ struct DisplayModeTests {
     #expect(mode(logical: (2560, 1440), pixels: (5120, 2880)).isHiDPI)
     #expect(!mode(logical: (2560, 1440), pixels: (2560, 1440)).isHiDPI)
 
-    // The case that separates ">= 2x" from "any upscale at all": a 1.5x scaled
-    // mode renders oversized but is NOT HiDPI. This is precisely the mode class
-    // the feature exists to surface, so the boundary has to be pinned — without
-    // it, `pixelWidth > logicalWidth` would satisfy the other two assertions.
+    // Separates ">= 2x" from "any upscale at all": a 1.5x mode renders oversized
+    // but is not HiDPI, and `pixelWidth > logicalWidth` would satisfy the other
+    // two assertions on its own.
     #expect(!mode(logical: (1920, 1080), pixels: (2880, 1620)).isHiDPI)
   }
 
@@ -64,8 +63,8 @@ struct DisplayModeTests {
     #expect(abs(ultrawide.aspectRatio - smaller.aspectRatio) < 0.0001)
   }
 
-  /// Third occurrence of the float-noise trap in this feature. Normalising at
-  /// the boundary is what stops it recurring downstream.
+  /// Refresh rates arrive with float noise; normalising at the boundary is what
+  /// stops it recurring downstream.
   @Test func refreshRatesAreQuantizedAtTheBoundary() {
     #expect(DisplayMode.quantizedRefresh(59.9998) == 60.0)
     #expect(DisplayMode.quantizedRefresh(60.0) == 60.0)
@@ -75,10 +74,8 @@ struct DisplayModeTests {
     #expect(DisplayMode.quantizedRefresh(59.9) != DisplayMode.quantizedRefresh(60.0))
   }
 
-  /// Codable is this type's whole reason for existing — it is what lands in
-  /// UserDefaults. Pin both the round trip and the on-disk key names, so a
-  /// later property rename breaks a test instead of silently orphaning every
-  /// stored preference.
+  /// This type exists to be Codable into UserDefaults, so the on-disk key names are
+  /// pinned too: a property rename breaks a test instead of orphaning stored prefs.
   @Test func theDescriptorSurvivesAJSONRoundTripWithStableKeys() throws {
     let original = DisplayModeDescriptor(
       logicalWidth: 2560, logicalHeight: 1440,

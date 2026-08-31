@@ -1,27 +1,23 @@
 /// Everything the diagnostics report says, gathered by the app before rendering.
 ///
-/// The snapshot carries its own timestamps (`recentEvents` are pre-formatted at
-/// append time) so the renderer stays pure: the same snapshot renders to the
-/// same bytes forever, which is what makes two pasted reports diffable.
+/// `recentEvents` arrive pre-formatted so the renderer stays pure: one snapshot
+/// always renders to the same bytes, which is what makes two pasted reports diffable.
 public struct DiagnosticsReportSnapshot: Sendable {
   public struct DisplayEntry: Sendable {
     public let name: String
     public let hardwareName: String
     public let connection: String?
     public let manufacturer: String?
-    /// Presence only. The value is PII and never reaches the report — these go
-    /// into public GitHub issues, and presence is all the twin-display
-    /// diagnosis needs.
+    /// Presence only. The serial is PII and never reaches the report, which gets
+    /// pasted into public issues; presence is all twin-display diagnosis needs.
     public let hasSerial: Bool
     public let currentMode: String?
     public let controlMethod: String
     public let readbackVerdict: String
     public let hdrEngaged: Bool
-    /// Free-form, rendered verbatim: the caller scrubs these, not the renderer.
-    /// Must carry the bare pref name and value (`forceSw = true`), never a full
-    /// storage key — `DisplayDiscovery.persistenceKey` is an EDID UUID or
-    /// `name-manufacturer-serial`, so a raw `UserDefaults` key would put the
-    /// serial straight into a public issue that `hasSerial` exists to keep out.
+    /// Rendered verbatim; the caller scrubs these, not the renderer. Bare pref
+    /// name and value only (`forceSw = true`), never a full storage key: a
+    /// persistence key carries the display's serial.
     public let nonDefaultPrefs: [String]
 
     public init(name: String, hardwareName: String, connection: String?,
@@ -112,7 +108,7 @@ public enum DiagnosticsReport {
     return lines.joined(separator: "\n") + "\n"
   }
 
-  /// A missing field says so rather than vanishing — an absent line reads as an
+  /// A missing field says so rather than vanishing: an absent line reads as an
   /// absent capability to whoever triages the paste.
   private static func reported(_ value: String?) -> String {
     value ?? "not reported"

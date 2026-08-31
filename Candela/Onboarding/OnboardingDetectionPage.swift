@@ -160,11 +160,10 @@ struct OnboardingDetectionPage: View {
     "Up to \(Int(display.refreshHz.rounded())) Hz"
   }
 
-  /// OB9: state what works; the display's own denial is its report, and
-  /// unknown is never called a failure. Unknown is also never called
-  /// verified: a display that answers no reads (the write-only case) cannot
-  /// confirm anything, so its line states what the app offers, not what the
-  /// display responded to.
+  /// OB9: state what works; the display's own denial is its report, and unknown
+  /// is never called a failure. Unknown is never called verified either: a
+  /// write-only display cannot confirm anything, so its line states what the app
+  /// offers rather than what the display responded to.
   private func controlLine(for display: OnboardingDisplayEntry) -> String {
     switch display.volume {
     case .works:

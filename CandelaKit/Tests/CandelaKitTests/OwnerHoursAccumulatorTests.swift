@@ -83,9 +83,9 @@ struct OwnerHoursAccumulatorTests {
   }
 
   /// The tuple label says `hours`; storage is seconds. This shipped briefly
-  /// returning raw seconds under that label — a 3600× overstatement one
-  /// `Text(...)` from the screen, and exactly the kind of number OC11 forbids
-  /// the UI to imply. One full-screen hour must read as 1.0, not 3600.
+  /// returning raw seconds under that label, a 3600x overstatement one `Text(...)`
+  /// from the screen and the kind of number OC11 forbids the UI to imply. One
+  /// full-screen hour reads as 1.0, not 3600.
   @Test func topOwnersReturnsHoursNotSeconds() {
     var acc = OwnerHoursAccumulator()
     let full = observation([String?](repeating: "Slack", count: PanelGrid.cellCount))
@@ -122,11 +122,10 @@ struct OwnerHoursAccumulatorTests {
     #expect(try JSONDecoder().decode(OwnerHours.self, from: data) == acc.hours)
   }
 
-  /// A round trip passes under ANY rename, because it encodes and decodes with
-  /// the same build. These strings are the on-disk schema (§4), and they used
-  /// to be synthesised from the property names, so the rename this file's own
-  /// doc comment invites (`secondsByOwner` holds seconds under a type called
-  /// `OwnerHours`) would have silently stranded every stored blob.
+  /// A round trip passes under ANY rename, since it encodes and decodes with the
+  /// same build. These strings are the on-disk schema, and they used to be
+  /// synthesised from the property names, so renaming `secondsByOwner` would have
+  /// silently stranded every stored blob.
   @Test func theEncodedKeyNamesAreTheOnDiskSchema() throws {
     var acc = OwnerHoursAccumulator()
     acc.accumulate(

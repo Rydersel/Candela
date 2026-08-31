@@ -134,8 +134,8 @@ private struct Fixture {
 
 @MainActor
 @Test func perDisplayCountsPreventCrossDisplayThresholdTripping() {
-  // Backlog #5a: N displays clobbering once each must NOT trip threshold 3 —
-  // the alert must name the display that actually earned it.
+  // N displays clobbering once each must not trip the threshold: the alert has to
+  // name the display that actually earned it.
   let gamma = RecordingGamma()
   let alerts = RecordingAlerts()
   let monitor = GammaInterferenceMonitor(gamma: gamma, alerts: alerts, threshold: 3)
@@ -159,11 +159,8 @@ private struct Fixture {
 
 @MainActor
 @Test func acceptDoesNotReArmTheMonitor() {
-  // Backlog #5b: the fork-parity re-arm nags once per display on 3+ rigs.
+  // The fork's re-arm on accept nags once per display on a multi-monitor rig, so
   // Candela keeps the session suspended after accept, same as "Not Now".
-  // SUPERSEDES the deleted `acceptSwitchesToShadeAndRearms` (which pinned
-  // the fork's reset-and-re-arm accept); its switch-to-shade assertion is
-  // folded in here.
   let gamma = RecordingGamma()
   let alerts = RecordingAlerts()
   let monitor = GammaInterferenceMonitor(gamma: gamma, alerts: alerts, threshold: 1)
@@ -178,9 +175,8 @@ private struct Fixture {
 
 @MainActor
 @Test func acceptPathReconfigureSkipsTheRecapture() async {
-  // progress.md:51 poisoned-baseline amendment: at accept time the
-  // interfering app may own the table — recapturing would bake its curve in
-  // as the "default" and clearSoftwareLeg would later resurface it as a tint.
+  // At accept time the interfering app may own the table, so recapturing would bake
+  // its curve in as the default and `clearSoftwareLeg` would resurface it as a tint.
   let defaults = InMemoryDefaults()
   let gamma = RecordingGamma()
   let controller = BrightnessController(
@@ -273,10 +269,9 @@ private struct Fixture {
 
 // MARK: - Per-display interference count (B7)
 
-/// An accessor rather than the dictionary: a view has no business iterating
-/// displays it does not own, and per-display counts are the whole point — one
-/// global count let N displays trip the threshold on the first real event, and
-/// the alert named whichever display came third (backlog #5a).
+/// An accessor rather than the dictionary: a view has no business iterating displays
+/// it does not own. One global count let N displays trip the threshold on the first
+/// real event, with the alert naming whichever came third.
 @MainActor
 @Test func interferenceIsCountedPerDisplayAndReadableForOne() {
   // Threshold far above anything this test reaches: the offer would suspend

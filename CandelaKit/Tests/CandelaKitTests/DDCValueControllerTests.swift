@@ -6,8 +6,7 @@ import Testing
 @Suite("DDCValueController")
 @MainActor
 struct DDCValueControllerTests {
-  /// Per-test throwaway defaults + memory store (the PathSelection harness
-  /// pattern — never touch .standard).
+  /// Per-test throwaway defaults and memory store; never .standard.
   @MainActor
   private final class Harness {
     let defaults: UserDefaults
@@ -15,9 +14,8 @@ struct DDCValueControllerTests {
     let fake = FakeDDC(readResult: nil) // write-only panel by default (MAG parity)
     let store = PathMemoryStore()
     let controller: DDCValueController
-    /// The display's own VCP 0x8D verdict, as the capabilities probe publishes
-    /// it. A var and not an init constant because the probe lands mid-session
-    /// in the app, and the gate is specified to read it live.
+    /// The display's own VCP 0x8D verdict from the capabilities probe. A var,
+    /// not an init constant: the probe lands mid-session and the gate reads it live.
     var muteWireSupport: VCPSupport = .unknown
 
     init(
@@ -46,18 +44,16 @@ struct DDCValueControllerTests {
     }
   }
 
-  /// Scripted read queue + counter and scripted write results — the
-  /// constant-result `FakeDDC` cannot observe the retry loop (test-design F7)
-  /// or a failed transaction (test-design F8).
+  /// The constant-result `FakeDDC` cannot observe the retry loop (test-design F7)
+  /// or a failed transaction (F8), so reads and write results are scripted here.
   private actor ScriptedDDC: DDCWriting {
     private(set) var readCount = 0
     private var reads: [(current: UInt16, max: UInt16)?]
     private var writeResults: [Bool]
     private(set) var writes: [(command: UInt8, value: UInt16)] = []
-    /// Fires DURING the nth read rather than between reads (#68, absorbed from
-    /// `HookedScriptedDDC`). That is the whole seam: it lands user input INSIDE
-    /// `refreshFromHardware`'s value loop, which is the F2 mute-generation
-    /// regression pin, and firing between reads would not reach the case.
+    /// Fires DURING the nth read, not between reads: that lands user input inside
+    /// `refreshFromHardware`'s value loop, which is the F2 mute-generation pin.
+    /// Firing between reads never reaches the case.
     private var hookAfterRead: Int?
     private var hook: (@Sendable () async -> Void)?
 
@@ -156,9 +152,8 @@ struct DDCValueControllerTests {
   }
 
   @Test func invertFlipsTheRange() async {
-    // Brief deviation (savedValue): a fresh contrast controller seeds 0.75,
-    // so the brief's setValue(0.75) was value-deduped and never hit the wire
-    // — seed 0.5 so 0.75 is a real change; the assertion is unchanged.
+    // Seeded at 0.5 because a fresh contrast controller seeds 0.75, and
+    // setValue(0.75) would be value-deduped before it reached the wire.
     let harness = Harness(command: .contrast, savedValue: 0.5) { prefs in
       var tuning = prefs.tuning(for: .contrast)
       tuning.invert = true
@@ -195,9 +190,8 @@ struct DDCValueControllerTests {
   }
 
   @Test func forceSoftwareDisplayNoOpsEverywhere() async {
-    // Fork isSw() parity (review R5): the user sets forceSoftware precisely
-    // because the display's DDC wire is broken — the volume/contrast surface
-    // must not hammer it with writes, on any path.
+    // Fork isSw() parity: forceSoftware means the DDC wire is broken, so the
+    // volume/contrast surface must not keep writing to it on any path.
     let harness = Harness(command: .volume, savedValue: 0.5) { prefs in
       prefs.forceSoftware = true
       prefs.startupAction = .read
@@ -229,9 +223,8 @@ struct DDCValueControllerTests {
     #expect(harness.controller.isMuted)
     #expect(harness.prefs.muted) // logical flag persists in BOTH strategies
     let writes = await harness.drainedWrites()
-    // Brief deviation: tuple arrays are not Equatable, so the brief's
-    // `writes == writes.filter(...)` cannot compile; allSatisfy asserts the
-    // same thing — every write rode 0x62, no 0x8D traffic.
+    // Tuple arrays are not Equatable, so allSatisfy stands in for a comparison:
+    // every write rode 0x62, no 0x8D traffic.
     #expect(writes.allSatisfy { $0.command == VCP.audioSpeakerVolume })
     #expect(writes.last?.value == 0)
     #expect(harness.controller.value == 0.5) // stored volume untouched — unmute restores it
@@ -289,10 +282,9 @@ struct DDCValueControllerTests {
   }
 
   @Test func unmuteBySettingTheSameValueStillRewritesTheRegister() async {
-    // Concurrency F5: default strategy muted → the register holds 0 while
-    // `value` keeps the stored level. A slider click landing EXACTLY on the
-    // stored value must still rewrite the register — the `changed` guard
-    // alone would leave the panel silent behind an unmuted UI.
+    // Concurrency F5: muted under the default strategy, the register holds 0 while
+    // `value` keeps the stored level. A click landing exactly on the stored value
+    // must still rewrite, or the `changed` guard leaves the panel silent.
     let harness = Harness(command: .volume, savedValue: 0.5) { $0.muted = true }
     harness.controller.setValue(0.5)
     #expect(harness.controller.isMuted == false)
@@ -304,10 +296,9 @@ struct DDCValueControllerTests {
   // MARK: - Mute strategy switched mid-session (test-design F4; D2 supports live pref flips)
 
   @Test func strategySwitchToWireModeUnmutesWithWireTwoAndVolumeRestore() async {
-    // Muted under the default strategy (register holds 0), user flips
-    // enableMuteUnmute on via `defaults write`, then unmutes: BOTH the wire-2
-    // companion and the volume rewrite must go out — the register still holds
-    // the old strategy's 0.
+    // Muted under the default strategy, then enableMuteUnmute flipped on: both the
+    // wire-2 companion and the volume rewrite must go out, since the register
+    // still holds the old strategy's 0.
     let harness = Harness(command: .volume, savedValue: 0.5)
     _ = harness.controller.toggleMute(isFresh: true) // volume-0 mute
     _ = await harness.drainedWrites()
@@ -319,12 +310,9 @@ struct DDCValueControllerTests {
   }
 
   @Test func strategySwitchToVolumeZeroModeUnmutesThroughTheVolumeWriteOnly() async {
-    // Muted under enableMuteUnmute (0x8D=1 on the wire, register untouched),
-    // pref flipped off, then unmute: the default strategy sends no 0x8D
-    // traffic, so the volume rewrite is the whole unmute. NOTE the recorded
-    // hazard: the panel may stay hardware-0x8D-muted — the fork's settings UI
-    // un-mutes BEFORE persisting the pref flip; that guard is an M5 settings
-    // behavior (see the plan's M5 deferrals section).
+    // Muted over 0x8D, pref flipped off, then unmute: the default strategy sends
+    // no 0x8D, so the volume rewrite is the whole unmute. Hazard: the panel can
+    // stay hardware-muted, which is why D29 rule 1 unmutes before the pref flip.
     let harness = Harness(command: .volume, savedValue: 0.5) { $0.enableMuteUnmute = true }
     _ = harness.controller.toggleMute(isFresh: true) // wire-1 mute
     _ = await harness.drainedWrites()
@@ -339,10 +327,9 @@ struct DDCValueControllerTests {
   // MARK: - The display's own denial of VCP 0x8D (D24, one register over)
 
   @Test func dragToZeroOnADisplayThatDeniesTheMuteCommandWritesNoMuteWire() async {
-    // The whole defect: the mute companion wrote 0x8D on the value-crossing
-    // path with no verdict consulted, so a display that lists no 0x8D got a
-    // write it refuses, a persisted mute, and a muted HUD for silence nobody
-    // achieved.
+    // The defect: the mute companion wrote 0x8D on the value-crossing path without
+    // consulting the verdict, so a display listing no 0x8D got a refused write,
+    // a persisted mute, and a muted HUD for silence nobody achieved.
     let harness = Harness(
       command: .volume, savedValue: 0.5, muteWireSupport: .unsupported
     ) { $0.enableMuteUnmute = true }
@@ -383,10 +370,9 @@ struct DDCValueControllerTests {
   }
 
   @Test func unmutingIsNeverGatedByTheDisplaysDenial() async {
-    // D29 rule 3, and the reason the gate is one-directional: the verdict can
-    // arrive AFTER a 0x8D mute was sent under `.unknown`, so the route back
-    // must not consult it. Both unmute routes are checked, the toggle and the
-    // value crossing.
+    // D29 rule 3, and why the gate is one-directional: the verdict can arrive
+    // after a 0x8D mute was sent under `.unknown`, so the route back (toggle
+    // and value crossing, both checked here) must not consult it.
     let toggled = Harness(
       command: .volume, savedValue: 0.5, muteWireSupport: .unsupported
     ) { prefs in
@@ -411,10 +397,8 @@ struct DDCValueControllerTests {
 
   @Test func restoreOfAMutedDisplayUnderTheDenialReassertsTheVolumeRegister() async {
     // The startup/wake half of the same defect. The dedicated-strategy restore
-    // deliberately writes ONLY the mute wire and skips the value, which is
-    // licensed by that wire carrying the silence. Where the display denies it,
-    // the skip would leave the app's mute standing over a register it never
-    // wrote and never restored.
+    // skips the value because the mute wire carries the silence; where the
+    // display denies that wire, the skip leaves nothing muted at all.
     let harness = Harness(
       command: .volume, savedValue: 0.5, muteWireSupport: .unsupported
     ) { prefs in
@@ -429,10 +413,9 @@ struct DDCValueControllerTests {
   }
 
   @Test func theUnmutedRestoreSendsWireTwoEvenWhereTheRegisterIsDenied() async {
-    // The load-bearing unmute after the launch window: an unmuted display's
-    // restore is what clears a 0x8D mute sent before the verdict landed, so
-    // this wire must not learn about the verdict. Gating it passes every other
-    // test in this file, which is why it has one of its own.
+    // An unmuted display's restore is what clears a 0x8D mute sent before the
+    // verdict landed, so this wire must not consult the verdict. Gating it
+    // passes every other test in this file, hence a test of its own.
     let harness = Harness(
       command: .volume, savedValue: 0.5, muteWireSupport: .unsupported
     ) { $0.enableMuteUnmute = true }
@@ -508,9 +491,8 @@ struct DDCValueControllerTests {
   }
 
   @Test func arebindDropsTheAssumptionWithTheRestOfTheServiceState() async {
-    // The record names a restore issued over a service the rebind just
-    // replaced, so it goes with the memos and the last-submitted targets. The
-    // pass that rebinds runs its own restore, which records it again.
+    // The record names a restore issued over the service the rebind replaced, so
+    // it drops with the memos. The rebinding pass runs its own restore.
     let harness = Harness(
       command: .volume, savedValue: 0.5, muteWireSupport: .unknown
     ) { prefs in
@@ -525,9 +507,8 @@ struct DDCValueControllerTests {
   }
 
   @Test func theMuteReadbackIsSkippedWhereTheDisplayDeniesTheRegister() async {
-    // Reading 0x8D on a display that lists no 0x8D and adopting the answer
-    // would record a mute state nothing ever wrote. One read happens (the
-    // value read); the mute loop never runs.
+    // Adopting a 0x8D read from a display that lists no 0x8D would record a mute
+    // state nothing wrote. Only the value read happens; the mute loop never runs.
     let scripted = ScriptedDDC(reads: [(current: 50, max: 100), (current: 1, max: 2)])
     let harness = Harness(
       command: .volume, savedValue: 0.25, writer: scripted, muteWireSupport: .unsupported
@@ -671,10 +652,9 @@ struct DDCValueControllerTests {
   }
 
   @Test func mutedReadOfRegisterZeroKeepsTheSavedVolume() async {
-    // Fix round 1 F1: muted in the default strategy, the register holds 0 as
-    // the MUTE ARTIFACT, not information. A `.read` relaunch seeing
-    // (0, 100) — a technically valid read — must not adopt/persist 0, or the
-    // unmute restore target is destroyed (next unmute restores 1/16, not 0.5).
+    // Muted in the default strategy, the register holds 0 as the mute artifact,
+    // not information. A `.read` relaunch seeing a valid (0, 100) must not adopt
+    // it, or the unmute restore target is gone (next unmute gives 1/16, not 0.5).
     let scripted = ScriptedDDC(reads: [(current: 0, max: 100)])
     let harness = Harness(command: .volume, savedValue: 0.5, writer: scripted) { prefs in
       prefs.startupAction = .read
@@ -687,12 +667,10 @@ struct DDCValueControllerTests {
   }
 
   @Test func muteLandingDuringTheValueReadBailsTheMuteReadback() async {
-    // Fix round 1 F2 regression pin: the mute generation is captured BEFORE
-    // the value read loop. A `toggleMute` landing mid-value-read bumps that
-    // generation, so the 0x8D readback pass must recognise the user's fresh
-    // mute as newer and bail. Sink the capture below the value loop and the
-    // capture already includes the bump — the readback's (current: 2) then
-    // clobbers the fresh mute back to unmuted and this test goes red.
+    // F2 regression pin: the mute generation is captured BEFORE the value read
+    // loop, so a `toggleMute` landing mid-read reads as newer and the 0x8D
+    // readback bails. Sink the capture below the loop and it already includes the
+    // bump, so the readback's (current: 2) clobbers the user's fresh mute.
     let scripted = ScriptedDDC(
       reads: [(current: 50, max: 100), (current: 2, max: 2)], // value read, then 0x8D says "unmuted"
       hookAfterRead: 1
@@ -739,11 +717,10 @@ struct DDCValueControllerTests {
   }
 
   @Test func restoreWhileMutedWithEnableMuteUnmuteSubmitsOnlyTheMuteWire() async {
-    // Review R2: the value and 0x8D coalescers drain independently, so a
-    // submitted PAIR races to the writer actor — and many panels treat a
-    // 0x62 write as an implicit unmute. The D5 wake chain re-rolls that race
-    // 10 times. While muted, the mute wire IS the restore; the volume value
-    // is written only when unmuted.
+    // The value and 0x8D coalescers drain independently, so a submitted pair races
+    // to the writer actor, and many panels treat a 0x62 write as an implicit
+    // unmute. While muted the mute wire IS the restore; the value waits for the
+    // unmute.
     let harness = Harness(command: .volume, savedValue: 0.5) { prefs in
       prefs.enableMuteUnmute = true
       prefs.muted = true
@@ -820,12 +797,10 @@ struct DDCValueControllerTests {
 
   // MARK: - Read evidence at the call site (B3)
 
-  /// The enum's own tests cannot catch a call site that stops folding, and no
-  /// test asserted this controller ever publishes anything at all — replacing
-  /// the fold with a plain assignment left the whole suite green. These pin
-  /// the published verdict, and with it the SCOPE of the fold: worst-wins
-  /// among a pass's failed attempts, superseded by a success, superseded again
-  /// by the next pass that asks.
+  /// Replacing the fold with a plain assignment left the whole suite green: the
+  /// enum's own tests cannot see a call site that stops folding. These pin the
+  /// fold's scope: worst-wins within a pass, beaten by a success, then by the
+  /// next pass.
 
   @Test func azerosAnsweringPanelPublishesAllZeros() async {
     let harness = Harness(command: .contrast, savedValue: 0.6) { $0.startupAction = .read }
@@ -841,12 +816,9 @@ struct DDCValueControllerTests {
     #expect(harness.controller.readEvidence == .noReply)
   }
 
-  /// The defect this whole scope change exists to remove. The retry loop is
-  /// there BECAUSE DDC reads are flaky, so "attempt 1 silent, attempt 2
-  /// answers" is the ordinary healthy case — and folding those monotonically
-  /// published "this display does not reply" about a panel whose value the
-  /// very same pass then adopted. A read that eventually succeeded is a read
-  /// that succeeded.
+  /// The retry loop exists because DDC reads are flaky, so "attempt 1 silent,
+  /// attempt 2 answers" is the healthy case. Folding those monotonically
+  /// published "does not reply" about a panel the same pass then adopted.
   @Test func asuccessfulRetryAfterAFailedAttemptReportsAnswered() async {
     let scripted = ScriptedDDC(reads: [nil, (current: 0, max: 0), (current: 30, max: 100)])
     let harness = Harness(command: .contrast, savedValue: 0.6, writer: scripted) {
@@ -857,10 +829,8 @@ struct DDCValueControllerTests {
     #expect(harness.controller.readEvidence == .answered) // …and says so
   }
 
-  /// The half that must NOT be weakened: within one pass, a later silent
-  /// attempt cannot erase an earlier zeros answer. `allZeros` outranks
-  /// `noReply` because it is the more specific finding, and it is the one that
-  /// names the fault.
+  /// Within one pass a later silent attempt cannot erase an earlier zeros answer:
+  /// `allZeros` outranks `noReply` because it names the fault.
   @Test func withinOnePassASilentRetryDoesNotEraseAZerosAnswer() async {
     let scripted = ScriptedDDC(reads: [(current: 0, max: 0), nil, nil])
     let harness = Harness(command: .contrast, savedValue: 0.6, writer: scripted) {
@@ -884,16 +854,10 @@ struct DDCValueControllerTests {
     #expect(harness.controller.readEvidence == .allZeros)
   }
 
-  /// A DIFFERENT panel on the same object, so both read-derived facts go back
-  /// to their "nothing learned" state. Not academic: `AppModel.performRefresh`
-  /// REUSES these controllers for any display whose `CGDirectDisplayID`
-  /// reappears, and macOS reassigns those IDs across a replug — a different
-  /// physical monitor on the same port inherits this object.
-  ///
-  /// `readMax` is the one that moves bytes: `nil` means "assume 100", so a
-  /// panel that had reported a max below 100 is written against 100 again
-  /// until the new panel answers. Deliberate, and asserted rather than left to
-  /// be discovered — see `rebind(writer:panelIdentity:)`.
+  /// `AppModel.performRefresh` reuses a controller for any display whose
+  /// `CGDirectDisplayID` reappears, and macOS reassigns those IDs across a replug,
+  /// so a different physical monitor inherits this object. `readMax` back to `nil`
+  /// costs bytes: writes scale against an assumed 100 until the new panel answers.
   @Test func arebindToADifferentPanelReturnsTheReadbackMaxToAssumed() async {
     let harness = Harness(command: .contrast, savedValue: 0.6, panelIdentity: "panel-A") {
       $0.startupAction = .read
@@ -908,13 +872,9 @@ struct DDCValueControllerTests {
     #expect(harness.controller.readEvidence == .notAttempted)
   }
 
-  /// The counterpart, and the regression the first ruling shipped:
-  /// `AppModel.performRefresh` rebinds every KEPT display on EVERY pass, not
-  /// only after a replug, so a reset keyed on the CALL rather than on a change
-  /// of panel drops a readable panel's reported maximum on every wake and
-  /// every reconfiguration. Here that costs real bytes — `readMax == nil`
-  /// means writes scale against 100 — and the recovering re-read is a no-op
-  /// unless `startupAction == .read`, which it usually is not.
+  /// `performRefresh` rebinds every kept display on every pass, not only after a
+  /// replug, so a reset keyed on the call drops a readable panel's maximum on
+  /// every wake. The recovering re-read only runs under `startupAction == .read`.
   @Test func arebindToTheSamePanelKeepsWhatThatPanelReported() async {
     let harness = Harness(command: .contrast, savedValue: 0.6, panelIdentity: "panel-A") {
       $0.startupAction = .read
@@ -928,22 +888,11 @@ struct DDCValueControllerTests {
     #expect(harness.controller.readEvidence == .answered)
   }
 
-  /// The clause the whole per-pass scope rests on, and until now the only one
-  /// nothing pinned: `refreshFromHardware` seeds `passEvidence` from
-  /// `.notAttempted`, not from the standing `readEvidence`. Seeding it from
-  /// `readEvidence` — the obvious "surely we should keep folding" edit —
-  /// left every other test in this suite green.
-  ///
-  /// The case that separates them: pass 1 gets the MAG's zeros answer, pass 2
-  /// goes completely silent. `allZeros` outranks `noReply`, so the carried
-  /// seed would republish `.allZeros` — "this panel answers with zeros" about
-  /// a panel that, on the only evidence this pass has, is not answering at
-  /// all. The verdict is the CURRENT pass's, and the current pass heard
-  /// nothing.
-  ///
-  /// Note what is NOT weakened: within pass 2 every attempt still folds
-  /// worst-wins (`withinOnePassASilentRetryDoesNotEraseAZerosAnswer` pins that
-  /// half). Only the seed changed scope.
+  /// `refreshFromHardware` seeds `passEvidence` from `.notAttempted`, not from the
+  /// standing `readEvidence`. Seeding from `readEvidence` left every other test in
+  /// this suite green: the case that separates them is a zeros answer followed by
+  /// a pass that hears nothing, where the carried seed republishes `.allZeros`.
+  /// Within a pass attempts still fold worst-wins; only the seed is per-pass.
   @Test func apassThatHearsOnlySilenceReportsSilenceNotTheOldZeros() async {
     let harness = Harness(command: .contrast, savedValue: 0.6) { $0.startupAction = .read }
     await harness.fake.setReadResult((current: 0, max: 0))
@@ -957,10 +906,8 @@ struct DDCValueControllerTests {
 
   // MARK: - The mute queue's own drain (the register the strand is about)
 
-  /// The value register and the mute register ride separate coalescers, and only
-  /// the second carries 0x8D. A drain that reported the value queue's health
-  /// would be certifying the wrong register, so the mute queue gets its own
-  /// skip-and-retry, pinned here.
+  /// Value and mute ride separate coalescers and only the second carries 0x8D, so
+  /// a drain reporting the value queue's health would certify the wrong register.
   @Test func aMuteWireTheEpochGateSkippedIsNotReportedAsLanded() async {
     let defaults = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
@@ -990,22 +937,18 @@ struct DDCValueControllerTests {
     )
   }
 
-  /// The memo says a value is already in the register, so the queue skips the
-  /// write and the drain counts it as landed. That holds only if the memo
-  /// describes a register the panel was really taking writes into: under HDR an
-  /// I2C write is acknowledged and swallowed, so a memo built through an HDR
-  /// window records values that never arrived, and the skip would then certify
-  /// the reset's own unmute. Dropping the memo is what re-opens the wire.
+  /// A memo skip counts as landed, which holds only if the panel was really taking
+  /// writes. Under HDR an I2C write is ACKed and swallowed, so a memo built through
+  /// an HDR window records values that never arrived. Dropping it reopens the wire.
   @Test func aMemoDroppedOnTheHDRExitLetsTheSameRawGoOutAgain() async {
     let defaults = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
     let fake = FakeDDC(readResult: nil)
     let volume = DDCValueController(writer: fake, command: .volume, prefs: prefs)
 
-    // Stands in for a write the display ACKed while it was in HDR: recorded in
-    // the memo as though it had landed, when the panel swallowed it. Two
-    // published values that scale to the SAME raw, because that is what the
-    // memo compares and therefore what it can suppress.
+    // Stands in for a write the display ACKed under HDR and swallowed. Two
+    // published values scaling to the same raw, since the raw is what the memo
+    // compares and therefore what it can suppress.
     volume.setValue(0.301)
     await volume.waitForPendingWrites()
     let before = await fake.recordedWrites().count
@@ -1021,9 +964,8 @@ struct DDCValueControllerTests {
 
   // MARK: - reassertHardware (the settings reset's door)
 
-  /// The post-reset shape: a wiped store, so the controller republishes the
-  /// assumed default and `restoreToHardware` would refuse to send it (no saved
-  /// value) while `setValue(0.75)` would return before the submit (unchanged).
+  /// The post-reset shape: with the store wiped, `restoreToHardware` refuses to
+  /// send (no saved value) and `setValue(0.75)` returns before the submit.
   @Test func reassertSendsTheAssumedContrastDefaultOverAnEmptyStore() async {
     let h = Harness(command: .contrast) // no savedValue: the domain was wiped
     #expect(h.controller.value == 0.75)

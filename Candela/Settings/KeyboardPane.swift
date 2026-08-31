@@ -2,11 +2,9 @@ import CandelaKit
 import KeyboardShortcuts
 import SwiftUI
 
-/// The Keyboard pane's navigation path, owned by `SettingsRootView` beside the
-/// display destinations' and the OLED pane's paths, and injected here because
-/// the pane's root is built by the registry with no arguments. The default is
-/// a no-op constant, so any view rendered outside the injection can render but
-/// never navigate.
+/// The Keyboard pane's navigation path, owned by `SettingsRootView` and injected
+/// because the registry builds the pane root with no arguments. The default is a
+/// no-op, so a view rendered outside the injection renders but never navigates.
 private struct KeyboardPathKey: EnvironmentKey {
   static let defaultValue: Binding<[KeyboardPage]> = .constant([])
 }
@@ -18,20 +16,18 @@ extension EnvironmentValues {
   }
 }
 
-/// Keyboard input settings as a hub (KMR1): the keycap hero answers "what do
-/// my keys do right now", the two mode pickers and their conditional recorders
-/// stay on the root because they are the change-often controls, and the
-/// reference legend and the set-once targeting and precision controls live one
+/// Keyboard input settings as a hub (KMR1): the keycap hero answers "what do my
+/// keys do right now", the mode pickers and their recorders stay on the root as
+/// the change-often controls, and the legend and the set-once controls sit one
 /// push deeper behind chevron rows that preview their value (KMR4).
 ///
-/// Layout follows the HIG's reading-order rule (layout.md): the Accessibility
-/// warning is the pane's most important state, so it sits at the TOP — a mode
-/// that wants the media-key tap does nothing at all without the grant, and
-/// every control below it is inert until that is fixed.
+/// The Accessibility warning sits at the TOP (HIG reading order, layout.md): a
+/// mode that wants the media-key tap does nothing without the grant, so every
+/// control below it is inert until that is fixed.
 ///
-/// `@MainActor` is load-bearing: `SettingsActions` is
-/// `@MainActor`, and a plain `struct … : View` has nonisolated stored and
-/// computed properties under Swift 6 complete concurrency.
+/// `@MainActor` is load-bearing: `SettingsActions` is `@MainActor`, and a plain
+/// `struct … : View` has nonisolated properties under Swift 6 complete
+/// concurrency.
 @MainActor
 struct KeyboardPane: View {
   @Environment(AppModel.self) private var model
@@ -41,18 +37,14 @@ struct KeyboardPane: View {
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
 
   var body: some View {
-    // `.refreshUI` (on every known PrefName) is the ONLY invalidation signal
-    // this pane has; `DisplayPrefs` is plain UserDefaults and not observable.
-    // Without this reference `body` never re-evaluates after a picker writes,
-    // so the recorder rows below would never appear and the picker would look
-    // like it snapped back.
+    // `.refreshUI` is the ONLY invalidation signal this pane has; `DisplayPrefs`
+    // is plain UserDefaults and not observable. Without this reference the
+    // recorder rows never appear and a picker looks like it snapped back.
     let _ = model.prefsRevision
     SettingsPageScaffold {
       // "Set to take" rather than "handled here": lit-ness is
-      // `KeyModePolicy.watchesMediaKeys` and knows nothing about the
-      // Accessibility grant, so a subtitle claiming achieved reach would be
-      // refuted by the warning card one line below it whenever the grant is
-      // missing. This wording is true in both grant states.
+      // `KeyModePolicy.watchesMediaKeys` and knows nothing about the grant, so a
+      // subtitle claiming achieved reach would be refuted by the warning below.
       SettingsPageHeader(
         title: "Keyboard",
         subtitle:
@@ -68,19 +60,14 @@ struct KeyboardPane: View {
 
   // MARK: - Accessibility
 
-  /// Shown only when a mode that actually needs the CGEvent tap is selected
-  /// AND the grant is missing. Custom shortcuts are Carbon hotkeys and work
-  /// without the grant (`KeyModePolicy.requiresAccessibility`), so an
-  /// all-custom rig is never warned about a permission it does not use: the
-  /// same gate as on `SettingsActions.recheckPermissions`.
+  /// Shown only when a mode needing the CGEvent tap is selected AND the grant is
+  /// missing: custom shortcuts are Carbon hotkeys and work without it
+  /// (`KeyModePolicy.requiresAccessibility`), so an all-custom rig is never
+  /// warned about a permission it does not use.
   ///
-  /// `AppModel.accessibility` polls while the grant is missing, so this row
-  /// clears itself the moment the grant appears; no reopen, no relaunch.
-  ///
-  /// The predicate is `AccessibilityPermission.isWarningWarranted`, the SAME
-  /// property the panel's banner gates on, not a second local copy of the rule.
-  /// Two implementations of one rule is exactly how the pane and the banner end
-  /// up disagreeing on an all-custom rig.
+  /// The predicate is `AccessibilityPermission.isWarningWarranted`, the same one
+  /// the panel's banner gates on: two copies of the rule is how the pane and the
+  /// banner end up disagreeing on an all-custom rig.
   @ViewBuilder private var accessibilitySection: some View {
     if model.accessibility.isWarningWarranted {
       SettingsNotice {
@@ -104,14 +91,10 @@ struct KeyboardPane: View {
 
   // MARK: - Hero
 
-  /// The self-annotating keycap strip (KMR2). Every input comes from the same
-  /// prefs and policies the engine uses (KMR3), read here so the strip
-  /// re-derives on the same `prefsRevision` bump the controls below cause.
-  /// The good-news Accessibility line gates itself inside the hero; while the
-  /// warning above is warranted it stays silent, so the two never both speak.
-  ///
-  /// Uncarded: the strip is the page's subject rather than one more group of
-  /// rows, and the deadspace around it is what makes it read as a hero.
+  /// The self-annotating keycap strip (KMR2), derived from the same prefs and
+  /// policies the engine uses (KMR3). The good-news Accessibility line gates
+  /// itself inside the hero, so it and the warning above never both speak.
+  /// Uncarded: the deadspace around it is what makes it read as a hero.
   private var heroSection: some View {
     KeyboardKeysHero(
       brightnessMode: prefs.keyboardBrightness,
@@ -129,8 +112,8 @@ struct KeyboardPane: View {
     SettingsCardSection(title: "Brightness and Contrast Keys") {
       SettingRow {
         // Explicit enum tags, never `enumerated()` positions (fork QUIRK): the
-        // raw values are shipped on-disk schema (D22) and the UI order is not
-        // the raw order.
+        // raw values are shipped on-disk schema (D22), and UI order is not raw
+        // order.
         ThemedChoiceRow(label: "Control brightness with:", selection: Binding(
           get: { prefs.keyboardBrightness },
           set: { setBrightnessMode($0) }
@@ -138,19 +121,18 @@ struct KeyboardPane: View {
           Text("The keyboard's brightness keys").tag(KeyMode.media)
           Text("Custom shortcuts").tag(KeyMode.custom)
           Text("Both").tag(KeyMode.both)
-          // D25: the fork's "Disable keyboard" disables no keyboard; it stops
-          // THIS APP from handling one key family. Under a "Control brightness
-          // with:" row label the honest item is "Nothing".
+          // D25: the fork's "Disable keyboard" disables no keyboard, it stops
+          // this app from handling one key family. Under a "Control brightness
+          // with:" label the honest item is "Nothing".
           Text("Nothing").tag(KeyMode.disabled)
         }
         .prefIdentifier(.keyboardBrightness)
       }
 
       if KeyModePolicy.firesCustomShortcuts(prefs.keyboardBrightness) {
-        // The recorder is KeyboardShortcuts' own control: the row frames it and
-        // its internals stay the package's. A titled recorder is a
-        // `LabeledContent`, so the scaffold's style gives it this window's row
-        // grammar for free.
+        // KeyboardShortcuts' own control, framed by the row. A titled recorder
+        // is a `LabeledContent`, so the scaffold's style gives it this window's
+        // row grammar for free.
         SettingsCardDivider()
         KeyboardShortcuts.Recorder("Brightness down:", name: .brightnessDown)
         SettingsCardDivider()
@@ -209,31 +191,26 @@ struct KeyboardPane: View {
       }
 
       if KeyModePolicy.watchesMediaKeys(prefs.keyboardVolume) {
-        // Under the card, where a section footer went: it is about the whole
-        // family rather than any one row. The output-device rule is NOT
-        // restated here. It does not hold in every mode (name matching never
-        // consults it), and the Targeting page's `volumeTargetCaption` already
-        // states it beside the picker that decides whether it applies.
+        // Under the card: it is about the whole family, not one row. The
+        // output-device rule is NOT restated here; it does not hold in every
+        // mode (name matching never consults it), and the Targeting page states
+        // it beside the picker that decides whether it applies.
         SettingsCaption("While macOS reports an output device, the volume keys go to it instead whenever no display those keys would reach can take the command they send. Option on its own opens Sound settings.")
       }
     }
   }
 
-  /// Why a bare letter looks like it does nothing.
-  ///
-  /// A recorder silently ignores a key pressed without a modifier, which reads
-  /// as a broken control — press "k", nothing happens, conclude the field is
-  /// dead. The rule is not arbitrary: these are system-wide hotkeys, so a
-  /// bare key would capture that key in every other app.
+  /// Why a bare letter looks like it does nothing: a recorder silently ignores a
+  /// key pressed without a modifier. These are system-wide hotkeys, so a bare key
+  /// would capture that key in every other app.
   private static let modifierHint: LocalizedStringKey =
     "Click a field and press the keys you want. A shortcut has to include ⌘, ⌃, ⌥ or ⇧. A letter or number on its own is ignored, because it would be captured in every app."
 
   // MARK: - More (KMR4)
 
-  /// The two pushed pages: the reference legend and the set-once controls.
-  /// Both rows are always present; a nav row that appears and disappears
-  /// breaks path retention (KMR5), so inactivity is stated on the page rather
-  /// than by hiding the way there.
+  /// Both rows are always present: a nav row that appears and disappears breaks
+  /// path retention (KMR5), so inactivity is stated on the page rather than by
+  /// hiding the way there.
   private var moreSection: some View {
     SettingsCardSection(title: "More") {
       NavigationRow(
@@ -254,19 +231,15 @@ struct KeyboardPane: View {
 
   // MARK: - Writes
   //
-  // Every write goes pref → shortcut registration → `prefDidChange`. A control
-  // that writes a pref and does not propagate is a broken control: the engine
-  // reads prefs at construction and at key time, not reactively (D20).
-  // `prefDidChange` takes a `PrefName` case, never a string (D27).
-  // The targeting and precision writes moved to `KeyboardTargetingPage` with
-  // their controls (KMR6).
+  // Every write goes pref → shortcut registration → `prefDidChange`, with a
+  // `PrefName` case, never a string (D27). The engine reads prefs at
+  // construction and at key time, not reactively (D20), so a control that
+  // writes a pref and does not propagate is broken.
 
   /// Without this call site a mode change never re-arms the media-key tap, so
-  /// the setting appears to do nothing until relaunch.
-  /// `.keyboardBrightness` fans out to rearmTap + recheckPermissions + refreshUI
-  /// — the recheck is D2 bug 2 (the fork's `handleListenForChanged` has zero
-  /// call sites, so switching INTO a media-key mode never re-prompts for
-  /// Accessibility).
+  /// the setting appears to do nothing until relaunch. The `.keyboardBrightness`
+  /// row also rechecks permissions (D2 bug 2: the fork never re-prompts for
+  /// Accessibility when switching INTO a media-key mode).
   private func setBrightnessMode(_ mode: KeyMode) {
     prefs.keyboardBrightness = mode
     // Registration follows the mode: a shortcut whose family is switched off
@@ -284,8 +257,7 @@ struct KeyboardPane: View {
   private func setInterceptAlternateKeys(_ accept: Bool) {
     prefs.interceptAlternateBrightnessKeys = accept
     // The persisted key stays inverted (`disableAltBrightnessKeys`, D1/D22);
-    // only the label and the accessor are positive. It feeds `tapConfig`, so
-    // its row is rearmTap + refreshUI.
+    // only the label and the accessor are positive.
     actions.prefDidChange(.disableAltBrightnessKeys)
   }
 }

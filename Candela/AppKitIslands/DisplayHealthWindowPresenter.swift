@@ -2,24 +2,20 @@ import AppKit
 import CandelaKit
 import SwiftUI
 
-/// Presents Display Health windows (OCR-A1, #185) as an AppKit island, the
-/// pattern `StatusItemController` already holds for the confirmation windows.
+/// Presents Display Health windows (OCR-A1) as an AppKit island, the pattern
+/// `StatusItemController` already holds for the confirmation windows.
 ///
-/// NOT a SwiftUI `WindowGroup`: adding one to this LSUIElement app changed
-/// PLAIN launch behavior, opening the settings window where a control build
-/// opened nothing [MEASURED 2026-08-17, control-verified against the
-/// pre-#185 installed build], and the API that would suppress that
-/// (`defaultLaunchBehavior(.suppressed)`) does not exist at the macOS 14
-/// floor (§4). An NSWindow made on demand changes nothing at launch by
-/// construction.
+/// NOT a SwiftUI `WindowGroup`: adding one to this LSUIElement app changed PLAIN
+/// launch behavior, opening the settings window where a control build opened
+/// nothing [MEASURED 2026-08-17], and the API that would suppress that
+/// (`defaultLaunchBehavior(.suppressed)`) does not exist at the macOS 14 floor
+/// (§4). An NSWindow made on demand changes nothing at launch by construction.
 ///
-/// One window per persistence key: `open(key:)` re-focuses an existing
-/// window rather than duplicating it, and the in-window display switcher
-/// re-keys its window so the map keeps one surface per display. Windows are
-/// non-resizable by the user; `NSHostingView.sizingOptions =
-/// .preferredContentSize` sizes each to its SwiftUI content and follows the
-/// switcher's shape changes, which is the whole point of the window: a
-/// portrait display's map gets a portrait window.
+/// One window per persistence key: `open(key:)` re-focuses an existing window
+/// rather than duplicating it, and the in-window display switcher re-keys its
+/// window. `NSHostingView.sizingOptions = .preferredContentSize` sizes each to
+/// its SwiftUI content and follows the switcher's shape changes, which is the
+/// whole point: a portrait display's map gets a portrait window.
 @MainActor
 final class DisplayHealthWindowPresenter {
   private let model: AppModel
@@ -41,29 +37,27 @@ final class DisplayHealthWindowPresenter {
       // resize would fight `preferredContentSize` sizing.
       styleMask: [.titled, .closable, .miniaturizable],
       backing: .buffered, defer: false)
-    // "Heat Map" since 2026-08-20: the row above it on the OLED Care page is
-    // "Health", and two neighbouring doorways called Health and Display Health
-    // told nobody which was which. The type keeps its name; scripts that
-    // select windows by title exclude both spellings.
+    // "Heat Map", not "Display Health": the row above it on the OLED Care page
+    // is "Health", and two neighbouring doorways called Health and Display
+    // Health told nobody which was which. The type keeps its name.
     window.title = "Heat Map"
-    // Dark-only (SV2), on the WINDOW and not just in SwiftUI: the titlebar,
-    // the traffic lights and the AppKit-drawn display switcher inside take
-    // their look from the window's appearance, and a light titlebar over the
-    // page's canvas is the seam this window is opened from settings to avoid.
+    // Dark-only (SV2), on the WINDOW and not just in SwiftUI: the titlebar, the
+    // traffic lights and the AppKit-drawn switcher take their look from the
+    // window's appearance, and a light titlebar over the page's canvas is the
+    // seam this avoids.
     window.appearance = NSAppearance(named: .darkAqua)
-    // The rest of that seam: a transparent titlebar draws the window's own
-    // background instead of its material, so the strip above the page is the
-    // canvas ground rather than a lighter bar laid over it. NOT
-    // `fullSizeContentView`, which would run the content under the titlebar,
-    // and the title stays visible: it is what names this window in the Window
-    // menu and tells it apart from the settings window that opened it.
+    // A transparent titlebar draws the window's own background instead of its
+    // material, so the strip above the page is the canvas ground rather than a
+    // lighter bar. NOT `fullSizeContentView`, which would run the content under
+    // the titlebar, and the title stays visible: it names this window in the
+    // Window menu.
     window.titlebarAppearsTransparent = true
     // The canvas's own ground colour, duplicated deliberately: an AppKit
     // window cannot read a SwiftUI view's fill, and the two only have to agree
     // across the strip the titlebar covers.
     window.backgroundColor = NSColor(srgbRed: 0.035, green: 0.035, blue: 0.06, alpha: 1)
-    // State restoration would resurrect the window at the next launch with
-    // no display resolution having run, the unprompted-window defect class.
+    // State restoration would resurrect the window at the next launch with no
+    // display resolution having run: the unprompted-window defect class.
     window.isRestorable = false
     // We own the lifetime through `windows`; AppKit must not deallocate a
     // closed window out from under the dictionary prune.
@@ -107,10 +101,9 @@ final class DisplayHealthWindowPresenter {
     window.makeKeyAndOrderFront(nil)
   }
 
-  /// The in-window switcher moved `window` from one display to another. If
-  /// the target display already has its own window, that one closes: the
-  /// user deliberately steered THIS window there, and two windows on one
-  /// display's map is what the one-per-key rule exists to prevent.
+  /// The in-window switcher moved `window` from one display to another. If the
+  /// target display already has its own window, that one closes: two windows on
+  /// one display's map is what the one-per-key rule exists to prevent.
   private func rekey(window: NSWindow, from old: String, to new: String) {
     if let occupying = windows[new], occupying !== window {
       occupying.close()

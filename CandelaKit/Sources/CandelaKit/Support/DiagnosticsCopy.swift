@@ -2,12 +2,10 @@ import Foundation
 
 /// Every sentence the diagnostics surfaces derive from a value, in one place.
 ///
-/// Moved here out of `DiagnosticsPage` (#127) without a word changed. The page
-/// composed these inline, interleaved with its own layout, where the app target
-/// has no test to hold them: "a pane that needs a test has too much in it". The
-/// distinctions below are the whole point of the diagnostics feature and several
-/// of them are one careless edit away from collapsing into a generic sentence,
-/// so each is pinned by `DiagnosticsCopyTests`.
+/// In Kit rather than in the page because the app target has no test to hold
+/// these, and the distinctions below are the whole point of the feature: each is
+/// one careless edit from collapsing into a generic sentence, and each is pinned
+/// by a test.
 ///
 /// The three that matter most, all of them defects this feature exists to
 /// prevent rather than hypotheticals:
@@ -18,21 +16,16 @@ import Foundation
 /// - volume unavailable because the DISPLAY denied it is a different sentence
 ///   from volume unavailable because a SETTING turned it off.
 ///
-/// It also carries the strings the page and the diagnostics REPORT share. One
-/// vocabulary on purpose: the page and the report describe the same facts, and a
-/// second set of sentences for the report is a second set to keep true. The
-/// report's field values are therefore the page's own words, capitalised the way
-/// the page capitalises them: `readback: Answers reads`, not `readback: answers
-/// reads`. That is the casing ruling this file owns.
+/// The page and the diagnostics REPORT share one vocabulary: a second set of
+/// sentences for the report is a second set to keep true. The report's field
+/// values are the page's own words with the page's capitalisation
+/// (`readback: Answers reads`), and that casing ruling lives here.
 ///
 /// Returns `String`, never `LocalizedStringKey`, which is why this can live in
-/// Kit at all (CandelaKit imports no SwiftUI). The page's captions and row
-/// labels stay in `DiagnosticsPageCopy` in the app target for exactly that
-/// reason.
+/// Kit at all. The page's captions and row labels stay in `DiagnosticsPageCopy`.
 ///
-/// `app` is the product name, passed in rather than read: `AppInfo.productName`
-/// is provisional and lives in the app target, and a second copy of the literal
-/// here would break the one-line rename it exists to guarantee.
+/// `app` is the product name, passed in rather than read: a second copy of the
+/// literal here would break the one-line rename it exists to guarantee.
 public enum DiagnosticsCopy {
 
   // MARK: - Shared vocabulary
@@ -47,12 +40,11 @@ public enum DiagnosticsCopy {
   /// with an empty one.
   public static let notStated = "Not stated"
 
-  // MARK: - Wire-timing guard (#110)
+  // MARK: - Wire-timing guard
 
-  /// The row label when the guard is on and withheld something. Here rather
-  /// than in the view so the em-dash and key-name guards below cover it: it
-  /// carried an em dash from the day it shipped until #129, precisely because
-  /// a label sitting inline in a 1159-line view was reachable by no test.
+  /// The row label when the guard is on and withheld something. Here rather than
+  /// in the view so the em-dash and key-name guards cover it; inline in the view
+  /// it carried an em dash from the day it shipped, reachable by no test.
   public static let wireTimingWithheldLabel = "Not offered: no matching timing"
 
   /// The row label when the guard is off. `docs/ADVANCED-SETTINGS.md` quotes
@@ -61,8 +53,8 @@ public enum DiagnosticsCopy {
 
   /// Says what WE did and why, never what the display or macOS did (DT30 rule
   /// (d)). Names no pref key: `wireTimingGuard` is a `defaults write` escape
-  /// hatch with no control in the interface (D26), so naming it in a tooltip
-  /// told the user nothing they could act on and broke D25.
+  /// hatch with no control in the interface (D26), so naming it tells the user
+  /// nothing they can act on and breaks D25.
   public static let wireTimingGuardOff = """
     Turned off by an advanced setting. Resolutions the display has no matching \
     timing for are offered again, and some displays scan those out letterboxed \
@@ -136,12 +128,10 @@ public enum DiagnosticsCopy {
   }
 
   /// The identity-keys tooltip. Carries the IOReg PATH and deliberately not
-  /// `ioregMatchScore`: that score is a non-optional `Int` reading 0 both when
-  /// nothing matched and when the CoreDisplay dictionary could not be read at
-  /// all, so any wording for 0 asserts one of two incompatible things; and its
-  /// documented "0…20" ceiling is wrong (the real maximum is 16). A number that
-  /// cannot be worded honestly is not a number to put in front of a user, and
-  /// DT30 rule (g) wants the real one or none.
+  /// `ioregMatchScore`: that score reads 0 both when nothing matched and when
+  /// the CoreDisplay dictionary could not be read at all, so any wording for 0
+  /// asserts one of two incompatible things. DT30 rule (g) wants the real number
+  /// or none.
   public static func ioregPath(_ facts: DisplayHardwareFacts?) -> String {
     guard let facts else { return "The system port path for this display has not been read yet." }
     guard let location = facts.ioDisplayLocation else {
@@ -230,11 +220,8 @@ public enum DiagnosticsCopy {
 
   /// SO5 applied to capabilities: answered, answered-but-unreadable,
   /// asked-and-unanswered, and never-asked are FOUR facts and each gets its own
-  /// sentence. The probe not having run is not the same fact as the display
-  /// having stayed silent, and a display whose description arrived but would not
-  /// parse is not the same fact as either. Collapsing any pair lets the page
-  /// accuse a display that was never asked, or credit one whose answer we could
-  /// not read.
+  /// sentence. Collapsing any pair lets the page accuse a display that was never
+  /// asked, or credit one whose answer we could not read.
   ///
   /// `parsedACommandList` is false when the description did not parse end to end
   /// (D24), which is a DIFFERENT answer from "the display listed no codes".
@@ -305,19 +292,17 @@ public enum DiagnosticsCopy {
   }
 
   /// Three answers, because `didReadMax` being false is not one fact.
-  /// `BrightnessController.refreshFromHardware` returns before it reads for a
-  /// display on the native path or with the brightness command turned off, and
-  /// the pass may simply not have run yet: in all of those it leaves the flag
-  /// false without ever having asked. "The display did not report one" there is
-  /// an absence claim about a probe that never ran, and it renders directly
-  /// above the same section's "has not read from this display".
+  /// `refreshFromHardware` returns before it reads for a display on the native
+  /// path or with the brightness command turned off, and the pass may not have
+  /// run yet, so the flag is false without anything having asked. "The display
+  /// did not report one" there is an absence claim about a probe that never ran.
   ///
-  /// A maximum that was READ says so outright, and never wears the word
-  /// "Assumed" that the other two arms carry.
+  /// A maximum that was READ says so outright, and never wears the "Assumed" the
+  /// other two arms carry.
   ///
   /// Takes the brightness controller's OWN evidence, not the folded worst of
   /// three: the maximum comes from the brightness read alone, so a volume read
-  /// that answered must not be allowed to speak for it.
+  /// that answered must not speak for it.
   public static func brightnessScale(
     didReadMax: Bool, maxValue: UInt16, evidence: DDCReadEvidence, app: String
   ) -> String {
@@ -357,15 +342,14 @@ public enum DiagnosticsCopy {
 
   /// DT30 rule (b), the row that rule exists for. `.unknown` is NOT
   /// "unsupported": `.unsupported` is reachable ONLY from a description that
-  /// parsed cleanly end to end and did not list the code. A page that flattened
-  /// three states to two would grey a working control on a display that merely
-  /// stayed silent. D24's doctrine is that unknown resolves to enabled, and this
-  /// is that doctrine said out loud.
+  /// parsed cleanly end to end and did not list the code, so flattening three
+  /// states to two greys a working control on a display that merely stayed
+  /// silent. D24 resolves unknown to enabled, and this says that out loud.
   ///
   /// `support` is nil when nobody has asked yet, which is not `.unknown`: a
   /// stored `.unknown` means the probe ran and the display said nothing usable.
   /// Folding the two put "this display did not answer" against a display that
-  /// was never spoken to, one row away from the row that states the difference.
+  /// was never spoken to.
   public static func volumeAvailability(
     override: AudioSinkOverride,
     isAvailable: Bool,
@@ -394,14 +378,12 @@ public enum DiagnosticsCopy {
     case .unknown:
       // A stored `.unknown` has TWO producers: the capability read came back
       // nil, OR a string arrived and `CapabilityString.support(forVCP:in:)` fell
-      // through to `.unknown` because it was unbalanced, carried no top-level
-      // `vcp(` tag, or listed no codes. Only the first is silence.
+      // through because it was unbalanced, carried no top-level `vcp(` tag, or
+      // listed no codes. Only the first is silence.
       //
-      // In the second, the description IS populated, and saying "this display
-      // did not answer" there contradicts, three rows apart, the same section's
-      // "The display answered", its verbatim copy of what the display sent, and
-      // "The description did not parse, so … makes no claim about it"
-      // (`codes(in:)` fails on exactly the same three gates, in the same order).
+      // In the second the description IS populated, so "this display did not
+      // answer" would contradict the same section's "The display answered" three
+      // rows away.
       return hasDescription
         ? "Available: \(app) could not read a command list out of this display's description, so the control stays on"
         : "Available: this display sent no answer \(app) could read, so the control stays on"
@@ -415,35 +397,27 @@ public enum DiagnosticsCopy {
   /// The SETTING that turns muting off is a different sentence from the DISPLAY
   /// denying the volume command, and this row is the one place both can reach.
   ///
-  /// The row's help is "VCP 0x8D", so what it answers is whether the display's
-  /// own mute command is the one carrying a mute here. That is the STRATEGY IN
-  /// FORCE and not the pref: `VolumeSliderPolicy.usesDedicatedMuteCommand`
-  /// decides it, and the two demotions it applies (a clean denial of 0x8D, and
-  /// the "always off" override) each leave the engine writing the volume
-  /// register while the pref still asks for the mute command. Read from the pref
-  /// alone this row said "Available" about a command the mute never reached,
-  /// which on a page written for bug reports is the one thing it cannot do.
+  /// The row's help is "VCP 0x8D", so it answers whether the display's own mute
+  /// command is the one carrying a mute. That is the STRATEGY IN FORCE, not the
+  /// pref: `VolumeSliderPolicy.usesDedicatedMuteCommand` decides it, and both
+  /// demotions it applies leave the engine writing the volume register while the
+  /// pref still asks for the mute command. Read from the pref alone this row
+  /// said "Available" about a command the mute never reached.
   ///
   /// Named apart for the reason the volume row names its two causes apart: a
-  /// user who set the slider to always off and is told the display refused goes
-  /// looking at their hardware.
+  /// user told the display refused goes looking at their hardware.
   ///
-  /// The prior two answers keep their precedence: the pref being off is why 0x8D
-  /// is out of use when it is off, and a switched-off volume command means no
-  /// mute is written at all, so neither may be replaced by a sentence about
-  /// where a mute would land.
+  /// The prior two answers keep their precedence, so neither may be replaced by
+  /// a sentence about where a mute would land.
   ///
   /// The consequence names the LEVEL a degraded mute reaches, never a register
   /// value: it goes out through `rawValue(for: 0)`, so a volume floor sends that
-  /// floor and Invert sends the top of the range, and both fields have UI a
-  /// person can set. "All the way down" is the claim none of them falsifies.
+  /// floor and Invert sends the top of the range. "All the way down" is the
+  /// claim neither falsifies.
   ///
-  /// `muteSupport` takes the non-optional `VCPSupport` the policy layer speaks,
-  /// with the cache miss resolved at the call site the way every other reader of
-  /// these caches resolves it. The volume row's optional exists because nil and
-  /// `.unknown` earn different sentences there; here D24 sends both to the
-  /// dedicated command, so an optional would only be a second spelling of the
-  /// same answer.
+  /// `muteSupport` is non-optional because D24 sends both nil and `.unknown` to
+  /// the dedicated command; the volume row's optional exists because the two
+  /// earn different sentences there.
   public static func muteAvailability(
     muteEnabled: Bool,
     volumeAvailable: Bool,
@@ -460,12 +434,11 @@ public enum DiagnosticsCopy {
     guard !VolumeSliderPolicy.usesDedicatedMuteCommand(
       prefEnabled: true, override: override, muteSupport: muteSupport)
     else {
-      // The escape hatch names itself here for the reason the volume row names
-      // it: it is a setting, and a reader who does not know it is on cannot
-      // account for what follows. Over a clean denial it is also the one cell
-      // that writes 0x8D into a display saying it has no 0x8D, which is where a
-      // mute the app records and no register carries comes from: the page
-      // exists to put that in a bug report.
+      // The escape hatch names itself: it is a setting, and a reader who does
+      // not know it is on cannot account for what follows. Over a clean denial
+      // it is also the one cell that writes 0x8D into a display saying it has
+      // none, which is where a mute the app records and no register carries
+      // comes from.
       switch override {
       case .forcePresent where muteSupport == .unsupported:
         return "Available: you set this display's volume slider to always on, so muting uses the mute command this display's description does not list"
@@ -500,19 +473,16 @@ public enum DiagnosticsCopy {
     return "Unavailable: the \(command) command is turned off for this display"
   }
 
-  /// `supportsHDR` is false in three different situations: the display really
-  /// lists no HDR modes, the async capability refresh has not landed yet, and
-  /// MonitorPanel.framework did not load at all. Blaming the display for the
-  /// last two is the same defect as reporting an unasked display as unsupported,
-  /// so the sentence names both possibilities and says they are indistinguishable
-  /// from here.
+  /// `supportsHDR` is false in three different situations: the display lists no
+  /// HDR modes, the async capability refresh has not landed, or
+  /// MonitorPanel.framework did not load. Blaming the display for the last two
+  /// is the same defect as reporting an unasked display as unsupported, so the
+  /// sentence names both and says they are indistinguishable from here.
   ///
   /// The DisplayServices check runs FIRST. It is a different framework, the one
-  /// that carries native brightness, which is the only path that reaches a
-  /// display in HDR mode, and it is knowable regardless of what MonitorPanel
-  /// answered. Behind the `supportsHDR` guard it could never fire for the case it
-  /// describes, because a machine with no private frameworks at all fails the
-  /// guard first.
+  /// carrying native brightness, which is the only path that reaches a display
+  /// in HDR mode. Behind the `supportsHDR` guard it could never fire for the case
+  /// it describes: a machine with no private frameworks fails that guard first.
   public static func hdrAvailability(
     displayServicesAvailable: Bool, supportsHDR: Bool, app: String
   ) -> String {
@@ -544,11 +514,11 @@ public enum DiagnosticsCopy {
 
   /// Split out so a row can tell "watching nothing" from "not running" without
   /// recomputing the words.
-  /// Volume and mute are armed on separate verdicts (they write separate
-  /// registers, and a display can list one and deny the other), so the report
-  /// names them apart when only one is watched. Watching both keeps the single
-  /// phrase: that is the ordinary state, and splitting it there would make every
-  /// report read like a special case.
+  ///
+  /// Volume and mute are armed on separate verdicts (separate registers, and a
+  /// display can list one and deny the other), so the report names them apart
+  /// when only one is watched. Watching both keeps the single phrase, since
+  /// splitting the ordinary state makes every report read like a special case.
   public static func watchedKeyFamilies(brightness: Bool, volume: Bool, mute: Bool) -> [String] {
     var families: [String] = []
     if brightness { families.append("brightness") }
@@ -602,13 +572,11 @@ public enum DiagnosticsCopy {
   /// nil is the display not having been enumerated yet.
   ///
   /// **`isSynthesized` outranks the flag, in all three of its states** (SS7). A
-  /// panel showing a synthesized size IS a mirror slave as far as CoreGraphics
-  /// is concerned, and it is showing its own desktop: the pixels come from a
-  /// virtual display Candela created for it, so "showing another display's
-  /// contents" names a display the user does not have and cannot look at. The
-  /// caller answers this from the engine's pairing table, which is the authority
-  /// on synthesis topology (SS1); a mirror flag that has not been enumerated yet
-  /// is not evidence against it.
+  /// panel showing a synthesized size IS a mirror slave to CoreGraphics while
+  /// showing its own desktop: the pixels come from a virtual display Candela
+  /// made for it, so "showing another display's contents" names a display the
+  /// user does not have. The caller answers from the engine's pairing table,
+  /// which is the authority on synthesis topology (SS1).
   public static func mirroring(isMirrorSlave: Bool?, isSynthesized: Bool = false) -> String {
     if isSynthesized { return "Showing a synthesized size" }
     guard let isMirrorSlave else { return notEnumerated }
@@ -649,9 +617,8 @@ public enum DiagnosticsCopy {
   }
 
   /// Rendered as the kernel spelled it. The `Transport` dictionary's vocabulary
-  /// is macOS's, not ours, and no real display's spelling has been observed, so
-  /// this maps nothing and prettifies nothing. Copy that invents a vocabulary
-  /// lies the moment the kernel's changes.
+  /// is macOS's, not ours, so this maps nothing and prettifies nothing: copy
+  /// that invents a vocabulary lies the moment the kernel's changes.
   ///
   /// nil covers BOTH "not enumerated yet" and "reported nothing". The page
   /// distinguishes them through `connection(_:)`; the report's field cannot, so

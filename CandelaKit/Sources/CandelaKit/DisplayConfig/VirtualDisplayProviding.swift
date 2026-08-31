@@ -20,18 +20,16 @@ public struct VirtualDisplaySpec: Sendable, Equatable {
   }
 
   /// Both axes rounded DOWN to even, clamped to the advertised pixel ceiling,
-  /// refresh quantized through the shared `DisplayMode.quantizedRefresh`.
-  /// Pure, and the only place any of these rules lives.
+  /// refresh quantized through `DisplayMode.quantizedRefresh`. The only place
+  /// these rules live.
   ///
-  /// The even rounding is DEFENSIVE, and that is the honest reason: S2
-  /// recorded that odd dimensions silently yielded non-HiDPI once, and the
-  /// follow-up research pass could not reproduce parity as the cause. Kept
-  /// because it costs nothing and the original failure is still unexplained.
+  /// The even rounding is DEFENSIVE: S2 recorded odd dimensions silently
+  /// yielding non-HiDPI once, and a follow-up could not reproduce parity as the
+  /// cause. Kept because it costs nothing and the failure is unexplained.
   ///
   /// The ceiling clamp is not defensive: prefs are an escape-hatch surface
-  /// (defaults write), and an unclamped width would trap the UInt32
-  /// conversion in the host on every launch with no way back from inside the
-  /// app.
+  /// (defaults write), and an unclamped width would trap the UInt32 conversion
+  /// in the host on every launch with no way back from inside the app.
   public var normalized: VirtualDisplaySpec {
     var copy = self
     copy.logicalWidth = min(
@@ -73,29 +71,27 @@ public struct VirtualDisplayHandle: Sendable, Equatable {
 }
 
 public enum VirtualDisplayFailure: Error, Sendable, Equatable {
-  /// `NSClassFromString` returned nil for one of the private classes. The
-  /// feature reports unavailable and every entry point is inert; there is no
-  /// public path to degrade to, the whole class family is private (VD10).
+  /// `NSClassFromString` returned nil for one of the private classes. Every
+  /// entry point is then inert; the whole class family is private, so there is
+  /// no public path to degrade to (VD10).
   case classFamilyUnavailable
   /// The slot is outside `VirtualDisplayIdentity.slotRange` or already live.
   case capExceeded
   /// `initWithDescriptor:` returned nil.
   case refused
   /// `initWithDescriptor:` produced `displayID == 0`: the measured
-  /// duplicate-identity refusal. Unreachable by construction under the
-  /// product-per-slot scheme, and kept because the refusal is the API's, not
-  /// ours; it is a PROTECTION, never to be defeated by randomising the
-  /// identity.
+  /// duplicate-identity refusal. Unreachable under the product-per-slot scheme,
+  /// and kept because it is a PROTECTION, never to be defeated by randomising
+  /// the identity.
   case identityInUse
-  /// `applySettings:` returned NO. The only creation-failure signal there
-  /// is: an empty mode list returns NO and the display never appears, so
-  /// this return is exercised, not decorative.
+  /// `applySettings:` returned NO, the only creation-failure signal it gives:
+  /// an empty mode list returns NO and the display never appears.
   case settingsRejected
   /// Created, but never appeared in `CGGetOnlineDisplayList` before the
   /// deadline. Released before reporting; a half-created display is exactly
   /// the thing later code would treat as live.
   case neverAppearedOnline
-  /// `CGMainDisplayID()` moved across the creation. The display was
+  /// `CGMainDisplayID()` moved across the creation, and the display was
   /// destroyed before this was returned. Destroy-and-report rather than
   /// move-it-back: main-display transaction semantics are unverified, and
   /// nothing may risk state that outlives the process.
@@ -108,16 +104,15 @@ public enum VirtualDisplayFailure: Error, Sendable, Equatable {
 
 /// The lifetime seam for displays Candela creates.
 ///
-/// A SIBLING of `DisplayConfiguring`, never a member of it: that protocol is
-/// a thin adapter with no judgement in it over PUBLIC CoreGraphics, while
-/// creation is private-API and fallible in ways `apply` is not, and adding a
-/// requirement there would force every existing fake to grow a conformance
-/// for something it will never do.
+/// A SIBLING of `DisplayConfiguring`, never a member of it: that protocol is a
+/// thin adapter over PUBLIC CoreGraphics, while creation is private-API and
+/// fallible in ways `apply` is not, and adding a requirement there would force
+/// every existing fake to grow a conformance for something it will never do.
 ///
-/// Everything is synchronous and everything can block: `create` and
-/// `destroy` poll the online list. It is therefore FORBIDDEN to call either
-/// on the main thread during an NSMenu tracking session; menu tracking
-/// starves main-actor work, measured twice in this project.
+/// Everything is synchronous and everything can block: `create` and `destroy`
+/// poll the online list. It is therefore FORBIDDEN to call either on the main
+/// thread during an NSMenu tracking session; menu tracking starves main-actor
+/// work, measured twice in this project.
 public protocol VirtualDisplayProviding: Sendable {
   /// False when the private class family is absent. Every other member is
   /// then inert: `create` fails every spec, `live()` is empty, `destroy` is

@@ -57,10 +57,9 @@ struct DiagnosticsReportTests {
   }
 
   @Test func rendersTheSameTextEveryTime() {
-    // Pins that render carries nothing between calls — no accumulating buffer,
-    // no cached lines. It does NOT prove purity: a minute-granularity timestamp
-    // would survive this. That guarantee is structural (the file imports
-    // nothing, so Date is not reachable), not testable from out here.
+    // Pins that render carries nothing between calls, no accumulating buffer. It
+    // does not prove purity: a minute-granularity timestamp would survive this.
+    // Purity is structural instead, since the file imports nothing that reaches Date.
     let s = snapshot()
     #expect(DiagnosticsReport.render(s) == DiagnosticsReport.render(s))
   }

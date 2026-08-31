@@ -3,9 +3,8 @@ import SwiftUI
 /// The built-in display drawn as what it is: a laptop, screen over a deck that
 /// is wider than the glass, the way the machine actually closes.
 ///
-/// Beside `DisplayGlyph` and taking the same parameters, because the built-in
-/// is depicted in both surfaces the glyphs serve: the guided setup flow and the
-/// settings window (SV9).
+/// Takes the same parameters as `DisplayGlyph`: the built-in is drawn in both
+/// surfaces the glyphs serve, the setup flow and the settings window (SV9).
 struct LaptopGlyph: View {
   /// Width over height as mounted.
   var aspect: Double

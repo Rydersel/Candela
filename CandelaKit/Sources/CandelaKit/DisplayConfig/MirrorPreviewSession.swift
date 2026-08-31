@@ -4,21 +4,21 @@ import Foundation
 /// The applied-but-unresolved mirror preview: what a UI renders, and what an
 /// answer about that UI carries back.
 ///
-/// It is the *intent* half that makes the guarantee structural — passing this
-/// value back into `confirm`/`revert` means an answer can only ever resolve the
-/// preview it was given for, so queue ordering becomes an optimisation rather
-/// than the thing preventing a wrong commit. The same argument `PreviewedMode`
-/// makes for a mode, made here for a set.
+/// The *intent* half makes the guarantee structural: passing this value back
+/// into `confirm`/`revert` means an answer can only resolve the preview it was
+/// given for, so queue ordering is an optimisation rather than the thing
+/// preventing a wrong commit. The same argument `PreviewedMode` makes for a
+/// mode, made here for a set.
 public struct PreviewedMirrorTopology: Sendable, Equatable {
   /// Where the confirmation window goes: the MASTER of the previewed set.
   ///
   /// Carried in the value rather than derived at present time, for the same
-  /// reason `PreviewedMode` carries its display ID. And it is the master rather
-  /// than the display named in the request because the request's display is a
-  /// SLAVE from the instant the preview applies — a mirrored panel is absent
-  /// from `NSScreen.screens` entirely (DT16), so a confirmation targeting it
-  /// would dismiss itself and the countdown would run to expiry with the user
-  /// shown nothing at all.
+  /// reason `PreviewedMode` carries its display ID. The master rather than the
+  /// display named in the request, because that display is a SLAVE from the
+  /// instant the preview applies: a mirrored panel is absent from
+  /// `NSScreen.screens` entirely (DT16), so a confirmation targeting it would
+  /// dismiss itself and the countdown would run to expiry with the user shown
+  /// nothing at all.
   public let confirmationDisplayID: CGDirectDisplayID
   /// Exactly what was staged. Confirming re-applies THIS at session scope.
   public let applied: [MirrorChange]
@@ -41,61 +41,56 @@ public struct PreviewedMirrorTopology: Sendable, Equatable {
 /// **defaults to revert** (DT19).
 ///
 /// A SIBLING of `ModePreviewSession`, deliberately not a generalisation of it:
-/// `OutstandingPreview` is keyed on one display and one `DisplayMode` and
-/// `begin()` on a second display reverts the first, and a set operation over N
-/// displays cannot be squeezed into that without changing the app's most
-/// safety-critical shipped type. Generalising the outstanding value to "a
-/// topology delta *or* a mode" would put the already-shipped, already-tested
-/// mode path under a type change it does not need.
+/// `OutstandingPreview` is keyed on one display and one `DisplayMode`, and a set
+/// operation over N displays cannot be squeezed into that without a type change
+/// to the app's most safety-critical shipped type.
 ///
 /// Its three invariants are that type's, verbatim:
 /// - A preview never begins unless the TOPOLOGY to fall back to was read first.
-///   `currentMode(for:)` is wrong for this — on a slave it reports the MASTER's
-///   geometry (**measured**: `3440×1440` before, `2580×1080` while mirrored)
-///   and may return nil outright — so the fallback is a `MirrorTopology`.
+///   `currentMode(for:)` is wrong for this: on a slave it reports the MASTER's
+///   geometry (**measured**: `3440×1440` before, `2580×1080` while mirrored) and
+///   may return nil outright, so the fallback is a `MirrorTopology`.
 /// - Confirming commits what was PREVIEWED, not what the topology reports at
 ///   confirm time. The two differ exactly when something went wrong, and
 ///   committing the drifted value at session scope would make an unapproved
 ///   topology outlive the process while reporting success.
 /// - A preview stays outstanding until a resolution actually SUCCEEDS. An apply
-///   that throws changed nothing, so the fallback is still valid and still
-///   needed, and retrying is the whole recovery path.
+///   that throws changed nothing, so the fallback is still valid and retrying is
+///   the whole recovery path.
 ///
 /// **One qualification on that third invariant, and it is not a loophole.**
-/// `applyMirroring` gained a post-commit check (`MirrorVerification`) for the
-/// one case where CoreGraphics accepts a change list, returns `.success`, and
-/// does something else — so its throw no longer implies "nothing moved". What
-/// still holds is the part the recovery rests on: every revert here recomputes
-/// its change list from a LIVE `displays()` sample (`revertOutstanding`), and
-/// the one path that does not — `confirm`, which deliberately re-applies what
-/// was PREVIEWED — leaves the countdown armed on failure, so the expiry reverts
-/// from live instead. No path can retry into a permanent no-op that reports
-/// success, which is the failure mode this whole type exists to prevent.
+/// `applyMirroring` gained a post-commit check (`MirrorVerification`) for the one
+/// case where CoreGraphics accepts a change list, returns `.success`, and does
+/// something else, so its throw no longer implies "nothing moved". What still
+/// holds is the part the recovery rests on: every revert here recomputes its
+/// change list from a LIVE `displays()` sample (`revertOutstanding`), and the one
+/// path that does not, `confirm`, leaves the countdown armed on failure so the
+/// expiry reverts from live instead. No path can retry into a permanent no-op
+/// that reports success.
 ///
 /// What it does cost: a `begin` whose apply diverged leaves the machine in
 /// CoreGraphics' topology with nothing outstanding to revert it. That is at
 /// `.preview` scope, it is reported rather than hidden, and the next
-/// engage/toggle samples it live and works from there. The alternative is
-/// worse — recording the REQUESTED changes as outstanding and letting a later
-/// `confirm` commit them at session scope with `.committed`.
+/// engage/toggle samples it live and works from there. The alternative is worse:
+/// recording the REQUESTED changes as outstanding and letting a later `confirm`
+/// commit them at session scope.
 ///
 /// Only an `.engage` is previewed. A break is never previewed and never gains a
 /// countdown: breaking a set returns every display to its own desktop and cannot
-/// leave a screen unreadable, while a countdown there would *re-mirror* a rig
-/// the user just un-mirrored, while they were still looking for the
-/// confirmation window on a screen that had only just come back. It commits
-/// through `applyDisengage(_:)` all the same — not because it needs previewing,
-/// but because it has to SUPERSEDE any preview that is outstanding, and the
-/// preview and its countdown live in here.
+/// leave a screen unreadable, while a countdown there would *re-mirror* a rig the
+/// user just un-mirrored, while they were still looking for the confirmation
+/// window on a screen that had only just come back. It commits through
+/// `applyDisengage(_:)` all the same, because it has to SUPERSEDE any preview
+/// that is outstanding, and the preview and its countdown live in here.
 ///
 /// `.preview` scope is a second backstop and nothing more.
 /// `kCGConfigureForAppOnly` does self-revert a mirror when the process exits
-/// (**measured** twice — clean exit and `SIGKILL`, with a third-process control
-/// proving it is not merely a per-process view), but it restores the topology
-/// as of process *exit* rather than the one the user approved, and it does
-/// nothing at all about a process that stays alive holding a mirror nobody
-/// wanted — which is the failure a preview exists to guard. So this type
-/// captures and re-applies its own fallback regardless.
+/// (**measured** twice, clean exit and `SIGKILL`, with a third-process control
+/// proving it is not merely a per-process view), but it restores the topology as
+/// of process *exit* rather than the one the user approved, and it does nothing
+/// about a process that stays alive holding a mirror nobody wanted, which is the
+/// failure a preview exists to guard. So this type captures and re-applies its
+/// own fallback regardless.
 ///
 /// An actor because the countdown and the user's answer race by construction.
 public actor MirrorPreviewSession {
@@ -116,8 +111,8 @@ public actor MirrorPreviewSession {
   private var countdown = PreviewCountdown()
   private var lastOutcome: PreviewOutcome?
 
-  /// Thirty seconds, the same as `ModePreviewSession` — see the note there.
-  /// Both are one kind of decision and differing timers would be arbitrary.
+  /// Thirty seconds, the same as `ModePreviewSession`. Both are one kind of
+  /// decision and differing timers would be arbitrary.
   public init(configurator: any DisplayConfiguring, countdownSeconds: Int = 30) {
     self.configurator = configurator
     self.countdownSeconds = countdownSeconds
@@ -125,7 +120,7 @@ public actor MirrorPreviewSession {
 
   public var secondsRemaining: Int { countdown.remaining }
 
-  /// True while a preview is applied and unresolved — including after a
+  /// True while a preview is applied and unresolved, including after a
   /// resolution that threw. `revert()` is worth calling exactly while this
   /// holds.
   public var hasOutstandingPreview: Bool { outstanding != nil }
@@ -152,23 +147,18 @@ public actor MirrorPreviewSession {
   /// outstanding at all).
   ///
   /// **Deliberately NOT `ModePreviewSession.discard`, which drops without
-  /// applying, and deliberately not named the same.** Dropping is right for one
-  /// display and one mode: the departed display is the only thing that preview
-  /// touched, and it keeps nothing, because its mode was app-scoped and is
-  /// renegotiated when it returns. A mirror preview is a SET, and dropping it
-  /// strands the members that did NOT depart —
+  /// applying.** Dropping is right for one display and one mode: the departed
+  /// display is the only thing that preview touched, and its mode was app-scoped.
+  /// A mirror preview is a SET, and dropping it strands the members that did NOT
+  /// depart. Preview `{1→2, 3→2}` with display 3 unplugged inside the countdown
+  /// window: dropping leaves display 1 still mirroring 2 at `.preview` scope,
+  /// countdown cancelled and confirmation window dismissed, a topology the user
+  /// never approved that is recoverable only by quitting the app.
   ///
-  /// preview `{1→2, 3→2}`, and display 3 is unplugged inside the countdown window.
-  /// Dropping leaves display 1 still mirroring 2 at `.preview` scope, with the
-  /// countdown cancelled and the confirmation window dismissed: a topology the
-  /// user never approved, with no UI and no timer, recoverable only by quitting
-  /// the app. That defeats the entire point of previewing, which is that an
-  /// unapproved topology self-heals.
-  ///
-  /// Uniform across master and slave, and neither needs a special case.
-  /// `MirrorTopologyPolicy.changes(from:to:)` iterates the LIVE list, so a
-  /// departed display is never staged; and a departure that emptied the set
-  /// yields an empty change list, which is already a no-op success.
+  /// Uniform across master and slave. `MirrorTopologyPolicy.changes(from:to:)`
+  /// iterates the LIVE list, so a departed display is never staged, and a
+  /// departure that emptied the set yields an empty change list, already a no-op
+  /// success.
   ///
   /// A revert that FAILS leaves the preview outstanding and the countdown where
   /// it was, exactly as every other resolution here does: nothing moved, so the
@@ -193,19 +183,17 @@ public actor MirrorPreviewSession {
     guard case let .engage(master, changes) = decision, !changes.isEmpty else {
       // A break commits through `applyDisengage(_:)` (see the type's doc
       // comment) and a refusal is not a change at all. Neither is partially
-      // handled here on purpose:
-      // `.disengage` carries `residualMembers`, and a break that leaves a
-      // locked slave mirroring is a PARTIAL break its caller has to report. A
-      // path through here that bound the changes and dropped the residue would
-      // re-create the T3 defect — success reported over a set the user is still
-      // looking at — one layer out.
+      // handled here on purpose: `.disengage` carries `residualMembers`, and a
+      // break that leaves a locked slave mirroring is a PARTIAL break its caller
+      // has to report. A path through here that bound the changes and dropped the
+      // residue would re-create the T3 defect, success reported over a set the
+      // user is still looking at, one layer out.
       return .failure(DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue))
     }
     guard !captured.displays.isEmpty else {
       // Nothing readable to restore means nothing to undo with, and the
-      // countdown would expire into a no-op — the exact failure this type
-      // exists to prevent. Refusing is the only safe answer; the caller
-      // surfaces it.
+      // countdown would expire into a no-op, the exact failure this type exists
+      // to prevent. Refusing is the only safe answer; the caller surfaces it.
       return .failure(DisplayConfigError(cgErrorCode: CGError.failure.rawValue))
     }
     if outstanding != nil {
@@ -234,30 +222,28 @@ public actor MirrorPreviewSession {
   }
 
   /// Commits a mirror BREAK at session scope, **superseding** any outstanding
-  /// preview — resolving it without reverting.
+  /// preview: resolving it without reverting.
   ///
-  /// The break is still not previewed and still never gains a countdown; see
-  /// the type's doc comment for why. What it gains by coming through here is
-  /// ORDER, and a place the rule can be tested: the outstanding preview and its
-  /// countdown live in this actor, so this is the only point at which "resolve
-  /// the preview, then apply" cannot be interleaved by an expiry landing
-  /// between the two.
+  /// The break is still not previewed and still never gains a countdown; see the
+  /// type's doc comment for why. What it gains by coming through here is ORDER,
+  /// and a place the rule can be tested: the outstanding preview and its countdown
+  /// live in this actor, so this is the only point at which "resolve the preview,
+  /// then apply" cannot be interleaved by an expiry landing between the two.
   ///
   /// **Superseded, not reverted, and that difference is the whole method.** A
   /// preview's fallback is the topology captured BEFORE it applied, and that
-  /// capture can perfectly well contain the very set the user has just asked to
-  /// break — start a preview while a set exists, then stop that set. Reverting
-  /// would re-apply the capture and bring the set back: half a minute later
-  /// if the expiry does it, immediately if this method did. An explicit choice
-  /// supersedes a pending question rather than losing to it.
+  /// capture can contain the very set the user has just asked to break. Reverting
+  /// would re-apply the capture and bring the set back, half a minute later if the
+  /// expiry does it. An explicit choice supersedes a pending question rather than
+  /// losing to it.
   ///
   /// **Superseding FIRST, before the apply, is deliberate.** Afterwards the
-  /// countdown is disarmed and `tick()` cannot re-apply the capture, so no
-  /// expiry can land in the middle. The cost is real and is the smaller one: an
-  /// apply that THROWS leaves the previewed topology standing with nothing left
-  /// to take it back automatically. It is still at `.preview` scope, the caller
-  /// reports the failure, and pressing the same button again is the retry — the
-  /// other ordering buys that back at the price of a window in which the expiry
+  /// countdown is disarmed and `tick()` cannot re-apply the capture, so no expiry
+  /// can land in the middle. The cost is real and is the smaller one: an apply
+  /// that THROWS leaves the previewed topology standing with nothing left to take
+  /// it back automatically. It is still at `.preview` scope, the caller reports
+  /// the failure, and pressing the same button again is the retry. The other
+  /// ordering buys that back at the price of a window in which the expiry
   /// re-mirrors the set this call has just dissolved.
   ///
   /// Refuses anything that is not a break, as the mirror image of `begin`
@@ -267,8 +253,7 @@ public actor MirrorPreviewSession {
   ///
   /// The RESIDUE of a partial break is deliberately not returned. It is decided
   /// before anything is staged, carried by `MirrorToggleDecision.disengage`, and
-  /// stated by the caller — the same division of labour that makes `begin`
-  /// refuse a disengage rather than swallow its residue.
+  /// stated by the caller.
   public func applyDisengage(_ changes: [MirrorChange]) -> Result<Void, DisplayConfigError> {
     guard changes.allSatisfy({ $0.master == kCGNullDirectDisplay }) else {
       return .failure(DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue))
@@ -294,7 +279,7 @@ public actor MirrorPreviewSession {
     guard let outstanding else {
       // Nothing is applied: repeat the answer already given rather than
       // inventing a reversion that never happened. Never begun at all is
-      // reported as reverted — nothing is being kept.
+      // reported as reverted, since nothing is being kept.
       return lastOutcome ?? .reverted
     }
     guard matches(answered, outstanding) else { return .stale }
@@ -302,9 +287,9 @@ public actor MirrorPreviewSession {
   }
 
   /// Safe to call repeatedly while `hasOutstandingPreview` names the same
-  /// preview. A revert that threw left the topology where it was, so trying
-  /// again once CoreGraphics recovers is the whole recovery path — the error UI
-  /// hangs off this, and it passes back the same value it is showing.
+  /// preview. A revert that threw left the topology where it was, so trying again
+  /// once CoreGraphics recovers is the whole recovery path: the error UI hangs off
+  /// this, and it passes back the same value it is showing.
   public func revert(_ answered: PreviewedMirrorTopology) -> PreviewOutcome {
     guard let outstanding else { return lastOutcome ?? .reverted }
     guard matches(answered, outstanding) else { return .stale }
@@ -327,7 +312,7 @@ public actor MirrorPreviewSession {
     guard let outstanding else { return lastOutcome ?? .reverted }
     // Computed against the LIVE topology, not against the applied changes: a
     // display that moved since the preview must be restored to what the capture
-    // said about it, and one that did not move must not be staged at all —
+    // said about it, and one that did not move must not be staged at all.
     // `applyMirroring` is all-or-nothing, so a redundant change that fails to
     // stage would cancel the revert entirely.
     let live = MirrorTopology(configurator.displays())
@@ -335,15 +320,14 @@ public actor MirrorPreviewSession {
     return resolve(applying: changes, success: .reverted)
   }
 
-  /// Resolves the outstanding preview by DROPPING it — nothing is applied, and
-  /// the countdown is disarmed with it. The one caller is `applyDisengage`,
-  /// whose doc comment carries the argument for why this is not a revert.
+  /// Resolves the outstanding preview by DROPPING it: nothing is applied, and
+  /// the countdown is disarmed with it. The one caller is `applyDisengage`, whose
+  /// doc comment carries the argument for why this is not a revert.
   ///
-  /// `lastOutcome` becomes `.stale` rather than `.reverted`. A window that was
-  /// still on screen when this ran can still deliver an answer, and `.stale` is
-  /// the truthful reply to it: that answer resolved nothing. `.reverted` would
-  /// claim a restoration that never happened — the same class of false report
-  /// this whole path exists to close — and `.committed` would claim the preview
+  /// `lastOutcome` becomes `.stale` rather than `.reverted`. A window still on
+  /// screen when this ran can still deliver an answer, and `.stale` is the
+  /// truthful reply: that answer resolved nothing. `.reverted` would claim a
+  /// restoration that never happened, and `.committed` would claim the preview
   /// was kept.
   @discardableResult
   private func supersede() -> PreviewedMirrorTopology? {
@@ -362,16 +346,16 @@ public actor MirrorPreviewSession {
   }
 
   /// Success is what clears the outstanding preview. A throw leaves every piece
-  /// of session state intact — nothing moved, so the record of how to move it
-  /// back is still the truth.
+  /// of session state intact: nothing moved, so the record of how to move it back
+  /// is still the truth.
   ///
   /// A failed COMMIT deliberately leaves the countdown armed: the user asked to
   /// keep a topology that could not be made permanent, and falling back to the
   /// one they can definitely read is the safe way to end that.
   ///
-  /// An EMPTY change list is a success, not a failure. `applyMirroring` opens
-  /// no transaction for it, and "the topology is already what you asked for" is
-  /// a resolution — which is the COMMON case on revert, since
+  /// An EMPTY change list is a success, not a failure. `applyMirroring` opens no
+  /// transaction for it, and "the topology is already what you asked for" is a
+  /// resolution, the COMMON case on revert since
   /// `MirrorTopologyPolicy.changes(from:to:)` returns `[]` whenever the live
   /// topology already matches the capture.
   private func resolve(

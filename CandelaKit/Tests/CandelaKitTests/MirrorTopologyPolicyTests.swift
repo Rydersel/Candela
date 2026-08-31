@@ -47,10 +47,10 @@ struct MirrorTopologyPolicyTests {
     ], residualMembers: []))
   }
 
-  /// T3 — the defect this row exists for. `engageMirror` saw a locked display
-  /// as "in a mirror set", staged a change that cannot succeed, discarded the
-  /// return value and reported success; the next press took the same branch,
-  /// forever. The toggle was permanently stuck off.
+  /// T3, the defect this row exists for. `engageMirror` saw a locked display as
+  /// "in a mirror set", staged a change that cannot succeed, discarded the return
+  /// value and reported success; every later press took the same branch, so the
+  /// toggle was stuck off.
   @Test func aSetNobodyCanBreakIsRefusedWithItsMembersNamed() {
     let topology = MirrorTopology([
       MirrorFixtures.display(1, mirrors: 2, always: true, builtIn: true),
@@ -63,10 +63,9 @@ struct MirrorTopologyPolicyTests {
   /// staged: the change cannot succeed, and staging it would fail the whole
   /// transaction and break nothing at all.
   ///
-  /// The break is therefore PARTIAL — 3 goes on mirroring 2, so 2 goes on being
-  /// a master — and the decision has to say so. A caller reading this as a
-  /// total break reports "mirroring off" over a set the user is still looking
-  /// at.
+  /// The break is therefore PARTIAL (3 goes on mirroring 2, so 2 goes on being a
+  /// master) and the decision has to say so. A caller reading it as a total break
+  /// reports "mirroring off" over a set the user is still looking at.
   @Test func aLockedMemberIsNeverStagedAndTheSetItLeavesBehindIsNamed() {
     let topology = MirrorTopology([
       MirrorFixtures.display(1, mirrors: 2, builtIn: true),
@@ -82,15 +81,14 @@ struct MirrorTopologyPolicyTests {
     ))
   }
 
-  /// PRESS TWICE on the rig above — the T3 defect's second life. Once the
-  /// partial break commits, the survivors are a master and a locked slave;
-  /// every change that could be staged is a no-op, and "one change per
-  /// breakable member" cheerfully stages the master alone: a transaction that
-  /// commits `.success`, reports mirroring off, and changes nothing. Forever,
-  /// since every later press takes the same branch.
+  /// PRESS TWICE on the rig above, which is the T3 defect's second life. Once the
+  /// partial break commits the survivors are a master and a locked slave, every
+  /// change that could be staged is a no-op, and "one change per breakable member"
+  /// stages the master alone: a transaction that commits `.success`, reports
+  /// mirroring off and changes nothing, on every later press too.
   ///
-  /// A set is broken by removing its SLAVES, so a set whose every slave is
-  /// locked is refused with its members named — by BOTH paths.
+  /// A set is broken by removing its SLAVES, so a set whose every slave is locked
+  /// is refused with its members named, by BOTH paths.
   @Test func aSecondPressOnTheResidualSetRefusesRatherThanStagingANoOp() {
     let afterFirstPress = MirrorTopology([
       MirrorFixtures.display(1, builtIn: true),
@@ -103,17 +101,16 @@ struct MirrorTopologyPolicyTests {
       == .refused(.setCannotBeBroken([2, 3])))
   }
 
-  /// T5. A laptop plus an always-mirrored receiver: two displays, nothing that
-  /// can own a set. `noEligibleMaster` is reachable from `toggle` ALONE — it is
-  /// the automatic scan's answer, and the only refusal that speaks about the
-  /// whole machine.
+  /// T5. A laptop plus an always-mirrored receiver: two displays, nothing that can
+  /// own a set. `noEligibleMaster` is reachable from `toggle` ALONE, the automatic
+  /// scan's answer, and the only refusal that speaks about the whole machine.
   @Test func noEligibleMasterIsRefusedRatherThanForcedOntoTheBuiltIn() {
     let topology = MirrorTopology([MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2, always: true)])
     #expect(MirrorTopologyPolicy.toggle(topology) == .refused(.noEligibleMaster))
   }
 
-  /// A locked display is never OFFERED as a master either: it cannot own a set
-  /// it cannot leave. Its own refusal, not the machine-wide one — the fact is
+  /// A locked display is never OFFERED as a master either: it cannot own a set it
+  /// cannot leave. Its own refusal, not the machine-wide one, because the fact is
   /// about the display the user pointed at.
   @Test func aLockedDisplayIsNeverOfferedAsAMaster() {
     let topology = MirrorTopology([MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2, always: true)])
@@ -121,20 +118,20 @@ struct MirrorTopologyPolicyTests {
       == .refused(.masterIsAlwaysMirrored))
   }
 
-  /// The branch that made `noEligibleMaster` a lie: the named master is
-  /// perfectly eligible — the user picked the built-in and the built-in can own
-  /// a set — and there is simply nothing left that may join it. "No display can
-  /// be the mirror master" would be false about the very display they chose.
+  /// The branch that made `noEligibleMaster` a lie: the named master is eligible
+  /// (the user picked the built-in, and the built-in can own a set) and there is
+  /// nothing left that may join it. "No display can be the mirror master" would be
+  /// false about the very display they chose.
   @Test func anEligibleMasterWithNothingToMirrorIsRefusedForThatReasonNotForBeingIneligible() {
     let topology = MirrorTopology([MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2, always: true)])
     #expect(MirrorTopologyPolicy.engage(topology, master: 1) == .refused(.nothingToMirror))
   }
 
-  /// #56, measured on macOS 26: `CGCompleteDisplayConfiguration` fails a
-  /// transaction whose changes are ALL no-ops with `1001`, every stage having
-  /// returned success. So asking to build the set the machine is already in
-  /// must never open a transaction — the honest answer is "nothing to do",
-  /// stated as a refusal, not an opaque platform code the UI cannot explain.
+  /// Measured on macOS 26: `CGCompleteDisplayConfiguration` fails a transaction
+  /// whose changes are ALL no-ops with `1001`, every stage having returned
+  /// success. So asking to build the set the machine is already in must never open
+  /// a transaction. The honest answer is "nothing to do", stated as a refusal
+  /// rather than an opaque platform code the UI cannot explain.
   @Test func rebuildingTheSetTheMachineIsAlreadyInIsRefusedNotStagedAsAllNoOps() {
     let topology = MirrorTopology([
       MirrorFixtures.display(1, inSet: true),
@@ -159,16 +156,15 @@ struct MirrorTopologyPolicyTests {
     ))
   }
 
-  /// Naming a display that is not in the sample is its own answer. The
-  /// alternative — "nothing can be the master" — describes the machine when the
-  /// truth is about a display that left it.
+  /// Naming a display that is not in the sample is its own answer. "Nothing can be
+  /// the master" describes the machine when the truth is about a display that left it.
   @Test func namingAMasterThatIsNotInTheSampleIsRefusedAsAbsent() {
     #expect(MirrorTopologyPolicy.engage(MirrorFixtures.unmirroredPair, master: 99)
       == .refused(.noSuchDisplay))
   }
 
   /// The UI's engage names its master. Unlike the hotkey's, it may name the
-  /// built-in — that is the user asking for it by name.
+  /// built-in: that is the user asking for it by name.
   @Test func theUICanNameAnyEligibleMasterIncludingTheBuiltIn() {
     let topology = MirrorTopology([
       MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2), MirrorFixtures.display(3),
@@ -191,10 +187,9 @@ struct MirrorTopologyPolicyTests {
       ], residualMembers: []))
   }
 
-  /// The API's two break paths differ on PURPOSE and the difference is
-  /// observable here: the hotkey is a panic button that clears the machine
-  /// (fork parity — it iterated the whole online list), while the UI's button
-  /// breaks the one set the user pointed at and leaves the other alone.
+  /// The two break paths differ on PURPOSE, observably: the hotkey is a panic
+  /// button that clears the machine (fork parity, it iterated the whole online
+  /// list), while the UI's button breaks the one set the user pointed at.
   @Test func theHotkeyClearsEverySetWhileTheUIBreaksOnlyTheOneNamed() {
     let topology = twoIndependentSets
     #expect(MirrorTopologyPolicy.toggle(topology) == .disengage(changes: [
@@ -209,10 +204,9 @@ struct MirrorTopologyPolicyTests {
     ], residualMembers: []))
   }
 
-  /// The fourth refusal case, and why it is not `.setCannotBeBroken([])`: an
-  /// empty payload would have the UI say "this set cannot be broken" about a
-  /// display that is in no set at all. This sub-project exists to stop the app
-  /// making false statements; a closed three-case enum is not worth one.
+  /// The fourth refusal case, and why it is not `.setCannotBeBroken([])`: an empty
+  /// payload would have the UI say "this set cannot be broken" about a display in
+  /// no set at all. A closed three-case enum is not worth a false statement.
   @Test func aDisplayInNoSetIsRefusedAsSuchRatherThanAsAnUnbreakableSet() {
     #expect(MirrorTopologyPolicy.disengage(MirrorFixtures.unmirroredPair, containing: 2)
       == .refused(.notInASet))
@@ -220,9 +214,9 @@ struct MirrorTopologyPolicyTests {
       == .refused(.notInASet))
   }
 
-  /// The UI's break path refuses a locked set for the same reason the hotkey
-  /// does, and names the same members — the difference between the two paths is
-  /// SCOPE, never leniency.
+  /// The UI's break path refuses a locked set for the same reason the hotkey does,
+  /// and names the same members. The difference between the paths is SCOPE, never
+  /// leniency.
   @Test func theUIRefusesALockedSetWithItsMembersNamedJustAsTheHotkeyDoes() {
     let topology = MirrorTopology([
       MirrorFixtures.display(1, mirrors: 2, always: true, builtIn: true),
@@ -232,11 +226,10 @@ struct MirrorTopologyPolicyTests {
       == .refused(.setCannotBeBroken([1, 2])))
   }
 
-  /// A phantom master — a slave naming a display this sample does not contain,
-  /// which a stale read or a filtered list (externals only, dropping a built-in
-  /// master) both produce — is never staged. Task 3's transaction is
-  /// all-or-nothing, so one impossible change would stop a set that CAN break
-  /// from breaking at all.
+  /// A phantom master, a slave naming a display this sample does not contain, is
+  /// never staged. A stale read or a filtered list (externals only, dropping a
+  /// built-in master) both produce one, and the transaction is all-or-nothing, so
+  /// a single impossible change would stop a set that CAN break from breaking.
   @Test func aSlaveWhoseMasterIsAbsentBreaksAloneRatherThanStagingThePhantom() {
     let topology = MirrorTopology([MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2, mirrors: 9)])
     #expect(MirrorTopologyPolicy.disengage(topology, containing: 2) == .disengage(
@@ -245,9 +238,9 @@ struct MirrorTopologyPolicyTests {
     ))
   }
 
-  /// An empty sample is not a machine state — it is a topology read between a
-  /// teardown and its callback — and it lands on the refusal the key path falls
-  /// through on, which is the harmless answer for it.
+  /// An empty sample is not a machine state, it is a topology read between a
+  /// teardown and its callback. It lands on the refusal the key path falls through
+  /// on, which is the harmless answer for it.
   @Test func anEmptySampleRefusesLikeASingleDisplayRatherThanCrashing() {
     #expect(MirrorTopologyPolicy.toggle(MirrorTopology([])) == .refused(.onlyOneDisplay))
     #expect(MirrorTopologyPolicy.engage(MirrorTopology([]), master: 1)
@@ -267,10 +260,9 @@ struct MirrorTopologyPolicyTests {
       == [MirrorChange(display: 1, master: kCGNullDirectDisplay)])
   }
 
-  /// A revert that has nothing to undo stages nothing — and Task 3's
-  /// `applyMirroring` opens no transaction for an empty list, so this is a true
-  /// no-op rather than a transaction that commits `.success` having done
-  /// nothing.
+  /// A revert with nothing to undo stages nothing, and `applyMirroring` opens no
+  /// transaction for an empty list, so this is a true no-op rather than a
+  /// transaction that commits `.success` having done nothing.
   @Test func revertingToTheTopologyAlreadyLiveStagesNothing() {
     #expect(MirrorTopologyPolicy.changes(
       from: MirrorFixtures.mirroredTrio, to: MirrorFixtures.mirroredTrio
@@ -278,8 +270,8 @@ struct MirrorTopologyPolicyTests {
   }
 
   /// A display that arrived after the capture is not in it. Restoring it to
-  /// "unmirrored" is the honest reading of a fallback that never described it —
-  /// the alternative is leaving it mirrored to a set the user is undoing.
+  /// "unmirrored" is the honest reading of a fallback that never described it; the
+  /// alternative leaves it mirrored to a set the user is undoing.
   @Test func aDisplayAbsentFromTheCapturedTopologyIsRestoredToUnmirrored() {
     let captured = MirrorTopology([MirrorFixtures.display(1, builtIn: true)])
     let live = MirrorTopology([
@@ -290,12 +282,11 @@ struct MirrorTopologyPolicyTests {
       == [MirrorChange(display: 1, master: kCGNullDirectDisplay)])
   }
 
-  /// Revert is BEST EFFORT, and this is the shape of its shortfall: a locked
+  /// Revert is BEST EFFORT and this is the shape of its shortfall: a locked
   /// display is skipped even though the capture says it was unmirrored, so the
-  /// revert completes with 3 still mirroring 2. Deleting the filter would stage
-  /// a change that cannot succeed and cancel the whole transaction — reverting
-  /// nothing at all — so the shortfall is the better of the two, but it is a
-  /// shortfall and a caller saying "restored" says more than it knows.
+  /// revert completes with 3 still mirroring 2. Deleting the filter would stage a
+  /// change that cannot succeed and cancel the whole transaction, so this is the
+  /// better of the two, but a caller saying "restored" says more than it knows.
   @Test func revertingSkipsALockedDisplayAndThereforeLeavesItMirrored() {
     let captured = MirrorTopology([
       MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2),

@@ -1,27 +1,23 @@
 import Foundation
 
-/// What the panel renders, and in what order (D7). Pure — the view supplies
-/// the projections, so this is testable without an app test target (D21).
+/// What the panel renders, and in what order (D7). Pure, so it stays testable with
+/// no app test target (D21): the view supplies the projections.
 public enum DisplayOrdering {
-  /// The name shown for a display: the user's chosen name when they set one,
-  /// the hardware name otherwise. Whitespace-only counts as unset — a field
-  /// the user cleared by hand must not render as a blank section header.
+  /// The user's chosen name when they set one, the hardware name otherwise.
+  /// Whitespace-only counts as unset: a hand-cleared field must not render as a
+  /// blank section header.
   public static func title(friendlyName: String, hardwareName: String) -> String {
     let trimmed = friendlyName.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.isEmpty ? hardwareName : trimmed
   }
 
-  /// Hidden displays removed, the rest ordered ASCENDING by title.
+  /// Hidden displays removed, the rest ordered ASCENDING by title (D7).
   ///
-  /// Filtering and ordering are deliberately one call: the fork builds a
-  /// filtered array and then overwrites it with its sort, so its per-display
-  /// filter never reaches the menu (D2 bug 1). They cannot come apart here.
-  ///
-  /// Ascending, not the fork's `.orderedDescending` (D7), and
-  /// `localizedStandardCompare` so "Display 2" precedes "Display 10" the way
-  /// the Finder orders names. Ties keep discovery order, so a rig with two
-  /// identically-named panels does not reshuffle between refreshes.
-  /// Ungated: there is no sort preference, in this app or the fork.
+  /// Filtering and ordering are one call on purpose: split apart, the sort can
+  /// overwrite the filtered array and the filter never reaches the menu (D2).
+  /// `localizedStandardCompare` puts "Display 2" before "Display 10". Ties keep
+  /// discovery order, so two identically-named panels do not reshuffle between
+  /// refreshes.
   public static func panelOrder<T>(
     _ items: [T],
     isHidden: (T) -> Bool,
@@ -37,20 +33,14 @@ public enum DisplayOrdering {
       .map(\.element)
   }
 
-  /// SO21: two attached units that report no serial resolve to ONE persistence
-  /// key, so they share every pref, one name and one destination. A 1-based
-  /// ordinal by list order is the only live fact that tells their rows apart.
-  /// `nil` (the near-universal case) means the key is unique and its row
-  /// appends nothing.
+  /// SO21: two attached units that report no serial resolve to ONE persistence key,
+  /// so they share every pref and one name. A 1-based ordinal by list order is the
+  /// only live fact telling their rows apart; `nil` means the key is unique.
   ///
-  /// Answers for EVERY key in one pass over one snapshot, rather than offering
-  /// a per-row "which number is this" that takes a position. A caller holding a
-  /// position holds a second, older description of the list. The sidebar did
-  /// exactly that and crashed: its stack showed a per-row closure re-running
-  /// after a settings reset had emptied the display list, with the position it
-  /// had been handed earlier, and indexing past the end. Returning the whole
-  /// answer leaves nothing to go stale: the result is as long as the input,
-  /// always.
+  /// Answers for every key in one pass rather than offering a per-row "which number
+  /// is this" that takes a position. A caller holding a position holds a second,
+  /// older description of the list: the sidebar did that and crashed, indexing past
+  /// the end after a settings reset emptied the display list.
   public static func sharedIdentityOrdinals(keys: [String]) -> [Int?] {
     var occurrences: [String: Int] = [:]
     for key in keys { occurrences[key, default: 0] += 1 }
@@ -64,20 +54,17 @@ public enum DisplayOrdering {
   }
 }
 
-/// Menu-bar icon visibility (D5). The mode is a user preference, but the
-/// status item's visibility is ALSO written from outside the app — ⌘-dragging
-/// the icon off the bar hides it — so the two directions are separate
-/// decisions and both live here.
+/// Menu-bar icon visibility (D5). The mode is a user preference, but the status
+/// item's visibility is ALSO written from outside the app (⌘-dragging the icon off
+/// the bar hides it), so the two directions are separate decisions.
 public enum MenuIconPolicy {
-  /// The order the modes are offered in. NOT `MenuIcon.allCases`: `externalOnly`
-  /// was appended as raw 3 but reads third, so iterating raw order would
-  /// silently reorder the popup (D5).
+  /// The order the modes are offered in. NOT `MenuIcon.allCases`: `externalOnly` was
+  /// appended as raw 3 but reads third, so raw order would reorder the popup (D5).
   public static let pickerOrder: [MenuIcon] = [.show, .sliderOnly, .externalOnly, .hide]
 
-  /// Should the status item be in the menu bar right now?
-  /// `hasVisibleSlider` is "the panel would render at least one display
-  /// section" — the caller derives it from the same ordering/hide rules the
-  /// panel itself uses, so the icon and the panel can never disagree.
+  /// `hasVisibleSlider` means the panel would render at least one display section.
+  /// The caller derives it from the same ordering and hide rules the panel uses, so
+  /// the icon and the panel cannot disagree.
   public static func isStatusItemVisible(
     mode: MenuIcon,
     hasExternalDisplay: Bool,
@@ -91,13 +78,12 @@ public enum MenuIconPolicy {
     }
   }
 
-  /// What to persist when the status item's visibility changes underneath us.
-  /// `nil` means "write nothing".
+  /// What to persist when the status item's visibility changes underneath us; `nil`
+  /// writes nothing.
   ///
-  /// The fork's loop guard, as a decision table: only a change the USER made
-  /// (a drag-removal) is a mode change; our own programmatic hide is not, or
-  /// apply → observe → persist → apply thrashes. Becoming visible is never a
-  /// mode change either — the mode is what made it visible.
+  /// A loop guard: only a user drag-removal is a mode change. Counting our own
+  /// programmatic hide as one thrashes apply, observe, persist, apply. Becoming
+  /// visible is never a mode change either, since the mode is what made it visible.
   public static func modeAfterVisibilityChange(
     isVisible: Bool,
     changedByUser: Bool,

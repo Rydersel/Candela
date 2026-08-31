@@ -2,31 +2,24 @@ import Foundation
 
 /// Pure copy derivations for the health surfaces.
 ///
-/// These lived as private statics in `PanelHealthView` and `OledCarePane`,
-/// where there is no test target ("a pane that needs a test has too much in
-/// it"), and the two files independently grew **different** formatters for the
-/// same quantity: 0.4 hours read "0.4 hours" in the pane's hours line and "24
-/// minutes" in the leaderboard one click away, and zero read "0 hours" against
-/// "none yet". Both carried a comment explaining why their own choice avoided a
-/// stuck-counter reading, and neither knew about the other.
+/// One formatter per quantity. These lived as private statics in two views with
+/// no test target, and the two grew **different** formatters for the same
+/// number: 0.4 hours read "0.4 hours" in one and "24 minutes" one click away.
 ///
-/// Returns `String`, not `LocalizedStringKey`, which is why this can live in
-/// Kit at all: `OledCareCopy` stays in the app target precisely because it
-/// returns the latter and CandelaKit cannot import SwiftUI.
+/// Returns `String`, not `LocalizedStringKey`, which is why this can live in Kit
+/// at all: `OledCareCopy` stays in the app target because it returns the latter
+/// and CandelaKit cannot import SwiftUI.
 public enum PanelHealthCopy {
 
   /// A duration in hours, for any surface showing accumulated time.
   ///
   /// Minutes below the hour, one decimal below ten, whole hours above. The
-  /// sub-hour case is the load-bearing one: a freshly enrolled display reads
-  /// zero for its whole first hour otherwise, which looks like a counter that
-  /// is not running, and that misreading is what both original formatters were
-  /// written around from opposite ends.
+  /// sub-hour case is the load-bearing one: a freshly enrolled display otherwise
+  /// reads zero for its whole first hour, which looks like a stuck counter.
   ///
-  /// `zeroPhrase` is the one legitimate difference between the two call sites.
-  /// A leaderboard row that does not exist yet says "none yet"; a display's
-  /// lifetime hours line says "0 hours", because there the number itself is the
-  /// subject of the sentence.
+  /// `zeroPhrase` is the one legitimate difference between call sites. A
+  /// leaderboard row that does not exist yet says "none yet"; a display's
+  /// lifetime hours line says "0 hours", where the number is the subject.
   public static func hours(_ hours: Double, zeroPhrase: String = "0 hours") -> String {
     guard hours.isFinite, hours > 0 else { return zeroPhrase }
     if hours < 1 {
@@ -41,10 +34,9 @@ public enum PanelHealthCopy {
 
   /// A relative exposure figure, as a multiple of the panel mean.
   ///
-  /// Answers nil rather than a placeholder glyph when there is no number: the
-  /// caller decides whether to write words or drop the row, and an em dash
-  /// standing in for a missing value violates §6 and is unreadable to VoiceOver
-  /// besides.
+  /// Nil rather than a placeholder glyph when there is no number: the caller
+  /// decides whether to write words or drop the row, and an em dash standing in
+  /// for a missing value is unreadable to VoiceOver.
   public static func multiple(_ relative: Double) -> String? {
     guard relative.isFinite, relative > 0 else { return nil }
     return String(format: "%.1f×", relative)
@@ -52,10 +44,10 @@ public enum PanelHealthCopy {
 
   /// Where a cell sits on the glass, in thirds, named.
   ///
-  /// Deliberately coarse. The grid is 24×10 over a 3440-wide panel, so "column
-  /// 17" would be a false precision; "toward the top, right of centre" is what
-  /// someone can go and look at. Takes the grid dimensions rather than reading
-  /// `PanelGrid` directly so a grid change cannot silently re-map the thirds.
+  /// Deliberately coarse: "column 17" on a 3440-wide panel is false precision,
+  /// while "toward the top, right of centre" is something someone can go and
+  /// look at. Takes the grid dimensions rather than reading `PanelGrid` directly
+  /// so a grid change cannot silently re-map the thirds.
   public static func region(
     cell index: Int, cols: Int = PanelGrid.cols, rows: Int = PanelGrid.rows
   ) -> String? {

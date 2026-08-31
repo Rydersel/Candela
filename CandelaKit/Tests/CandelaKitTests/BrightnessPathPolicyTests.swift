@@ -23,10 +23,8 @@ struct BrightnessPathPolicyTests {
     )
   }
 
-  /// The built-in panel has no DDC wire at all, so it is constitutively native
-  /// no matter what any pref says. Pinning the pref-independence is the point:
-  /// the shipped "Control method" row reads `forceSoftware` and therefore lies
-  /// about the built-in today.
+  /// The built-in panel has no DDC wire, so it is native whatever any pref says. The
+  /// shipped "Control method" row reads `forceSoftware` and so lies about the built-in.
   @Test func theBuiltInPanelIsAlwaysNativeWhateverThePrefsSay() {
     #expect(BrightnessPathPolicy.path(inputs(role: .builtIn)) == .native)
     #expect(BrightnessPathPolicy.path(
@@ -35,28 +33,25 @@ struct BrightnessPathPolicyTests {
     ) == .native)
   }
 
-  /// Live HDR is the condition, and Candela's own HDR mode is not even an
-  /// input (#52): System Settings can engage HDR with our mode still `.off`,
-  /// where DDC writes cannot land, so requiring the mode routed `.combined` —
-  /// a locked wire captioned as live control. The other direction stays
-  /// measured fact: with HDR off the MAG341C answers
-  /// `DisplayServicesSetBrightness` with SUCCESS and changes nothing, so only
-  /// LIVE HDR may route an external display native.
+  /// Live HDR is the condition; Candela's own HDR mode is not an input, since System
+  /// Settings can engage HDR with our mode `.off`, where DDC writes cannot land, and
+  /// requiring the mode routed `.combined`: a locked wire captioned as live control.
+  /// Measured the other way too: with HDR off the MAG341C answers
+  /// `DisplayServicesSetBrightness` with success and changes nothing.
   @Test func nativeFollowsLiveHDRWhoeverEngagedIt() {
     #expect(BrightnessPathPolicy.usesNative(role: .external, isHDRActive: true))
     #expect(!BrightnessPathPolicy.usesNative(role: .external, isHDRActive: false))
     #expect(BrightnessPathPolicy.usesNative(role: .builtIn, isHDRActive: false))
   }
 
-  /// #52's measured scenario is now the only way to say "HDR is live": the
-  /// mode is not an input, so the outside-Candela engage cannot diverge.
+  /// The mode is not an input, so an HDR engage from outside Candela cannot diverge
+  /// from what this reports.
   @Test func liveHDROnAnExternalDisplayIsTheNativePath() {
     #expect(BrightnessPathPolicy.path(inputs(isHDRActive: true)) == .native)
   }
 
-  /// Native OUTRANKS force-software: under live HDR the software leg is torn
-  /// down, and reporting `.software` there would describe a gamma table that
-  /// HDR ignores.
+  /// Native outranks force-software: under live HDR the software leg is torn down, and
+  /// `.software` would describe a gamma table HDR ignores.
   @Test func nativeWinsOverForceSoftware() {
     #expect(BrightnessPathPolicy.path(
       inputs(isHDRActive: true, forceSoftware: true)
@@ -70,9 +65,8 @@ struct BrightnessPathPolicyTests {
     ) == .software(.overlay))
   }
 
-  /// Combined is the DEFAULT path, and it carries its split point so the pane
-  /// can state it in the user's terms ("below 47%…") rather than re-deriving
-  /// it from `combinedSwitchingPoint`, which is an internal pref name.
+  /// Combined is the default path and carries its split point, so the pane can state it
+  /// in the user's terms rather than re-deriving it from an internal pref name.
   @Test func theDefaultPathIsCombinedAndCarriesItsSplitPoint() {
     #expect(BrightnessPathPolicy.path(inputs(switchingValue: 0.47))
       == .combined(switchingValue: 0.47, backend: .gamma))
@@ -84,35 +78,21 @@ struct BrightnessPathPolicyTests {
     #expect(BrightnessPathPolicy.path(inputs(disableCombinedBrightness: true)) == .hardware)
   }
 
-  /// Branch 4 of `applyPaths` submits NOTHING when DDC brightness is turned off
-  /// and combined dimming is off — there is no software leg left to carry the
-  /// value. This is the only state in which nothing at all moves brightness,
-  /// and the whole reason `unavailable` carries a reason rather than being a
-  /// bare nil.
+  /// With DDC brightness turned off and combined dimming off, `applyPaths` submits
+  /// nothing: no software leg is left to carry the value. The only state where nothing
+  /// moves brightness, and why `unavailable` carries a reason instead of being a bare nil.
   @Test func combinedOffPlusDDCOffIsTheOneStateWhereNothingMovesBrightness() {
     #expect(BrightnessPathPolicy.path(
       inputs(disableCombinedBrightness: true, unavailableDDC: true)
     ) == .unavailable(.ddcTurnedOffWithNoSoftwareLeg))
   }
 
-  /// Controller ruling R-A, and the two half-truths it sits between.
-  ///
-  /// In COMBINED mode `unavailableDDC` skips only the hardware submit — the
-  /// software leg still runs — so this is NOT `.unavailable`. The obvious wrong
-  /// simplification is to hoist the `unavailableDDC` check above the combined
-  /// branch, which would report a display that still dims as dead.
-  ///
-  /// But it is not `.combined` either, and that is the ruling: `.combined`
-  /// means "DDC carries the top of the range", which is the one thing this
-  /// display is not doing. A pane that captioned this "Hardware (DDC) control"
-  /// would claim hardware control of a dead wire — in a feature whose entire
-  /// purpose is to say what is actually driving the display.
-  ///
-  /// The truth is narrower than either: the software leg alone, over `[0, s)`
-  /// only, because `DimmingMath.combinedSplit` hands back `sw == 1` for every
-  /// value at or above `s` and the DDC portion that was supposed to carry that
-  /// band is never submitted. `dimsBelow` is that band's edge, so the pane can
-  /// state the dead zone instead of implying a working full-range control.
+  /// Ruling R-A, between two half-truths. In combined mode `unavailableDDC` skips only
+  /// the hardware submit, so this is not `.unavailable`; hoisting that check above the
+  /// combined branch reports a display that still dims as dead. It is not `.combined`
+  /// either, which would caption a dead wire as hardware control. What is left is the
+  /// software leg alone over `[0, s)`, since `DimmingMath.combinedSplit` returns `sw == 1`
+  /// at or above `s` and the DDC portion is never submitted. `dimsBelow` is that edge.
   @Test func combinedWithDDCOffIsSoftwareOnlyAndNeverClaimsHardware() {
     #expect(BrightnessPathPolicy.path(inputs(unavailableDDC: true))
       == .softwareOnly(backend: .gamma, reason: .ddcTurnedOff, dimsBelow: 0.47))
@@ -121,21 +101,17 @@ struct BrightnessPathPolicyTests {
       == .softwareOnly(backend: .overlay, reason: .ddcTurnedOff, dimsBelow: 0.3))
   }
 
-  /// The `s = 0` corner of the same state (pref point −8, "pure hardware"):
-  /// `combinedSplit`'s first branch always wins, so the software band is empty
-  /// and the skipped DDC submit leaves nothing at all. Reported as the block,
-  /// not as a software leg that "dims below 0%" — a caption stating a dead zone
-  /// covering the whole range is the same lie in the other direction.
+  /// The `s = 0` corner of the same state: `combinedSplit`'s first branch always wins, so
+  /// the software band is empty and the skipped DDC submit leaves nothing. Reported as the
+  /// block, since a caption reading "dims below 0%" is the same lie the other way round.
   @Test func combinedWithDDCOffAndAZeroWidthSoftwareBandMovesNothingAtAll() {
     #expect(BrightnessPathPolicy.path(inputs(unavailableDDC: true, switchingValue: 0))
       == .unavailable(.ddcTurnedOffWithNoSoftwareLeg))
   }
 
-  /// Ruling R-A pinned as a PROPERTY over the whole input space rather than as
-  /// one example, because the defect it forbids is a caption claiming hardware
-  /// control that is not happening — and one example only forbids one route to
-  /// it. Every combination of every input is walked; `.combined` may not appear
-  /// anywhere `unavailableDDC` is set.
+  /// R-A as a property over the whole input space, not one example: the defect is a
+  /// caption claiming hardware control that is not happening, and one example forbids one
+  /// route to it. `.combined` may not appear anywhere `unavailableDDC` is set.
   @Test func noInputWhateverCanProduceACombinedPathWithADeadDDCLeg() {
     let bools = [false, true]
     for role in [DisplayRole.external, .builtIn] {
@@ -161,11 +137,9 @@ struct BrightnessPathPolicyTests {
     }
   }
 
-  /// The native gate is the one branch that outranks every pref, so its
-  /// agreement with the standalone predicate is pinned over the whole input
-  /// space too: `usesNative` is what the hot paths call without building an
-  /// `Inputs`, and a divergence between the two would put the drag path on one
-  /// leg while the pane described another.
+  /// The native gate outranks every pref, and `usesNative` is what the hot paths call
+  /// without building an `Inputs`. A divergence would put the drag path on one leg while
+  /// the pane described another.
   @Test func theStandalonePredicateAgreesWithTheTableEverywhere() {
     let bools = [false, true]
     for role in [DisplayRole.external, .builtIn] {
@@ -190,12 +164,10 @@ struct BrightnessPathPolicyTests {
     }
   }
 
-  /// `drivesDDCBrightness` is a projection of the same table, so it is pinned
-  /// against the table rather than described beside it: the two arms that
-  /// SUBMIT a register value in `applyPaths` are exactly the two that answer
-  /// true. A drift here is #143 again, in either direction: a false answer for
-  /// a path that writes would hand the register back underneath a live DDC leg,
-  /// and a true answer for one that does not would leave it at the floor.
+  /// `drivesDDCBrightness` is a projection of the same table: the two arms that submit a
+  /// register value are exactly the two that answer true. A false answer for a path that
+  /// writes hands the register back under a live DDC leg; a true one for a path that does
+  /// not leaves it stuck at the floor.
   @Test func drivesDDCBrightnessNamesExactlyTheRegisterWritingArms() {
     let bools = [false, true]
     for role in [DisplayRole.external, .builtIn] {
@@ -226,9 +198,8 @@ struct BrightnessPathPolicyTests {
 
   // MARK: - The wire stopped answering (WD2)
 
-  /// The demotion's ordinary shape: the software leg dims over `[0, s)` only,
-  /// exactly as it does when the user turns the command off. `.combined` would
-  /// caption a dead wire as hardware control, which is ruling R-A's subject.
+  /// The demotion's ordinary shape: the software leg dims over `[0, s)` only, as it does
+  /// when the user turns the command off. `.combined` would caption a dead wire (R-A).
   @Test func anUnresponsiveWireInCombinedModeIsSoftwareOnly() {
     #expect(BrightnessPathPolicy.path(inputs(wireUnresponsive: true))
       == .softwareOnly(backend: .gamma, reason: .ddcUnresponsive, dimsBelow: 0.47))
@@ -237,9 +208,8 @@ struct BrightnessPathPolicyTests {
     ) == .softwareOnly(backend: .overlay, reason: .ddcUnresponsive, dimsBelow: 0.3))
   }
 
-  /// The zero-width corner (pref point −8, "pure hardware"): empty software
-  /// band, register write going nowhere. Its own block reason, because the
-  /// sentence a person needs here is about the wire, not about a switch.
+  /// The zero-width corner: empty software band, register write going nowhere. Its own
+  /// block reason, because the sentence a person needs is about the wire, not a switch.
   @Test func anUnresponsiveWireWithAZeroWidthSoftwareBandMovesNothingAtAll() {
     #expect(BrightnessPathPolicy.path(inputs(switchingValue: 0, wireUnresponsive: true))
       == .unavailable(.ddcUnresponsiveWithNoSoftwareLeg))
@@ -269,9 +239,8 @@ struct BrightnessPathPolicyTests {
     ) == .unavailable(.ddcTurnedOffWithNoSoftwareLeg))
   }
 
-  /// Under live HDR the DDC failures are no evidence about the wire, and a
-  /// display the user put on the software leg is already where the demotion
-  /// would send it.
+  /// Under live HDR the DDC failures say nothing about the wire, and a display already
+  /// on the software leg is where the demotion would send it.
   @Test func nativeAndForceSoftwareStillOutrankTheWire() {
     #expect(BrightnessPathPolicy.path(inputs(isHDRActive: true, wireUnresponsive: true))
       == .native)

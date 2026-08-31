@@ -1,10 +1,9 @@
 import CoreGraphics
 import Testing
 
-/// The flow window leaves the target display only when it has to. A window
-/// already off the target stays where the person is looking; one sitting on
-/// the target moves to the nearest other screen, never to whichever screen
-/// AppKit happens to list first.
+/// The flow window leaves the target display only when it has to: one already
+/// off the target stays where the person is looking, one on it moves to the
+/// nearest other screen rather than whichever screen AppKit lists first.
 @Suite struct CheckupFlowWindowHostTests {
   private let builtIn = CheckupFlowWindowHost.Screen(
     id: 1, frame: CGRect(x: 0, y: 0, width: 1728, height: 1117))

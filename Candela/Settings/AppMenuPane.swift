@@ -5,23 +5,18 @@ import SwiftUI
 /// Candela puts on screen outside its own windows.
 ///
 /// The indicator positions live here rather than under Keyboard because they
-/// are an appearance choice, and this is the pane that owns those. Keyboard
-/// decides which display a press acts on; this decides where the answer is
-/// drawn.
+/// are an appearance choice. Keyboard decides which display a press acts on;
+/// this decides where the answer is drawn.
 ///
-/// The set of slider and menu-bar controls is deliberate. D26 cut the fork's "General menu items style"
-/// popup and "Show slider tick marks" toggle, and D32 files both prefs as
-/// reserved-and-inert: `menuItemStyle` and `showTickMarks` keep their keys so
-/// the schema slots can never be reused, but nothing in Candela reads them,
-/// they are not `PrefName` cases, and this pane writes neither. The fork's
-/// app-wide "show brightness slider" / "show volume slider" toggles are cut
-/// too — the controls on each display's own destination say the same thing more
-/// precisely — as are the `multiSliders` combined/relevant modes.
+/// D26 cut the fork's menu-items-style popup and tick-marks toggle; D32 files
+/// `menuItemStyle` and `showTickMarks` as reserved-and-inert, keeping the schema
+/// slots while nothing reads them and this pane writes neither. The fork's
+/// app-wide slider toggles are cut too: each display's own destination says the
+/// same thing more precisely.
 ///
-/// `@MainActor` is load-bearing. A `View`'s stored and
-/// computed properties are nonisolated under `SWIFT_STRICT_CONCURRENCY:
-/// complete`, so `SettingsActions` (itself `@MainActor`) could not be held or
-/// touched outside `body` without it.
+/// `@MainActor` is load-bearing: a `View`'s properties are nonisolated under
+/// `SWIFT_STRICT_CONCURRENCY: complete`, so `SettingsActions` could not be held
+/// or touched outside `body` without it.
 @MainActor
 struct AppMenuPane: View {
   @Environment(AppModel.self) private var model
@@ -36,9 +31,8 @@ struct AppMenuPane: View {
 
   var body: some View {
     // `menuIcon` is written from OUTSIDE this pane: ⌘-dragging the status item
-    // off the menu bar makes StatusItemController persist `.hide` (D5). Prefs
-    // are plain UserDefaults and not observable, so the revision bump is the
-    // only thing that re-reads them and flips the popup.
+    // off the menu bar persists `.hide` (D5). Prefs are not observable, so the
+    // revision bump is the only thing that re-reads them and flips the popup.
     let _ = model.prefsRevision
     // The scaffold's reading variant: the page scrolls, and the preview's
     // doorways need the proxy that drives it.
@@ -78,12 +72,9 @@ struct AppMenuPane: View {
 
   // MARK: - Preview
 
-  /// The pane's subject, drawn (KMR7): everything below decides what Candela
-  /// puts on screen, and the preview shows the current answer. Its widgets are
-  /// doorways (KMR-A5): clicking one scrolls to the section that configures it.
-  ///
-  /// The preview keeps depicting the real widgets rather than the settings
-  /// window's own look (SV13); only the frame around it is this window's.
+  /// The pane's subject, drawn (KMR7). The widgets are doorways (KMR-A5):
+  /// clicking one scrolls to the section that configures it. It depicts the real
+  /// widgets, not this window's look (SV13); only the frame is this window's.
   private func preview(proxy: ScrollViewProxy) -> some View {
     VStack(alignment: .leading, spacing: 8) {
       MenuBarPreviewView { target in
@@ -110,22 +101,18 @@ struct AppMenuPane: View {
             actions.prefDidChange(.menuIcon)
           }
         )) {
-          // The order comes from `MenuIconPolicy.pickerOrder`, never
-          // `MenuIcon.allCases`: `externalOnly` was appended as raw 3 but
-          // belongs third, so iterating raw order would silently reorder the
-          // popup (D5). Consuming the Kit constant keeps the one copy of that
-          // rule where it is tested.
+          // `MenuIconPolicy.pickerOrder`, never `MenuIcon.allCases`: raw order
+          // is not reading order, so iterating allCases would silently reorder
+          // the popup (D5).
           ForEach(MenuIconPolicy.pickerOrder, id: \.self) { mode in
             Text(label(for: mode)).tag(mode)
           }
         }
         .prefIdentifier(.menuIcon)
         if prefs.menuIcon != .show {
-          // Every mode but "Always" can leave the user with no icon and
-          // therefore no way in. SO24 makes that recovery real rather than a
-          // promise: `StatusItemController.applicationShouldHandleReopen`
-          // opens this window when the running app is opened again. The fork's
-          // caption pointed at a relaunch action that never existed.
+          // Every mode but "Always" can leave the user with no icon and no way
+          // in. `StatusItemController.applicationShouldHandleReopen` opens this
+          // window when the running app is opened again (SO24).
           SettingsCaption("Open \(AppInfo.productName) again from Applications to get back to these settings. You can quit it from General.")
         }
       }
@@ -143,10 +130,9 @@ struct AppMenuPane: View {
         get: { !prefs.hideBuiltInDisplay },
         set: { shown in
           prefs.hideBuiltInDisplay = !shown
-          // Also `.updateStatusItem`, not just a panel rebuild: with
-          // `menuIcon == .sliderOnly` this pref decides `hasVisibleSlider`,
-          // so without the fan-out the icon would only catch up on the next
-          // hotplug.
+          // Also `.updateStatusItem`, not just a panel rebuild: under
+          // `.sliderOnly` this pref decides `hasVisibleSlider`, so without the
+          // fan-out the icon catches up only on the next hotplug.
           actions.prefDidChange(.hideBuiltInDisplay)
         }
       ))
@@ -155,9 +141,9 @@ struct AppMenuPane: View {
     }
   }
 
-  /// The caption carries the consequence because the panel's own row cannot:
-  /// a one-line row is what keeps the panel from resizing while its menu is
-  /// open, so this is where the reach gets stated (A-21).
+  /// The caption carries the consequence because the panel's own row cannot: a
+  /// one-line row is what keeps the panel from resizing while its menu is open,
+  /// so the reach gets stated here (A-21).
   private var keepAwakeRow: some View {
     SettingRow("Keep Display Awake stops the display sleeping until you turn it off or quit. While it is on, OLED care's idle dimming, blackout and unfocused dimming do not start. Hiding the row here does not turn it off.") {
       Toggle("Show Keep Display Awake in the menu bar", isOn: Binding(
@@ -219,10 +205,9 @@ struct AppMenuPane: View {
   }
 
   /// The caption must not promise a 0% stop on every slider: volume rows snap
-  /// on `SliderSnap.stopsWithoutZero` (D29), because landing on 0 is a mute
-  /// event in `DDCValueController.apply` and, under `enableMuteUnmute`, a
-  /// persistent VCP 0x8D hardware mute. A cosmetic convenience must not be able
-  /// to cause that from the bottom 3% of a drag.
+  /// on `SliderSnap.stopsWithoutZero` (D29), because landing on 0 is a mute in
+  /// `DDCValueController.apply` and, under `enableMuteUnmute`, a persistent VCP
+  /// 0x8D hardware mute a cosmetic convenience must never cause.
   private var percentRow: some View {
     SettingRow("Snapping pulls a slider to the nearest 25%, 50%, 75% or 100% position while you drag (and to 0% for brightness and contrast). Percentages show the exact value next to each slider.") {
       Toggle("Show percentages", isOn: Binding(
@@ -239,19 +224,14 @@ struct AppMenuPane: View {
 
   // MARK: - On-screen indicators
 
-  /// Where the pills a key press puts on screen sit. Two pickers rather than
-  /// one so each kind has a stable home: volume always reports in one place,
-  /// brightness in another. Not a way to see both at once: the HUD keys one
-  /// window per display, so on a single display the two kinds take turns in it.
+  /// Where the pills a key press puts on screen sit. Two pickers so each kind
+  /// has a stable home, not a way to see both at once: the HUD keys one window
+  /// per display, so the two kinds take turns in it.
   ///
   /// Each row's caption describes ITS OWN control, because `SettingRow`
-  /// republishes the caption as that control's accessibility hint: a shared
-  /// sentence under one picker would be spoken as a fact about that picker
-  /// alone.
+  /// republishes the caption as that control's accessibility hint.
   ///
-  /// "Indicator" is the house term for these (the Keyboard pane and each
-  /// display's Advanced page both use it); "OSD" and "HUD" are internal words
-  /// and never appear here.
+  /// "Indicator" is the user-facing term; "OSD" and "HUD" never appear here.
   private var indicatorSection: some View {
     VStack(alignment: .leading, spacing: 8) {
       SettingsCardSection(title: "On-Screen Indicators") {
@@ -263,9 +243,9 @@ struct AppMenuPane: View {
               actions.prefDidChange(.hudStyle)
             }
           )) {
-            // `HUDStyle.pickerOrder`, consumed like every enum picker here even
-            // though it matches raw order today, so a future case slots into
-            // reading order without renumbering raws.
+            // `HUDStyle.pickerOrder` even though it matches raw order today,
+            // so a future case slots into reading order without renumbering
+            // raws.
             ForEach(HUDStyle.pickerOrder, id: \.self) { style in
               Text(label(for: style)).tag(style)
             }
@@ -283,10 +263,8 @@ struct AppMenuPane: View {
               actions.prefDidChange(.hudPositionBrightness)
             }
           )) {
-            // `HUDPlacement.pickerOrder`, never `allCases`: raw 0 is the
-            // top-right position (the one every earlier build drew), so raw
-            // order is not reading order. Same rule as the menu-bar icon popup
-            // above.
+            // `HUDPlacement.pickerOrder`, never `allCases`: raw 0 is top-right,
+            // so raw order is not reading order.
             ForEach(HUDPlacement.pickerOrder, id: \.self) { position in
               Text(label(for: position)).tag(position)
             }
@@ -311,9 +289,8 @@ struct AppMenuPane: View {
           .prefIdentifier(.hudPositionVolume)
         }
       }
-      // The preview depicts both kinds at once so both position choices stay
-      // visible (KMR-A5); this line keeps what the screen actually does from
-      // being misread off that picture.
+      // The preview shows both kinds at once so both positions stay visible
+      // (KMR-A5); this line stops that picture reading as what the screen does.
       SettingsCaption("On screen, the two kinds of indicator take turns in one window per display; the preview shows both so each position stays visible.")
     }
     .id(Self.indicatorsSectionID)
@@ -343,10 +320,9 @@ struct AppMenuPane: View {
     }
   }
 
-  /// Written so the popup reads as one sentence with its label — "Show the menu
-  /// bar icon: When an external display is connected" — rather than four
-  /// independent phrases (D25). Exhaustive, so a future `MenuIcon` case is a
-  /// compile error here rather than a blank row.
+  /// Reads as one sentence with the row label: "Show the menu bar icon: When an
+  /// external display is connected" (D25). Exhaustive, so a future `MenuIcon`
+  /// case is a compile error rather than a blank row.
   private func label(for mode: MenuIcon) -> LocalizedStringKey {
     switch mode {
     case .show: "Always"

@@ -327,16 +327,13 @@ on_signal() {
 trap cleanup EXIT
 trap on_signal INT TERM
 
-# ---- outer watchdog ---------------------------------------------------------
-# Both fds go to /dev/null. A long-lived background child that still holds the
-# script's stdout or stderr keeps a pipe's write end open, so `rig.sh | tail`
-# would block for the whole watchdog period instead of finishing. The signal
-# trap is what reports the firing.
+# Outer watchdog. Both fds go to /dev/null: a long-lived background child that
+# holds the script's stdout keeps a pipe's write end open, so `rig.sh | tail`
+# would block for the whole watchdog period. The signal trap reports the firing.
 ( sleep "$WATCHDOG"; touch "$RUNDIR/watchdog-fired"; kill -TERM $$ 2>/dev/null ) \
   >/dev/null 2>&1 &
 WATCHDOG_PID=$!
 
-# ---- keep-awake -------------------------------------------------------------
 if [ "$KEEP_AWAKE" -eq 1 ]; then
   # -u is the only assertion measured to actually wake a sleeping panel;
   # -dis does not (S1 §5A). The wake is not instant — measured at ~2s — so
@@ -359,7 +356,6 @@ if [ "$KEEP_AWAKE" -eq 1 ]; then
   fi
 fi
 
-# ---- precondition -----------------------------------------------------------
 PREEXISTING="$("$BIN/topology" | grep "vendor=$RIG_VENDOR" | awk '{print $2}' | tr '\n' ' ')"
 if [ -n "$PREEXISTING" ]; then
   loud "A RIG DISPLAY IS ALREADY ONLINE BEFORE THIS RUN: $PREEXISTING"
@@ -368,7 +364,6 @@ if [ -n "$PREEXISTING" ]; then
   exit 74
 fi
 
-# ---- baseline ---------------------------------------------------------------
 PROFILES_BEFORE="$(profile_count)"
 ls -1 "$PROFILE_DIR" 2>/dev/null >"$RUNDIR/profiles.before.txt"
 note "baseline: $PROFILES_BEFORE colour profiles"
@@ -378,7 +373,6 @@ note "baseline: $PROFILES_BEFORE colour profiles"
 BASE_N="$(grep -c '^display ' "$RUNDIR/topology.before.txt" | tr -d ' ')"
 note "baseline topology: $BASE_N display(s)"
 
-# ---- holder(s) --------------------------------------------------------------
 # Returns 0 once the holder announces READY-ALL, 1 if it fails or never gets
 # there. $1 = holder arguments, $2 = log path.
 start_holder() {
@@ -451,7 +445,6 @@ else
   sed 's/^/    /' "$RUNDIR/holder.log"
 fi
 
-# ---- topology gained exactly COUNT displays ---------------------------------
 "$BIN/topology" >"$RUNDIR/topology.during.txt"
 DURING_N="$(grep -c '^display ' "$RUNDIR/topology.during.txt" | tr -d ' ')"
 if [ "$DURING_N" -ne "$((BASE_N + COUNT))" ]; then
@@ -462,7 +455,6 @@ if [ "$DURING_N" -ne "$((BASE_N + COUNT))" ]; then
 fi
 note "topology: $BASE_N -> $DURING_N display(s), ids:$RIG_IDS"
 
-# ---- tester -----------------------------------------------------------------
 note "running tester (deadline ${DEADLINE}s): ${TESTER[*]}"
 export VDRIG_COUNT="$COUNT"
 export VDRIG_DISPLAY_IDS="$RIG_IDS"

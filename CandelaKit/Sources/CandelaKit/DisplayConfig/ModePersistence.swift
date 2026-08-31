@@ -13,11 +13,11 @@ public enum ModeMatch: Sendable, Equatable {
 
 /// Per-display stored mode, opt-in.
 ///
-/// Stores a DESCRIPTOR, never an `ioModeID` — IDs are reassigned across replug
+/// Stores a DESCRIPTOR, never an `ioModeID`: IDs are reassigned across replug
 /// and a stored one would silently resolve to a different mode or none (DM6).
 ///
 /// UserDefaults is documented thread-safe and it is the only stored property,
-/// hence the unchecked conformance — same shape as `DisplayPrefs` and
+/// hence the unchecked conformance, the same shape as `DisplayPrefs` and
 /// `UserDefaultsBrightnessStore`.
 public final class ModePersistence: @unchecked Sendable {
   private let defaults: UserDefaults
@@ -51,8 +51,8 @@ public final class ModePersistence: @unchecked Sendable {
   /// are separate answers, and clearing both here would silently opt the user
   /// back out the first time a mode became unavailable.
   ///
-  /// No production caller yet — this is the engine seam issue #49 (forget a
-  /// remembered mode) wires up.
+  /// No production caller yet: this is the engine seam a "forget this remembered
+  /// mode" control wires up.
   public func clear(for identity: DisplayConfigIdentity) {
     defaults.removeObject(forKey: key(PrefName.storedDisplayMode, identity))
   }
@@ -61,32 +61,27 @@ public final class ModePersistence: @unchecked Sendable {
   /// it was recorded in and then transposed.
   ///
   /// A quarter turn swaps the axes of the WHOLE mode list, so a descriptor
-  /// recorded un-rotated cannot match anything a rotated display publishes,
-  /// even though the identical panel-native mode is present with its sides
-  /// swapped. The transposed arm exists for that case, and is consulted ONLY
-  /// when the literal arm found nothing at the stored logical size.
+  /// recorded un-rotated cannot match anything a rotated display publishes, even
+  /// though the identical panel-native mode is present with its sides swapped.
+  /// The transposed arm exists for that case, and runs ONLY when the literal arm
+  /// found nothing at the stored logical size.
   ///
   /// That condition is the whole rule. If the literal arm DID find the stored
-  /// logical size, the record was saved in the frame the display is in now, so
-  /// a transposed twin sitting in the same list is a genuinely different
-  /// desktop shape rather than a rotation artifact: taking it would change the
-  /// shape of the screen to fix a refresh delta. A literal
-  /// `.refreshRateDiffers` or `.scaleDiffers` therefore beats a transposed
-  /// `.exact`. Below that line, where the literal arm has only a different size
-  /// or nothing at all to offer, the better-ranked outcome wins and the literal
-  /// arm takes ties.
+  /// logical size, the record was saved in the frame the display is in now, so a
+  /// transposed twin sitting in the same list is a genuinely different desktop
+  /// shape rather than a rotation artifact: taking it would change the shape of
+  /// the screen to fix a refresh delta. A literal `.refreshRateDiffers` or
+  /// `.scaleDiffers` therefore beats a transposed `.exact`. Below that line the
+  /// better-ranked outcome wins and the literal arm takes ties.
   ///
-  /// Whenever the literal arm answers at the stored size, this returns before a
-  /// second pass exists, so that case is bit-for-bit the resolution it always
-  /// was. It is the stored size being present that decides this, not the
-  /// display's orientation: an un-rotated display whose stored size has since
-  /// vanished from the list does run the second pass, and finds nothing there
-  /// to prefer.
+  /// It is the stored size being present that decides this, not the display's
+  /// orientation: an un-rotated display whose stored size has since vanished from
+  /// the list does run the second pass, and finds nothing there to prefer.
   ///
   /// A transposed exact match reports `.exact` and so applies silently, on
   /// purpose: it is the same panel-native picture the user chose, and a
-  /// substitution notice for a pure orientation swap reads as a bug rather
-  /// than as honesty.
+  /// substitution notice for a pure orientation swap reads as a bug rather than
+  /// as honesty.
   public static func resolve(
     _ descriptor: DisplayModeDescriptor, in modes: [DisplayMode]
   ) -> ModeMatch {
@@ -125,17 +120,17 @@ public final class ModePersistence: @unchecked Sendable {
   ///
   /// 1. exact geometry + refresh
   /// 2. same geometry, nearest refresh
-  /// 3. same logical size, any framebuffer — HiDPI preferred over 1x
+  /// 3. same logical size, any framebuffer, HiDPI preferred over 1x
   /// 4. nearest logical area OF THE SAME ASPECT RATIO
   /// 5. nothing
   ///
-  /// EVERY step picks deterministically, ties broken on `ioModeID` — including
-  /// the first, which is the same nearest-rate selection as the second and
-  /// merely reports `.exact` when the winner lands inside the tolerance. A
-  /// selection decided by CoreGraphics' enumeration order is not an answer we
-  /// can explain to the user or reproduce in a bug report: the nearest logical
-  /// size typically exists at two framebuffers and six refresh rates, and even
-  /// at exact geometry two rates can sit inside the match window at once.
+  /// EVERY step picks deterministically, ties broken on `ioModeID`, including
+  /// the first, which is the same nearest-rate selection as the second and merely
+  /// reports `.exact` when the winner lands inside the tolerance. A selection
+  /// decided by CoreGraphics' enumeration order cannot be explained to the user
+  /// or reproduced in a bug report: the nearest logical size typically exists at
+  /// two framebuffers and six refresh rates, and even at exact geometry two rates
+  /// can sit inside the match window at once.
   private static func resolveLiteral(
     _ descriptor: DisplayModeDescriptor, in modes: [DisplayMode]
   ) -> ModeMatch {
@@ -153,25 +148,23 @@ public final class ModePersistence: @unchecked Sendable {
     // Refresh rates are compared with a tolerance, NOT with ==. CoreGraphics
     // reports rates like 59.997 rather than 60, so an exact Double comparison
     // means a stored mode never matches on real hardware and every reconnect
-    // silently degrades to a fallback branch. But the tolerance is wider than
-    // the gap between an NTSC rate and its integer twin — 59.9 and 60 are 0.1
-    // apart and BOTH match — so "first in the window" answers a question the
-    // window cannot answer, and answers it with CoreGraphics' enumeration order.
+    // silently degrades to a fallback branch. But the tolerance is wider than the
+    // gap between an NTSC rate and its integer twin (59.9 and 60 are 0.1 apart
+    // and BOTH match), so "first in the window" would answer with CoreGraphics'
+    // enumeration order.
     //
-    // That was a visible defect, not a theoretical one: `quantizedRefresh`
-    // keeps 59.9 and 60 apart and `DisplayModeCopy` renders them as separate
-    // picker rows, so selecting 59.9 could resolve to the 60 mode — whose
-    // `ioModeID` is the one already current, which `DisplayHubView.apply`
-    // then early-returns on. The picker snapped back and nothing happened.
-    // Taking the nearest also makes this the only step that does not depend on
-    // enumeration order, matching steps 2–4.
+    // That was a visible defect, not a theoretical one: `quantizedRefresh` keeps
+    // 59.9 and 60 apart and `DisplayModeCopy` renders them as separate picker
+    // rows, so selecting 59.9 could resolve to the 60 mode, whose `ioModeID` is
+    // the one already current, which `DisplayHubView.apply` then early-returns
+    // on. The picker snapped back and nothing happened.
     if let nearestRefresh = sameGeometry.min(by: { closerRefresh($0, $1, to: descriptor) }) {
       return Self.refreshMatches(nearestRefresh.refreshHz, descriptor.refreshHz)
         ? .exact(nearestRefresh)
         : .refreshRateDiffers(nearestRefresh)
     }
 
-    // Same logical size, different framebuffer. Prefer the HiDPI candidate —
+    // Same logical size, different framebuffer. Prefer the HiDPI candidate:
     // silently dropping a stored HiDPI choice to 1x reads as the feature
     // breaking.
     let sameLogicalSize = modes.filter {
@@ -239,9 +232,8 @@ extension DisplayModeDescriptor {
   /// swapped, the refresh rate untouched, since rotation does not retime the
   /// panel.
   ///
-  /// Computed rather than stored, so the descriptor's five CodingKeys stay
-  /// exactly the shipped on-disk format. Nothing about a stored record changes;
-  /// only what `resolve` is willing to look for changes.
+  /// Computed rather than stored, so the descriptor's CodingKeys stay exactly
+  /// the shipped on-disk format. Only what `resolve` looks for changes.
   var transposed: DisplayModeDescriptor {
     DisplayModeDescriptor(
       logicalWidth: logicalHeight, logicalHeight: logicalWidth,

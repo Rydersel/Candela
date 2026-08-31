@@ -52,9 +52,8 @@ struct RestoreCoordinatorTests {
   @Test func wakeRunsSoberDelayThenTenRepeats() async {
     let (coordinator, counter) = makeCoordinator(action: .write)
     coordinator.noteWake()
-    // Nothing before the sober delay elapses. Deterministic ONLY because the
-    // coordinator's plain `Task {}` inherits the main actor and cannot run
-    // before this test suspends — see the why-comment in noteWake.
+    // Deterministic only because the coordinator's plain `Task {}` inherits the
+    // main actor and cannot run before this test suspends.
     #expect(counter.count == 0)
     for _ in 0 ..< 400 { // ~2 s ceiling at 5 ms polls
       if counter.count == 10 { break }
@@ -66,9 +65,8 @@ struct RestoreCoordinatorTests {
   }
 
   @Test func aNewerWakeSupersedesTheOlderChain() async {
-    // Timing bounds per concurrency F6: supersede at the FIRST observed pass
-    // and keep the old chain's interval wide (50 ms) so a CI stall can never
-    // fit a full double-run inside the poll budget.
+    // Timing bounds per F6: supersede at the first observed pass and keep the
+    // old chain's interval wide so a CI stall cannot fit a full double-run.
     let (coordinator, counter) = makeCoordinator(
       action: .write, soberDelay: .milliseconds(1), repeatInterval: .milliseconds(50), repeatCount: 10
     )
@@ -84,8 +82,8 @@ struct RestoreCoordinatorTests {
       try? await Task.sleep(for: .milliseconds(5))
     }
     try? await Task.sleep(for: .milliseconds(120))
-    // Old chain stopped at its supersession check — at most ONE extra pass of
-    // guard-before-sleep slack — and only the new chain ran to completion.
+    // The old chain stops at its supersession check, with at most one extra
+    // pass of guard-before-sleep slack. Only the new chain runs to completion.
     #expect(counter.count <= observedAtSupersession + 1 + 10)
     #expect(counter.count >= 10)
   }
@@ -95,9 +93,8 @@ struct RestoreCoordinatorTests {
 @MainActor
 struct ControllerRestoreTests {
   @Test func restoreFullRangeDDCWritesThePublishedValueOnTheFullRange() async {
-    // Combined mode default: published 0.3 sits below s=0.5, so the combined
-    // DDC leg is 0 — but the quit restore must write the FULL-RANGE
-    // equivalent (30) so the monitor isn't left at the DDC floor.
+    // Combined mode: published 0.3 is below s=0.5 so the DDC leg is 0, but the
+    // quit restore must write the full-range 30 or the panel sits at its floor.
     let defaults = InMemoryDefaults()
     let fake = FakeDDC(readResult: nil)
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "qr")
@@ -148,12 +145,9 @@ struct ControllerRestoreTests {
   }
 
   @Test func hasStoredValueIsTheEverTouchedGate() {
-    // D5's "stored (= ever-touched)" gate for the restore pass's brightness
-    // leg (fork isTouched; planner flag 4 OVERTURNED, review R4): a fresh
-    // display publishes the assumed default 1.0 with an EMPTY store, and a
-    // restore pass must never write that — full blast on an OLED at night.
-    // AppModel.performRestorePass checks this accessor instead of reaching
-    // into the store.
+    // D5's ever-touched gate for the restore pass. A fresh display publishes
+    // the assumed default 1.0 over an EMPTY store, and writing that on restore
+    // is full blast on an OLED at night.
     let defaults = InMemoryDefaults()
     let store = PathMemoryStore()
     let controller = BrightnessController(
@@ -174,18 +168,11 @@ struct ControllerRestoreTests {
   }
 
   @Test func reassertOverAnEmptyStoreWritesTheFreshDisplayDefault() async {
-    // The post-reset shape, and the ONE property Reset All Settings depends on:
-    // the domain wipe leaves every display with an empty store, so the rebuilt
-    // controller publishes the fresh-display default and `hasStoredValue` is
-    // false. Nothing else writes that number to the panel. The arrival branch
-    // only READS (a no-op under the default `.doNothing` startup action), and
-    // the restore pass's R4 gate skips exactly this case by design, so a
-    // `reassertHardware` that ever grew the same gate would silently return the
-    // reset to leaving the slider at 100% over a panel that never moved.
-    //
-    // Pure DDC so the assertion is the wire value itself rather than a split
-    // across two legs; the combined path writes the same 100 at the top of its
-    // band.
+    // The one property Reset All Settings depends on: after the domain wipe
+    // nothing but `reassertHardware` writes the fresh-display default to the
+    // panel, so growing an ever-touched gate here would leave the slider at
+    // 100% over a panel that never moved.
+    // Pure DDC so the assertion is the wire value, not a split across two legs.
     let defaults = InMemoryDefaults()
     defaults.set(true, forKey: "disableCombinedBrightness")
     let fake = FakeDDC(readResult: nil)

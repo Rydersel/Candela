@@ -6,12 +6,11 @@ import Sparkle
 ///
 /// Sparkle is the store for every updater setting (`SUEnableAutomaticChecks`
 /// and friends live in our defaults domain but are Sparkle's schema, not
-/// `PrefName` cases): the toggle below writes through to the updater rather
-/// than persisting anything of our own, the same one-source-of-truth shape as
-/// launch-at-login (D10) and the ambient row. `automaticallyChecksForUpdates`
-/// is a stored mirror ONLY because `@Observable` cannot invalidate a view from
-/// a computed property over foreign storage; it is written back in `didSet`
-/// and nothing else in the app writes the underlying key.
+/// `PrefName` cases), so the toggle below writes through to the updater rather
+/// than persisting anything of our own: the same one-source-of-truth shape as
+/// launch-at-login (D10). `automaticallyChecksForUpdates` is a stored mirror
+/// ONLY because `@Observable` cannot invalidate a view from a computed property
+/// over foreign storage.
 @MainActor @Observable
 final class UpdaterModel {
   @ObservationIgnored private let controller: SPUStandardUpdaterController
@@ -28,10 +27,9 @@ final class UpdaterModel {
   @ObservationIgnored private var canCheckObservation: NSKeyValueObservation?
 
   init() {
-    // Starting at construction is Sparkle's recommended shape; the scheduled
-    // check fires only if automatic checks are enabled. The `--vd-engage`
-    // helper never gets here: it exits inside CandelaMain before any app
-    // machinery is built.
+    // Sparkle's recommended shape; the scheduled check fires only if automatic
+    // checks are enabled. The `--vd-engage` helper never reaches here: it exits
+    // inside CandelaMain before any app machinery is built.
     controller = SPUStandardUpdaterController(
       startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil
     )
@@ -41,8 +39,8 @@ final class UpdaterModel {
       \.canCheckForUpdates, options: [.initial, .new]
     ) { [weak self] updater, _ in
       // KVO delivers on the main thread here, but the closure is nonisolated;
-      // hop rather than assume. Re-reading the check date on every flip is
-      // what refreshes "Last checked" after a check completes.
+      // hop rather than assume. Re-reading the check date on every flip is what
+      // refreshes "Last checked".
       let canCheck = updater.canCheckForUpdates
       let lastCheck = updater.lastUpdateCheckDate
       Task { @MainActor [weak self] in

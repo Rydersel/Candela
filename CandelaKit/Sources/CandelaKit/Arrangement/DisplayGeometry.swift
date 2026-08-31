@@ -2,8 +2,8 @@ import Foundation
 
 /// A point in **display space**: integral, y-**down**, origin at the top-left of
 /// the main display (AR1). This is `CGDisplayBounds`' space, never
-/// `NSScreen.frame`'s y-up one — mixing the two draws a display above its
-/// neighbour on the map and below it in reality.
+/// `NSScreen.frame`'s y-up one: mixing the two draws a display above its neighbour
+/// on the map and below it in reality.
 public struct DisplayPoint: Sendable, Equatable, Hashable {
   public var x: Int
   public var y: Int
@@ -19,13 +19,9 @@ public struct DisplayPoint: Sendable, Equatable, Hashable {
 /// A display's rect in display space. Integers make equality exact, kill float
 /// drift in snapping, and match `CGConfigureDisplayOrigin`'s `int32_t` (AR1).
 ///
-/// **`let`, so `init`'s clamp cannot be undone.** These were `var` — copied
-/// verbatim from the drag-canvas research §2.1, since corrected there — which
-/// left `max(0, …)` bypassable after construction. A negative width silently
-/// breaks `overlaps`, `touches` and `union`, and every validity and snapping
-/// decision in the feature rests on those three. Nothing needs in-place
-/// mutation: callers already use `moved(to:)` and `offset(dx:dy:)`, and both go
-/// back through `init`.
+/// **`let`, so `init`'s clamp cannot be undone.** A negative width silently breaks
+/// `overlaps`, `touches` and `union`, and every validity and snapping decision rests
+/// on those three.
 public struct DisplayRect: Sendable, Equatable, Hashable {
   public let x: Int
   public let y: Int
@@ -51,8 +47,8 @@ public struct DisplayRect: Sendable, Equatable, Hashable {
     DisplayRect(x: x + dx, y: y + dy, width: width, height: height)
   }
 
-  /// Strictly positive interior intersection. A shared edge is NOT overlap —
-  /// it is the only legal way for two displays to meet.
+  /// Strictly positive interior intersection. A shared edge is NOT overlap: it is
+  /// the only legal way for two displays to meet.
   public func overlaps(_ other: DisplayRect) -> Bool {
     x < other.maxX && other.x < maxX && y < other.maxY && other.y < maxY
   }

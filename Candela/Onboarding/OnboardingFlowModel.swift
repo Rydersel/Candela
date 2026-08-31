@@ -2,8 +2,8 @@ import Foundation
 import Observation
 
 /// A decision the flow commits when the user advances past a page (OB7).
-/// Stage 1 records these; Stage 2 routes them through the existing write
-/// paths (OB6) and nothing else changes.
+/// Fixture mode records these; live mode routes them through the app's existing
+/// write paths (OB6).
 enum OnboardingCommit: Equatable {
   case rename(displayKey: String, name: String)
   case applySize(displayKey: String, looksLikeWidth: Int, looksLikeHeight: Int)
@@ -39,9 +39,9 @@ enum OnboardingApplyState: Equatable, Sendable {
 }
 
 /// Drives the guided setup flow over an `OnboardingEnvironment`. Owns the
-/// derived page list, the in-flow choices, and the commit seam. In fixture
-/// mode (Stage 1, tests) commits are recorded and the permission grant is
-/// simulated; live mode replaces `commit` and the permission proxy.
+/// derived page list, the in-flow choices and the commit seam. In fixture mode
+/// (the mock and tests) commits are recorded and the permission grant is
+/// simulated; live mode replaces `onCommit` and the permission proxy.
 @MainActor
 @Observable
 final class OnboardingFlowModel {
@@ -62,19 +62,18 @@ final class OnboardingFlowModel {
     }
   }
 
-  /// Keys the user took out of the designation. The designation commit arm
-  /// reads "enrolled but not designated" as an un-enrollment, so a display
-  /// that is merely ABSENT from the set must never be confused with one the
-  /// user deselected; this is what tells the two apart across a re-harvest.
+  /// Keys the user took out of the designation. The commit arm reads "enrolled
+  /// but not designated" as an un-enrollment, so a display merely ABSENT from
+  /// the set must never be confused with one the user deselected.
   private var deselectedOleds: Set<String> = []
 
   /// Per-display protection choice on the care page, default on for every
   /// designated display (OB3).
   var careEnabled: Set<String> {
     didSet {
-      // Same rule as the designation set, one layer in: a protection-off is a
-      // decision, and it is recorded wherever it happens rather than by the
-      // care page, so a re-harvest cannot mistake it for an unseeded key.
+      // Same rule as the designation set: a protection-off is a decision, and
+      // recording it here rather than in the care page keeps a re-harvest from
+      // mistaking it for an unseeded key.
       declinedCare.formUnion(oldValue.subtracting(careEnabled))
       declinedCare.subtract(careEnabled)
     }
@@ -83,8 +82,7 @@ final class OnboardingFlowModel {
   /// Keys whose Protect toggle the user turned off. `designatedOleds` cannot
   /// carry this: a care-page toggle-off leaves the display designated, so
   /// absence from `careEnabled` is the ONLY trace of the decision, and a
-  /// re-harvest that reseeded the toggle would flip it back on under the user
-  /// and enroll a display they had just declined.
+  /// re-harvest that reseeded the toggle would enroll a display just declined.
   private var declinedCare: Set<String> = []
 
   /// True when the user took the recommended measured path (OB5).
@@ -149,16 +147,14 @@ final class OnboardingFlowModel {
 
   // MARK: - Size apply seam
 
-  /// The apply seam, closure and state shaped like the permission seams
-  /// above. `applySize(displayKey:choice:)` starts an apply; the seam
-  /// implementation reports back through `applyCountdownTicked`,
-  /// `applyKept`, `applyReverted` and `applyFailed`, and the model owns what
-  /// those reports mean. The defaults installed in `init` are the fixture: a
-  /// simulated countdown with the shipped semantics. Live wiring replaces
-  /// all three closures with the shipped mode-apply path and answers its
-  /// preview directly, because the shipped banner's answering surface is
-  /// fixed at preview start and never this window, so the Setup window
-  /// renders its own (DM11).
+  /// The apply seam, shaped like the permission seams above.
+  /// `applySize(displayKey:choice:)` starts an apply and the implementation
+  /// reports back through the `apply*` methods below, which own what those
+  /// reports mean. `init` installs a fixture with the shipped semantics. Live
+  /// wiring replaces all three closures with the shipped mode-apply path and
+  /// answers its preview directly: the shipped banner's answering surface is
+  /// fixed at preview start and is never this window, so Setup renders its own
+  /// (DM11).
   var onApplySize: (_ displayKey: String, _ looksLikeWidth: Int, _ looksLikeHeight: Int) -> Void
   var onKeepSize: () -> Void
   var onRevertSize: () -> Void
@@ -179,11 +175,9 @@ final class OnboardingFlowModel {
 
   static let applyCountdownSeconds = 15
 
-  /// Seconds the installed applier's countdown opens with, used to seed the
+  /// Seconds the installed applier's countdown opens with, seeding the
   /// synchronous `.counting` state in `applySize`. Only a seed: the applier's
   /// first tick report carries the real remaining seconds and overwrites it.
-  /// The fixture installer sets it from its own `seconds`; live wiring sets
-  /// it to the shipped preview countdown's length.
   var applierCountdownSeconds = OnboardingFlowModel.applyCountdownSeconds
 
   private(set) var committed: [OnboardingCommit] = []
@@ -195,17 +189,14 @@ final class OnboardingFlowModel {
     careEnabled = designated
     launchAtLogin = environment.isFirstRun ? true : environment.loginItemEnabled
     // A re-run arrives at the prior telemetry decision (OB3 keeps the
-    // recommended measured default for a first run). Only an enrolled
-    // display's pref carries a decision: an unenrolled display's stored
-    // value is the unwritten default and must not flip the recommendation.
+    // recommended measured default for a first run). Only an enrolled display's
+    // pref carries a decision; an unenrolled one holds the unwritten default and
+    // must not flip the recommendation.
     //
     // ANY measuring display seeds this on, not the first enrolled one. The
-    // choice is one switch for the whole flow, so on a mixed harvest one of
-    // the two answers has to lose, and it must not be the measuring display:
-    // seeding off there would make an untouched flow turn its measurement off
-    // on the way past. Seeding on re-affirms the recommended path for the
-    // other display instead, which is a write the user can see coming and can
-    // undo on the page it is offered.
+    // choice is one switch for the whole flow, so on a mixed harvest one answer
+    // has to lose, and it must not be the measuring display: seeding off there
+    // would make an untouched flow turn its measurement off on the way past.
     if !environment.isFirstRun, environment.displays.contains(where: \.enrolledInCare) {
       measuredTelemetry = environment.displays.contains {
         $0.enrolledInCare && $0.measuredTelemetry
@@ -233,9 +224,9 @@ final class OnboardingFlowModel {
   }
 
   func displayName(forKey key: String) -> String {
-    // A cleared name field stores an empty rename, which every later page
-    // would render as a blank title; a rename that trims to nothing falls
-    // back to the environment's name instead.
+    // A cleared name field stores an empty rename, which every later page would
+    // render as a blank title, so a rename that trims to nothing falls back to
+    // the environment's name.
     if let rename = renames[key],
       !rename.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     {
@@ -283,14 +274,11 @@ final class OnboardingFlowModel {
     // Snapshot before `self.environment` is replaced below; the re-seed
     // needs to know which displays are new to this harvest.
     let priorKeys = Set(self.environment.displays.map(\.persistenceKey))
-    // An in-flight apply changes the display's mode, and the re-harvest that
-    // follows sees the previewed size as current, so the fresh entry arrives
-    // with no suggestion (the suppression working as designed for a display
-    // already at its best size). Without the prior suggestion the size page
-    // would vanish mid-countdown and its disappearance would revert the very
-    // apply the user asked for. Carry the old suggestion forward while the
-    // apply is unresolved; once it resolves, the next harvest drops the page
-    // normally.
+    // An in-flight apply changes the display's mode, so the re-harvest sees the
+    // previewed size as current and the fresh entry arrives with no suggestion.
+    // Without the prior suggestion the size page would vanish mid-countdown, and
+    // its disappearance would revert the very apply the user asked for. Carry it
+    // forward until the apply resolves; the next harvest drops the page then.
     if applyState != .idle, let pending = pendingApply,
       let prior = display(forKey: pending.displayKey)?.sizeSuggestion,
       let present = environment.displays.firstIndex(
@@ -307,21 +295,17 @@ final class OnboardingFlowModel {
       // countdown rather than answering into the void.
       resetApplyState()
     }
-    // This method has a LIVE caller: the app's topology loop calls it on every
-    // display reconfiguration while the Setup window is up, so displays really
-    // do arrive and depart mid-flow. The designation arm turns "enrolled but
-    // not designated" into an un-enrollment write, which makes both edges
-    // below load-bearing rather than housekeeping.
+    // The app's topology loop calls this on every display reconfiguration while
+    // the Setup window is up, so displays really do arrive and depart mid-flow.
+    // The designation arm turns "enrolled but not designated" into an
+    // un-enrollment write, which makes both edges below load-bearing rather than
+    // housekeeping.
     //
-    // An already enrolled display that arrives mid-flow is designated on
-    // arrival, or advancing past the designation page would silently
-    // un-enroll a display the user never touched. Only displays the user has
-    // not deselected are re-designated, so a deliberate deselect is never
-    // resurrected by a replug.
-    //
-    // The name guess is re-run for arrivals only. A guess-only designation has
-    // nothing on disk to restore it, so a replug would drop the display off the
-    // care page; a display already here keeps what the user made of it.
+    // An enrolled display that arrives mid-flow is designated on arrival, or
+    // advancing past the designation page would silently un-enroll a display the
+    // user never touched. A deselected one is left out, so a deliberate deselect
+    // survives a replug. The name guess re-runs for arrivals only: a guess-only
+    // designation has nothing on disk to restore it.
     let seeded = environment.displays
       .filter { entry in
         guard !deselectedOleds.contains(entry.persistenceKey) else { return false }
@@ -334,10 +318,9 @@ final class OnboardingFlowModel {
     // back returns the way the user left it, protection included.
     careEnabled.formUnion(seeded.filter { !declinedCare.contains($0) })
     // A departure is not a decision, so the keys dropped here are subtracted
-    // from `deselectedOleds` afterwards; without that the didSet would record
-    // them as deselections and hold them against the display on its return.
-    // Union and prune in ONE assignment: each write to `designatedOleds`
-    // replans, and the plan only needs deriving once per update.
+    // from `deselectedOleds` afterwards; without that the didSet records them as
+    // deselections and holds them against the display on its return. Union and
+    // prune in ONE assignment: each write to `designatedOleds` replans.
     let departed = designatedOleds.filter { key in
       !environment.displays.contains { $0.persistenceKey == key }
     }
@@ -349,10 +332,10 @@ final class OnboardingFlowModel {
 
   // MARK: - Size apply entry points (called by the size page)
 
-  /// Start the keep and revert countdown for a chosen size. The choice is
-  /// held as pending and recorded only when the countdown is answered with a
-  /// keep; the `.applySize` commit that eventually rides the advance is a
-  /// record of that kept apply, never a trigger.
+  /// Start the keep and revert countdown for a chosen size. The choice is held
+  /// as pending and recorded only when the countdown is answered with a keep;
+  /// the `.applySize` commit that later rides the advance records that kept
+  /// apply and never triggers one.
   func applySize(displayKey: String, choice: OnboardingSizeChoice) {
     let size: (width: Int, height: Int)
     switch choice {
@@ -387,10 +370,10 @@ final class OnboardingFlowModel {
     onRevertSize()
   }
 
-  /// Belt and braces at the flow's edge: a countdown the user walks away
-  /// from is answered with a revert, so an unconfirmed mode change never
-  /// outlives its page. The shipped apply path's own departure and expiry
-  /// handling stays authoritative; this only forwards the answer.
+  /// A countdown the user walks away from is answered with a revert, so an
+  /// unconfirmed mode change never outlives its page. The shipped apply path's
+  /// own departure and expiry handling stays authoritative; this forwards the
+  /// answer and nothing more.
   func sizePageDisappeared() {
     guard case .counting = applyState else { return }
     revertSize()
@@ -451,10 +434,10 @@ final class OnboardingFlowModel {
 
   // MARK: - Fixture applier
 
-  /// Fixture mode: a simulated countdown with the shipped semantics. Expiry
-  /// reverts and the page stays; the Stage 1 mock auto-advanced on expiry,
-  /// which is the defect this replaces. Installed by `init` so the mock
-  /// presenter and tests get it for free; tests shrink `seconds` and `tick`.
+  /// Fixture mode: a simulated countdown with the shipped semantics, so expiry
+  /// reverts and the page stays rather than auto-advancing. Installed by `init`
+  /// so the mock presenter and tests get it for free; tests shrink `seconds`
+  /// and `tick`.
   func installFixtureSizeApplier(
     seconds: Int = OnboardingFlowModel.applyCountdownSeconds,
     tick: Duration = .seconds(1)
@@ -504,11 +487,11 @@ final class OnboardingFlowModel {
     case .welcome, .accessibility, .noDisplays:
       break
     case .oledSelect:
-      // Un-enrollment is split across two pages on purpose. A deselect can be
-      // the very thing that takes the care page out of the plan, so the care
-      // arm would never run for it; this arm owns the displays that left the
-      // designation, and the care arm owns the ones still in it with their
-      // toggle off. The two sets cannot overlap, so nothing is written twice.
+      // Un-enrollment is split across two pages on purpose: a deselect can be
+      // the very thing that takes the care page out of the plan, so the care arm
+      // would never run for it. This arm owns the displays that left the
+      // designation, the care arm the ones still in it with their toggle off.
+      // The two sets cannot overlap, so nothing is written twice.
       for entry in environment.displays
       where entry.enrolledInCare && !designatedOleds.contains(entry.persistenceKey) {
         onCommit(.unenrollFromCare(displayKey: entry.persistenceKey))

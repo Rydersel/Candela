@@ -3,14 +3,10 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// **`apply` is never called here, and that is deliberate.** It reconfigures
-/// the machine the tests are running on; there is no scope that makes a real
-/// `CGCompleteDisplayConfiguration` safe in an unattended suite. What IS
-/// testable without hardware is everything the configurator delegates to:
-/// reading the layout (`ArrangementSnapshot`) and judging the result
-/// (`ArrangementVerification`, exercised through `FakeArrangementConfigurator`
-/// in `ArrangementPlanTests`). That split is the point of keeping this file
-/// thin.
+/// `apply` is never called here on purpose: it reconfigures the machine the tests run
+/// on, and no scope makes a real `CGCompleteDisplayConfiguration` safe unattended. What
+/// is testable is what it delegates to: reading the layout with `ArrangementSnapshot` and
+/// judging the result with `ArrangementVerification`.
 @Suite("CoreGraphics arrangement configurator")
 struct CoreGraphicsArrangementConfiguratorTests {
   private func bounds(_ rects: [CGDirectDisplayID: CGRect]) -> (CGDirectDisplayID) -> CGRect {
@@ -54,9 +50,8 @@ struct CoreGraphicsArrangementConfiguratorTests {
     #expect(arrangement.tile(2)?.mirroredIDs == [1, 3])
   }
 
-  /// Sorted, so the value is a function of the topology rather than of the
-  /// enumeration order — "the layout has not changed" has to be decidable by
-  /// equality, and a preview session compares whole arrangements.
+  /// Sorted, so the value is a function of the topology rather than the enumeration
+  /// order: a preview session decides "unchanged" by comparing whole arrangements.
   @Test func mirroredIDsDoNotDependOnEnumerationOrder() {
     let rects = bounds([2: CGRect(x: 0, y: 0, width: 100, height: 100)])
     let displays = [
@@ -71,9 +66,8 @@ struct CoreGraphicsArrangementConfiguratorTests {
     #expect(ArrangementSnapshot.arrangement(of: displays, bounds: rects).tile(2)?.mirroredIDs == [1, 3])
   }
 
-  /// `CGDisplayBounds` returns `CGRectNull` for an ID it does not know — an
-  /// origin of **infinity**, and `Int(infinity)` traps. This is the whole
-  /// reason the conversion is fallible rather than a `map`.
+  /// `CGDisplayBounds` returns `CGRectNull` for an ID it does not know, an origin of
+  /// infinity, and `Int(infinity)` traps. That is why the conversion is fallible.
   @Test func aDisplayWithUnreadableBoundsIsSkippedRatherThanTrappedOn() {
     let arrangement = ArrangementSnapshot.arrangement(
       of: [MirrorFixtures.display(1), MirrorFixtures.display(2)],
@@ -82,9 +76,8 @@ struct CoreGraphicsArrangementConfiguratorTests {
     #expect(arrangement.tiles.map(\.id) == [1])
   }
 
-  /// A zero-size rect is the other shape an unusable display reports; a tile of
-  /// no area touches nothing, so it would read as a permanently disconnected
-  /// display in `ArrangementRules`.
+  /// A zero-size rect is the other shape an unusable display reports: a tile of no area
+  /// touches nothing, so `ArrangementRules` reads it as permanently disconnected.
   @Test func aDisplayWithEmptyBoundsIsSkipped() {
     let arrangement = ArrangementSnapshot.arrangement(
       of: [MirrorFixtures.display(1)],
@@ -95,20 +88,17 @@ struct CoreGraphicsArrangementConfiguratorTests {
 
   // MARK: - Through the real type
 
-  /// The null-bounds guard end to end: the fake's display IDs are unknown to
-  /// CoreGraphics, so every `CGDisplayBounds` call returns `CGRectNull`. Before
-  /// the guard this trapped rather than failing.
+  /// The null-bounds guard end to end: the fake's display IDs are unknown to CoreGraphics,
+  /// so every `CGDisplayBounds` call returns `CGRectNull`, which used to trap.
   @Test func theRealConfiguratorSurvivesDisplayIDsCoreGraphicsDoesNotKnow() {
     let fake = FakeConfigurator()
     fake.configuredDisplays = [MirrorFixtures.display(0xDEAD_BEEF), MirrorFixtures.display(0xFEED)]
     #expect(CoreGraphicsArrangementConfigurator(displays: fake).currentArrangement().isEmpty)
   }
 
-  /// The one hardware assertion in the file, and it only READS: the display at
-  /// the origin *is* the main display, definitionally (arrangement research
-  /// §2.1), so a layout read from this machine must agree with
-  /// `CGMainDisplayID`. If the conversion ever flipped an axis or lost the
-  /// origin, this is what would say so.
+  /// The one hardware assertion in the file, and it only reads: the display at the origin
+  /// is definitionally the main display, so a layout read from this machine must agree with
+  /// `CGMainDisplayID`. A conversion that flipped an axis or lost the origin fails here.
   @Test func aLayoutReadFromThisMachineAgreesWithCGMainDisplayID() throws {
     let arrangement = CoreGraphicsArrangementConfigurator().currentArrangement()
     // Only true of a machine with an attached display; a headless CI runner has

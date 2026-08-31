@@ -7,9 +7,8 @@ import Testing
 /// over a real `SynthesisCoordinator`, a real preview session, a real engine and
 /// a real gate, with only the two hardware backends faked (AT3).
 ///
-/// Its own file because more than one suite builds it now. A second copy would
-/// let the two drift, and on a fixture that writes REAL prefs a drifted copy is
-/// a test that passes for the wrong reason.
+/// Shared rather than copied per suite: this fixture writes REAL prefs, and a
+/// drifted copy is a test that passes for the wrong reason.
 @MainActor
 struct SynthesisFixture {
   static let panelID: CGDirectDisplayID = 2
@@ -18,11 +17,9 @@ struct SynthesisFixture {
   static let nativeHeight = 1440
   static let nativeHz: Double = 175
 
-  /// Zero, so a suite that drives several engages does not pay the engage
-  /// tail's real settle times. The durations exist as a seam for exactly this:
-  /// the bounce's failure path is about seventeen seconds of wall clock per
-  /// case, which is the difference between a test that exists and one that
-  /// does not.
+  /// Zero, so a suite driving several engages does not pay the engage tail's
+  /// real settle times: the bounce's failure path is about seventeen seconds of
+  /// wall clock per case, which is the difference between a test and no test.
   static let instantDurations = BouncingSynthesisDriver.Durations(
     beforeRetime: .zero, beforeBounce: .zero, hdrSettle: .zero,
     betweenAttempts: .zero, hdrHeld: .zero
@@ -43,22 +40,18 @@ struct SynthesisFixture {
   /// `DisplayPrefs` directly; the key is unique per call and removed at the end
   /// of the test, so nothing survives the process or collides with a sibling.
   ///
-  /// `secondPanel` attaches an identical ultrawide under a second id, which is
-  /// what the departure sweep needs: it takes a SECOND engage to reach the
-  /// sweep that catches the first display's departure.
-  /// `mirroring` gives the first panel a master, which is CoreGraphics' shape
-  /// for a mirror slave (the flag and the master id both). `mirrorMaster` is
-  /// the other end of that set: the flag with no master id, which is all a
-  /// master ever reports about its own mirroring.
+  /// `secondPanel` attaches an identical ultrawide under a second id: it takes
+  /// a SECOND engage to reach the sweep that catches the first one's departure.
+  /// `mirroring` gives the first panel a master, CoreGraphics' shape for a
+  /// mirror slave. `mirrorMaster` is the other end of that set: the flag with no
+  /// master id, which is all a master reports about its own mirroring.
   ///
   /// `nativeRidesTheHiDPITwin` reproduces the enumeration order behind the
   /// stale-descriptor regression: a panel flags BOTH the 1x row at its pixel
-  /// size and the HiDPI twin whose framebuffer is that size, so taking the
-  /// first native-flagged entry out of the RAW list picks whichever came back
-  /// first.
-  /// `enumerateOnInit: false` leaves the panel baseline EMPTY, which is what a
-  /// display first seen inside a mirror window has: no cached measurement of
-  /// its own to fall back on.
+  /// size and the HiDPI twin whose framebuffer is that size, so taking the first
+  /// native-flagged entry out of the RAW list picks whichever came back first.
+  /// `enumerateOnInit: false` leaves the panel baseline EMPTY, as it is for a
+  /// display first seen inside a mirror window.
   init(
     optedIn: Bool = true, secondPanel: Bool = false, mirroring: CGDirectDisplayID? = nil,
     mirrorMaster: Bool = false, nativeRidesTheHiDPITwin: Bool = false,
@@ -143,10 +136,9 @@ struct SynthesisFixture {
 
   /// Takes this fixture's pref keys back out of the process's defaults.
   ///
-  /// Synchronous and separate from the revert below so every test can `defer`
-  /// it at the top: a throwing `#require` skips the rest of the body, and a
-  /// cleanup that only runs on the happy path leaks a key on exactly the runs
-  /// that failed.
+  /// Synchronous and separate from the revert below so a test can `defer` it at
+  /// the top: a throwing `#require` skips the rest of the body, and a cleanup on
+  /// the happy path only leaks a key on exactly the runs that failed.
   func forgetPrefs() {
     UserDefaults.standard.removeObject(forKey: "offerSyntheticSizes.\(persistenceKey)")
     UserDefaults.standard.removeObject(forKey: "storedSyntheticSize.\(persistenceKey)")
@@ -162,15 +154,11 @@ struct SynthesisFixture {
   /// The select is fire-and-forget onto the coordinator's queue; nothing in a
   /// suite may end while it is still reconfiguring a fake world.
   ///
-  /// **It GIVES UP after about two seconds and says nothing**, deliberately,
-  /// and the silence is the trade. A hang here cannot be cancelled cleanly and
-  /// would take the whole suite with it, while every assertion this returns to
-  /// is about a state the operation was supposed to have reached: an operation
-  /// still running at the deadline fails those assertions on the next line,
-  /// with a message about the state rather than about the wait. The bound is
-  /// three orders of magnitude past what the fakes need, so it can only be hit
-  /// by a real regression, and that regression is reported by the expectation
-  /// that follows rather than swallowed.
+  /// **It GIVES UP after about two seconds and says nothing**, deliberately. A
+  /// hang here cannot be cancelled cleanly and would take the whole suite with
+  /// it, while an operation still running at the deadline fails the very next
+  /// assertion, with a message about the state rather than about the wait. The
+  /// bound is far past what the fakes need, so only a regression reaches it.
   func settle() async {
     for _ in 0 ..< 2000 where modes.isApplying {
       try? await Task.sleep(for: .milliseconds(1))

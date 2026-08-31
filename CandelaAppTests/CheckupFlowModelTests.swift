@@ -12,9 +12,8 @@ struct CheckupFlowModelTests {
     var hides = 0
     /// The mirroring case: the window found no screen, so nothing reached glass.
     var refuses = false
-    /// The hold the real window takes for the life of a showing. `hide()` runs
-    /// on paths with nothing on screen, so a hide count cannot answer whether
-    /// care was left paused.
+    /// The hold the real window takes for the life of a showing. `hide()` also
+    /// runs with nothing on screen, so a hide count cannot answer this.
     private(set) var holds: [String] = []
     var isHolding: Bool { holds.last == "begin" }
     func show(kind: CheckupFieldKind, plant: CheckupPlant?, on display: CheckupDisplayEntry) -> Bool {
@@ -81,7 +80,6 @@ struct CheckupFlowModelTests {
       makeRNG: { SeededGenerator(seed: 1) })
   }
 
-  /// Drives the flow from scenario to the first field instruction.
   private func toFirstField(_ flow: CheckupFlowModel) async {
     await flow.advance()                     // scenario -> displayPick
     flow.selectedDisplay = flow.environment.displays[0]
@@ -266,7 +264,7 @@ struct CheckupFlowModelTests {
   }
 
   /// Left to the panel class, a Dell whose cached string never arrived would be
-  /// pre-graded write-only, which is false about the panel and lands in a saved report.
+  /// pre-graded write-only: false about the panel, and it lands in a saved report.
   @Test func anHDREngagedRunPregradesTheCapabilityRowsAndNeverRunsTheLeg() async {
     let runs = CheckupRunCount()
     let flow = CheckupFlowModel(environment: environment(

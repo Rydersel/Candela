@@ -122,20 +122,10 @@ struct CapabilityStringTests {
   }
 
   @Test func truncatedBuffersNeverIndexOutOfBounds() {
-    // A bus that returns fewer bytes than the frame needs must be a `nil`,
-    // never a crash: this is the shape a half-answered fragment arrives in.
-    //
-    // DEVIATION from the task brief, which looped `0 ..< good.count` (38) and
-    // expected `nil` for every prefix. That assertion is false against the
-    // brief's own implementation and would have been a permanently red test:
-    // the frame here is 9 bytes (5 header + 3 payload + checksum) inside a
-    // 38-byte buffer, and `fragment` derives the frame length from the length
-    // byte precisely so it can validate a short answer sitting in a long
-    // buffer. Every prefix of length >= 9 therefore contains the WHOLE frame
-    // and must decode — a `nil` there would reject every real fragment, since
-    // the transport always reads 38 bytes for a frame that is almost always
-    // shorter. The genuine boundary is 9: below it, nil; at or above it, the
-    // payload. Both halves are asserted.
+    // A bus returning fewer bytes than the frame needs must be nil, never a crash. The
+    // boundary is the frame length (9 here: 5 header, 3 payload, checksum): below it nil,
+    // at or above it the payload, because `fragment` takes the length from the length byte
+    // so a short answer sitting in the always-38-byte read still decodes.
     let good = Self.frame(offset: 0, payload: [0x41, 0x42, 0x43])
     let frameLength = 9
     for length in 0 ..< frameLength {
@@ -149,10 +139,8 @@ struct CapabilityStringTests {
   }
 }
 
-/// A real MAG-shaped capability string, plus the malformed variants D24 exists
-/// for. Same matrix as the `support(forVCP:in:)` suite above, because the new
-/// API inherits the same rule and inheriting a rule is not the same as obeying
-/// it.
+/// A real MAG-shaped capability string plus the malformed variants D24 exists for. Same
+/// matrix as the suite above, because inheriting a rule is not the same as obeying it.
 @Suite("Capability string detail (D24)")
 struct CapabilityStringDetailTests {
   private let real = "(prot(monitor)type(LCD)model(MAG341CQR)cmds(01 02 03 07 0C E3 F3)"
@@ -165,9 +153,8 @@ struct CapabilityStringDetailTests {
     #expect(codes?.contains(0x62) == true)
     #expect(codes?.contains(0x8D) == true)
     #expect(codes?.contains(0x12) == true)
-    // 0x0F, 0x11 and 0x05 appear only INSIDE 60(...) and 14(...) as permitted
-    // VALUES. 0x05 is separately a top-level code here, so the one that proves
-    // the rule is 0x0F.
+    // 0x0F and 0x11 appear only inside 60(...) and 14(...) as permitted values. 0x05 is
+    // also a top-level code here, so 0x0F is the one that proves the rule.
     #expect(codes?.contains(0x0F) == false)
     #expect(codes?.contains(0x11) == false)
   }
@@ -183,18 +170,16 @@ struct CapabilityStringDetailTests {
     #expect(CapabilityString.tag("mswhql", in: real) == nil)
   }
 
-  /// The whole-tag boundary check, generalised. `prot_type(` is a different
-  /// key from `type(`, and matching it would report another field's value as
-  /// this one's — a fact invented out of unrelated data.
+  /// The whole-tag boundary check: `prot_type(` is a different key from `type(`, and
+  /// matching it would report another field's value as this one's.
   @Test func aTagOnlyMatchesAWholeTagNeverASuffixOfALongerOne() {
     #expect(CapabilityString.tag("type", in: "(prot_type(RGB)vcp(10))") == nil)
     #expect(CapabilityString.codes(in: "(vcpname(brightness)vcp(10))")?.contains(0x10) == true)
     #expect(CapabilityString.codes(in: "(mccs_vcp(99))") == nil)
   }
 
-  /// D24's fail-to-nil rule, in every shape the field produces. A string we
-  /// cannot fully account for earns silence, never a partial answer that reads
-  /// like a complete one.
+  /// D24's fail-to-nil rule in every shape the field produces: a string we cannot fully
+  /// account for earns silence, never a partial answer that reads like a complete one.
   @Test func anythingWeCannotFullyAccountForIsNilNotAPartialAnswer() {
     // Truncated: the vcp group never closes.
     #expect(CapabilityString.codes(in: "(prot(monitor)vcp(02 10 12") == nil)
@@ -220,10 +205,8 @@ struct CapabilityStringDetailTests {
     #expect(CapabilityString.tag("model", in: "(vcp(10))") == nil)
   }
 
-  /// Degenerate inputs that must not crash or index out of bounds. The empty
-  /// string and a bare tag name with no group are what a garbled or
-  /// zero-length DDC read decodes to on hardware like the MAG 341C, and both
-  /// must be silence rather than a fabricated answer.
+  /// The empty string and a bare tag name with no group are what a garbled or zero-length
+  /// DDC read decodes to on hardware like the MAG, and both must be silence, not a crash.
   @Test func degenerateInputsAreSilentNotFatal() {
     #expect(CapabilityString.codes(in: "") == nil)
     #expect(CapabilityString.codes(in: "   ") == nil)
@@ -232,22 +215,15 @@ struct CapabilityStringDetailTests {
     #expect(CapabilityString.tag("mccs_ver", in: "mccs_ver") == nil)
     // A tag name longer than the whole string: the scan must simply not run.
     #expect(CapabilityString.tag("mccs_ver", in: "(m)") == nil)
-    // Balanced, but the group we want never closes is unreachable — an
-    // unbalanced string is rejected before the scan, which is the point of
-    // running the balance check first.
+    // An unbalanced string is rejected before the scan, which is the point of running
+    // the balance check first.
     #expect(CapabilityString.tag("vcp", in: "(vcp(10)") == nil)
   }
 
-  /// A feature code is exactly two ASCII hex digits — no sign, ever.
-  ///
-  /// `UInt8("+1", radix: 16)` is `1` and `"+1"` is two Characters, so a
-  /// `token.count == 2` check that leans on `UInt8(_:radix:)` to reject
-  /// non-digits lets a signed token through. Two consequences, the second one
-  /// shipping: the pane would report "this display advertises VCP 0x01" from a
-  /// token that is not a hex pair, and `support(forVCP:in:)` would answer
-  /// `.unsupported` for a string that is provably malformed — greying a working
-  /// control, which is the exact inversion of D24's doctrine that an unclear
-  /// answer resolves to *enabled*.
+  /// A feature code is exactly two ASCII hex digits, never signed. `UInt8("+1", radix: 16)`
+  /// is 1 and `"+1"` is two Characters, so a `count == 2` check leaning on `UInt8(_:radix:)`
+  /// lets a signed token through: the pane would report an advertised VCP that is not there,
+  /// and `support(forVCP:in:)` would grey a working control off a malformed string.
   @Test func aSignedTokenIsNotAHexPairAndPoisonsTheWholeString() {
     #expect(CapabilityString.codes(in: "(vcp(+1))") == nil)
     #expect(CapabilityString.codes(in: "(vcp(-0))") == nil)
@@ -269,14 +245,10 @@ struct CapabilityStringDetailTests {
     #expect(CapabilityString.codes(in: "(vcp(10 60(0f 1A) e3))") == [0x10, 0x60, 0xE3])
   }
 
-  /// The tag scan is depth-aware: a tag nested inside another tag's body is
-  /// that tag's content, not a top-level field.
-  ///
-  /// `prot(type(LCD))` is a shape real monitors emit, and a textual scan would
-  /// answer `tag("type", …)` with a body that belongs to `prot`. That is one
-  /// field's value reported as another's — the same "fact invented out of
-  /// unrelated data" the whole-tag boundary check exists to prevent, arriving
-  /// by the other door. Only a match immediately inside the outer group counts.
+  /// The tag scan is depth-aware: a tag nested inside another tag's body belongs to that
+  /// tag. `prot(type(LCD))` is a shape real monitors emit, and a textual scan would answer
+  /// `tag("type", …)` with a body that belongs to `prot`, one field's value reported as
+  /// another's. Only a match immediately inside the outer group counts.
   @Test func aNestedTagIsNotATopLevelTag() {
     #expect(CapabilityString.tag("type", in: "(prot(type(LCD))vcp(10))") == nil)
     #expect(CapabilityString.tag("prot", in: "(prot(type(LCD))vcp(10))") == "type(LCD)")
@@ -287,21 +259,11 @@ struct CapabilityStringDetailTests {
     #expect(CapabilityString.tag("mccs_ver", in: "(model(mccs_ver(2.1)))") == nil)
   }
 
-  /// "Top-level" is measured against a real wrapper: the whole string must be
-  /// one parenthesised group. Anything else earns silence.
-  ///
-  /// Inferring the wrapper from whichever `(` came first is not merely untidy,
-  /// it manufactures denials. `"vcp(vcp(60(01 03)))"` has no outer group, so a
-  /// first-paren-wins reading treats the leading `vcp(` as the wrapper, reads
-  /// the INNER list as top-level, parses it cleanly, and answers `.unsupported`
-  /// for 0x10 — a grey slider derived from a string that is not a capability
-  /// string at all. A differential fuzz found this shape to be the *entire*
-  /// class of inputs where the depth fix could turn a non-denial into a denial,
-  /// which is the one direction D24 forbids.
-  ///
-  /// The rest is the safe direction and is free at the UI:
-  /// `VolumeSliderPolicy.isEnabled` greys on `.unsupported` alone, so a
-  /// `.supported → .unknown` move changes no control's state.
+  /// "Top-level" needs a real wrapper: the whole string must be one parenthesised group.
+  /// Taking whichever `(` came first manufactures denials, since `"vcp(vcp(60(01 03)))"`
+  /// then reads the inner list as top-level, parses it cleanly and answers `.unsupported`
+  /// for 0x10: a grey slider from a string that is not a capability string. The other
+  /// direction is free, because `VolumeSliderPolicy.isEnabled` greys on `.unsupported` alone.
   @Test func onlyASingleOuterGroupSpanningTheWholeStringIsACapabilityString() {
     // The shape that would have manufactured a denial.
     #expect(CapabilityString.codes(in: "vcp(vcp(60(01 03)))") == nil)

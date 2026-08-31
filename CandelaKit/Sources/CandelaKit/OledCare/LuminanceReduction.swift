@@ -4,15 +4,13 @@ import Foundation
 /// Capture geometry and pixel-to-luminance reduction, shared by every producer
 /// of an exposure sample.
 ///
-/// **One implementation, deliberately.** The app's ScreenCaptureKit island, the
-/// wallpaper source and the offline capture tool all reduce pixels through this
-/// type. A producer that requested a different shape would letterbox
-/// differently, and one that linearized differently would fit or accumulate
-/// against a subtly different measurement; either turns a comparison between
-/// them into a comparison of their implementations.
+/// **One implementation, deliberately.** A producer that requested a different
+/// shape would letterbox differently, and one that linearized differently would
+/// accumulate against a subtly different measurement; either turns a comparison
+/// between producers into a comparison of their implementations.
 ///
-/// Kit-side rather than app-side because it is pure CoreGraphics with no capture
-/// in it: the ScreenCaptureKit call stays an app-target island.
+/// Kit-side because it is pure CoreGraphics: the ScreenCaptureKit call stays an
+/// app-target island.
 public enum LuminanceReduction {
 
   /// How many capture pixels per panel-grid cell edge.
@@ -22,105 +20,52 @@ public enum LuminanceReduction {
   /// for four times the pixels.
   ///
   /// **The bound this places on a captured frame is the square fallback**,
-  /// 384x384 or 147,456 pixels, not any real panel's request. Among real panels
-  /// the count grows as the aspect moves AWAY from the grid's 2.4:1, so the
-  /// largest panel here asks for the fewest pixels: the MAG requests 384x161
-  /// (61,824) because 2.3889 is nearly 2.4, the rotated Dell 216x384 (82,944)
-  /// and the built-in 384x249 (95,616). Either way no full-resolution frame
-  /// exists in the process, so the privacy story is unchanged.
+  /// 384x384, not any real panel's request: the pixel count grows as the aspect
+  /// moves AWAY from the grid's 2.4:1, so the MAG asks for the fewest at
+  /// 384x161. No full-resolution frame exists in the process either way, so the
+  /// privacy story is unchanged.
   public static let captureOversample = 16
 
   /// The capture is requested at the **display's own aspect**, with its long
-  /// edge at `captureOversample` pixels per grid cell. `panelNativeGrid` then
-  /// re-bins whatever shape arrives into the fixed 24x10 storage grid, so the
-  /// request never has to match the storage shape.
+  /// edge at `captureOversample` pixels per grid cell. `panelNativeGrid` re-bins
+  /// whatever shape arrives into the fixed 24x10 storage grid.
   ///
-  /// **This asks for the display's aspect rather than the grid's because SCK
-  /// letterboxes.** [MEASURED 2026-08-17, macOS 26] A capture whose requested
-  /// frame aspect differs from the source is scaled to fit and the remainder is
-  /// padded with **black**, inside a frame that still comes back at exactly the
-  /// requested size. Black is a luminance the accumulator cannot tell from a
-  /// dark panel, so the padding books as real exposure and a band of the map
-  /// stays cold forever.
+  /// **The display's aspect rather than the grid's, because SCK letterboxes**
+  /// [MEASURED 2026-08-17, macOS 26]. A request whose aspect differs from the
+  /// source is scaled to fit and the remainder padded with **black**, inside a
+  /// frame that still comes back at exactly the requested size. The accumulator
+  /// cannot tell black padding from a dark panel, so it books as real exposure
+  /// and a band of the map stays cold forever. The earlier fixed 24x10 request
+  /// left six blank rows on the rotated Dell and eight blank columns on the
+  /// built-in; only the MAG escaped, because 2.3889 is a hair off 2.4.
   ///
-  /// The earlier rule here gave the long edge `PanelGrid.cols` and the short
-  /// edge `PanelGrid.rows` regardless of the panel, which measured as:
-  ///
-  /// | panel | aspect | requested | dead band |
-  /// |---|---|---|---|
-  /// | Dell 1440x2560 at 270 deg | 0.5625 | 10x24 (0.4167) | 6 blank rows |
-  /// | built-in 1800x1169 | 1.5398 | 24x10 (2.4000) | 8 blank columns |
-  /// | MAG 3440x1440 | 2.3889 | 24x10 (2.4000) | none |
-  ///
-  /// Only the MAG escaped, and only because 2.3889 is a hair off 2.4. On the
-  /// Dell the blank rows are display rows; at 270 deg `panelPoint` turns them
-  /// into blank *panel columns*, which is why a rotation-shaped defect had a
-  /// capture-shaped cause.
-  ///
-  /// **`preservesAspectRatio = false` does not help.** [MEASURED 2026-08-17]
+  /// **`preservesAspectRatio = false` does not help** [MEASURED 2026-08-17].
   /// `SCScreenshotManager.captureImage` letterboxes identically with the flag
-  /// cleared; the same Dell request came back with the same six blank rows.
-  /// Do not reach for it again.
+  /// cleared. Do not reach for it again.
   ///
-  /// Still true from the earlier pass, and still not a contract:
+  /// **SCK delivers exactly the size requested** [MEASURED 2026-08-07,
+  /// macOS 26.4], which is about the frame's dimensions and not about content
+  /// filling it: the delivered size matched on every panel while the Dell's
+  /// content occupied 18 of its 24 rows. Reading the delivered size back cannot
+  /// catch that.
   ///
-  /// - [MEASURED 2026-08-07, macOS 26.4] **SCK delivers exactly the size
-  ///   requested.** That is about the frame's dimensions, not about the content
-  ///   filling it: the delivered size matched on every panel while the Dell's
-  ///   content occupied 18 of its 24 rows. Reading back the delivered size was
-  ///   never going to catch this, so nothing here should be read as evidence
-  ///   that the frame is fully covered.
-  /// - **SCK's downscale does NOT area-average at an extreme ratio, and the
-  ///   note that used to stand here was wrong** [MEASURED 2026-08-18, macOS 26].
-  ///   The earlier pass compared a direct 24x10 capture against a 384x160
-  ///   capture box-filtered to 24x10, found a mean |delta| of 0.003 to 0.016,
-  ///   and concluded oversampling bought nothing. Repeated on a deliberately
-  ///   structured, STATIC target (a 40 px stripe on a 143 px cell pitch, placed
-  ///   mid-cell so a box filter must report a partial value and a point sample
-  ///   can only report all or nothing), the same comparison against a
-  ///   full-resolution grab gives:
-  ///
-  ///   | request | r | mean \|d\| | max \|d\| |
-  ///   |---|---|---|---|
-  ///   | 24x10 | 0.8233 | 0.0467 | 0.2837 |
-  ///   | 96x40 | 0.9574 | 0.0241 | 0.1241 |
-  ///   | 384x161 | 0.9839 | 0.0137 | 0.0757 |
-  ///   | 768x321 | 0.9891 | 0.0110 | 0.0598 |
-  ///
-  ///   **What that table measured, stated exactly, because a second table
-  ///   reports different numbers for what reads as the same experiment.** Each
-  ///   row is one SCK capture at the stated size, box-filtered HERE to 24x10,
-  ///   against a `screencapture` grab of the same static target box-filtered to
-  ///   24x10. Reducing every row the same way isolates one variable, what SCK's
-  ///   own downscale loses at each ratio. It is not the shipped path: what
-  ///   ships reduces through `PanelSpaceTransform.panelNativeGrid`, and
-  ///   `docs/spikes/2026-08-18-exposure-model-probe-findings.md` measures THAT,
-  ///   end to end, reporting r 0.9814, mean 0.0094, max 0.1437 for the same
-  ///   384x161 request. Different reducer, different numbers; neither
-  ///   supersedes the other, because the question here is what the request size
-  ///   costs and the question there is what the shipped path delivers. Their
-  ///   24x10 rows are identical, which is what makes the pair look like one
-  ///   experiment: at the grid size neither reducer has anything left to do.
-  ///
-  ///   The old measurement was taken on an ordinary desktop, where large flat
-  ///   regions hide the difference: any sampling of a constant field returns
-  ///   the constant, so only structure exposes it. Two independent checks
-  ///   confirm the fault is the downscale and not the capture API: a 24x10 SCK
-  ///   capture disagrees with a 1920x804 SCK capture box-filtered (r = 0.8858),
-  ///   which is SCK against itself, while a large SCK capture and a
-  ///   `screencapture` grab, both box-filtered, agree at r = 0.9993.
-  ///
-  ///   Exposure needs an area average, because every pixel of a cell emits. So
-  ///   the request is oversampled and the area-weighted reduction to the panel
-  ///   grid is done by `PanelSpaceTransform.panelNativeGrid`, which callers
-  ///   already run.
+  /// **SCK's downscale does NOT area-average at an extreme ratio**
+  /// [MEASURED 2026-08-18, macOS 26]. Against a structured static target, a
+  /// direct 24x10 capture correlates 0.8233 with a full-resolution reference
+  /// while a 384x161 capture box-filtered here reaches 0.9839. An earlier pass
+  /// measured on an ordinary desktop and concluded oversampling bought nothing:
+  /// flat regions hide the difference, since any sampling of a constant field
+  /// returns the constant. Exposure needs an area average because every pixel of
+  /// a cell emits, so the request is oversampled and
+  /// `PanelSpaceTransform.panelNativeGrid` does the area-weighted reduction.
+  /// End-to-end numbers for the shipped path:
+  /// `docs/spikes/2026-08-18-exposure-model-probe-findings.md`.
   ///
   /// Callers still read the DELIVERED size back off the image rather than
   /// assuming this one was honoured.
   ///
-  /// The wallpaper source renders through this same rule, and correctly: it
-  /// draws through `meanLuminance`, which stretches to fill and never
-  /// letterboxes, so an aspect-matched request is right on that path too.
+  /// The wallpaper source draws through `meanLuminance`, which stretches to fill
+  /// and never letterboxes, so an aspect-matched request is right there too.
   public static func requestedSize(displayWidth: Int, displayHeight: Int) -> (Int, Int) {
     let long = max(PanelGrid.cols, PanelGrid.rows) * captureOversample
     // A zero-sized display reading only happens mid-reconfiguration; the square
@@ -138,18 +83,15 @@ public enum LuminanceReduction {
   /// The centre crop macOS shows when it fills a display with an image whose
   /// aspect does not match.
   ///
-  /// **A capture needs no crop; a wallpaper does** [MEASURED 2026-08-18]. A
-  /// ScreenCaptureKit frame already has the display's aspect, so drawing it
-  /// into a grid of that aspect is the identity. A wallpaper is an arbitrary
-  /// image that macOS scales to FILL and crops the overflow of, while
-  /// `meanLuminance` stretches whatever it is handed. On the Dell, a 3840x2160
-  /// wallpaper stretched into the rotated 14x24 request correlated 0.186 with
-  /// the panel's own capture; cropped to fill first, 0.584. The panel was
-  /// showing nothing but wallpaper at the time, so that capture IS the
-  /// wallpaper and the comparison is direct.
+  /// **A capture needs no crop; a wallpaper does** [MEASURED 2026-08-18]. An
+  /// SCK frame already has the display's aspect, but a wallpaper is an arbitrary
+  /// image macOS scales to FILL and crops, while `meanLuminance` stretches
+  /// whatever it is handed. On the Dell, showing nothing but wallpaper, a
+  /// 3840x2160 wallpaper stretched into the rotated request correlated 0.186
+  /// with the panel's own capture; cropped to fill first, 0.584.
   ///
-  /// Returns the image unchanged when it cannot crop, which keeps a failure
-  /// here degrading to the old behaviour rather than to nothing.
+  /// Returns the image unchanged when it cannot crop, so a failure here degrades
+  /// to the old behaviour rather than to nothing.
   public static func cropToFill(_ image: CGImage, aspect: Double) -> CGImage {
     let width = Double(image.width)
     let height = Double(image.height)
@@ -163,37 +105,34 @@ public enum LuminanceReduction {
 
   /// sRGB EOTF, tabulated over the 256 encoded values.
   ///
-  /// **Transfer function: sRGB, and it IS applied.** Capture pins its colour
-  /// space to sRGB, so the bytes arriving are gamma-encoded; the Rec. 709
-  /// coefficients are only meaningful on linear values, and OLED pixel current
-  /// tracks linear luminance rather than the encoded value. Skipping this step
-  /// would overweight dark cells by roughly a factor of two at mid-grey.
+  /// **The transfer function IS applied.** Capture pins its colour space to
+  /// sRGB, so the arriving bytes are gamma-encoded; the Rec. 709 coefficients
+  /// are only meaningful on linear values, and OLED pixel current tracks linear
+  /// luminance. Skipping it overweights dark cells about 2x at mid-grey.
   static let linearFromSRGB: [Double] = (0..<256).map { step in
     let c = Double(step) / 255.0
     return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
   }
 
-  /// Per-pixel relative luminance, row-major, top-left origin.
+  /// Per-pixel relative luminance in `0...1`, row-major, top-left origin.
   ///
   /// Coefficients: **Rec. 709 / sRGB, `0.2126 R + 0.7152 G + 0.0722 B`**,
-  /// applied to linearized values (see `linearFromSRGB`). Result is `0...1`.
+  /// applied to linearized values (see `linearFromSRGB`).
   ///
   /// The image is redrawn into a context of known layout rather than read
-  /// through `dataProvider`: a ScreenCaptureKit `CGImage` is IOSurface-backed
-  /// and its channel order, row padding and alpha handling are not contractual.
-  /// At the oversampled request size the redraw is 62k to 147k pixels, still
-  /// small next to a full frame.
+  /// through `dataProvider`: an SCK `CGImage` is IOSurface-backed and its
+  /// channel order, row padding and alpha handling are not contractual. The
+  /// redraw is under 150k pixels.
   ///
   /// A bitmap context's first memory row is the image's TOP row even though its
-  /// user space has a bottom-left origin, so no flip is needed to land in the
+  /// user space has a bottom-left origin, so no flip is needed for the
   /// top-left-origin convention `PanelSpaceTransform` expects.
   public static func meanLuminance(of image: CGImage, cols: Int, rows: Int) -> [Double]? {
     guard cols > 0, rows > 0 else { return nil }
     let bytesPerRow = cols * 4
     var pixels = [UInt8](repeating: 0, count: bytesPerRow * rows)
-    // sRGB, not DeviceRGB: the destination encoding has to be the one the
-    // transfer function above names, or CoreGraphics colour-matches underneath
-    // us and the comment stops being true.
+    // sRGB, not DeviceRGB: the destination encoding must be the one the
+    // transfer function above names, or CoreGraphics colour-matches under us.
     guard let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
 
     let drew = pixels.withUnsafeMutableBytes { buffer -> Bool in

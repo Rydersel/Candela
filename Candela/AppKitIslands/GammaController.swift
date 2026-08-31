@@ -35,9 +35,8 @@ struct GammaSamples: Equatable {
   }
 }
 
-/// What a table read produced. It carries the CoreGraphics code on failure so
-/// the one-per-display error line keeps the number the hardware pass reads out
-/// of it.
+/// What a table read produced, carrying the CoreGraphics code on failure so the
+/// one-per-display error line keeps the number the hardware pass reads.
 enum GammaReadOutcome {
   case table(GammaSamples)
   case failed(CGError)
@@ -46,11 +45,9 @@ enum GammaReadOutcome {
 /// The CoreGraphics transfer-table pair, the ColorSync hand-back and the
 /// activity enforcer, behind one seam.
 ///
-/// It exists for a single testability reason, and it is not a hypothetical one:
-/// SS15's companion leg is defined by what happens when a display REFUSES to
-/// report its own table, and no display in the rig can be told to refuse on
-/// demand. The production implementation is the only one shipped; a test drives
-/// a stub.
+/// A seam for one testability reason: SS15's companion leg is defined by what
+/// happens when a display REFUSES to report its own table, and no display in the
+/// rig can be told to refuse on demand. A test drives a stub.
 @MainActor
 protocol GammaTableDriving: AnyObject {
   func readTable(_ displayID: CGDirectDisplayID, capacity: UInt32) -> GammaReadOutcome
@@ -64,10 +61,10 @@ protocol GammaTableDriving: AnyObject {
 /// Software dimming by gamma-table scaling: the display's captured default
 /// transfer table, multiplied uniformly by a 0…1 scale.
 ///
-/// Two things make this an AppKit island rather than engine code:
-/// 1. the "activity enforcer" — a 1×1 window WindowServer has to composite for
-///    a gamma write to take effect (see `CoreGraphicsGammaDriver`);
-/// 2. `NSScreen` geometry, needed to park that window on the target display.
+/// An AppKit island for two reasons: the "activity enforcer", a 1×1 window
+/// WindowServer has to composite for a gamma write to take effect (see
+/// `CoreGraphicsGammaDriver`), and the `NSScreen` geometry needed to park it on
+/// the target display.
 @MainActor
 final class GammaController: GammaApplying {
   private static let log = Logger(subsystem: "com.rydersel.Candela", category: "gamma")
@@ -87,21 +84,19 @@ final class GammaController: GammaApplying {
     self.driver = driver
   }
 
-  /// A display's untouched transfer table — the baseline every scale multiplies.
-  /// Captured before we ever write, so the user's ColorSync profile curve shape
-  /// is preserved and repeated scales don't compound.
+  /// A display's untouched transfer table, the baseline every scale multiplies.
+  /// Captured before any write, so the user's ColorSync profile curve shape is
+  /// preserved and repeated scales do not compound.
   private var defaultTables: [CGDirectDisplayID: GammaSamples] = [:]
   private var lastAppliedScale: [CGDirectDisplayID: Double] = [:]
 
   /// Displays whose baseline capture already failed and was already logged.
   ///
-  /// The capture is still RETRIED every time, so a display that starts
-  /// answering gets its baseline; only the line is written once, because the
-  /// failure is now reachable at drag rate. SS15 writes the table to both ends
-  /// of a synthesis set, and the second end is a virtual display this process
-  /// created and measurably cannot read back; without this, one drag on a
-  /// synthesized size fills the log with the same error at 60 lines a second.
-  /// The line itself is deliberately kept: the hardware pass greps for it.
+  /// The capture is still RETRIED every time, so a display that starts answering
+  /// gets its baseline; only the line is written once. SS15 writes the table to
+  /// both ends of a synthesis set, and the second end is a virtual display that
+  /// measurably cannot read back, so without this one drag fills the log at 60
+  /// lines a second. The line itself stays: the hardware pass greps for it.
   private var loggedCaptureFailures: Set<CGDirectDisplayID> = []
 
   // MARK: - GammaApplying
@@ -123,8 +118,8 @@ final class GammaController: GammaApplying {
   ) -> Bool {
     // The whole difference from the leg above: a display that will not report a
     // table is written anyway, against the straight ramp. That a virtual
-    // display's untouched table IS the straight ramp is an ASSUMPTION and is
-    // unverified; the hardware pass's eyes item decides the final routing.
+    // display's untouched table IS the straight ramp is an ASSUMPTION, and it is
+    // unverified.
     let baseline = self.defaultTable(for: displayID)
       ?? GammaSamples.linear(count: Int(Self.sampleCapacity))
     return self.write(scale, baseline: baseline, on: displayID, enforcerOn: drawableDisplayID)
@@ -141,12 +136,11 @@ final class GammaController: GammaApplying {
     // Fork order, and it matters: park the enforcer on the drawable display,
     // write the table to the target, then force a composite pass.
     //
-    // DT17: if the enforcer has no screen the write is not attempted at all and
-    // this returns false. Before, the enforcer silently stayed where it was,
-    // the write got no composite pass, and `lastAppliedScale` was recorded
-    // ANYWAY — so `verifyTableIntact` disagreed with itself, reported
-    // interference, and drove the fallback to the shade path, which was also
-    // broken on the same display.
+    // DT17: if the enforcer has no screen the write is not attempted at all.
+    // Otherwise the enforcer stays where it was, the write gets no composite
+    // pass, and `lastAppliedScale` is recorded ANYWAY, so `verifyTableIntact`
+    // disagrees with itself, reports interference, and drives the fallback to a
+    // shade path broken on the same display.
     guard self.driver.moveEnforcer(to: drawableDisplayID) else {
       Self.log.error(
         "No screen for display \(drawableDisplayID, privacy: .public); gamma write for \(displayID, privacy: .public) not attempted"
@@ -157,13 +151,11 @@ final class GammaController: GammaApplying {
     // and this holds no opinion about which display should be dimmed.
     //
     // For a mirror SLAVE, whether the write reaches the glass is not decidable
-    // from here, or from anywhere else in software. Phase 0 measured a slave's
-    // table storing and reading back changed, with an unmirrored positive
-    // control, while its scanout comes from the master's framebuffer: both
-    // outcomes are consistent with everything observable. That is why the engine
-    // writes both ends of a synthesis set (SS15) and why nothing on this path
-    // claims a write landed on the panel. A `.success` here means CoreGraphics
-    // accepted the table, no more.
+    // from software. A slave's table was MEASURED storing and reading back
+    // changed, with an unmirrored positive control, while its scanout comes from
+    // the master's framebuffer: both outcomes fit everything observable. That is
+    // why the engine writes both ends of a synthesis set (SS15). A `.success`
+    // here means CoreGraphics accepted the table, no more.
     let result = self.driver.writeTable(displayID, scaled)
     guard result == .success else {
       Self.log.error("CGSetDisplayTransferByTable failed for display \(displayID, privacy: .public): \(result.rawValue)")
@@ -192,9 +184,9 @@ final class GammaController: GammaApplying {
   }
 
   /// Re-capture the baseline. Caller contract: the OS must own the table at this
-  /// moment (i.e. call `resetAllGamma()`, or otherwise be sure no scale of ours
-  /// is installed, first) — capturing while dimmed bakes the dimming into the
-  /// baseline and the display can never get back to full brightness.
+  /// moment (call `resetAllGamma()` first, or otherwise be sure no scale of ours
+  /// is installed). Capturing while dimmed bakes the dimming into the baseline
+  /// and the display can never get back to full brightness.
   func recaptureDefaultTable(on displayID: CGDirectDisplayID) {
     self.defaultTables.removeValue(forKey: displayID)
     // The previous scale was measured against the previous baseline; keeping it
@@ -267,8 +259,7 @@ final class CoreGraphicsGammaDriver: GammaTableDriving {
     var sampleCount: UInt32 = 0
     let result = CGGetDisplayTransferByTable(displayID, capacity, &red, &green, &blue, &sampleCount)
     guard result == .success else { return .failed(result) }
-    // A success that filled nothing is a failure with no code of its own; the
-    // caller's guard against a zero-sample table used to live here.
+    // A success that filled nothing is a failure with no code of its own.
     guard sampleCount > 0 else { return .failed(.failure) }
     let filled = Int(sampleCount)
     return .table(GammaSamples(
@@ -293,8 +284,8 @@ final class CoreGraphicsGammaDriver: GammaTableDriving {
   /// WindowServer drops (or never applies) a `CGSetDisplayTransferByTable` write
   /// on a display with no drawing activity. The countermeasure is this window:
   /// 1×1, black, effectively invisible at 1% alpha, click-through, parked on the
-  /// display we are about to write to. Its *alpha change* right after the write
-  /// is what forces a composite pass — the value itself is irrelevant.
+  /// display about to be written. Its ALPHA CHANGE right after the write is what
+  /// forces a composite pass; the value itself is irrelevant.
   private lazy var enforcer: NSWindow = {
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1, height: 1), styleMask: [], backing: .buffered, defer: false)
     window.title = "Candela Gamma Activity Enforcer"
@@ -319,13 +310,13 @@ final class CoreGraphicsGammaDriver: GammaTableDriving {
   /// One enforcer window shared by all displays: it can only enforce on one
   /// display at a time, which is fine because every gamma write moves it first.
   ///
-  /// The ID is ALREADY RESOLVED to a drawable display by the engine (DT15) —
-  /// the fork resolved mirroring here instead, at each of nine such sites.
+  /// The ID is ALREADY RESOLVED to a drawable display by the engine (DT15).
+  /// DIVERGENCE: the fork resolved mirroring here instead, at each of nine such
+  /// sites.
   ///
-  /// Returns whether it actually has a screen. The old version ordered it front
-  /// regardless "because a stale position still composites somewhere" — which
-  /// is true and is exactly the problem: it composites on the WRONG display,
-  /// and the write it was supposed to enable is never applied.
+  /// Returns whether it actually has a screen. Ordering it front regardless
+  /// composites on the WRONG display, and the write it was supposed to enable is
+  /// never applied.
   func moveEnforcer(to displayID: CGDirectDisplayID) -> Bool {
     guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
       return false

@@ -44,14 +44,10 @@ struct DDCCommandApplierTests {
   }
 
   @Test func remapFanOutFailurePropagates() async {
-    // A false from ANY fanned-out code must surface as a failed apply: the
-    // coalescer records its duplicate memo only on success, so a partial
-    // fan-out failure must not suppress the retry (test-design F8).
-    //
-    // The FIRST code fails on purpose: with the last code failing, an
-    // accidental short-circuit (`allOK && await write`) would still pass both
-    // assertions. Failing 0x10 pins BOTH halves of the contract — the failure
-    // propagates AND the fan-out continues to 0x2F.
+    // A false from any fanned-out code must surface as a failed apply: the coalescer
+    // records its duplicate memo only on success, so a partial failure must not suppress
+    // the retry. The first code fails on purpose, since a short-circuit would still pass
+    // both assertions if the last one failed.
     let fake = FakeDDC(readResult: nil, failingCommands: [0x10])
     let applier = DDCCommandApplier(writer: fake, command: VCP.contrast, remapCodes: [0x10, 0x2F])
     #expect(await applier.apply(.ddc(raw: 7)) == false)

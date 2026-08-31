@@ -141,7 +141,7 @@ struct ExposureModelTests {
   }
 
   /// All-or-nothing, the accumulator's rule: one bad member discards the whole
-  /// wallpaper rather than leaving 239 real cells beside one invented one.
+  /// wallpaper rather than leaving the real cells beside an invented one.
   @Test func oneNonFiniteWallpaperCellDiscardsTheWholeWallpaper() {
     for poison in [Double.nan, .infinity, -.infinity] {
       var cells = [Double](repeating: 0.9, count: PanelGrid.cellCount)

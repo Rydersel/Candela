@@ -3,10 +3,8 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// macOS adjusts a requested layout silently, so the outcome of an apply is
-/// read back rather than assumed (§6.3). The pair of tests below is the whole
-/// point of this type: it has to tell the ADJUSTMENT apart from the
-/// renormalisation that follows every successful apply.
+/// macOS adjusts a requested layout silently, so an apply reads the outcome back.
+/// The hard part is telling adjustment apart from the renormalisation that always follows.
 @Suite("Arrangement outcome policy")
 struct ArrangementOutcomePolicyTests {
   private var requested: DisplayArrangement {
@@ -17,17 +15,14 @@ struct ArrangementOutcomePolicyTests {
     ])
   }
 
-  /// The one that would cry wolf on every apply if it were wrong. The global
-  /// space re-anchors on whichever display ends up at (0,0) (§2.2), so the
-  /// origins that come back are routinely shifted for a layout in which nothing
-  /// physically moved.
+  /// The global space re-anchors on whichever display ends up at (0,0), so the origins
+  /// that come back are routinely shifted for a layout in which nothing moved.
   @Test func aPurelyTranslatedResultIsNotReportedAsAdjusted() {
     let translated = requested.translated(dx: -1920, dy: 4321)
     #expect(ArrangementOutcomePolicy.notices(
       requested: requested, resulting: translated, requestedMain: 1
     ) == [.mainDisplayUnchanged(1)])
 
-    // …and with the anchor intact, nothing at all is reported.
     #expect(ArrangementOutcomePolicy.notices(
       requested: requested, resulting: requested, requestedMain: 1
     ).isEmpty)
@@ -44,9 +39,8 @@ struct ArrangementOutcomePolicyTests {
     ) == [.adjusted(resulting)])
   }
 
-  /// The notice carries what is ON SCREEN, not what was asked for — the caller
-  /// needs the layout it must now reconcile against, and it has the request
-  /// already.
+  /// The notice carries what is on screen, not what was asked for: the caller already
+  /// has the request and needs the layout it must reconcile against.
   @Test func theAdjustedNoticeCarriesTheResultingLayout() throws {
     let resulting = requested.moving(2, to: DisplayPoint(x: 1920, y: 0))
     let notices = ArrangementOutcomePolicy.notices(
@@ -61,8 +55,7 @@ struct ArrangementOutcomePolicyTests {
   }
 
   /// The main display is compared on its own identity, never inferred from the
-  /// geometry comparison — the two facts are independent, and §2.3 says so
-  /// directly.
+  /// geometry comparison: the two facts are independent.
   @Test func aMainDisplayTheSystemDidNotHonourIsReportedOnItsOwn() {
     // Same relative layout, but 2 ended up at the origin instead of 1.
     let resulting = requested.makingMain(2)
@@ -83,11 +76,9 @@ struct ArrangementOutcomePolicyTests {
     ) == [.adjusted(resulting), .mainDisplayUnchanged(1)])
   }
 
-  /// A layout that puts no tile at the origin asked for no main display, so
-  /// there is nothing for `.mainDisplayUnchanged` to name — `ArrangementPlan`'s
-  /// `requestedMain` is optional for exactly that reason. Skipped rather than
-  /// answered against a guess, and the LAYOUT comparison still runs: that is the
-  /// half that would be lost if "no main requested" short-circuited both.
+  /// A layout with no tile at the origin asked for no main display, so the main notice
+  /// is skipped rather than guessed. The layout comparison still runs; short-circuiting
+  /// both would lose that half.
   @Test func noRequestedMainSkipsTheMainNoticeAndStillReportsAnAdjustment() {
     let offOrigin = requested.translated(dx: 100, dy: 100)
     #expect(offOrigin.mainDisplayID == nil)
@@ -104,9 +95,8 @@ struct ArrangementOutcomePolicyTests {
     ) == [.adjusted(elsewhere)])
   }
 
-  /// A display that vanished between the apply and the read-back is a different
-  /// layout, not a translation of one — the caller must not be told its request
-  /// stands.
+  /// A display that vanished between apply and read-back is a different layout, not a
+  /// translation of one, so the caller must not be told its request stands.
   @Test func aResultMissingADisplayIsReportedAsAdjusted() {
     let resulting = DisplayArrangement(tiles: requested.tiles.filter { $0.id == 1 })
     #expect(ArrangementOutcomePolicy.notices(
@@ -114,21 +104,13 @@ struct ArrangementOutcomePolicyTests {
     ) == [.adjusted(resulting)])
   }
 
-  /// The reciprocal of the test above, and the one this suite was missing: a
-  /// result carrying an EXTRA display.
-  ///
-  /// A display can arrive between the commit and the read-back — or one whose
-  /// `CGDisplayBounds` was unreadable at `begin` can become readable — and the
-  /// newcomer moves the achieved bounding box, so an unfiltered normalisation
-  /// shifts every requested tile and reports a layout nothing touched as
-  /// adjusted. `ArrangementVerification.unhonoured` already restricts to the
-  /// planned displays for this reason; this comparison did not, so the two
-  /// disagreed and the confirmation card told the user macOS had rearranged
-  /// their displays while they were deciding whether to keep the change.
+  /// A display can arrive between the commit and the read-back, and the newcomer moves
+  /// the achieved bounding box. An unfiltered normalisation then shifts every requested
+  /// tile and reports a layout nothing touched as adjusted: that is what made the
+  /// confirmation card claim macOS had rearranged the displays mid-decision.
   @Test func aResultCarryingAnExtraDisplayIsNotReportedAsAdjusted() {
-    // Placed left of and above everything requested, so it is the newcomer that
-    // owns the achieved bounding box's minimum corner — the case an unfiltered
-    // normalisation gets wrong.
+    // Left of and above everything requested, so the newcomer owns the achieved
+    // bounding box's minimum corner, which is what an unfiltered normalisation gets wrong.
     let arrived = ArrangementFixtures.tile(3, DisplayRect(x: -3440, y: -2520, width: 3440, height: 1440))
     let resulting = DisplayArrangement(tiles: requested.tiles + [arrived])
 
@@ -151,10 +133,8 @@ struct ArrangementOutcomePolicyTests {
     ) == [.adjusted(resulting)])
   }
 
-  /// …and the main-display half stays UNfiltered on purpose. A newcomer that
-  /// landed at the origin means the menu bar really is not on the display that
-  /// was asked for, which is a fact about the machine rather than about the
-  /// planned displays' relative positions.
+  /// The main-display half stays unfiltered on purpose: a newcomer at the origin means
+  /// the menu bar really is not on the display that was asked for.
   @Test func anExtraDisplayAtTheOriginStillReportsTheMainDisplayUnchanged() {
     let arrived = ArrangementFixtures.tile(3, DisplayRect(x: 0, y: 0, width: 3440, height: 1440))
     // The requested pair, translated so 3 owns the origin and the pair's own

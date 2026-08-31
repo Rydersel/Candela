@@ -7,8 +7,7 @@ struct DDCOverrideValidationTests {
   @Test func anEmptyFieldClearsTheOverride() {
     #expect(DDCOverrideValidation.classify("") == .cleared)
     #expect(DDCOverrideValidation.classify("   ") == .cleared)
-    // A newline-only field is blank too — `.whitespacesAndNewlines`, not
-    // `.whitespaces` (lens-4 L6: with the narrower set this was `.rejected`).
+    // A newline-only field is blank too: `.whitespacesAndNewlines`, not `.whitespaces`.
     #expect(DDCOverrideValidation.classify("\n") == .cleared)
     // 0 IS the unset value in the engine, so typing it means the same thing.
     #expect(DDCOverrideValidation.classify("0") == .cleared)
@@ -23,9 +22,8 @@ struct DDCOverrideValidationTests {
   }
 
   @Test func garbageAndOutOfRangeAreRejectedNeverCoerced() {
-    // Fork parity for Min: the field snaps back and NOTHING is written.
-    // Candela applies the identical bound to Max, which the fork left
-    // unbounded (chapter 2 QUIRK 9).
+    // Fork parity for Min: the field snaps back and nothing is written. Candela applies
+    // the same bound to Max, which the fork left unbounded (QUIRK 9).
     #expect(DDCOverrideValidation.classify("abc") == .rejected)
     #expect(DDCOverrideValidation.classify("12x") == .rejected)
     #expect(DDCOverrideValidation.classify("-1") == .rejected)
@@ -69,16 +67,8 @@ struct DDCOverrideValidationTests {
   }
 }
 
-/// THE anti-QUIRK-7 suite. Every assertion here exercises code this task
-/// introduces, and every one of them fails before `DDCOverrideValidation`
-/// exists.
-///
-/// The previous version of this suite was named for the grid's write pattern
-/// and tested `DisplayPrefs.setTuning` instead — pre-existing M4 API that is
-/// green against `main`. It could not have caught the one mistake the task
-/// exists to prevent: a `commit` that loops over `DDCCommand.allCases` and
-/// writes the edited tuning into all three commands, which is the fork's
-/// literal QUIRK 7 (lens-4 C3).
+/// Anti-QUIRK-7: the mistake to catch is a `commit` that loops over `DDCCommand.allCases`
+/// and writes the edited tuning into all three commands, which is what the fork did.
 @Suite("Applying one override to one command")
 struct DDCOverrideApplicationTests {
   private var base: CommandTuning {
@@ -92,9 +82,8 @@ struct DDCOverrideApplicationTests {
     let after = try #require(DDCOverrideValidation.applied(.value(12), to: base, field: .minimum))
     #expect(after.minDDCOverride == 12)
     #expect(after.maxDDCOverride == base.maxDDCOverride) // the sibling override is untouched
-    // The D26-cut prefs SURVIVE an edit made through the grid. The fork
-    // rewrote them on every widget touch (QUIRK 7/8), turning "unset" into an
-    // explicit value on displays the user never tuned.
+    // The D26-cut prefs survive an edit made through the grid. The fork rewrote them on
+    // every widget touch (QUIRK 7/8), turning unset into an explicit value.
     #expect(after.curveIndex == base.curveIndex)
     #expect(after.remapCodes == base.remapCodes)
     #expect(after.invert == base.invert)
@@ -115,18 +104,15 @@ struct DDCOverrideApplicationTests {
   }
 
   @Test func rejectedInputWritesNothingAtAll() {
-    // `nil` is the grid's instruction to snap the field back and skip the
-    // write entirely — not "write the old value again", which would still fan
-    // out and re-apply dimming for a typo.
+    // `nil` tells the grid to snap the field back and skip the write, rather than
+    // writing the old value again, which would fan out and re-apply dimming for a typo.
     #expect(DDCOverrideValidation.applied(.rejected, to: base, field: .minimum) == nil)
     #expect(DDCOverrideValidation.applied(.rejected, to: base, field: .maximum) == nil)
   }
 
-  /// The per-display reset writes `CommandTuning.unset`, and `unset` must be
-  /// exactly what an untouched display reports. Pinned against a real empty
-  /// store so reset can never drift into writing an explicit value — the fork
-  /// wrote curve 5 on first touch (QUIRK 8), and a hand-typed second copy of
-  /// the literal in the app target is how that slip re-enters (lens-4 H4).
+  /// The per-display reset writes `CommandTuning.unset`, so `unset` has to be exactly what
+  /// an untouched display reports. Pinned against a real empty store: the fork wrote curve
+  /// 5 on first touch (QUIRK 8), and a second hand-typed copy of the literal brings it back.
   @Test func theFactoryTuningIsWhatAnUntouchedDisplayReports() {
     let fresh = DisplayPrefs(defaults: InMemoryDefaults(), persistenceKey: "FRESH")
     for command in DDCCommand.allCases {
@@ -141,14 +127,10 @@ struct DDCOverrideApplicationTests {
   }
 }
 
-/// The whole of what a field commit decides, which both routes into it share.
-///
-/// A settings field applies its text on Return AND when focus leaves it (#144).
-/// Two routes into one write is how a second, looser validation gets written by
-/// accident: the fork accepted `abc`, `70000` and `-1` in these boxes, and a
-/// blur path that parsed its own text could put that back through a new door.
-/// `committed` is the whole decision, so there is one place for both to call
-/// and nothing left at the call site to get wrong.
+/// What a field commit decides, shared by both routes into it: a settings field applies
+/// its text on Return and when focus leaves. Two routes into one write is how a second,
+/// looser validation gets added by accident, and the fork accepted `abc`, `70000` and `-1`
+/// in these boxes.
 @Suite("Committing a field's text")
 struct DDCOverrideCommitTests {
   private var tuned: CommandTuning {
@@ -170,9 +152,8 @@ struct DDCOverrideCommitTests {
     #expect(maxed.minDDCOverride == 20)
   }
 
-  /// Emptying a box is a real decision, not an abandoned edit: it stores 0 and
-  /// gives the display its own range back. Both routes have to mean that, or
-  /// clearing a box and clicking away would silently keep the old override.
+  /// Emptying a box is a real decision, not an abandoned edit: it stores 0 and gives the
+  /// display its range back, or clearing a box and clicking away keeps the old override.
   @Test func emptyingAFieldStoresTheUnsetSentinel() throws {
     for text in ["", "   ", "\n", "0"] {
       let after = try #require(
@@ -191,9 +172,8 @@ struct DDCOverrideCommitTests {
     }
   }
 
-  /// nil for "nothing to do", not just for "refused". A field that is left as
-  /// it was renders text that resolves to the value already stored, and a write
-  /// there would fan out to a pointless re-apply of dimming on every focus
+  /// nil means nothing to do, not only refused: a field left alone renders text that
+  /// resolves to the stored value, and writing there re-applies dimming on every focus
   /// change (D4).
   @Test func textThatMeansTheStoredValueWritesNothing() {
     #expect(DDCOverrideValidation.committed("20", to: tuned, field: .minimum) == nil)
@@ -204,9 +184,8 @@ struct DDCOverrideCommitTests {
     #expect(DDCOverrideValidation.committed("0", to: untouched, field: .maximum) == nil)
   }
 
-  /// The field renders `text(for:)` and commits whatever it holds, so the text
-  /// a field shows must always be a no-op commit. Anything else writes a pref
-  /// every time focus passes through a box nobody typed in.
+  /// The field renders `text(for:)` and commits whatever it holds, so rendered text must
+  /// always be a no-op commit; otherwise focus passing through a box writes a pref.
   @Test func theRenderedTextOfEveryStoredValueIsANoOpCommit() {
     for stored in [0, 1, 20, 255, 65535] {
       let tuning = CommandTuning(
@@ -219,9 +198,8 @@ struct DDCOverrideCommitTests {
     }
   }
 
-  /// One command's tuning in, the same command's tuning out. The fork wrote all
-  /// three commands on any single edit (chapter 2 QUIRK 7); nothing here can
-  /// reach another command, because no other command's tuning is in scope.
+  /// One command's tuning in, the same command's tuning out. The fork wrote all three
+  /// commands on any single edit (QUIRK 7); no other command's tuning is in scope here.
   @Test func committingIsPureAndTouchesNoOtherCommand() throws {
     let defaults = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "PK")
@@ -235,9 +213,8 @@ struct DDCOverrideCommitTests {
   }
 }
 
-/// Kept as a REGRESSION PIN on M4's key composition, honestly named. It tests
-/// `DisplayPrefs`, not this task, and it is green against `main` — which is why
-/// it is no longer presented as Task 14 coverage.
+/// A regression pin on key composition: this exercises `DisplayPrefs`, not the
+/// validation above.
 @Suite("DisplayPrefs per-command key materialization")
 struct PerCommandKeyMaterializationTests {
   @Test func writingOneCommandNeverMaterializesTheOthers() {

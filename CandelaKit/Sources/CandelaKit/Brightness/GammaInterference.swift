@@ -5,11 +5,10 @@ import os
 /// Night Shift and friends all own the same global resource) and, once it keeps
 /// happening, offers to move that display to the shade instead.
 ///
-/// Narrower than the fork by design (plan scope decision 11): the fork checks
-/// on every brightness set, Candela only when the gamma backend is actually
-/// about to write — above the combined switching point no scale of ours is
-/// installed, so there is nothing to fight over and nothing to nag about.
-/// `BrightnessController.preGammaApplyHook` is exactly that moment.
+/// Narrower than the fork by design: the fork checks on every brightness set,
+/// Candela only when the gamma backend is about to write. Above the combined
+/// switching point no scale of ours is installed, so there is nothing to fight
+/// over. `BrightnessController.preGammaApplyHook` is that moment.
 @MainActor
 public final class GammaInterferenceMonitor {
   /// `verifyTableIntact` is a `CGGetDisplayTransferByTable` round trip; a 60 Hz
@@ -21,37 +20,28 @@ public final class GammaInterferenceMonitor {
   private let threshold: Int
   private let log = Logger(subsystem: "com.rydersel.Candela", category: "gamma")
 
-  /// The "Not Now" outcome. Set when the offer is *raised*, not when it is
-  /// declined — fork parity with `gammaInterferenceWarningShown`, which the
-  /// fork also sets before running its modal. Declining is the absence of a
-  /// callback, so suspending up front is what makes a decline stick; it also
-  /// keeps a second offer from being raised while one is still on screen
-  /// (Candela presents asynchronously, so that window is real).
+  /// The "Not Now" outcome, set when the offer is RAISED rather than when it is
+  /// declined. Declining is the absence of a callback, so suspending up front is
+  /// what makes a decline stick, and it also keeps a second offer from being
+  /// raised while one is still on screen.
   public private(set) var suspendedForSession = false
 
-  /// Clobber events per display this session (backlog #5a: one global count
-  /// let N displays trip the threshold on the FIRST real event, and the alert
-  /// named whichever display came third). Internal: the offer is the public
-  /// signal, the counts are a test seam — `interferenceCount(for:)` below is
-  /// the public reading of one entry.
+  /// Clobber events per display this session. One global count let N displays
+  /// trip the threshold on the FIRST real event, and the alert then named
+  /// whichever display came third. Internal: the offer is the public signal and
+  /// `interferenceCount(for:)` reads one entry.
   private(set) var interferenceCounts: [CGDirectDisplayID: Int] = [:]
 
   /// How many times another app has taken THIS display's color profile back
-  /// this session (B7). The count already drives the fallback offer; until now
-  /// it was unsayable, so the pane could not explain WHY the offer appeared —
-  /// or, for a user still below the threshold, that a fight was going on at
-  /// all.
+  /// this session (B7), so the pane can say why the offer appeared, or that a
+  /// fight is going on below the threshold.
   ///
-  /// An accessor rather than the dictionary made public: a view has no
-  /// business iterating displays it does not own, and a display nobody
-  /// clobbered must read zero rather than a nil every caller re-interprets.
-  /// `suspendedForSession` is already public, so the pair is complete.
+  /// An accessor rather than a public dictionary: a display nobody clobbered
+  /// reads zero instead of a nil every caller re-interprets.
   ///
-  /// This type is not `@Observable`, so a row reading this refreshes on the
-  /// pane's existing invalidation rather than the instant a clobber is
-  /// detected. Acceptable for a count that is read while someone is working
-  /// out why their screen keeps changing; a live badge would need the monitor
-  /// to become observable, which is a bigger change than this row is worth.
+  /// This type is not `@Observable`, so a row reading it refreshes on the pane's
+  /// existing invalidation, not the instant a clobber is detected. A live badge
+  /// would mean making the monitor observable.
   public func interferenceCount(for displayID: CGDirectDisplayID) -> Int {
     interferenceCounts[displayID, default: 0]
   }
@@ -69,10 +59,10 @@ public final class GammaInterferenceMonitor {
 
   /// Call immediately before a gamma-path software apply.
   ///
-  /// No re-apply happens here, unlike the fork (which resets its scale to 1 and
-  /// lets the *next* brightness set restore it): this runs one statement before
-  /// the apply it guards, so the caller's own write is the re-apply — same end
-  /// state, one write instead of two, no flash to full brightness in between.
+  /// No re-apply here, unlike the fork, which resets its scale to 1 and lets the
+  /// NEXT brightness set restore it. This runs one statement before the apply it
+  /// guards, so the caller's own write is the re-apply: one write instead of
+  /// two, and no flash to full brightness in between.
   public func checkBeforeApply(
     displayID: CGDirectDisplayID,
     displayName: String,
@@ -92,10 +82,9 @@ public final class GammaInterferenceMonitor {
     guard count >= threshold else { return }
 
     suspendedForSession = true
-    // No re-arm on accept (backlog #5b, divergence from the fork): re-arming
-    // nags up to once per display on 3+-external rigs. Suspended lasts until
-    // relaunch, exactly like "Not Now" — the accepted display dims through
-    // the shade either way.
+    // No re-arm on accept, a divergence from the fork: re-arming nags once per
+    // display on a multi-external rig. Suspended lasts until relaunch, exactly
+    // like "Not Now"; the accepted display dims through the shade either way.
     alerts.offerShadeFallback(displayName: displayName) {
       onSwitchToShade()
     }

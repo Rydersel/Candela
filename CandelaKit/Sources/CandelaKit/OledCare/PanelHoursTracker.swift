@@ -1,10 +1,9 @@
 import Foundation
 
-/// Accumulated panel-on time for one display (#23, reduced scope).
+/// Accumulated panel-on time for one display.
 ///
-/// Storage keys are engine state rather than `PrefName` cases — nothing routes
-/// a usage counter through `SettingsActions`, and `PrefPropagationTests` pins
-/// their absence from the enum.
+/// Storage keys are engine state rather than `PrefName` cases: nothing routes a
+/// usage counter through `SettingsActions`, and a test pins their absence.
 ///
 /// Deliberately not `Sendable`: confined to whichever actor owns the display's
 /// controllers (the main actor today). Making it thread-safe would buy a lock
@@ -43,16 +42,15 @@ public final class PanelHoursTracker {
   }
 
   /// Suppresses the note until the next standby. Persisted: an in-memory-only
-  /// dismissal comes back on every relaunch while the counter is still over the
-  /// threshold, which is exactly the recurring reminder the spec forbids.
+  /// dismissal returns on every relaunch while the counter is over threshold,
+  /// which is the recurring reminder the spec forbids.
   public func dismissStandbyNote() { setDismissed(true) }
 
   public func noteTick(displayAwake: Bool, secondsSinceLastTick: Double) {
     // The caller derives the delta from wall-clock timestamps, so a clock step
-    // backwards yields a negative one. `isFinite` is explicit rather than
-    // relying on NaN failing `> 0` incidentally — a NaN or infinite total is
-    // unrecoverable once persisted, since every later comparison against it
-    // reads false and the counter silently stops meaning anything.
+    // backwards yields a negative one. `isFinite` is explicit: a NaN or infinite
+    // total is unrecoverable once persisted, because every later comparison
+    // against it reads false and the counter stops meaning anything.
     guard displayAwake, secondsSinceLastTick.isFinite, secondsSinceLastTick > 0 else { return }
     totalSeconds += secondsSinceLastTick
     secondsSinceStandby += secondsSinceLastTick
@@ -61,10 +59,10 @@ public final class PanelHoursTracker {
   }
 
   /// Display slept or departed. A panel switched off at the monitor itself may
-  /// not be one of these: macOS reports a DPMS-blanked panel as awake and never
-  /// reconfigures (#94, measured for a `0xD6` write), so a panel held in soft
-  /// standby is invisible here. If the button instead deasserts hot-plug detect
-  /// the display departs and this IS called — untested, per monitor (#23).
+  /// be neither: macOS reports a DPMS-blanked panel as awake and never
+  /// reconfigures (measured for a `0xD6` write), so a panel held in soft standby
+  /// is invisible here. If the button instead deasserts hot-plug detect the
+  /// display departs and this IS called; untested, and it varies per monitor.
   public func noteStandby() {
     secondsSinceStandby = 0
     // The panel got its rest, so the next crossing has earned a fresh note.

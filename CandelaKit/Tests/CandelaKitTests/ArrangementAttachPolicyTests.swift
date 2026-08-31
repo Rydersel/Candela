@@ -16,12 +16,11 @@ struct ArrangementAttachPolicyTests {
     ])
   }
 
-  /// Optionals here are bound with `#require` rather than force-unwrapped, and
-  /// that is a rule for the whole file. A behaviour change that makes `attach`
-  /// return nil trapped on the force-unwrap instead, and the trap signal-kills
-  /// the runner: the failure was reported as a crash with no test name, and
-  /// every suite that had not run yet reported nothing at all. `#require` turns
-  /// the same nil into one named failure and lets the rest of the run finish.
+  /// Optionals are bound with `#require` rather than force-unwrapped, and that
+  /// is a rule for the whole file: a force-unwrap trap signal-kills the runner,
+  /// so the failure came back as a crash with no test name and every suite that
+  /// had not run yet reported nothing. `#require` gives one named failure and
+  /// lets the run finish.
   @Test func aDropInOpenSpaceLandsOnTheNearestLegalEdge() throws {
     let attachment = try #require(ArrangementAttachPolicy.attach(
       rect(2_000, -3_000, 1_000, 1_000), id: 2, in: pair, threshold: 80
@@ -34,25 +33,22 @@ struct ArrangementAttachPolicyTests {
     #expect(attachment.line.kind == .abut)
     #expect(attachment.line.otherDisplayID == 1)
 
-    // Positive control: this is a drop that is refused today. Leaving display 2
-    // where the pointer left it strands it, which is what the attachment
-    // replaces.
+    // Positive control: leaving display 2 where the pointer left it strands it,
+    // which is what the attachment replaces.
     #expect(!ArrangementRules.problems(
       in: pair.moving(2, to: DisplayPoint(x: 2_000, y: -3_000))
     ).isEmpty)
-    // And the attachment itself is legal, which is the contract.
     #expect(ArrangementRules.problems(
       in: pair.moving(2, to: attachment.rect.origin)
     ).isEmpty)
   }
 
   @Test func aDropPastAnEdgeGoesFlushRatherThanClippingOneCorner() throws {
-    // Well below and to the right of display 1. The nearest position that keeps
-    // any shared edge at all is y = 999, where the two displays meet over a
-    // single point; that is legal and looks like a misfire. Going flush with
-    // the end the drop is nearest gives the whole edge. This is why AR15 says
-    // NEAR rather than nearest: the landing here is 999 points off the strictly
-    // nearest legal position, on purpose.
+    // Well below and to the right of display 1. The nearest position keeping any
+    // shared edge is y = 999, where the two displays meet over a single point:
+    // legal, and it looks like a misfire. Going flush with the nearer end gives
+    // the whole edge. This is why AR15 says NEAR rather than nearest, and the
+    // landing here is 999 points off the strictly nearest legal position.
     let attachment = try #require(ArrangementAttachPolicy.attach(
       rect(5_000, 3_000, 1_000, 1_000), id: 2, in: pair, threshold: 80
     ))

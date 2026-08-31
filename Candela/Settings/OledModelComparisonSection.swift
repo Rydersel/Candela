@@ -4,18 +4,15 @@ import SwiftUI
 
 /// EM9's gate instrument, as amended by OCR7: scores the estimated exposure
 /// model against the measured readings, beside the measurement controls and
-/// revertable, never inside the health view it might one day change. It rode
-/// the Measurement & Data page until SC5 retired that page, and moved to the
-/// Health pane with the controls it sits under. Shown once measurement is on
-/// or a stored comparison exists, so a user who turns measurement off keeps
-/// their score.
+/// never inside the health view it might one day change. Shown once measurement
+/// is on or a stored comparison exists, so turning measurement off keeps the
+/// score.
 ///
-/// **TEMPORARY, built to be deleted (OCR7).** This section exists to judge the
-/// estimate during the current soak. Once Ryder records the verdict on the
+/// TEMPORARY, built to be deleted (OCR7). Once Ryder records the verdict on the
 /// comparison gate, deletion is: remove this file, remove the one call site in
-/// `HealthPane`, and move the stalled-sampling note below up to ride the
-/// "Measure how bright each part of this display is" toggle, because that note
-/// proved necessary independently of the comparison.
+/// `HealthPane`, and move the stalled-sampling note below onto the "Measure how
+/// bright each part of this display is" toggle, since that note proved necessary
+/// independently of the comparison.
 @MainActor
 struct OledModelComparisonSection: View {
   let persistenceKey: String
@@ -76,7 +73,7 @@ struct OledModelComparisonSection: View {
 
   private func pairedReadingsLine(_ comparison: ModelComparison) -> String {
     guard comparison.pairCount > 0 else { return "None yet" }
-    // A single pair has no span worth naming; "spanning 0 minutes" reads as a
+    // A single pair has no span worth naming: "spanning 0 minutes" reads as a
     // broken counter.
     guard comparison.pairCount > 1, let first = comparison.firstPair,
       let last = comparison.lastPair
@@ -84,10 +81,10 @@ struct OledModelComparisonSection: View {
     return "\(comparison.pairCount), spanning \(Self.spanPhrase(last.timeIntervalSince(first)))"
   }
 
-  /// Stalled means the pipeline should be producing pairs and is not: the
-  /// pref is on, the grant preflights true, the session is not Safe Mode, and
-  /// the last pair is well past the sampling interval. A missing grant is NOT
-  /// stalled here; the measurement rows above already carry that note.
+  /// Stalled means the pipeline should be producing pairs and is not: pref on,
+  /// grant preflighting true, not Safe Mode, and the last pair well past the
+  /// sampling interval. A missing grant is NOT stalled here; the measurement rows
+  /// above already carry that note.
   private func isComparisonStalled(_ comparison: ModelComparison) -> Bool {
     guard prefs.oledTelemetry, !model.isSafeMode, CGPreflightScreenCaptureAccess(),
       let last = comparison.lastPair
@@ -108,8 +105,7 @@ struct OledModelComparisonSection: View {
 
   private static func relativePhrase(_ date: Date) -> String {
     // A pair booked this minute rounds to "in 0 seconds" through the relative
-    // formatter (the timestamps straddle the render by microseconds); the
-    // honest phrase for anything inside one sampling interval is this one.
+    // formatter, because the timestamps straddle the render by microseconds.
     let interval = Date().timeIntervalSince(date)
     guard interval >= 60 else { return "just now" }
     let formatter = RelativeDateTimeFormatter()

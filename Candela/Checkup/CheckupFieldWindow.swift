@@ -2,10 +2,9 @@ import AppKit
 import CandelaKit
 
 /// The field on the target display: borderless, shielding level, pointer out of
-/// the way. When the target is the only display, a strip at the bottom carries
-/// the instruction, countdown and answers, since the flow window is unreachable
-/// behind a shielding-level field; the report records those fields as partially
-/// occluded (CK16). The AppKit island behind `CheckupFieldPresenting`.
+/// the way. On a one-display run the flow window is unreachable behind a
+/// shielding-level field, so a strip at the bottom carries the instruction,
+/// countdown and answers, and CK16 records those fields as partially occluded.
 @MainActor
 final class CheckupFieldWindow: CheckupFieldPresenting {
   /// Tall enough for the instruction over a row of answers: on a one-display

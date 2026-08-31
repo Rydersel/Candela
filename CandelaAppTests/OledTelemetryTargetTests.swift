@@ -7,17 +7,15 @@ import Testing
 /// be sampled, and which display the sample is read from.
 ///
 /// The defect these pin is silent in both halves. A panel showing a synthesized
-/// size sits at `.suspended`, which used to disqualify it from sampling
-/// outright; and even qualified, a capture asked for the panel returns nil
-/// forever, because ScreenCaptureKit does not list a mirrored display. Either
-/// way the exposure map simply stops growing while the health view keeps
-/// rendering the history it already had.
+/// size sits at `.suspended`, which on its own disqualifies it from sampling;
+/// and even qualified, a capture asked for the panel returns nil forever,
+/// because ScreenCaptureKit does not list a mirrored display. Either way the
+/// exposure map stops growing while the health view keeps rendering old history.
 ///
 /// The fixture is the shape measured on the rig: one physical panel mirroring
 /// onto the virtual display that carries the desktop, with the engine's pairing
 /// naming the master. `userMirrored` is the same CoreGraphics shape with no
-/// stamp, which is exactly what an ordinary mirror set looks like, and it is
-/// the control for every carve-out below.
+/// stamp, an ordinary mirror set, and the control for every carve-out below.
 @Suite("Telemetry targeting under a synthesized size") @MainActor
 struct OledTelemetryTargetTests {
   private static let panelID: CGDirectDisplayID = 3

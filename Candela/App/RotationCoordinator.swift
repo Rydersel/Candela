@@ -9,8 +9,8 @@ import SwiftUI
 /// Display rotation: the request, the countdown, and the one surface that
 /// reports on either.
 ///
-/// Owned by `AppModel` rather than by a view, for `DisplayModeCoordinator`'s
-/// reason — the countdown has to outlive whatever window started it.
+/// Owned by `AppModel` rather than by a view: the countdown has to outlive
+/// whatever window started it.
 ///
 /// **The apply is blocking and must not run on the main actor (RS10).**
 /// `SLSSetDisplayRotation` does not return until the rotation has taken effect;
@@ -34,10 +34,9 @@ final class RotationCoordinator {
   /// A rotation or a revert that the hardware refused, or that reported success
   /// and did not happen (RT8).
   private(set) var lastFailure: DisplayConfigError?
-  /// The four-way gate refused this request, and names who is holding it
-  /// (AR12). Its own property rather than a fifth `RotationRefusal`: that enum
-  /// is `RotationPolicy`'s answer about the DISPLAY, and this is not a fact
-  /// about the display at all.
+  /// The gate refused this request, and names who holds it (AR12). Not a
+  /// `RotationRefusal` case: that enum answers about the DISPLAY, and this is no
+  /// fact about the display.
   private(set) var blockedBy: ReconfigurationClaimant?
   private(set) var isApplying = false
 
@@ -45,11 +44,8 @@ final class RotationCoordinator {
 
   @ObservationIgnored private let configurator: any DisplayConfiguring
   /// AR12. Held from just before the rotation applies until nothing is
-  /// outstanding. Rotation had no exclusion of any kind before this: it shipped
-  /// after AR10 was written, which is exactly why the ruling was amended.
-  ///
-  /// Not defaulted — a per-coordinator default would compile, run, and exclude
-  /// nobody.
+  /// outstanding. Not defaulted: a per-coordinator default would compile, run,
+  /// and exclude nobody.
   @ObservationIgnored private let gate: DisplayReconfigurationGate
   @ObservationIgnored private let session: RotationPreviewSession
   @ObservationIgnored private let queue = PreviewQueue()
@@ -72,8 +68,8 @@ final class RotationCoordinator {
     self.gate = gate
     self.configurator = configurator
     session = RotationPreviewSession(configurator: configurator, timeoutSeconds: timeoutSeconds)
-    // A rotation fires this notification itself, so this is not only about
-    // departures — it is also what re-reads the angle a picker is showing.
+    // A rotation fires this notification itself, so besides departures this is
+    // what re-reads the angle a picker is showing.
     screenObserver = NotificationCenter.default.addObserver(
       forName: NSApplication.didChangeScreenParametersNotification,
       object: nil,
@@ -83,16 +79,14 @@ final class RotationCoordinator {
     }
 
     #if DEBUG
-      // Screenshot validation only, and permanent for the reason its two
-      // siblings in `MirroringCoordinator` are: the confirmation window cannot
-      // be reached from a script. Driving the Settings picker needs an
-      // Accessibility grant this machine does not have — measured 2026-08-04,
-      // synthetic scroll events to the settings window were silently dropped —
-      // and there is no rotation hotkey by design (RT1).
+      // Screenshot validation only: the confirmation window cannot be reached
+      // from a script. Driving the Settings picker needs an Accessibility grant
+      // this machine lacks (synthetic scroll events to the settings window are
+      // silently dropped), and there is no rotation hotkey by design (RT1).
       //
-      // It posts the REAL request through the real policy, so the countdown and
-      // its revert are the shipping ones. Never the built-in: a rotated laptop
-      // panel whose revert fails is the worst outcome available here.
+      // Posts the REAL request through the real policy, so the countdown and its
+      // revert are the shipping ones. Never the built-in: a rotated laptop panel
+      // whose revert fails is the worst outcome available here.
       debugObserver = DistributedNotificationCenter.default().addObserver(
         forName: Notification.Name("com.rydersel.Candela.debug.showRotationPreview"),
         object: nil,
@@ -117,9 +111,9 @@ final class RotationCoordinator {
     configurator.rotation(of: displayID)
   }
 
-  /// What a picker should show for this display: its live angle, or — while a
-  /// preview is outstanding on it — the previewed one, so the control does not
-  /// snap back under the question being asked about it.
+  /// What a picker should show: the live angle, or the previewed one while a
+  /// preview is outstanding, so the control does not snap back under the
+  /// question being asked about it.
   func displayedRotation(of displayID: CGDirectDisplayID) -> DisplayRotation? {
     if let preview, preview.request.display == displayID { return preview.request.to }
     return rotation(of: displayID)
@@ -137,11 +131,10 @@ final class RotationCoordinator {
     )
     switch decision {
     case let .refused(refusal):
-      // A refusal changed nothing on screen, so silence is indistinguishable
-      // from the feature not working — except for `unchanged`, which is the one
-      // refusal the user cannot tell from success because the display is
-      // ALREADY where they asked for it. Reporting that would be a dialog
-      // saying "no" to someone who got what they wanted.
+      // A refusal changed nothing on screen, so silence looks like the feature
+      // not working. `unchanged` is the exception: the display is ALREADY where
+      // they asked for it, so a dialog would say "no" to someone who got what
+      // they wanted.
       if case .unchanged = refusal {
         log.debug("rotation request is a no-op for display \(displayID)")
         return
@@ -149,15 +142,12 @@ final class RotationCoordinator {
       lastRefusal = refusal
       syncConfirmation()
     case let .rotate(request):
-      // Raised HERE, synchronously, and not inside the queue, which is what the
-      // other three coordinators do. Two reasons, and the second is the defect
-      // that motivated the move: a control that queues main-actor work and only
-      // then disables itself is a control two clicks get through; and `enqueue`
-      // also carries the countdown's per-second `adopt` and the departure
-      // discard, neither of which is an apply, so raising the flag inside it
-      // greyed Keep and Revert once a second for the whole preview. Counted
-      // rather than boolean, so two queued rotations do not have the first
-      // one's completion clear the flag for the second.
+      // Raised HERE, synchronously, not inside the queue. A control that queues
+      // main-actor work and only then disables itself is a control two clicks get
+      // through, and `enqueue` also carries the countdown's per-second `adopt`
+      // and the departure discard, so raising the flag inside it greyed Keep and
+      // Revert once a second for the whole preview. Counted, not boolean, so the
+      // first of two queued rotations cannot clear the flag for the second.
       inFlight += 1
       isApplying = true
       queue.enqueue {
@@ -169,10 +159,9 @@ final class RotationCoordinator {
   }
 
   private func begin(_ request: RotationRequest) async {
-    // Through the syncing funnel rather than three bare assignments: the
-    // `gate.claim` below suspends, and a window still rendering a report that
-    // has just been cleared is the empty-floating-panel defect `syncConfirmation`
-    // documents.
+    // Through the syncing funnel, not bare assignments: the `gate.claim` below
+    // suspends, and a window still rendering a just-cleared report is the
+    // empty-floating-panel defect `syncConfirmation` documents.
     dismissReport()
     // AR12, asked BEFORE the apply: `SLSSetDisplayRotation` blocks for 0.4–1.1
     // seconds and does not come back until the panel has moved, so a refusal
@@ -189,8 +178,8 @@ final class RotationCoordinator {
       await adopt(.clear)
       startCountdown()
     case let .failure(error):
-      // Nothing is outstanding — `begin` leaves no request when it fails — so
-      // this is a report, not a preview.
+      // Nothing is outstanding, since `begin` leaves no request when it fails,
+      // so this is a report rather than a preview.
       lastFailure = error
       await adopt(.clear)
     }
@@ -214,8 +203,7 @@ final class RotationCoordinator {
   }
 
   /// The display carrying an unanswered rotation went away. Nothing can be
-  /// rotated back, so the request is discarded rather than left waiting for an
-  /// answer about hardware that is gone.
+  /// rotated back, so the request is discarded rather than left waiting.
   func displaysChanged() {
     let present = Set(configurator.displays().map(\.id))
     guard let preview, !present.contains(preview.request.display) else { return }
@@ -226,9 +214,6 @@ final class RotationCoordinator {
   }
 
   // MARK: - Serialisation
-  //
-  // The queue itself is `PreviewQueue` in CandelaKit (#68): four coordinators
-  // held four byte-identical copies of it, and the countdown driver beside it.
 
   private func resolve(_ answered: Preview, keeping: Bool) async -> PreviewOutcome {
     let outcome = keeping
@@ -238,25 +223,22 @@ final class RotationCoordinator {
     case .committed, .reverted: await adopt(.clear)
     case let .failed(error): await adopt(.set(error))
     // The answer was about a preview that is no longer outstanding, so it
-    // resolved nothing. Keep whatever is on screen — it belongs to the preview
-    // that is still there.
+    // resolved nothing. Keep what is on screen: it belongs to the one still
+    // there.
     case .stale: await adopt(.keep)
     }
     return outcome
   }
 
-  /// Rebuilds the UI's picture FROM the session, and is the only writer of
-  /// `preview` — so no path can leave the two disagreeing, including a countdown
-  /// tick that resumes late.
+  /// Rebuilds the UI's picture FROM the session. THE only writer of `preview`,
+  /// so no path can leave the two disagreeing, a late countdown tick included.
   private func adopt(_ failure: FailureUpdate) async {
     guard let outstanding = await session.previewed else {
       preview = nil
       stopCountdown()
-      // THE release (AR12). Here rather than at each call site because this
-      // funnel already runs after every path that can end a rotation preview — a
-      // failed begin, an answer, an expiry, and the display departing with
-      // nobody watching. Unconditional: the gate refuses a release from a
-      // claimant that is not holding it.
+      // THE release (AR12), here rather than at each call site: this funnel
+      // already runs after every path that can end a rotation preview.
+      // Unconditional, since the gate refuses a release from a non-holder.
       await gate.release(.rotation)
       syncConfirmation()
       return
@@ -277,9 +259,9 @@ final class RotationCoordinator {
     syncConfirmation()
   }
 
-  /// Every write to `preview`, `lastRefusal`, `lastFailure` or `blockedBy` must
-  /// be followed by this. An un-synced write leaves the window rendering a state
-  /// that no longer exists — an empty floating panel.
+  /// Every write to `preview` or the report properties must be followed by this.
+  /// An un-synced write leaves the window rendering a state that no longer
+  /// exists, which shows up as an empty floating panel.
   private func syncConfirmation() {
     if let preview {
       confirmation?.presentRotationConfirmation(.preview(preview.request.display))

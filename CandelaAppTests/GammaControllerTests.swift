@@ -45,9 +45,9 @@ struct GammaControllerTests {
     return GammaSamples(red: ramp, green: ramp, blue: ramp)
   }
 
-  /// THE FIX. A virtual display cannot be read back by the process that created
-  /// it, so the companion leg has no baseline to scale; SS15 still requires it
-  /// to receive the table, so it is written against the straight ramp.
+  /// A virtual display cannot be read back by the process that created it, so
+  /// the companion leg has no baseline to scale. SS15 still requires it to
+  /// receive the table, so the table is written against the straight ramp.
   @Test func theCompanionLegWritesTheIdentityScaledTableWhenTheBaselineCannotBeCaptured() {
     let driver = StubGammaDriver()
     driver.screens = [Self.virtualID]
@@ -114,9 +114,8 @@ struct GammaControllerTests {
   }
 
   /// A display written only through the assumed-baseline leg has no captured
-  /// reference, so there is nothing a readback could be compared against. It
-  /// must read as intact rather than as interference, or the engine would drive
-  /// the shade fallback on a display whose gamma nobody has touched.
+  /// reference for a readback to compare against. It must read as intact, or the
+  /// engine drives the shade fallback on a display whose gamma nobody touched.
   @Test func aDisplayWithNoCapturedBaselineReadsAsIntact() {
     let driver = StubGammaDriver()
     driver.screens = [Self.virtualID]

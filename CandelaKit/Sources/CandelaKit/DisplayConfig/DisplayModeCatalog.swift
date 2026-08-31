@@ -4,20 +4,17 @@ import Foundation
 /// to describe it.
 ///
 /// Carries no refresh-rate list of its own. The picker asks about the size the
-/// display is CURRENTLY running — which is not always a curated row, since the
-/// current size can sit below the usability floor — so it calls
-/// `refreshRates(in:logicalWidth:logicalHeight:)` directly. A per-row copy was
-/// the same list computed twice, read by nothing.
+/// display is CURRENTLY running, which is not always a curated row, so it calls
+/// `refreshRates(in:logicalWidth:logicalHeight:)` directly.
 public struct DisplayModeRow: Sendable, Equatable, Identifiable {
   public let mode: DisplayMode
-  /// Relative to the OWNING panel — the same logical size is native on one
+  /// Relative to the OWNING panel: the same logical size is native on one
   /// display and scaled on another.
   public let isScaled: Bool
 
-  // No `isRevealed` here, deliberately. A row is a SIZE, and the mode it
-  // applies is chosen at press time from the rate the display is running, so
-  // the representative's provenance is not the row's answer: a size can hold
-  // published and added modes at once. Surfaces marking a curated row ask
+  // No `isRevealed` here, deliberately. A row is a SIZE and the mode it applies
+  // is chosen at press time from the rate the display is running, so a size can
+  // hold published and added modes at once. Surfaces marking a curated row ask
   // whatever they would apply.
 
   public var id: Int32 { mode.ioModeID }
@@ -31,27 +28,24 @@ public struct DisplayModeRow: Sendable, Equatable, Identifiable {
 /// Turns an honest-but-unusable mode list into something a person can choose
 /// from, without hiding anything the way macOS does.
 ///
-/// Foundation only — no CoreGraphics — so the judgement is testable against
+/// Foundation only, no CoreGraphics, so the judgement is testable against
 /// captured fixtures rather than against attached hardware.
 public enum DisplayModeCatalog {
   /// LAST-RESORT floor, on the SHORTER axis, for the one state where nothing
-  /// about the panel is known: no declared physical size to take a density
-  /// from, and no native pixel count to take a fraction of. Every other case
-  /// goes through `passesUsabilityFloor`, which prefers density and then the
-  /// fraction. Not dead code: `DisplayModeCoordinator` really does pass 0 for
-  /// the native pixels when the native-flagged mode could not be read.
+  /// about the panel is known: no declared physical size to take a density from,
+  /// and no native pixel count to take a fraction of. Every other case goes
+  /// through `passesUsabilityFloor`. Not dead code: `DisplayModeCoordinator`
+  /// really does pass 0 for the native pixels when the native-flagged mode could
+  /// not be read.
   ///
-  /// It was the ONLY floor until the density model landed, and a flat pixel
-  /// count is the wrong shape for the job: it asks how many pixels tall a mode
-  /// is, when the question is how big things look. On a 21:9 panel that cut
-  /// three legitimate ladder rungs (1600×670, 1344×562, 1280×536) for being
-  /// short rather than for being unusable.
+  /// A flat pixel count is the wrong shape for the job: it asks how many pixels
+  /// tall a mode is when the question is how big things look. On a 21:9 panel it
+  /// cut three legitimate ladder rungs for being short rather than unusable.
   ///
-  /// Deliberately the minor axis rather than width: the development Dell runs
-  /// rotated 270°, where usable desktops are tall and narrow, and a width-only
-  /// floor cut 945×1680 and 900×1600. Deliberately 720 rather than 768: the
-  /// MAG ultrawide's exact-2x native mode is 1720×720, so a higher value would
-  /// remove the most important mode on that panel.
+  /// Minor axis rather than width: the development Dell runs rotated 270°, where
+  /// usable desktops are tall and narrow, and a width-only floor cut 945×1680.
+  /// 720 rather than 768: the MAG ultrawide's exact-2x native mode is 1720×720,
+  /// so a higher value would remove the most important mode on that panel.
   public static let usabilityFloorMinorAxis = 720
 
   /// Default presentation: one row per logical size, fastest refresh rate
@@ -59,13 +53,11 @@ public enum DisplayModeCatalog {
   ///
   /// - Parameter geometry: the panel's physical facts, when they are known.
   ///   Supplying them upgrades the usability floor from a pixel count to a
-  ///   density, which is the only form of the question that transfers between
-  ///   a 21:9 ultrawide and a rotated 4K panel. On the calibrated panel set it
-  ///   only ADDS rows: nothing the shipped pixel floor kept disappears, which
-  ///   `noCurrentlyCuratedRowDisappearsOnAnyPanel` pins on all three fixtures.
-  ///   That is a fixture result, not a structural one. A panel coarse enough
-  ///   (a 55-inch 4K TV reads about 81 PPI) has sizes a pixel floor keeps and
-  ///   a density floor drops, which is the density floor doing its job.
+  ///   density, the only form of the question that transfers between a 21:9
+  ///   ultrawide and a rotated 4K panel. On the calibrated panel set it only ADDS
+  ///   rows, which is a fixture result rather than a structural one: a panel
+  ///   coarse enough (a 55-inch 4K TV reads about 81 PPI) has sizes a pixel floor
+  ///   keeps and a density floor drops.
   ///
   ///   A VIRTUAL display's geometry may be passed like any other: the floor
   ///   itself treats `isVirtual` as no geometry at all, so no caller can
@@ -99,21 +91,20 @@ public enum DisplayModeCatalog {
   /// first, each falling through to the next when its input is missing.
   ///
   /// 1. Density, when the panel declares a physical size AND is not virtual.
-  ///    "Too big to work in" is a physical claim, so this is the only floor
-  ///    that means the same thing on two panels of different sizes. A virtual
-  ///    display's declared size is invented, so its density is fiction and the
-  ///    fraction of its native pixels is the honest answer: the exclusion lives
-  ///    here rather than in every caller, since a caller that forgets to strip
-  ///    the geometry gets a floor derived from a made-up 600x340 mm panel.
-  /// 2. A fraction of the native minor axis, when only the pixel count is
-  ///    known. Calibrated so nothing currently curated disappears, which makes
-  ///    it deliberately permissive: on the MAG it lands at 475 where the flat
-  ///    floor was 720.
+  ///    "Too big to work in" is a physical claim, so this is the only floor that
+  ///    means the same thing on two panels of different sizes. A virtual
+  ///    display's declared size is invented, so its density is fiction; the
+  ///    exclusion lives here rather than in every caller, since a caller that
+  ///    forgets to strip the geometry gets a floor derived from a made-up
+  ///    600x340 mm panel.
+  /// 2. A fraction of the native minor axis, when only the pixel count is known.
+  ///    Calibrated so nothing currently curated disappears, which makes it
+  ///    deliberately permissive: on the MAG it lands at 475 where the flat floor
+  ///    was 720.
   /// 3. The flat constant, when neither is known.
   ///
-  /// Runs BEFORE grouping, so the representative-picking never sees a mode the
-  /// floor rejected. `PanelDensityModel.evaluate` then trusts that its rows are
-  /// post-floor, which is what this ordering guarantees.
+  /// Runs BEFORE grouping, so representative-picking never sees a mode the floor
+  /// rejected. `PanelDensityModel.evaluate` trusts that its rows are post-floor.
   private static func passesUsabilityFloor(
     _ mode: DisplayMode, nativePixelWidth: Int, nativePixelHeight: Int,
     geometry: PanelGeometry?
@@ -137,12 +128,11 @@ public enum DisplayModeCatalog {
   /// Everything, ungrouped. The escape hatch that stops us being a nicer
   /// version of the thing users resent.
   ///
-  /// "Everything" means every mode in the list it is handed — which is the
-  /// public CoreGraphics list plus whatever survived revelation's gates, not
-  /// every mode the two enumerations named. #110 settled that deliberately:
-  /// the wire-timing guard filters here as well as in `curated`, rather than
-  /// annotating, because a mode that scans out cropped is not an option a
-  /// full list owes anybody. The `wireTimingGuard` default (D26) is what
+  /// "Everything" means every mode in the list it is handed, which is the public
+  /// CoreGraphics list plus whatever survived revelation's gates, not every mode
+  /// the two enumerations named. The wire-timing guard filters here as well as in
+  /// `curated`, rather than annotating, because a mode that scans out cropped is
+  /// not an option a full list owes anybody. The `wireTimingGuard` default (D26)
   /// brings those back.
   public static func full(_ modes: [DisplayMode]) -> [DisplayMode] {
     modes.sorted {
@@ -176,10 +166,10 @@ public enum DisplayModeCatalog {
   /// 3. Then fastest, then lowest id, so the choice is deterministic rather
   ///    than dependent on dictionary ordering.
   ///
-  /// Shared with `outcome`, which has to answer for the same mode `curated`
-  /// would have shown — two copies of this ranking would disagree the first
-  /// time one was touched, and the disagreement would surface as a size row
-  /// warning about the wrong framebuffer's rates.
+  /// Shared with `outcome`, which has to answer for the same mode `curated` would
+  /// have shown. Two copies of this ranking would disagree the first time one was
+  /// touched, and the disagreement would surface as a size row warning about the
+  /// wrong framebuffer's rates.
   private static func representativeRanking(_ lhs: DisplayMode, _ rhs: DisplayMode) -> Bool {
     if lhs.isNative != rhs.isNative { return lhs.isNative }
     if lhs.isHiDPI != rhs.isHiDPI { return lhs.isHiDPI }
@@ -203,42 +193,36 @@ public enum DisplayModeCatalog {
   /// Predicts the mode a size row applies, so the row can state its outcome
   /// instead of naming a catalog entry.
   ///
-  /// This is a PREDICTION of `DisplayModeCoordinator.Catalog
-  /// .modeKeepingCurrentRefreshRate`, and it mirrors that applier step for
-  /// step rather than restating an idea of what it ought to do:
+  /// A PREDICTION of
+  /// `DisplayModeCoordinator.Catalog.modeKeepingCurrentRefreshRate`, mirroring
+  /// that applier step for step:
   ///
-  /// - the applier resolves the ROW's descriptor, and the row for a size is
-  ///   its curated representative — so the candidates are the representative's
-  ///   framebuffer, not every mode sharing the logical size. A revealed HiDPI
-  ///   variant offering only 60 Hz caps a 175 Hz display even while the 1x
+  /// - the applier resolves the ROW's descriptor, and the row for a size is its
+  ///   curated representative, so the candidates are the representative's
+  ///   framebuffer rather than every mode sharing the logical size. A revealed
+  ///   HiDPI variant offering only 60 Hz caps a 175 Hz display even while the 1x
   ///   variant at the same size still lists 175.
-  /// - `ModePersistence.resolve` picks the rate NEAREST the current one, not
-  ///   the size's fastest. From 75 Hz, a size holding 60 and 120 lands on 60;
-  ///   predicting "the fastest applies" would promise 120 and stay silent
-  ///   through a real drop.
+  /// - `ModePersistence.resolve` picks the rate NEAREST the current one, not the
+  ///   size's fastest. From 75 Hz, a size holding 60 and 120 lands on 60;
+  ///   predicting "the fastest applies" would promise 120 and stay silent through
+  ///   a real drop.
   ///
-  /// nil when the display has no mode at that size — there is no outcome to
-  /// state about a row that cannot exist.
+  /// nil when the display has no mode at that size.
   ///
-  /// - Parameter currentHz: exactly what the applier reads —
-  ///   `current?.refreshHz ?? row.mode.refreshHz`. This is a contract, not a
-  ///   hint: `currentHz` is the point the nearest-rate search measures from, so
-  ///   a wrong value produces a confident wrong prediction, which is the exact
-  ///   SO18 defect this function exists to prevent. Two ways to get it wrong:
-  ///   - `0` as a stand-in for "unknown" makes every gap equal to the rate
-  ///     itself, so the search returns the size's SLOWEST — and since no rate
-  ///     is below zero, `lowersCurrentRate` comes back `false`. The row then
-  ///     names the wrong rate AND the caps warning is silently disabled.
-  ///   - any other placeholder judges the drop against a rate the display is
-  ///     not running: a warning on rows that will not change, and none on rows
-  ///     that will.
+  /// - Parameter currentHz: exactly what the applier reads,
+  ///   `current?.refreshHz ?? row.mode.refreshHz`. A contract, not a hint: it is
+  ///   the point the nearest-rate search measures from, so a wrong value produces
+  ///   a confident wrong prediction (the SO18 defect). `0` as a stand-in for
+  ///   "unknown" makes every gap equal to the rate itself, so the search returns
+  ///   the size's SLOWEST and `lowersCurrentRate` comes back `false`: wrong rate,
+  ///   and the caps warning silently disabled. Any other placeholder judges the
+  ///   drop against a rate the display is not running.
   ///
-  ///   **When the display has no current mode, suppress the caps warning
-  ///   rather than substitute a placeholder.** The applier falls back to the
-  ///   row's own rate in that state, so there is nothing to compare against and
-  ///   nothing honest to warn about. A caller that can reach the row's mode may
-  ///   pass `row.mode.refreshHz` and get the applier's answer with
-  ///   `lowersCurrentRate == false`; a caller that cannot must show no outcome.
+  ///   **When the display has no current mode, suppress the caps warning rather
+  ///   than substitute a placeholder.** The applier falls back to the row's own
+  ///   rate, so there is nothing honest to warn about. A caller that can reach the
+  ///   row's mode may pass `row.mode.refreshHz`; a caller that cannot must show no
+  ///   outcome.
   public static func outcome(
     selectingWidth: Int, selectingHeight: Int, currentHz: Double, in modes: [DisplayMode]
   ) -> SizeSelectionOutcome? {
@@ -265,9 +249,8 @@ public enum DisplayModeCatalog {
     )
   }
 
-  /// Every mode a display offers, gathered under its logical size — the
-  /// structure the full list is read in. Nothing is filtered; that is the
-  /// point of the full list.
+  /// Every mode a display offers, gathered under its logical size. Nothing is
+  /// filtered; that is the point of the full list.
   public struct SizeGroup: Equatable, Sendable {
     public let logicalWidth: Int
     public let logicalHeight: Int
@@ -304,18 +287,18 @@ public enum DisplayModeCatalog {
 
   /// The modes the full list tags "low resolution", by `ioModeID`.
   ///
-  /// SO14's inversion, and macOS's: where one logical size is offered both
-  /// sharp and blurry, the BLURRY one is tagged. Tagging the sharp one "HiDPI"
-  /// names an implementation detail, and it leaves the 1x mode looking like the
-  /// plain choice when it is the compromised one.
+  /// SO14's inversion, and macOS's: where one logical size is offered both sharp
+  /// and blurry, the BLURRY one is tagged. Tagging the sharp one "HiDPI" names an
+  /// implementation detail and leaves the 1x mode looking like the plain choice
+  /// when it is the compromised one.
   ///
-  /// A size with no sharp variant tags NOTHING. Most sizes on a standard-PPI
-  /// panel are 1x and unremarkable; tagging all of them would say "low
+  /// A size with no sharp variant tags NOTHING: most sizes on a standard-PPI
+  /// panel are 1x and unremarkable, and tagging all of them would say "low
   /// resolution" about every resolution such a display has.
   ///
   /// One pass over the whole list rather than a per-mode question, because the
-  /// answer depends on the mode's SIBLINGS at the same logical size and the
-  /// caller renders hundreds of rows.
+  /// answer depends on a mode's SIBLINGS at the same logical size and the caller
+  /// renders hundreds of rows.
   public static func lowResolutionDuplicates(_ modes: [DisplayMode]) -> Set<Int32> {
     let sharpSizes = Set(
       modes.filter(\.isHiDPI).map { SizeKey(width: $0.logicalWidth, height: $0.logicalHeight) }
@@ -331,9 +314,9 @@ public enum DisplayModeCatalog {
     )
   }
 
-  /// Every rate in the list, once each, descending — the filter's menu.
-  /// Quantized, so CoreGraphics' float noise cannot offer 60 twice while
-  /// keeping NTSC's 59.9 as its own entry.
+  /// Every rate in the list, once each, descending: the filter's menu.
+  /// Quantized, so CoreGraphics' float noise cannot offer 60 twice while keeping
+  /// NTSC's 59.9 as its own entry.
   public static func distinctRates(_ modes: [DisplayMode]) -> [Double] {
     Array(Set(modes.map { DisplayMode.quantizedRefresh($0.refreshHz) })).sorted(by: >)
   }

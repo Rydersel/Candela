@@ -3,10 +3,9 @@ import CoreGraphics
 /// Where the checkup flow window goes as a field goes up on the target (CK16:
 /// the field covers the target, so the controls belong on another display).
 ///
-/// Pure over frames so the rule is testable without screens. The rule is
-/// "leave only if you must": a window the person is already looking at stays,
-/// and one on the target goes to the nearest other screen rather than to the
-/// first one AppKit lists, which read as a random jump.
+/// Pure over frames so the rule is testable without screens. It moves only if
+/// it must, and then to the nearest other screen: the first screen AppKit lists
+/// reads as a random jump.
 enum CheckupFlowWindowHost {
   struct Screen: Equatable {
     var id: CGDirectDisplayID

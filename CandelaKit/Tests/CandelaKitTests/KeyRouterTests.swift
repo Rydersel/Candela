@@ -13,7 +13,6 @@ struct KeyRouterTests {
     )
   }
 
-  // Plain steps
   @Test func plainBrightnessUp() {
     #expect(route(.brightnessUp) == .stepBrightness(isUp: true, isFine: false, scope: .affected))
   }
@@ -27,7 +26,6 @@ struct KeyRouterTests {
     #expect(route(.brightnessUp, pressed: false) == .none)
   }
 
-  // Fine steps + inversion pref
   @Test func optShiftIsFine() {
     #expect(route(.brightnessUp, [.option, .shift]) == .stepBrightness(isUp: true, isFine: true, scope: .affected))
   }
@@ -94,7 +92,6 @@ struct KeyRouterTests {
     )
   }
 
-  // Volume steps (Appendix A)
   @Test func plainVolumeUp() {
     #expect(routeVol(.volumeUp) == .stepVolume(isUp: true, isFine: false))
   }
@@ -120,7 +117,6 @@ struct KeyRouterTests {
     #expect(action == .stepVolume(isUp: true, isFine: false))
   }
 
-  // Key-up: feedback-sound trigger for volume, nothing for mute
   @Test func volumeKeyUpRoutesTheFeedbackTrigger() {
     #expect(routeVol(.volumeUp, pressed: false) == .volumeKeyUp)
     #expect(routeVol(.volumeDown, pressed: false) == .volumeKeyUp)
@@ -129,7 +125,6 @@ struct KeyRouterTests {
     // "The mute key should not respond to press + hold or keyup" (fork).
     #expect(routeVol(.mute, pressed: false) == .none)
   }
-  // Mute
   @Test func muteFreshPressToggles() {
     #expect(routeVol(.mute) == .toggleMute)
   }
@@ -137,7 +132,6 @@ struct KeyRouterTests {
     #expect(routeVol(.mute, isRepeat: true) == .none)
   }
 
-  // Option-only deep link → Sound settings
   @Test func optionOnlyVolumeOpensSoundSettings() {
     #expect(routeVol(.volumeUp, [.option]) == .openSoundSettings)
     #expect(routeVol(.mute, [.option]) == .openSoundSettings)
@@ -149,10 +143,9 @@ struct KeyRouterTests {
     #expect(routeVol(.volumeDown, [.option, .shift]) == .stepVolume(isUp: false, isFine: true))
   }
 
-  // Fork-parity pins (review T6-Q1): the cells future edits would most
-  // plausibly break — key-up routes regardless of modifiers (the fork plays
-  // the feedback sound on an Option-only release too), only EXACT Option is
-  // the deep link, and brightness-family chords mean nothing to volume.
+  // The cells a future edit would most plausibly break: key-up routes whatever
+  // the modifiers are (the fork plays the sound on an Option-only release too),
+  // only EXACT Option is the deep link, and brightness chords mean nothing to volume.
   @Test func modifiedVolumeKeyUpStillRoutesTheRelease() {
     #expect(routeVol(.volumeUp, pressed: false, [.option]) == .volumeKeyUp)
   }

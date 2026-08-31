@@ -3,16 +3,6 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// `setTransientHDR`: one leg of an HDR round trip another feature needs on a
-/// display, taken through the controller so the brightness stack sees the
-/// window it opens.
-///
-/// The whole point of the method is what it does to state the caller cannot
-/// reach: the transition token, the optimistic path mirror, the settle flag and
-/// the wire's duplicate memos. Every one of those is assertable host-free, and
-/// none of them was until this suite: the app-side bounce tests drive a fake
-/// seam, so they exercise control flow over a `false` that means something the
-/// real seam does not promise.
 /// Polls until `condition` holds or ~1 s elapses. Its own copy rather than a
 /// shared one: the transition runs on the main actor, so each suspension is
 /// what lets it make progress, and the sibling suite's version is private.
@@ -79,14 +69,10 @@ struct TransientHDRTests {
     #expect(rig.controller.hdrMode == .off)
   }
 
-  /// The memo drop fires on BOTH legs, unconditionally.
-  ///
-  /// The observed true-to-false edge in `refreshHDRCaches` only sees a window
-  /// some refresh caught live, and a bounce is exactly the window that can open
-  /// and close between two refreshes. Left to the edge alone, every DDC value
-  /// written while the register was locked stays recorded as landed, and the
-  /// next write of the same value is skipped as a duplicate: on a write-only
-  /// display nothing downstream can tell that from a write that worked.
+  /// The memo drop fires on BOTH legs, unconditionally. `refreshHDRCaches`'s
+  /// true-to-false edge only sees a window some refresh caught live, and a
+  /// bounce can open and close between two refreshes, leaving every value
+  /// written into a locked register recorded as landed and skipped next time.
   @Test func bothLegsDropTheWiresDuplicateMemos() async {
     let rig = await rig()
     // Baselined AFTER construction, so nothing the init refresh happened to do

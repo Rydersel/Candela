@@ -1,10 +1,9 @@
 import ServiceManagement
 import Testing
 
-// The D10 invariant, pinned now that the seam exists: `isEnabled` answers from
-// the system on every read, never from a mirror. The fake's backing is mutated
-// behind the object's back, exactly what System Settings or sfltool does to
-// the real one.
+// The D10 invariant: `isEnabled` answers from the system on every read, never
+// from a mirror. The fake's backing is mutated behind the object's back,
+// exactly what System Settings or sfltool does to the real one.
 @Suite("Login item") @MainActor
 struct LoginItemTests {
   /// A settable stand-in for the system's registration state. A class so the

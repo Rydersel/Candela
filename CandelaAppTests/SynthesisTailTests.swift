@@ -6,12 +6,8 @@ import Testing
 /// The engage tail and the coordinator decisions around a synthesized size,
 /// host-free, over `SynthesisFixture`'s real coordinators and real engine.
 ///
-/// Everything here was product-only until 2026-08-18: nine fixes had landed on
-/// these paths with no test between them, and the two that were wrong
-/// (a stored stop that survived a kept ordinary size, a link bounce whose
-/// completion log outran what it had measured) were both invisible to every
-/// suite. The three seams that made them reachable are the injected bounce
-/// durations, the recorded mode applies, and the scriptable HDR seam.
+/// The seams that make these paths reachable are the injected bounce durations,
+/// the recorded mode applies, and the scriptable HDR seam.
 @Suite("Synthesized sizes: the engage tail and its fallout") @MainActor
 struct SynthesisTailTests {
   private typealias Fixture = SynthesisFixture
@@ -27,9 +23,8 @@ struct SynthesisTailTests {
 
   // MARK: - The engage tail
 
-  /// The re-time is what keeps the display on its own timing, so a landed
-  /// engage has to have applied the display's OWN mode to it, once, after the
-  /// mirror stood.
+  /// The re-time is what keeps the display on its own timing, so it runs once,
+  /// after the mirror stood.
   @Test func aLandedEngageRetimesTheDisplayOntoItsOwnMode() async throws {
     let fixture = Fixture()
     defer { fixture.forgetPrefs() }
@@ -46,9 +41,7 @@ struct SynthesisTailTests {
     #expect(applies.first?.mode.refreshHz == ownMode.refreshHz)
   }
 
-  /// And a FAILED engage re-times nothing: the tail runs only on success, so a
-  /// refused mirror must not leave a mode apply behind on a display it never
-  /// moved.
+  /// A refused mirror must not leave a mode apply behind on a display it never moved.
   @Test func aFailedEngageAppliesNoMode() async throws {
     let fixture = Fixture()
     defer { fixture.forgetPrefs() }
@@ -62,8 +55,7 @@ struct SynthesisTailTests {
     #expect(fixture.configurator.applies.isEmpty)
   }
 
-  /// The bounce is the fallback, so it runs exactly when the re-time did not:
-  /// here the apply throws, and the HDR seam sees a full round trip.
+  /// The bounce is the fallback, so it runs exactly when the re-time did not.
   @Test func aRefusedRetimeFallsThroughToTheHDRRoundTrip() async throws {
     let hdr = FakeSynthesisHDR()
     let fixture = Fixture(hdr: hdr)
@@ -78,9 +70,8 @@ struct SynthesisTailTests {
     #expect(hdr.leftStanding.isEmpty)
   }
 
-  /// A display with no HDR gets no bounce at all, however the re-time went.
-  /// There is nothing to renegotiate through, and an HDR write to a display
-  /// that has none is a write nobody can predict.
+  /// Nothing to renegotiate through, and an HDR write to a display that has none
+  /// is a write nobody can predict.
   @Test func aDisplayWithoutHDRIsNeverBounced() async throws {
     let hdr = FakeSynthesisHDR(supports: false)
     let fixture = Fixture(hdr: hdr)
@@ -94,9 +85,8 @@ struct SynthesisTailTests {
     #expect(hdr.legs.isEmpty)
   }
 
-  /// The user's own HDR is never ended by a bounce. The guard is read AFTER the
-  /// settle rather than before it, so a state that changed while the engage was
-  /// landing is the one this decides from.
+  /// The guard is read AFTER the settle, so a state that changed while the engage
+  /// was landing is the one this decides from.
   @Test func aBounceStandsDownWhenHDRIsAlreadyLive() async throws {
     let hdr = FakeSynthesisHDR(live: true)
     let fixture = Fixture(hdr: hdr)
@@ -110,9 +100,8 @@ struct SynthesisTailTests {
     #expect(hdr.legs.isEmpty, "an HDR state somebody else set is not this feature's to end")
   }
 
-  /// A state nobody will vouch for fails the same guard. `.unknown` from the
-  /// controller means a transition raced the read, and deciding from it is
-  /// exactly the mistake the measured-read rule exists to stop.
+  /// `.unknown` means a transition raced the read, and deciding from it is the
+  /// mistake the measured-read rule exists to stop.
   @Test func aBounceStandsDownWhenNobodyVouchesForTheHDRState() async throws {
     let hdr = FakeSynthesisHDR(live: nil)
     let fixture = Fixture(hdr: hdr)
@@ -126,14 +115,10 @@ struct SynthesisTailTests {
     #expect(hdr.legs.isEmpty)
   }
 
-  /// The on leg reports ACHIEVED, not issued, and abandoning it still runs the
-  /// off discipline.
-  ///
-  /// A false from the seam is TWO facts: the display measured the other way, or
-  /// a newer transition superseded the call, which established nothing and left
-  /// the register assumed locked. Reading it as "HDR never came on" and walking
-  /// away is a best-effort path leaving the disabling state standing, on a
-  /// display whose only symptom is brightness and volume quietly not working.
+  /// The on leg reports ACHIEVED, not issued. A false from the seam means either
+  /// the display measured the other way or a newer transition superseded the call,
+  /// so reading it as "HDR never came on" can leave HDR standing, and the only
+  /// symptom is brightness and volume quietly not working.
   @Test func anAbandonedOnLegStillStandsTheOffLegDown() async throws {
     let hdr = FakeSynthesisHDR(achievesOn: false)
     let fixture = Fixture(hdr: hdr)
@@ -148,8 +133,7 @@ struct SynthesisTailTests {
     #expect(hdr.leftStanding.isEmpty, "and the off leg took, so nothing is standing")
   }
 
-  /// The same shape with the off leg refusing too: this is the state that kills
-  /// DDC, and it has to reach a person whichever leg failed first.
+  /// HDR left standing kills DDC, so it has to reach a person whichever leg failed.
   @Test func anAbandonedOnLegThatCannotBeStoodDownIsReported() async throws {
     let hdr = FakeSynthesisHDR(achievesOn: false, achievesOff: false)
     let fixture = Fixture(hdr: hdr)
@@ -164,10 +148,9 @@ struct SynthesisTailTests {
     #expect(hdr.leftStanding == [Self.panelID])
   }
 
-  /// And the one case that does NOT write: the on leg was never issued, so the
-  /// display is measured out of HDR and there is nothing to stand down. The
-  /// fresh read before the off leg is the last chance not to reach into a state
-  /// this feature did not create.
+  /// The display measured out of HDR, so there is nothing to stand down. The fresh
+  /// read before the off leg is the last chance not to reach into a state this
+  /// feature did not create.
   @Test func anOnLegThatWasNeverIssuedSkipsTheOffWriteEntirely() async throws {
     let hdr = FakeSynthesisHDR(achievesOn: false, stateAfterFailedOn: false)
     let fixture = Fixture(hdr: hdr)
@@ -182,9 +165,8 @@ struct SynthesisTailTests {
     #expect(hdr.leftStanding.isEmpty)
   }
 
-  /// The one hard rule. HDR left standing kills DDC to the display, so the off
-  /// leg is tried three times and then reported where a person can read it: a
-  /// log line is not a recovery path.
+  /// HDR left standing kills DDC to the display, so the off leg is retried and then
+  /// reported where a person can read it. A log line is not a recovery path.
   @Test func anOffLegThatNeverTakesIsReportedAndNotSwallowed() async throws {
     let hdr = FakeSynthesisHDR(achievesOff: false)
     let fixture = Fixture(hdr: hdr)
@@ -196,19 +178,16 @@ struct SynthesisTailTests {
     _ = await fixture.synthesis.engage(stop, on: display)
 
     #expect(hdr.legs.filter { $0.enabled == false }.count == 3)
-    // The seam is what carries it to a surface: `AppModel` wires this to
-    // `SynthesisCoordinator.note(.hdrLeftStanding,)`, which `SynthesisCopy`
-    // renders in the banner region. Asserted at the seam because the seam is
-    // built before the coordinator it reports to, so a fixture cannot hold both
-    // ends of that join.
+    // Asserted at the seam because the seam is built before the coordinator it
+    // reports to, so a fixture cannot hold both ends of that join.
     #expect(hdr.leftStanding == [Self.panelID])
   }
 
   // MARK: - What the surfaces read
 
-  /// SS1 over the readback. The engage tail re-times the display onto its own
-  /// mode, so `current` names a real published row: every "what is running"
-  /// reader has to go through `onScreen`, and every no-op guard has to see nil.
+  /// SS1 over the readback. The re-time leaves `current` naming a real published
+  /// row, so every "what is running" reader goes through `onScreen` and every no-op
+  /// guard sees nil.
   @Test func theOnScreenSizeIsTheStopRatherThanTheReadback() async throws {
     let fixture = Fixture()
     defer { fixture.forgetPrefs() }
@@ -227,29 +206,19 @@ struct SynthesisTailTests {
     #expect(after.onScreen?.logicalWidth == stop.logicalWidth)
     #expect(after.onScreen?.logicalHeight == stop.logicalHeight)
     #expect(after.onScreen?.isSynthesized == true)
-    // The rate rides along from the readback, which the re-time put back on the
-    // display: a label with no rate on it would read as the feature having
-    // taken the rate away.
+    // A label with no rate on it would read as the feature having taken the rate away.
     #expect(after.onScreen?.refreshHz == Fixture.nativeHz)
-    // The guard the pick paths consult. nil, so picking the native size is a
-    // real change rather than a silent no-op against a descriptor that happens
-    // to match it.
+    // nil, so picking the native size is a real change rather than a silent no-op.
     #expect(after.alreadyOnScreenModeID == nil)
   }
 
-  /// The mid-engage catalog pass that poisoned the ladder, driven at the one
-  /// instant it can happen: the mirror stands, the pairing snapshot is still
-  /// empty (so `isEngaged` reads FALSE and the baseline lookup does not take
-  /// its cached-value shortcut), the work depth is still raised, and the world
-  /// is already publishing the master's twins.
+  /// A catalog pass at the one instant that poisons the ladder: the mirror stands,
+  /// the pairing snapshot is still empty (so `isEngaged` reads FALSE and the
+  /// baseline lookup skips its cache shortcut), and the world is already publishing
+  /// the master's twins. A pass after the engage returns cannot reach that guard.
   ///
-  /// That combination is what reaches the guard the fix changed. A pass run
-  /// after the engage returns cannot: `isEngaged` is true by then and
-  /// `baseline` answers from the cache before the guard is evaluated at all.
-  ///
-  /// Fails under the mutation this pins, which is dropping `!unstable` from the
-  /// guard: the poisoned baseline replaces the good one and the ladder, the
-  /// native pixels and the engaged row all go with it.
+  /// Drop `!unstable` from the guard and the poisoned baseline replaces the good
+  /// one, taking the ladder, the native pixels and the engaged row with it.
   @Test func aCatalogRefreshInsideTheEngageWindowKeepsTheLadder() async throws {
     let fixture = Fixture()
     defer { fixture.forgetPrefs() }
@@ -259,9 +228,8 @@ struct SynthesisTailTests {
     let stopsBefore = fixture.modes.catalogs[Self.panelID]?.syntheticStops ?? []
     #expect(!stopsBefore.isEmpty, "the fixture's own control")
 
-    // Runs on the engine's executor with the mirror standing. Hopping to the
-    // main actor and BLOCKING there is what makes the pass land inside the
-    // window rather than after it.
+    // Runs on the engine's executor with the mirror standing. Hopping to the main
+    // actor and BLOCKING there is what lands the pass inside the window.
     let refreshed = DispatchSemaphore(value: 0)
     fixture.configurator.onMirrorApplied = { [modes = fixture.modes, synthesis = fixture.synthesis] in
       Task { @MainActor in
@@ -286,21 +254,12 @@ struct SynthesisTailTests {
     )
   }
 
-  /// The first-sight escape hatch, closed: a pass that runs while the baseline
-  /// is untrustworthy stores NOTHING, even when nothing is cached yet.
-  ///
-  /// The scope of that is narrow and worth stating, because the test has to
-  /// model it exactly. While the set stands, a pass computes from a world that
-  /// is publishing the master's twins, so it is poisoned whether or not the
-  /// cache is consulted. What the old `|| baselines[key] == nil` escape added
-  /// was PERMANENCE: the poison became the cached answer, and `isEngaged` then
-  /// short-circuits to it for the rest of the set's life, so nothing can
-  /// recover even once the world stops lying. That is what this drives: first
-  /// sight inside the mirror window, then the OS list settling back, then a
-  /// second pass.
-  ///
-  /// Fails under the mutation: the cached first-sight poison is returned by the
-  /// `isEngaged` shortcut and the second pass never gets to look.
+  /// A pass that runs while the baseline is untrustworthy stores NOTHING, even when
+  /// nothing is cached yet. A `|| baselines[key] == nil` escape would make the
+  /// poison PERMANENT: it becomes the cached answer, `isEngaged` short-circuits to
+  /// it for the rest of the set's life, and nothing recovers once the world stops
+  /// lying. Driven here as first sight inside the mirror window, the OS list
+  /// settling back, then a second pass.
   @Test func anUnstableFirstPassCachesNothing() async throws {
     let fixture = Fixture(enumerateOnInit: false)
     defer { fixture.forgetPrefs() }
@@ -316,7 +275,7 @@ struct SynthesisTailTests {
     let refreshed = DispatchSemaphore(value: 0)
     fixture.configurator.onMirrorApplied = { [modes = fixture.modes] in
       Task { @MainActor in
-        // FIRST sight for this identity, and it happens inside the window.
+        // FIRST sight for this identity, inside the window.
         modes.refreshCatalog(for: Self.panelID)
         refreshed.signal()
       }
@@ -336,10 +295,9 @@ struct SynthesisTailTests {
     #expect(catalog.rows.contains { catalog.isCurrentSize($0.mode) })
   }
 
-  /// The enumeration order that made the launch restore report a stale
-  /// descriptor forever: the native flag rides the HiDPI twin, so a ladder
-  /// taken from the RAW list computes from half the real logical size and every
-  /// stop falls under the minor-axis floor. The catalog is sorted first.
+  /// The native flag rides the HiDPI twin, so a ladder taken from the RAW list
+  /// computes from half the real logical size and every stop falls under the
+  /// minor-axis floor. The catalog is sorted first.
   @Test func aNativeFlaggedHiDPITwinDoesNotSuppressTheLadder() {
     let fixture = Fixture(nativeRidesTheHiDPITwin: true)
     defer { fixture.forgetPrefs() }
@@ -350,9 +308,8 @@ struct SynthesisTailTests {
 
   // MARK: - An ordinary size over a committed set
 
-  /// SS10 through the picker: an ordinary pick over a COMMITTED set takes the
-  /// set down through the engine before any mode touches the display, and the
-  /// gate comes back afterwards.
+  /// SS10 through the picker: the set comes down through the engine before any mode
+  /// touches the display, and the gate comes back afterwards.
   @Test func anOrdinaryPickOverACommittedSetTakesTheSetDown() async throws {
     let fixture = Fixture()
     defer { fixture.forgetPrefs() }
@@ -376,26 +333,24 @@ struct SynthesisTailTests {
     await fixture.settle()
 
     #expect(fixture.synthesis.pairings.isEmpty, "the set comes down before the mode is applied")
-    // A null-master change is the break, and the fake world records every batch.
+    // A null-master change is the break.
     #expect(
       fixture.world.mirrorChanges.contains { changes in
         changes.contains { $0.display == Self.panelID && $0.master == kCGNullDirectDisplay }
       })
 
-    // Keeping the ordinary size clears the stored stop, and it does so with
-    // Remember OFF, which is the shipped default: the two prefs are unrelated
-    // and neither may gate the other. Left standing, the next launch would
-    // re-engage the stop over the size the person just confirmed.
+    // Cleared with Remember OFF, the shipped default: the two prefs are unrelated
+    // and neither may gate the other. Left standing, the next launch would re-engage
+    // the stop over the size the person just confirmed.
     #expect(!fixture.modes.isRemembering(Self.panelID), "the fixture's own control")
     if let preview = fixture.modes.preview { _ = await fixture.modes.confirm(preview) }
     await fixture.settle()
     #expect(fixture.prefs.storedSyntheticSize == nil)
   }
 
-  /// RULING 2026-08-18. The teardown above is irreversible and it happens
-  /// BEFORE the reversible preview, so Revert has to return the person to the
-  /// screen they were looking at when they picked: the synthesized size, not
-  /// the desktop the display had before it was ever engaged.
+  /// The teardown is irreversible and happens BEFORE the reversible preview, so
+  /// Revert returns the person to the synthesized size they were looking at when
+  /// they picked, not the desktop the display had before it was ever engaged.
   @Test func revertingAnOrdinaryPickPutsTheSynthesizedSizeBack() async throws {
     let fixture = Fixture()
     defer { fixture.forgetPrefs() }
@@ -424,19 +379,15 @@ struct SynthesisTailTests {
 
   /// A STAND-DOWN is not an answer, and it must not restore.
   ///
-  /// `endOutstandingPreview` produces the same `.reverted` outcome a person's
-  /// own Revert does, and every caller of it is about to reconfigure these
-  /// displays for itself: the mirror path claims the gate and then stands
-  /// previews down, the opt-out and the whole-app reset stand them down before
-  /// claiming. `SynthesisCoordinator.engage` takes no claim of its own, so a
-  /// restore from any of those is tens of seconds of display reconfiguration
-  /// performed inside somebody else's operation, and in the mirror case it
-  /// mirrors the user's own topology on top of a display this app has just
-  /// made a synthesis slave.
+  /// `endOutstandingPreview` yields the same `.reverted` outcome a person's Revert
+  /// does, but every caller of it is about to reconfigure these displays itself, and
+  /// `SynthesisCoordinator.engage` takes no claim of its own. Restoring there is
+  /// tens of seconds of reconfiguration inside somebody else's operation, and on the
+  /// mirror path it mirrors the user's topology onto a display this app just made a
+  /// synthesis slave.
   ///
-  /// The stash is CONSUMED rather than dropped, so the stored stop cannot
-  /// re-engage at the next launch behind a person who is looking at something
-  /// else, and the disappearance gets a sentence.
+  /// The stash is CONSUMED rather than dropped, so the stored stop cannot re-engage
+  /// at the next launch behind a person looking at something else.
   @Test func aStandDownConsumesTheRestoreWithoutPerformingIt() async throws {
     let fixture = Fixture()
     defer { fixture.forgetPrefs() }
@@ -469,11 +420,9 @@ struct SynthesisTailTests {
     #expect(fixture.synthesis.refusal?.reason == .restoreSuperseded)
   }
 
-  /// A superseding pick consumes the stash too, and the stored stop goes with
-  /// it. Pick A's preview is resolved inside `ModePreviewSession.begin`'s
-  /// revert-first, which reaches no arm here, so a bare drop left the pref
-  /// naming a size that will not be on the glass under either outcome: the
-  /// machine-versus-pref divergence one gesture further along.
+  /// Pick A's preview resolves inside `ModePreviewSession.begin`'s revert-first,
+  /// which reaches no arm here, so a bare drop leaves the pref naming a size that
+  /// will not be on the glass under either outcome.
   @Test func aSupersedingPickConsumesTheStashSoNothingReEngagesLater() async throws {
     let fixture = Fixture()
     defer { fixture.forgetPrefs() }
@@ -506,13 +455,10 @@ struct SynthesisTailTests {
     #expect(fixture.synthesis.pairings.isEmpty, "and nothing re-engages behind the second pick")
   }
 
-  /// The restore re-validates against the ladder this display generates NOW.
-  ///
-  /// The refusal guard it already asks covers the opt-in, HDR, the built-in and
-  /// user mirroring; it has no `sizeNoLongerOffered` arm, because that answer
-  /// belongs to the catalog lookup the restore would otherwise bypass. Thirty
-  /// seconds is long enough for a rotation or a native-geometry change to
-  /// regenerate the ladder underneath a captured stop.
+  /// The restore re-validates against the ladder this display generates NOW. The
+  /// refusal guard has no `sizeNoLongerOffered` arm because that answer belongs to
+  /// the catalog lookup the restore would otherwise bypass, and a countdown is long
+  /// enough for a rotation to regenerate the ladder under a captured stop.
   @Test func aRestoreRefusesAStopTheLadderNoLongerOffers() async throws {
     let fixture = Fixture()
     defer { fixture.forgetPrefs() }
@@ -526,8 +472,8 @@ struct SynthesisTailTests {
     fixture.modes.select(smaller, on: Self.panelID, from: .settings, surface: .settingsBanner)
     await fixture.settle()
 
-    // The ladder regenerates from a different native geometry, the way a
-    // rotation makes it.
+    // The ladder regenerates from a different native geometry, the way a rotation
+    // makes it.
     let rotated = DisplayMode(
       ioModeID: 11, logicalWidth: 1920, logicalHeight: 1080,
       pixelWidth: 1920, pixelHeight: 1080, refreshHz: 60, isNative: true
@@ -550,11 +496,10 @@ struct SynthesisTailTests {
     #expect(fixture.prefs.storedSyntheticSize == nil, "and the pref cannot outlive the ladder")
   }
 
-  /// The queue-context flags, asserted the only way a hang can be: the select
-  /// RETURNS, and the gate is free afterwards. Both entry points the teardown
-  /// needs (`endOutstandingPreview` and `releaseClaimIfIdle`) re-enter the
-  /// coordinator's queue, so a teardown that took them from inside it waited on
-  /// the operation doing the waiting and every later pick enqueued forever.
+  /// A hang can only be asserted as its absence: the select RETURNS and the gate is
+  /// free afterwards. Both entry points the teardown needs re-enter the coordinator's
+  /// queue, so a teardown that took them from inside it waited on itself and every
+  /// later pick enqueued forever.
   @Test func anOrdinaryPickOverACommittedSetDoesNotWedgeTheQueue() async throws {
     let fixture = Fixture()
     defer { fixture.forgetPrefs() }
@@ -562,8 +507,8 @@ struct SynthesisTailTests {
     let stop = try firstStop(fixture)
     let smaller = try #require(
       fixture.modes.catalogs[Self.panelID]?.all.first { $0.logicalWidth == 2560 })
-    // The wiring the app makes, and the half that would hang: both closures
-    // enter this coordinator's queue.
+    // The app's wiring, and the half that would hang: both closures enter this
+    // coordinator's queue.
     fixture.synthesis.endOutstandingPreview = { [modes = fixture.modes] in
       await modes.endOutstandingPreview()
     }
@@ -586,20 +531,18 @@ struct SynthesisTailTests {
   }
 }
 
-/// The launch-ordering join the synthesis prefs hang off, asserted where it
-/// actually lives: `AppModel`'s `persistenceKey` closure.
+/// The launch-ordering join the synthesis prefs hang off, in `AppModel`'s
+/// `persistenceKey` closure.
 ///
-/// The unattended reapply pass can run before the first controller build has
-/// populated `allControlledStates`. A nil answer there reads as "not opted in"
-/// and silently drops the relaunch restore, so the closure falls back to
-/// discovery and MEMOIZES what it learned: the walk is a full IOKit service
-/// iteration on the main actor, and the closure is reached from a catalog
-/// refresh on every reconfiguration and from a Diagnostics body on every
-/// render.
+/// The unattended reapply pass can run before the first controller build populates
+/// `allControlledStates`. A nil answer there reads as "not opted in" and silently
+/// drops the relaunch restore, so the closure falls back to discovery and MEMOIZES
+/// it: the walk is a full IOKit service iteration on the main actor, reached from
+/// every catalog refresh and every Diagnostics render.
 @Suite("The persistence-key join at launch") @MainActor
 struct SynthesisPersistenceKeyTests {
-  /// Counts its own calls, so the memo is a fact about behaviour rather than
-  /// an implementation detail nobody can see.
+  /// Counts its own calls, so the memo is observable behaviour rather than an
+  /// implementation detail.
   private final class CountingDiscovery: @unchecked Sendable {
     private let lock = NSLock()
     private var _calls = 0
@@ -610,8 +553,7 @@ struct SynthesisPersistenceKeyTests {
       return [(
         display: ExternalDisplay(id: 2, name: "MAG341C", persistenceKey: "3669-key"),
         writer: FakeDDCWriter(),
-        // Nothing here reads the facts: the join under test is the persistence
-        // key alone.
+        // Nothing here reads the facts: the join under test is the key alone.
         facts: DisplayHardwareFacts(
           transportUpstream: nil, transportDownstream: nil, manufacturerID: nil,
           alphanumericSerialNumber: nil, numericSerialNumber: nil,
@@ -627,15 +569,13 @@ struct SynthesisPersistenceKeyTests {
       shade: FakeShade(), gamma: FakeGamma(), hdrToggling: FakeHDR(), audioDevices: FakeAudio(),
       discoverDisplays: { [discovery] in discovery.discover($0) })
 
-    // The state the launch race puts this in: nothing has been built yet.
+    // The state the launch race puts this in.
     #expect(model.allControlledStates.isEmpty)
     #expect(model.synthesis.persistenceKey(2) == "3669-key")
   }
 
-  /// And the walk is asked once per display per configuration, including for
-  /// the displays discovery does not know: those miss the controller table
-  /// PERMANENTLY, so an unmemoized fallback is an unbounded retry of a question
-  /// that has already been answered.
+  /// Displays discovery does not know miss the controller table PERMANENTLY, so an
+  /// unmemoized fallback retries an already-answered question forever.
   @Test func aMissIsRememberedRatherThanRewalked() {
     let discovery = CountingDiscovery()
     let model = AppModel(

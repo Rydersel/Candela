@@ -4,11 +4,10 @@ import Testing
 
 /// SO6's one-answerable-surface property across all THREE owners (DM11).
 ///
-/// The guided setup flow used to borrow `.settingsBanner`, which made a
-/// background settings window on the same display's page draw a second
-/// answerable banner for one preview. These two suites pin the two halves of
-/// the fix: the banner renders nothing for a setup-owned preview, and the
-/// floating window is not presented for one either.
+/// The guided setup flow borrowing `.settingsBanner` made a background settings
+/// window on the same display's page draw a second answerable banner for one
+/// preview. These suites pin both halves: the banner renders nothing for a
+/// setup-owned preview, and the floating window is not presented for one.
 @Suite("Preview surface ownership") @MainActor
 struct PreviewSurfaceOwnershipTests {
   private static let displayID: CGDirectDisplayID = 4
@@ -41,9 +40,8 @@ struct PreviewSurfaceOwnershipTests {
 
   // MARK: - The settings banner (BannerRegion.countdownForm)
 
-  /// The change. Both stack states, because the answerable placement is the one
-  /// that follows the navigation stack and a setup-owned preview must draw
-  /// nothing in either.
+  /// Both stack states, because the answerable placement follows the navigation
+  /// stack and a setup-owned preview must draw nothing in either.
   @Test func aSetupOwnedPreviewDrawsNoBannerAtAll() {
     #expect(Self.form(Self.preview(surface: .guidedSetup)) == nil)
     #expect(Self.form(Self.preview(surface: .guidedSetup), ownsAnswerable: false) == nil)
@@ -57,22 +55,21 @@ struct PreviewSurfaceOwnershipTests {
     #expect(Self.form(Self.preview(surface: .guidedSetup, isCountingDown: false)) == nil)
   }
 
-  /// The lift's proof, part one: the settings banner still answers when it owns
-  /// the answer, and gives it up to the pushed placement when it does not.
+  /// The settings banner answers when it owns the answer, and gives it up to
+  /// the pushed placement when it does not.
   @Test func theSettingsBannerStillAnswersWhenItOwnsTheAnswer() {
     #expect(Self.form(Self.preview(surface: .settingsBanner)) == .answerable)
     #expect(Self.form(Self.preview(surface: .settingsBanner), ownsAnswerable: false) == nil)
   }
 
-  /// Part two: the floating window's preview still leaves a passive line here
-  /// while its countdown is armed, and none once it is spent.
+  /// A floating window's preview leaves a passive line here while its countdown
+  /// is armed, and none once it is spent.
   @Test func aFloatingPanelPreviewIsStillPassiveWhileArmed() {
     #expect(Self.form(Self.preview(surface: .floatingPanel)) == .passive)
     #expect(Self.form(Self.preview(surface: .floatingPanel, isCountingDown: false)) == nil)
   }
 
-  /// Part three: the display test and the no-preview case, both of which the
-  /// lift had to carry across unchanged.
+  /// The display test and the no-preview case.
   @Test func aPreviewOnAnotherDisplayRendersNothingHere() {
     #expect(Self.form(nil) == nil)
     #expect(Self.form(Self.preview(surface: .settingsBanner, on: Self.otherDisplayID)) == nil)

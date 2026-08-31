@@ -3,28 +3,25 @@ import CoreGraphics
 import Foundation
 import os
 
-/// `WindowListing` over `CGWindowListCopyWindowInfo` — the permission-free half
-/// of W3b's telemetry. It reports geometry and owning application only; it
-/// never reads a window title (OC18), so the degraded no-Screen-Recording mode
-/// still attributes exposure to an app.
+/// `WindowListing` over `CGWindowListCopyWindowInfo`, the permission-free half
+/// of the telemetry. It reports geometry and owning application only, never a
+/// window title (OC18), so the degraded no-Screen-Recording mode still
+/// attributes exposure to an app.
 ///
-/// **Coordinate spaces — the one thing that is silently wrong if it is wrong.**
-/// `kCGWindowBounds` is in the *global* window-server space: one origin shared
-/// by every display, top-left, y increasing **downwards**. That is NOT
-/// `NSScreen.frame`, which is bottom-left with y upwards and would put every
-/// window on the wrong half of the panel. `PanelSpaceTransform` wants
-/// **display-local** coordinates (origin at the display's own top-left, same y
-/// direction), so the display's global origin is subtracted here.
-/// `CGDisplayBounds` reports in that same flipped global space, which is why it
-/// is the right thing to subtract and `NSScreen` is not.
+/// **Coordinate spaces, the one thing that is silently wrong if it is wrong.**
+/// `kCGWindowBounds` is in the GLOBAL window-server space: one origin for every
+/// display, top-left, y increasing DOWNWARDS. That is not `NSScreen.frame`,
+/// which is bottom-left and would put every window on the wrong half of the
+/// panel. `PanelSpaceTransform` wants display-local coordinates, so the
+/// display's global origin is subtracted here; `CGDisplayBounds` reports in that
+/// same flipped space, which is why it is the right thing to subtract.
 ///
-/// The origin is read fresh on every call rather than captured at init: a
-/// rearrangement in Displays settings moves every non-primary display's origin
-/// without any object here being rebuilt.
+/// The origin is read fresh on every call: a rearrangement in Displays settings
+/// moves a non-primary display's origin without rebuilding anything here.
 struct CGWindowListSource: WindowListing {
-  /// A live handle, not persisted state — display IDs are reassigned across a
-  /// replug (CLAUDE.md §3), so the coordinator owns re-creating this on
-  /// reconfiguration and nothing here is keyed by the ID.
+  /// A live handle, not persisted state: display IDs are reassigned across a
+  /// replug, so the coordinator re-creates this on reconfiguration and nothing
+  /// here is keyed by the ID.
   let displayID: CGDirectDisplayID
 
   init(displayID: CGDirectDisplayID) {
@@ -48,19 +45,14 @@ struct CGWindowListSource: WindowListing {
   }
 
   /// Once per launch: does the window server hand us owner names without a
-  /// Screen Recording grant?
+  /// Screen Recording grant? The whole permission-free half of OLED care rests
+  /// on yes, and it is platform behaviour we do not control, so this is
+  /// permanent telemetry rather than a debug switch.
   ///
-  /// The whole permission-free half of OLED care rests on yes, and it is a
-  /// platform behaviour we do not control — so this is permanent telemetry
-  /// about whether telemetry can work, not a debug switch. It stays useful the
-  /// day a macOS release changes the rules and the health view quietly loses
-  /// every app name.
-  ///
-  /// **Read it only from an `open`-launched instance.** TCC attributes a
-  /// capture check to the *responsible* process, so running the executable
-  /// straight from a shell inherits the terminal's grant and reports
-  /// `preflight=true` for a build whose own grant is revoked
-  /// [MEASURED 2026-08-07, same bundle both ways].
+  /// **Read it only from an `open`-launched instance.** TCC attributes a capture
+  /// check to the RESPONSIBLE process, so running the executable from a shell
+  /// inherits the terminal's grant and reports `preflight=true` for a build whose
+  /// own grant is revoked [MEASURED 2026-08-07, same bundle both ways].
   private func logFieldAvailabilityOnce(_ info: [[String: Any]], ourPID: Int32) {
     let first = Self.diagnosticLogged.withLock { logged -> Bool in
       if logged { return false }
@@ -69,8 +61,8 @@ struct CGWindowListSource: WindowListing {
     }
     guard first else { return }
 
-    // Counted before `snapshot` filters, which drops a window that has no
-    // owner name — counting after would report 100% by construction.
+    // Counted before `snapshot` filters, which drops a window that has no owner
+    // name; counting after would report 100% by construction.
     var foreign = 0, named = 0, bounded = 0
     for entry in info {
       guard let pid = (entry[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
@@ -98,9 +90,8 @@ struct CGWindowListSource: WindowListing {
   /// concurrent first calls are possible.
   private static let diagnosticLogged = OSAllocatedUnfairLock(initialState: false)
 
-  /// Windows outside this display are deliberately kept: the caller decides
-  /// what intersects (Task 8), and `PanelSpaceTransform` clips anything that
-  /// lands off-display to zero coverage regardless.
+  /// Windows outside this display are deliberately kept: the caller decides what
+  /// intersects, and `PanelSpaceTransform` clips anything off-display to zero.
   private func snapshot(
     from entry: [String: Any], excludingPID ourPID: Int32, relativeTo displayOrigin: CGPoint
   ) -> WindowSnapshot? {
@@ -108,9 +99,8 @@ struct CGWindowListSource: WindowListing {
       return nil
     }
     // Our dim overlays are ordinary on-screen windows. Left in, they read as a
-    // stationary full-screen region owned by Candela covering the whole panel —
-    // the measures-its-own-effect failure OC16 exists to prevent, arriving
-    // through the window list instead of the capture.
+    // full-screen region owned by Candela covering the panel: the
+    // measures-its-own-effect failure OC16 prevents, by way of the window list.
     guard ownerPID != ourPID else { return nil }
 
     guard let windowID = (entry[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
@@ -119,10 +109,9 @@ struct CGWindowListSource: WindowListing {
       let globalBounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary)
     else { return nil }
 
-    // No owner name means no attribution is possible. Dropping the window is
-    // honest; inventing a label would put a fabricated app name in the health
-    // view. It costs the cell to whatever is behind, which is rare and visible
-    // as a wrong app rather than as a made-up one.
+    // No owner name means no attribution. Dropping the window costs the cell to
+    // whatever is behind it; inventing a label would put a fabricated app name
+    // in the health view.
     guard let ownerName = entry[kCGWindowOwnerName as String] as? String, !ownerName.isEmpty else {
       return nil
     }

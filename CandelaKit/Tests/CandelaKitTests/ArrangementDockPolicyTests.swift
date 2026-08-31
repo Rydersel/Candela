@@ -6,10 +6,9 @@ import Testing
 @Suite("Arrangement dock policy")
 struct ArrangementDockPolicyTests {
   /// `mirroredIDs` is non-empty on the odd ids, so every property below is
-  /// checked against a tile that carries something a move must not drop. AR6:
-  /// mirror slaves get no tile at all, and their masters must keep naming them
-  /// across a keyboard move — a plan built from a tile that lost them would
-  /// silently break the mirror set.
+  /// checked against a tile carrying something a move must not drop. AR6: mirror
+  /// slaves get no tile, and their masters must keep naming them across a
+  /// keyboard move, or the plan silently breaks the mirror set.
   private func tile(_ id: CGDirectDisplayID, _ rect: DisplayRect) -> ArrangementTile {
     ArrangementTile(
       id: id,
@@ -25,8 +24,8 @@ struct ArrangementDockPolicyTests {
   }
 
   /// Small and deliberately varied: equal sizes (where every alignment collapses
-  /// onto one candidate), unequal sizes (where they do not), a portrait display,
-  /// a vertical stack, a lone display, and a layout that is already broken.
+  /// onto one candidate), unequal sizes, a portrait display, a vertical stack, a
+  /// lone display, and a layout that is already broken.
   private var fixtures: [DisplayArrangement] {
     [
       // A lone display.
@@ -41,7 +40,7 @@ struct ArrangementDockPolicyTests {
         (1, DisplayRect(x: 0, y: 0, width: 1000, height: 800)),
         (2, DisplayRect(x: 0, y: 800, width: 1000, height: 800)),
       ]),
-      // Three in a row — moving the middle one strands the far one.
+      // Three in a row: moving the middle one strands the far one.
       arrangement([
         (1, DisplayRect(x: 0, y: 0, width: 1000, height: 800)),
         (2, DisplayRect(x: 1000, y: 0, width: 1000, height: 800)),
@@ -86,7 +85,7 @@ struct ArrangementDockPolicyTests {
           for other in moved.tiles where other.id != source.id {
             #expect(other == layout.tile(other.id))
           }
-          // The moved tile keeps everything except its origin — size, identity,
+          // The moved tile keeps everything except its origin: size, identity,
           // name, and the mirror slaves it is master of (AR6).
           #expect(moved.tile(source.id) == source.moved(to: moved.tile(source.id)!.rect.origin))
         }
@@ -218,9 +217,8 @@ struct ArrangementDockPolicyTests {
 
   @Test func aCentreDockRoundsTheSameWayASnapDoes() {
     // An odd difference cannot land on the exact centre. The keyboard and the
-    // drag must land on the SAME point either way, or an arrow press and a
-    // centre snap would disagree by one — so both go through
-    // `ArrangementSnapper.halved`.
+    // drag must land on the SAME point, or an arrow press and a centre snap
+    // would disagree by one, so both go through `ArrangementSnapper.halved`.
     let layout = arrangement([
       (1, DisplayRect(x: 0, y: 0, width: 1001, height: 1000)),
       (2, DisplayRect(x: 1001, y: 0, width: 600, height: 600)),
@@ -232,10 +230,10 @@ struct ArrangementDockPolicyTests {
 
   @Test func aCentreDockFloorsWhenTheMovedDisplayIsTheWiderOne() {
     // The case a positive difference cannot see. `halved` FLOORS, so a moved
-    // display wider than its neighbour centres one point to the LEFT of centre;
-    // Swift's `/` would truncate toward zero and put it one point to the right,
-    // making the bias depend on which of two displays the user happened to grab.
-    // Both axes, because the two call sites are separate lines.
+    // display wider than its neighbour centres one point LEFT of centre; Swift's
+    // `/` truncates toward zero and would put it one point right, making the
+    // bias depend on which display the user grabbed. Both axes, because the two
+    // call sites are separate lines.
     let layout = arrangement([
       (1, DisplayRect(x: 0, y: 0, width: 600, height: 600)),
       (2, DisplayRect(x: 0, y: 600, width: 1001, height: 1001)),
@@ -257,11 +255,10 @@ struct ArrangementDockPolicyTests {
       (2, DisplayRect(x: 1000, y: 0, width: 1000, height: 800)),
     ])
     // Four dock positions, all at Manhattan distance 1800 or 2000 from (1000, 0).
-    // Pressing left offers three of them; the two at 1800 tie and `(x, y)` picks
-    // the one with the lower y. So the first press moves the display ABOVE its
-    // neighbour rather than to the far side of it — surprising, correct, and
-    // pinned: "left" means the nearest legal position that is strictly to the
-    // left, not "the position on the left-hand side".
+    // Pressing left offers three; the two at 1800 tie and `(x, y)` picks the
+    // lower y. So the first press moves the display ABOVE its neighbour rather
+    // than to the far side: "left" means the nearest legal position strictly to
+    // the left, not "the position on the left-hand side".
     let first = ArrangementDockPolicy.move(2, .left, in: layout)
     #expect(first?.tile(2)?.rect.origin == DisplayPoint(x: 0, y: -800))
 
@@ -275,10 +272,9 @@ struct ArrangementDockPolicyTests {
   @Test func distanceIsMeasuredOnBothAxes() {
     // Manhattan, not "distance along the axis the key names". Display 2 sits at
     // the trailing edge of display 1's right-hand side; pressing up offers both
-    // remaining right-hand positions, and they are the same distance along x.
-    // Only the cross-axis term separates them, and it must, or the key would
-    // jump the display the whole height of its neighbour when one step up was
-    // available.
+    // remaining right-hand positions at the same distance along x. Only the
+    // cross-axis term separates them, or the key would jump the whole height of
+    // the neighbour when one step up was available.
     let layout = arrangement([
       (1, DisplayRect(x: 0, y: 0, width: 1000, height: 1000)),
       (2, DisplayRect(x: 1000, y: 800, width: 200, height: 200)),
@@ -308,7 +304,7 @@ struct ArrangementDockPolicyTests {
   }
 
   @Test func anArrowPressRescuesADisplayFromAnIllegalLayout() {
-    // The keyboard route has to work from a layout that is already broken —
+    // The keyboard route has to work from a layout that is already broken:
     // otherwise a display stranded by a System Settings change, or by another
     // display departing, could not be recovered without the mouse.
     let stranded = arrangement([
@@ -322,8 +318,8 @@ struct ArrangementDockPolicyTests {
   }
 
   @Test func movingTheMiddleOfARowNeverStrandsTheFarDisplay() {
-    // §3.5: connectivity is checked on the WHOLE arrangement, so a dock position
-    // that would leave display 3 on its own is not offered at all.
+    // Connectivity is checked on the WHOLE arrangement, so a dock position that
+    // would leave display 3 on its own is not offered at all.
     let row = arrangement([
       (1, DisplayRect(x: 0, y: 0, width: 1000, height: 800)),
       (2, DisplayRect(x: 1000, y: 0, width: 1000, height: 800)),

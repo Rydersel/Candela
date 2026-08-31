@@ -52,8 +52,7 @@ enum CheckupPaneCopy {
 
 /// Which display the history opens on: the one with the most recent run, then
 /// the first external, then whatever is left. Not "the first display": the
-/// built-in leads `allControlledStates`, which would hide a fresh external's
-/// run behind the picker.
+/// built-in leads `allControlledStates` and would hide a fresh external's run.
 enum CheckupHistoryScope {
   static func defaultKey(_ candidates: [(key: String, isBuiltIn: Bool, latestRun: Date?)])
     -> String? {
@@ -68,9 +67,8 @@ enum CheckupHistoryScope {
 /// The Checkup pillar (CK28): the launcher, this display's past runs, and the
 /// place a report somebody sends you is checked against its own hash. The pane
 /// never runs a check; "Run a checkup" opens the flow window through
-/// `SettingsActions`, and the history is read from the store a run wrote to.
-/// `@MainActor` for `DisplayDetailView`'s reason: stored and computed
-/// properties read `AppModel` outside `body`.
+/// `SettingsActions`. `@MainActor` because stored and computed properties read
+/// `AppModel` outside `body`.
 @MainActor
 struct CheckupPane: View {
   @Environment(AppModel.self) private var model
@@ -269,7 +267,6 @@ struct CheckupPane: View {
     }
   }
 
-  /// Both verifiers open the same kind of file, so the panel is set up once.
   private func pickJSONFile() -> URL? {
     let panel = NSOpenPanel()
     panel.allowedContentTypes = [.json]
@@ -378,8 +375,8 @@ private struct CheckupHistoryRow: View {
     do {
       try CheckupStore.encoded(run.envelope).write(to: url, options: .atomic)
     } catch {
-      // Silence here would look exactly like a saved file. The report exists to
-      // be handed to somebody, so a save that did not happen has to say so.
+      // Silence would look exactly like a saved file, and this report exists to
+      // be handed to somebody.
       saveError = error.localizedDescription
     }
   }

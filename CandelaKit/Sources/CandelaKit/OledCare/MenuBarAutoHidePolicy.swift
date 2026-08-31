@@ -1,8 +1,6 @@
 /// What the Control Center domain holds for `AutoHideMenuBarOption`, as three
-/// distinguishable states rather than an optional. "No value" and "a value in a
-/// shape we do not recognise" are different facts about the machine and the
-/// policy below treats them the same way only because it decided to, not
-/// because the type collapsed them.
+/// states rather than an optional: "no value" and "a value we cannot read" are
+/// different facts, and the policy collapses them by choice, not by type.
 public enum ControlCenterMenuBarRecord: Equatable, Sendable {
   case absent
   case option(Int)
@@ -11,12 +9,10 @@ public enum ControlCenterMenuBarRecord: Equatable, Sendable {
 }
 
 /// Decides how the two records of "automatically hide the menu bar" are read
-/// and written across the whole macOS support range. Pure, so the branches this
-/// machine can never enter are still covered by tests: `SystemChromeWriter`
-/// supplies the live values and owns every side effect.
-///
-/// See `SystemChromeWriter` for the single statement of what is measured here
-/// and what is assumed from published sources.
+/// and written across the whole macOS support range. Pure, so branches this
+/// machine can never enter are still covered by tests; `SystemChromeWriter`
+/// supplies the live values, owns every side effect, and states what is
+/// measured here versus assumed from published sources.
 public enum MenuBarAutoHidePolicy {
   /// The four-way choice, as MEASURED on macOS 26 (2026-08-07) by driving
   /// System Settings through accessibility and diffing the domains it wrote.
@@ -32,15 +28,12 @@ public enum MenuBarAutoHidePolicy {
 
   /// Feature detection first, version second.
   ///
-  /// A decodable value is proof this macOS keeps the record, whatever its
-  /// version number, so it participates. Only when there is nothing usable to
-  /// detect does the version get a vote, and then it answers one narrow
-  /// question: is this a macOS whose own settings pane is expected to create
-  /// the key? On 26 and later, yes, so Candela writes it rather than leaving
-  /// System Settings to disagree. Before that, published evidence says the
-  /// picker runs on the global keys alone, and writing a guessed integer into
-  /// undocumented Control Center schema on a version nobody here can test is a
-  /// worse failure than not writing it.
+  /// A decodable value proves this macOS keeps the record, so it participates.
+  /// With nothing to detect, the version decides whether this macOS's own
+  /// settings pane is expected to create the key: on 26 and later Candela writes
+  /// it rather than leaving System Settings to disagree. Before that the picker
+  /// runs on the global keys alone, and guessing an integer into undocumented
+  /// Control Center schema nobody here can test is the worse failure.
   public static func controlCenterRecordParticipates(
     _ record: ControlCenterMenuBarRecord, osMajorVersion: Int
   ) -> Bool {
@@ -51,9 +44,9 @@ public enum MenuBarAutoHidePolicy {
   }
 
   /// What the record claims about the DESKTOP half, or nil when it makes no
-  /// claim this code can read. An unrecognised integer is nil on purpose: a
-  /// value outside the measured four is schema drift, and defaulting drift to
-  /// "hidden" would pin the switch ON with nothing able to clear it.
+  /// claim this code can read. An unrecognised integer is nil on purpose:
+  /// defaulting schema drift to "hidden" would pin the switch ON with nothing
+  /// able to clear it.
   public static func recordHidesOnDesktop(_ record: ControlCenterMenuBarRecord) -> Bool? {
     guard case .option(let option) = record else { return nil }
     switch option {
@@ -67,13 +60,11 @@ public enum MenuBarAutoHidePolicy {
   /// must read ON whenever anything is hiding the bar, because turning it off
   /// is the only in-app route back (D29 rule 3).
   ///
-  /// The participation guard is load-bearing, not a tidiness pass. This
-  /// predicate and `writesControlCenterRecord` ask the SAME question, so the
-  /// read can never be influenced by a record the write would decline to
-  /// touch. Were they allowed to disagree, an OFF click would write only the
-  /// legacy key, leave the record still reporting hidden, and the switch would
-  /// snap back with the menu bar still gone. One predicate, both legs, so that
-  /// state cannot be constructed.
+  /// The participation guard is load-bearing. This predicate and
+  /// `writesControlCenterRecord` ask the SAME question, so the read can never be
+  /// swayed by a record the write would decline to touch. If they disagreed, an
+  /// OFF click would write only the legacy key and the switch would snap back
+  /// with the menu bar still gone.
   public static func isMenuBarHidden(
     effectiveBit: Bool, record: ControlCenterMenuBarRecord, osMajorVersion: Int
   ) -> Bool {
@@ -101,13 +92,12 @@ public enum MenuBarAutoHidePolicy {
 
   /// Everything one menu bar auto-hide write does to the machine, in order.
   ///
-  /// The broadcast is the reason this is a sequence rather than two booleans.
-  /// Preference writes alone change NOTHING on screen (see `SystemChromeWriter`
-  /// for the measurement); the system adopts them only when it is told to
-  /// reconcile. Branching over that in the writer put the broadcast on one path
-  /// and not the other, which is how a write can land and do nothing. Here the
-  /// branch is chosen once, in a pure function, and the broadcast is appended
-  /// unconditionally, so no future leg can be added without it.
+  /// The broadcast is why this is a sequence rather than two booleans.
+  /// Preference writes alone change NOTHING on screen (`SystemChromeWriter` has
+  /// the measurement); the system adopts them only when told to reconcile.
+  /// Branching over that in the writer put the broadcast on one path and not the
+  /// other, so a write could land and do nothing. Here the branch is chosen once
+  /// and the broadcast appended unconditionally.
   public static func writeEffects(
     desktopHides: Bool, fullScreenHides: Bool,
     record: ControlCenterMenuBarRecord, osMajorVersion: Int

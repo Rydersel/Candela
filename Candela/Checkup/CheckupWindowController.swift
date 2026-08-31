@@ -4,10 +4,9 @@ import CoreGraphics
 import SwiftUI
 
 /// The AppKit island hosting the checkup flow, shaped like the setup window: an
-/// `LSUIElement` app has no window scene, so this is a plain `NSWindow`. The
-/// one-second cap tick and the pairing of an answer with the tapped region live
-/// here because both need the field window, which the model only sees through
-/// `CheckupFieldPresenting`.
+/// `LSUIElement` app has no window scene, so this is a plain `NSWindow`. The cap
+/// tick and the pairing of an answer with the tapped region live here because
+/// both need the field window, which the model sees only through a protocol.
 @MainActor
 final class CheckupWindowController: NSObject, NSWindowDelegate {
   private let environment: () async -> CheckupEnvironment
@@ -123,8 +122,7 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
   /// The field covers the target, so the flow window belongs on another display
   /// when there is one; otherwise the field's strip carries the controls (CK16).
   /// Called as the field goes up, not at pick time: a window that jumped while
-  /// the person was still choosing read as a random move, since nothing on
-  /// screen yet explained it.
+  /// the person was still choosing read as a random move.
   private func moveOffTarget(_ entry: CheckupDisplayEntry) {
     guard let window else { return }
     let screens = NSScreen.screens.compactMap { screen -> CheckupFlowWindowHost.Screen? in

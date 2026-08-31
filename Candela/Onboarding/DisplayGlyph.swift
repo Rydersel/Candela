@@ -1,9 +1,8 @@
 import SwiftUI
 
 /// A display drawn as a lit object (OB10): true mounted aspect ratio, glass
-/// gradient face, specular edge light, stand and a soft floor reflection.
-/// The continuity device of the whole flow; every set piece is built from
-/// these, sized by context.
+/// gradient face, specular edge light, stand and a soft floor reflection. Every
+/// set piece in the flow is built from these, sized by context.
 struct DisplayGlyph: View {
   /// Width over height as mounted (the rotated Dell is < 1).
   var aspect: Double

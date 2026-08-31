@@ -63,11 +63,11 @@ struct OledDimmingTests {
     #expect(e.tick(signals(idle: 1, locked: true)) == .lockDim)
   }
 
-  /// The live defect: a fresh engine has `lastIdleSeconds == 0`, so the old
-  /// test could not see the fall that a real lock always produces. Locking is
-  /// itself input (a shortcut, a menu click, a hot corner), so on a warm engine
-  /// the idle counter DROPS at the lock edge, and reading that drop as "input
-  /// while locked" lifted the dim on the same tick that armed it.
+  /// A fresh engine has `lastIdleSeconds == 0`, so a cold fixture never sees the
+  /// fall a real lock produces. Locking is itself input (a shortcut, a menu click,
+  /// a hot corner), so on a warm engine the idle counter DROPS at the lock edge,
+  /// and reading that drop as "input while locked" lifted the dim on the same tick
+  /// that armed it.
   @Test func lockEdgeDimsOnAWarmEngineWhoseIdleCounterJustFell() {
     var e = IdleDimmingEngine(config: config())
     #expect(e.tick(signals(idle: 42)) == .active)  // user reading, engine warm
@@ -100,8 +100,8 @@ struct OledDimmingTests {
     _ = e.tick(signals(idle: 5, locked: true))
     e.noteWake()
     #expect(e.tick(signals(idle: 6, locked: true)) == .active)
-    // Re-arms 300 s after the WAKE, not 300 s on a counter that started before
-    // it — the wake floor is 6 here (fix round 1, FINDING C).
+    // Re-arms 300 s after the WAKE, not on a counter that started before it. The
+    // wake floor is 6 here (FINDING C).
     #expect(e.tick(signals(idle: 306, locked: true)) == .lockDim)
   }
 
@@ -205,11 +205,10 @@ struct OledDimmingTests {
     #expect(e.alpha(for: .suspended) == nil)
   }
 
-  /// All eight prefs get distinct values: with defaults left in place a
-  /// transposed pair (blackout seconds ↔ unfocused seconds, either level into
-  /// the other) reads correct. The two enable flags must DIFFER from each other
-  /// here — both true, as this test first had it, is transposable against a
-  /// defaults test where both are false.
+  /// All eight prefs get distinct values: with defaults left in place a transposed
+  /// pair (blackout seconds against unfocused seconds, either level into the other)
+  /// reads correct. The two enable flags must DIFFER here, since both true is
+  /// transposable against a defaults test where both are false.
   @Test func configFromPrefsReadsTask1Accessors() {
     let defaults = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
@@ -235,13 +234,10 @@ struct OledDimmingTests {
     #expect(c.unfocusedDimBrightness == 0.8)
   }
 
-  /// The whole chain, both ends, from the number the user sets to what reaches
-  /// the screen. **10% is DARKEST and 90% is mildest.** It ran the other way
-  /// until 2026-08-07, where the number meant how much dimming to APPLY and
-  /// read backwards to everyone: a user setting 10% expects a dim display.
-  ///
-  /// Both ends are asserted because the midpoint is its own complement, so a
-  /// mapping that is still inverted passes any test written at 50%.
+  /// The whole chain, both ends, from the number the user sets to what reaches the
+  /// screen: 10% is DARKEST and 90% is mildest, because a user setting 10% expects
+  /// a dim display. Both ends are asserted because the midpoint is its own
+  /// complement, so a mapping that is still inverted passes any test written at 50%.
   @Test func theDimSettingIsDarkestAtTenPercentAndMildestAtNinety() {
     let defaults = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
@@ -261,12 +257,10 @@ struct OledDimmingTests {
     #expect(abs(engine.alpha(for: .unfocusedDim)! - 0.8) < 1e-9)
   }
 
-  /// The on-disk half of the same flip, and the reason no migration is owed:
-  /// the KEY still holds the overlay opacity it has always held, and the
-  /// inversion lives at the accessor. A stored 0.5 meant a half-opaque overlay
-  /// before this change and still does, so nothing already on a user's disk
-  /// changed meaning. Break this and every existing display silently flips its
-  /// dim depth.
+  /// The on-disk half of the same flip, and why no migration is owed: the KEY still
+  /// holds the overlay opacity it always held, and the inversion lives at the
+  /// accessor. A stored 0.5 is a half-opaque overlay either way, so nothing on a
+  /// user's disk changed meaning. Break this and every display flips its dim depth.
   @Test func theStoredValueIsStillTheOverlayOpacityNotTheBrightness() {
     let defaults = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
@@ -283,8 +277,8 @@ struct OledDimmingTests {
     #expect(abs(engine.alpha(for: .idleDim)! - 0.5) < 1e-9)
   }
 
-  /// The default prefs ARE the Recommended preset (Task 1), so an un-tuned
-  /// display's config must survive every sanitization untouched.
+  /// The default prefs ARE the Recommended preset, so an un-tuned display's config
+  /// must survive every sanitization untouched.
   @Test func presetDefaultsSurviveSanitizationUnchanged() {
     let prefs = DisplayPrefs(defaults: InMemoryDefaults(), persistenceKey: "pk")
     let c = OledDimConfig(prefs: prefs)
@@ -301,12 +295,10 @@ struct OledDimmingTests {
     #expect(c.unfocusedDimBrightness == 0.7)
   }
 
-  // MARK: - Additions beyond the brief
-
-  /// Task 1 review carry-in: dim levels were unclamped through the whole chain
-  /// (pref accessor → config → alpha → overlay). A 0.0 dim is a no-op and a 1.0
-  /// dim is an unannounced blackout that does not swallow its waking click
-  /// (OC15) — both are config errors, so the config is where they die.
+  /// Dim levels were unclamped through the whole chain, from pref accessor to
+  /// overlay alpha. A 0.0 dim is a no-op and a 1.0 dim is an unannounced blackout
+  /// that does not swallow its waking click (OC15): both are config errors, so the
+  /// config is where they die.
   @Test func dimBrightnessesClampToUsableRange() {
     let tooBright = config(level: 1.0, unfocusedLevel: 4.2)
     #expect(tooBright.idleDimBrightness == 0.9)
@@ -340,9 +332,9 @@ struct OledDimmingTests {
     #expect(infinite.unfocusedDimBrightness == 0.1)
   }
 
-  /// `updateConfig` is how a pref change reaches a live engine (Task 7's
-  /// `reapplyAfterPrefChange`); an engine that kept its original config would
-  /// pass every other test here.
+  /// `updateConfig` is how a pref change reaches a live engine, through
+  /// `reapplyAfterPrefChange`. An engine that kept its original config would pass
+  /// every other test here.
   @Test func updateConfigRetargetsThresholdAndLevel() {
     var e = IdleDimmingEngine(config: config(idle: 300, level: 0.5))
     #expect(e.tick(signals(idle: 200)) == .active)
@@ -359,8 +351,6 @@ struct OledDimmingTests {
     #expect(e.state == returned)
     #expect(e.state == .idleDim)
   }
-
-  // MARK: - Review round 1
 
   /// RULING A: the assertion gates ENTRY only, uniformly. An app taking
   /// `PreventUserIdleDisplaySleep` while a dim is already up must not make the
@@ -380,8 +370,8 @@ struct OledDimmingTests {
     #expect(e.tick(signals(idle: 11, assertion: true, unfocused: 701)) == .unfocusedDim)
   }
 
-  /// FINDING B: with the entry gate uniform, the sticky branch is gone — a
-  /// dropped unfocused counter (focus arrived and left between two ticks) exits.
+  /// FINDING B: with the entry gate uniform the sticky branch is gone, so a dropped
+  /// unfocused counter (focus arrived and left between two ticks) exits.
   @Test func unfocusedDimExitsWhenItsCounterDrops() {
     var e = IdleDimmingEngine(config: config(unfocused: true, unfocusedAt: 600))
     #expect(e.tick(signals(idle: 10, unfocused: 700)) == .unfocusedDim)
@@ -437,16 +427,15 @@ struct OledDimmingTests {
     #expect(e.tick(signals(idle: 305)) == .idleDim)  // measured from it, not the wake
   }
 
-  /// RULING D, restated for the delivery A-16 measured (final review,
-  /// 2026-08-07): a blacked-out display that gets locked drops to `.lockDim`.
+  /// RULING D, restated for the delivery A-16 measured: a blacked-out display that
+  /// gets locked drops to `.lockDim`.
   ///
-  /// The old hold kept `.blackout` so the panel would not rise to lock dim's
-  /// lighter level, but `.blackout` is delivered only by an overlay and no
-  /// overlay of ours renders above the lock screen. The hold therefore
-  /// delivered the FULL-BRIGHT lock screen while every surface said "Screen
-  /// off". `.lockDim` goes on the wire, so it is strictly darker than the hold
-  /// ever actually was, and ruling D holds in light off the panel rather than
-  /// in the name of a state.
+  /// Holding `.blackout` kept the panel off lock dim's lighter level in name only.
+  /// `.blackout` is delivered by an overlay, and no overlay of ours renders above
+  /// the lock screen, so the hold delivered a FULL-BRIGHT lock screen while every
+  /// surface said "Screen off". `.lockDim` goes on the wire, strictly darker than
+  /// the hold ever was, so ruling D holds in light off the panel rather than in the
+  /// name of a state.
   @Test func lockingABlackoutDimsTheWireInsteadOfHoldingAnInvisibleOverlay() {
     var e = IdleDimmingEngine(config: config(blackout: true, blackoutAt: 1200))
     #expect(e.tick(signals(idle: 1300)) == .blackout)
@@ -464,7 +453,7 @@ struct OledDimmingTests {
     e.noteLock(idleSeconds: 1300)
     #expect(e.tick(signals(idle: 1301, locked: true)) == .lockDim)
     e.noteWake()
-    // The counter still reads hours — sleep does not reset it — but none of it
+    // The counter still reads hours, since sleep does not reset it, but none of it
     // was spent awake, so the lock screen comes up lit.
     #expect(e.tick(signals(idle: 7200, locked: true)) == .active)
     #expect(e.tick(signals(idle: 7200 + 299, locked: true)) == .active)
@@ -483,9 +472,9 @@ struct OledDimmingTests {
     #expect(e.tick(signals(idle: 9000, locked: true)) == .lockDim)
   }
 
-  /// RULING F: lock dim is exempt from the HDR-settle deferral — a full-bright
-  /// lock screen during a settle is the worse outcome, and locking is an
-  /// explicit user action rather than an inferred idle.
+  /// RULING F: lock dim is exempt from the HDR-settle deferral. A full-bright lock
+  /// screen during a settle is the worse outcome, and locking is an explicit user
+  /// action rather than an inferred idle.
   @Test func lockEdgeDimsEvenDuringHDRSettle() {
     var e = IdleDimmingEngine(config: config())
     e.noteLock(idleSeconds: 1)
@@ -493,8 +482,8 @@ struct OledDimmingTests {
   }
 
   /// FINDING E: sub-30 s thresholds mean "dimmed always", and the blackout row
-  /// derives from the idle one — so an unfloored idle threshold is how a
-  /// display blacks out at zero idle with nothing to recover it.
+  /// derives from the idle one, so an unfloored idle threshold is how a display
+  /// blacks out at zero idle with nothing to recover it.
   @Test func secondsThresholdsHaveFloors() {
     let c = OledDimConfig(idleDimSeconds: 0, idleDimBrightness: 0.5, lockDim: true,
                           blackoutEnabled: true, blackoutSeconds: -100,
@@ -514,8 +503,8 @@ struct OledDimmingTests {
     #expect(ok.blackoutSeconds == 5000)
   }
 
-  /// Round 2: `max(NaN, floor)` returns NaN, which reads as "floored" while
-  /// disabling the row it belongs to — every `>=` against it is false.
+  /// `max(NaN, floor)` returns NaN, which reads as "floored" while disabling the
+  /// row it belongs to: every `>=` against it is false.
   @Test func nonFiniteSecondsFallBackToTheFloor() {
     let c = OledDimConfig(idleDimSeconds: .nan, idleDimBrightness: 0.5, lockDim: true,
                           blackoutEnabled: true, blackoutSeconds: .nan,

@@ -10,47 +10,38 @@ import os
 /// list, so Kit only ever receives the resulting array of floats.
 ///
 /// **One capture per call, never an `SCStream`** (OC16). Suspension is then the
-/// natural state between captures: there is no stream lifecycle to pause,
-/// resume or leak, and a display that stops qualifying simply stops being
-/// asked.
+/// natural state between captures: no stream lifecycle to pause, resume or leak,
+/// and a display that stops qualifying simply stops being asked.
 ///
-/// **The request is `LuminanceReduction.captureOversample` pixels per grid-cell
-/// edge, not one.** It was grid scale until the oversample landed, and the
-/// sentence that stood here read the privacy story and the performance story
-/// off that one fact. Both still hold, for reasons that are no longer that one.
+/// The request is `LuminanceReduction.captureOversample` pixels per grid-cell
+/// edge, not one.
 ///
 /// - Privacy. ScreenCaptureKit scales out of process, so no full-resolution
-///   frame exists here at either size. What changed is what the small frame is:
-///   384x249 on the built-in is 95,616 luminance values, and a greyscale image
-///   that size is a legible screenshot, with window layout, large text and app
-///   identity recoverable from it, where a 24x10 grid is not. It stays
-///   transient, and that is a property of the call graph rather than of the
-///   frame: the `CGImage` dies with `sample(displayID:)`, the caller reduces
-///   `Sample` to 240 cells and stores only those, and nothing retains or logs
-///   the delivered grid. A consumer that started holding a `Sample` is the
-///   thing to look at.
-/// - Performance. Unchanged, and measured rather than carried over. [MEASURED
-///   2026-08-18, 20 captures per leg on this rig] Median capture latency at 16x
-///   is 49.5 ms on the MAG (384x161), 49.0 ms on the built-in (384x249) and
-///   42.2 ms on the rotated Dell (216x384). The OLD grid-scale request is the
-///   control and is no faster: 52.8, 48.7 and 39.3 ms. The cost is the round
-///   trip to the compositor, not the pixel count. Reduction goes from 0.06 to
-///   0.13 ms up to 0.29 to 0.44 ms, still nothing. The 69.6 ms average this
-///   comment used to cite is dropped rather than moved: S3 measured it at the
-///   grid-scale request, so it never described this size.
+///   frame exists here at any size. A 384x249 greyscale frame is 95,616
+///   luminance values and reads as a legible screenshot, with window layout,
+///   large text and app identity recoverable from it, where the reduced grid is
+///   not. It stays transient by the shape of the call graph: the `CGImage` dies
+///   with `sample(displayID:)`, the caller reduces `Sample` to its cells and
+///   stores only those. A consumer that started holding a `Sample` is the thing
+///   to look at.
+/// - Performance. [MEASURED 2026-08-18, 20 captures per leg on this rig] Median
+///   capture latency at 16x is 49.5 ms on the MAG (384x161), 49.0 ms on the
+///   built-in (384x249) and 42.2 ms on the rotated Dell (216x384). A grid-scale
+///   request is the control and is no faster: 52.8, 48.7 and 39.3 ms. The cost
+///   is the round trip to the compositor, not the pixel count.
 ///
 /// **Every failure returns `nil`, never a zero grid.** A zero would accumulate
-/// as "this panel was black for 60 s", which is a lie that silently cools the
-/// map. The caller's contract is "skip this sample".
+/// as "this panel was black for 60 s", which silently cools the map. The
+/// caller's contract is "skip this sample".
 @MainActor
 final class LuminanceSampler {
 
   /// A delivered capture, reduced to mean luminance per cell.
   ///
-  /// `grid` is row-major with a top-left origin, in **display** orientation —
-  /// the caller maps it into panel-native space through `PanelSpaceTransform`.
-  /// `cols`/`rows` are the size ScreenCaptureKit **actually delivered**, read
-  /// off the image rather than carried over from the request.
+  /// `grid` is row-major with a top-left origin, in DISPLAY orientation; the
+  /// caller maps it into panel-native space through `PanelSpaceTransform`.
+  /// `cols`/`rows` are the size ScreenCaptureKit actually delivered, read off
+  /// the image rather than carried over from the request.
   struct Sample: Sendable {
     let grid: [Double]
     let cols: Int
@@ -59,12 +50,10 @@ final class LuminanceSampler {
 
   private static let log = Logger(subsystem: "com.rydersel.Candela", category: "oledcare")
 
-  /// Whether Screen Recording is already granted.
-  ///
-  /// Preflight only — **this type never calls `CGRequestScreenCaptureAccess()`**.
-  /// Prompting is a user-facing decision that belongs to the settings pane; a
-  /// background sampler that raises a TCC prompt on its own schedule is a
-  /// permission dialog with no explanation attached to it.
+  /// Whether Screen Recording is already granted. Preflight only: this type
+  /// never calls `CGRequestScreenCaptureAccess()`, because a background sampler
+  /// that raises a TCC prompt on its own schedule is a permission dialog with no
+  /// explanation attached. Prompting belongs to the settings pane.
   static func hasScreenRecordingPermission() -> Bool {
     CGPreflightScreenCaptureAccess()
   }
@@ -76,7 +65,7 @@ final class LuminanceSampler {
     guard Self.hasScreenRecordingPermission() else { return nil }
 
     // Desktop windows are NOT excluded: wallpaper is emitted light and belongs
-    // in the measurement. On-screen only — an offscreen window emits nothing.
+    // in the measurement. On-screen only, since an offscreen window emits nothing.
     let content: SCShareableContent
     do {
       content = try await SCShareableContent.excludingDesktopWindows(
@@ -91,9 +80,9 @@ final class LuminanceSampler {
     }
 
     // OC16: our own overlays must not be sampled, or detection dimming feeds
-    // back into the measurement it derives from — band dims region, region
-    // reads cooler, band lifts, region reheats. `owningApplication` is nil for
-    // some system windows, which are correctly kept.
+    // back into the measurement it derives from: band dims region, region reads
+    // cooler, band lifts, region reheats. `owningApplication` is nil for some
+    // system windows, which are correctly kept.
     let ourPID = ProcessInfo.processInfo.processIdentifier
     let ownWindows = content.windows.filter { $0.owningApplication?.processID == ourPID }
     let filter = SCContentFilter(display: scDisplay, excludingWindows: ownWindows)
@@ -106,9 +95,8 @@ final class LuminanceSampler {
     config.showsCursor = false
     // Pin the source colour space so the transfer function below is a stated
     // assumption rather than whatever the panel's profile happens to be. On an
-    // HDR display this clamps to the SDR range; `captureDynamicRange` is left
-    // at its SDR default deliberately (macOS 15+ API, and an EDR sample would
-    // need a luminance model this grid does not have).
+    // HDR display this clamps to SDR; `captureDynamicRange` stays at its SDR
+    // default, since an EDR sample needs a luminance model this grid lacks.
     config.colorSpaceName = CGColorSpace.sRGB
 
     let image: CGImage
@@ -120,11 +108,9 @@ final class LuminanceSampler {
       return nil
     }
 
-    // Read back what was DELIVERED. Today it matches the request on all three
-    // panels (see `LuminanceReduction.requestedSize`), but nothing documents
-    // that it must, and
-    // treating a request as an achieved state is this project's most repeated
-    // defect. `cols`/`rows` below are read off the image, never assumed.
+    // Read back what was DELIVERED. It matches the request on every panel in
+    // this setup, but nothing documents that it must, and treating a request as
+    // an achieved state is this project's most repeated defect.
     let cols = image.width
     let rows = image.height
     guard cols > 0, rows > 0 else { return nil }

@@ -6,11 +6,8 @@ import Testing
 // The words and the rows synthesized sizes put on screen (SS4/SS5/SS9),
 // asserted without a window (AT4 layer 1, AT5).
 //
-// Its own file rather than more cases in `CopyBuilderTests`: that suite's
-// em-dash scan enumerates its builders by hand, and this one carries the same
-// scan plus the two scans only this feature needs. Nothing here may name a
-// refresh rate and nothing here may claim sharpness, and both rules are
-// mechanical rather than a review habit.
+// Nothing here may name a refresh rate and nothing here may claim sharpness.
+// Both rules are scans below rather than a review habit.
 //
 // The reading technique is `CopyBuilderTests`': a `LocalizedStringKey`
 // reflects to its KEY plus its arguments as separate values, so an interpolated

@@ -22,11 +22,9 @@ enum CGSModeFixtures {
     pixelWidth: 4096, pixelHeight: 1716, refreshHz: 175, density: 2.0
   )
 
-  // The exact-2:1 family, transcribed from
-  // docs/spikes/exact-2to1-first-engagement/01-mag-modes.txt. Every one of
-  // these passes gates 1-5; they differ ONLY in refresh, which is exactly what
-  // #110's guard judges them on. The glass verdicts are measured, not assumed —
-  // docs/spikes/2026-08-07-exact-2to1-camera-gate.md §1.
+  // The exact-2:1 family. All pass gates 1-5 and differ only in refresh, which is what
+  // the wire-timing guard judges them on. The glass verdicts below were measured on the
+  // panel, not assumed.
 
   /// id 109 @ 120 Hz. MEASURED BROKEN: scanned out at 2560x1440, desktop
   /// pillarboxed with the rightmost ~880 logical columns cropped away.
@@ -43,9 +41,8 @@ enum CGSModeFixtures {
     pixelWidth: 6880, pixelHeight: 2880, refreshHz: 100, density: 2.0
   )
 
-  /// id 111 @ 75 Hz. MEASURED BROKEN: OSD read 1280x1024 @ 75. This is the
-  /// PREDICTION case — called broken from the timing inventory before it was
-  /// applied, which is what promoted the rule from hypothesis to guard.
+  /// id 111 @ 75 Hz. MEASURED BROKEN: OSD read 1280x1024 @ 75. The prediction case,
+  /// called broken from the timing inventory before it was ever applied.
   static let magRevealedNativeAt2x75 = CGSModeDescriptor(
     modeNumber: 111, flags: 0x0020_0001,
     logicalWidth: 3440, logicalHeight: 1440,
@@ -94,11 +91,9 @@ enum CGSModeFixtures {
     pixelWidth: 600, pixelHeight: 800, refreshHz: 60, density: 2.0
   )
 
-  /// The Dell's only exact-2:1 rung (transcript
-  /// docs/spikes/ratio-classifier-fixtures/01-dell-modes.txt), and it lands at
-  /// 75 Hz — a refresh the panel advertises NO native-width timing for. Never
-  /// engaged on hardware; the guard's prediction is that it would scan out
-  /// wrong, and the issue's hardware pass is what will settle it.
+  /// The Dell's only exact-2:1 rung, at 75 Hz, a refresh the panel advertises no
+  /// native-width timing for. Never engaged on hardware; the guard predicts it would
+  /// scan out wrong.
   static let dellRevealedNativeAt2x = CGSModeDescriptor(
     modeNumber: 272, flags: 0x0020_0001,
     logicalWidth: 2160, logicalHeight: 3840,
@@ -123,14 +118,10 @@ enum CGSModeFixtures {
 
 /// CoreGraphics-side fixtures the merge dedups against.
 enum RevealedModeFixtures {
-  /// Transcribed from docs/spikes/exact-2to1-first-engagement/01-mag-modes.txt.
-  ///
-  /// The shape that matters for #110: the panel's native-width timings are
-  /// 175/144/100/60 (framebuffer 3440x1440), and CoreGraphics ALSO publishes
-  /// modes at 120 Hz — but only at 2560x1440, a narrower framebuffer. A guard
-  /// that asked "does any CoreGraphics mode run at this refresh?" would admit
-  /// the 120 Hz rung that was measured to crop the desktop, so ids 22 and 67
-  /// are here specifically to make that mistake fail a test.
+  /// The shape the wire-timing guard turns on: the panel's native-width timings are
+  /// 175/144/100/60 (framebuffer 3440x1440), and CoreGraphics also publishes 120 Hz modes,
+  /// but only at the narrower 2560x1440 framebuffer. ids 22 and 67 are here so a guard
+  /// asking only "does any mode run at this refresh?" admits the rung that crops the desktop.
   static func magExistingCG() -> [DisplayMode] {
     [
       // Native-width family — framebuffer == the panel's own 3440x1440.
@@ -164,9 +155,8 @@ enum RevealedModeFixtures {
     ]
   }
 
-  /// The Dell's native-width family (rotated 270°, so native is 2160x3840).
-  /// Rates from the advertised-timing inventory: no 75 Hz anywhere, which is
-  /// what makes its single 2:1 rung suspect.
+  /// The Dell's native-width family (rotated 270°, so native is 2160x3840). No 75 Hz
+  /// anywhere in the advertised timings, which is what makes its single 2:1 rung suspect.
   static func dellExistingCG() -> [DisplayMode] {
     [60.0, 59.9, 50.0, 30.0, 120.0].enumerated().map { index, rate in
       DisplayMode(

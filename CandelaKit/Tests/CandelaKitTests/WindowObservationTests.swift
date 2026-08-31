@@ -92,9 +92,8 @@ struct WindowObservationTests {
     #expect(result.stationaryByCell[0] == false)
   }
 
-  /// The counter-example the spec names: a video player holds a fixed rect
-  /// while every pixel under it changes. Geometry alone WILL call it
-  /// stationary — that is correct behaviour for this type, and the reason
+  /// A video player holds a fixed rect while every pixel under it changes, so
+  /// geometry alone WILL call it stationary. Correct for this type, and why
   /// OC18 makes it a prior rather than a verdict. Pinned so nobody "fixes" it.
   @Test func geometryCallsAStationaryVideoPlayerStationary() {
     var observer = WindowObserver()
@@ -179,23 +178,19 @@ struct WindowObservationTests {
     var observer = WindowObserver()
     let rotated = PanelSpaceTransform(
       displaySize: CGSize(width: 2160, height: 3840), rotation: .twoSeventy)
-    // Under 270°, top-left in DISPLAY space is the panel's TOP-RIGHT. See the
-    // rotation-convention note in PanelSpaceTransform: settled from Apple's own
-    // header, which states CGDisplayRotation is degrees CLOCKWISE. No longer
-    // reasoned, and no longer waiting on the rotated Dell.
+    // Under 270°, top-left in DISPLAY space is the panel's TOP-RIGHT. Apple's
+    // header states CGDisplayRotation is degrees CLOCKWISE; see the
+    // rotation-convention note in PanelSpaceTransform.
     let w = window(1, "Slack", CGRect(x: 0, y: 0, width: 200, height: 200))
     let result = observer.observe([w], through: rotated, at: Date())
     #expect(result.dominantOwnerByCell[PanelGrid.cols - 1] == "Slack")
     #expect(result.dominantOwnerByCell[(PanelGrid.rows - 1) * PanelGrid.cols] == nil)
   }
 
-  /// `fullScreenOwner` reads only `transform.displaySize` and never touches
-  /// `rotation`, so this passes with the rotation math entirely broken. That is
-  /// correct behaviour, not a gap: full-screen-ness is a display-space
-  /// question, and the #20 gate that consumes it asks about the display the
-  /// user is looking at. Asserted here so the independence is on record rather
-  /// than incidental, and so a later change that DID make it rotation-sensitive
-  /// fails loudly.
+  /// `fullScreenOwner` reads only `transform.displaySize`, so this passes with
+  /// the rotation math entirely broken. That is correct: full-screen-ness is a
+  /// display-space question. Asserted so a change that made it
+  /// rotation-sensitive fails loudly.
   @Test func aRotatedFullScreenWindowIsStillFullScreen() {
     var observer = WindowObserver()
     let rotated = PanelSpaceTransform(
@@ -222,10 +217,8 @@ struct WindowObservationTests {
   }
 
   /// A window the window server reports with a NaN bound must contribute
-  /// nothing. Without the guard it out-covers every real window (coverage 1.0
-  /// in all 240 cells beats any fraction), takes every cell in
-  /// `dominantOwnerByCell`, and books the whole interval to its owner in a
-  /// persisted store.
+  /// nothing. Unguarded it out-covers every real window, takes every cell in
+  /// `dominantOwnerByCell`, and books the whole interval to its owner on disk.
   @Test func aWindowWithANonFiniteRectIsAttributedNowhere() {
     var observer = WindowObserver()
     let t = PanelSpaceTransform(

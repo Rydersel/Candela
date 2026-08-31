@@ -3,14 +3,14 @@ import Testing
 @testable import CandelaKit
 
 /// The app-behaviour verdicts `candela-probe regress` judges its measurements
-/// with. Each one is exercised three ways, because each has three results: a
-/// control that did not fire (inconclusive), a control that fired over a wrong
-/// measurement (fail), and the measured-healthy case (pass). An invariant never
-/// observed failing is not yet a test, so the fail branch comes first.
+/// with. Each is exercised three ways, one per result: a control that did not
+/// fire (inconclusive), a control that fired over a wrong measurement (fail),
+/// and the measured-healthy case (pass). An invariant never observed failing is
+/// not yet a test, so the fail branch comes first.
 ///
 /// The log-line fixtures are transcribed from a real window read on the rig
 /// (`/usr/bin/log show --info --debug --style compact`), header line included
-/// where it matters, so the parsers are tested against the bytes they will meet.
+/// where it matters, so the parsers meet the bytes they will meet live.
 @Suite("App regression verdicts")
 struct AppRegressionTests {
   private typealias PC = PlatformConformance
@@ -51,11 +51,10 @@ struct AppRegressionTests {
   }
 
   @Test func aFiredControlSurvivesAnInconclusiveVerdict() {
-    // The whole point of the third state: the control demonstrably fired and
-    // the measurement still could not be judged. Demoting the control here
-    // both misreports the run and drops the evidence sentence, which is what
-    // the operator needs to tell "the instrument is dead" from "the instrument
-    // worked and the answer was unreadable".
+    // The point of the third state: the control demonstrably fired and the
+    // measurement still could not be judged. Demoting it misreports the run and
+    // drops the sentence that tells "the instrument is dead" apart from "the
+    // instrument worked and the answer was unreadable".
     let check = AppRegression.controlledCheck(
       name: "regress.instrument.keys", controlFired: true, control: Self.controlSentence
     ) { .inconclusive("the targeting mode was not the pointer") }
@@ -192,11 +191,11 @@ struct AppRegressionTests {
   }
 
   @Test func anotherPanelsInterleavedWritesDoNotBreakTheAssertion() {
-    // The write record carries no display id, so a window tight enough to
-    // catch the MAG's write catches the other panel's re-apply too (93 off,
-    // 87 on, measured on the rig). The assertion is PRESENCE of the expected
-    // value, never exclusivity: judging the last value in the window would
-    // convict the app of another panel's behaviour.
+    // The write record carries no display id, so a window tight enough to catch
+    // the MAG's write catches the other panel's re-apply too (93 off, 87 on,
+    // measured on the rig). The assertion is PRESENCE of the expected value,
+    // never exclusivity: judging the last value would convict the app of another
+    // panel's behaviour.
     let outcome = AppRegression.combinedToggleVerdict(
       gammaAtFloor: 0.7875, ddcFloorWriteSeen: true,
       gammaAfterOff: 1.0, ddcValuesAfterOff: [93, 37],
@@ -361,11 +360,9 @@ struct AppRegressionTests {
   }
 
   @Test func theCrossoverValueIsTheDimmingMathsAnswerAtTheCrossoverBrightness() {
-    // The constant is derived rather than transcribed, so the derivation is
-    // pinned, and it is pinned through the SAME functions the app writes with
-    // rather than through a hand-truncation that happens to agree today. A
-    // change to the affine step or to where the truncation falls in
-    // `valueToDDC` is then a failing test rather than a rig surprise.
+    // Derived through the SAME functions the app writes with, not transcribed
+    // or hand-truncated, so a change to the affine step or to where the
+    // truncation falls in `valueToDDC` fails here rather than on the rig.
     let split = DimmingMath.combinedSplit(
       value: AppRegression.combinedCrossoverBrightness,
       switching: DimmingMath.switchingValue(fromPoint: 0))
@@ -377,19 +374,15 @@ struct AppRegressionTests {
   }
 
   @Test func theAssumedRegisterMaximumIsTheAppsOwnUntunedFallback() {
-    // Couples the constant to the app rather than to a comment. Both
-    // derivation pins take the register maximum as given, so a change to it
-    // would otherwise leave them green while describing a mapping the app no
-    // longer uses.
+    // Couples the constant to the app rather than to a comment: both derivation
+    // pins take the register maximum as given, so a change to it would otherwise
+    // leave them green while describing a mapping the app no longer uses.
     //
-    // What this binds, exactly: `CommandTuning.effectiveMaxDDC`'s fallback for
-    // an untuned command with no read maximum supplied. It does NOT bind
-    // `BrightnessController.assumedMaxDDC`, which is private and unreachable
-    // from here, and it does not describe the live write path, which always
-    // passes a real `readMax` taken from `maxDDCValue`. So it guards the
-    // arithmetic premise the 37 and 50 derivations rest on, and the two
-    // constants can still be wrong together if the panel's own maximum is not
-    // the assumed one. That remains the run-card item.
+    // It binds `CommandTuning.effectiveMaxDDC`'s fallback for an untuned command
+    // with no read maximum, NOT `BrightnessController.assumedMaxDDC` (private
+    // and unreachable here) and not the live write path, which always passes a
+    // real `readMax`. So the two constants can still be wrong together if the
+    // panel's own maximum is not the assumed one. That stays a run-card item.
     let untuned = CommandTuning(
       unavailableDDC: false, minDDCOverride: 0, maxDDCOverride: 0,
       curveIndex: 0, invert: false, remapCodes: [])
@@ -456,11 +449,11 @@ struct AppRegressionTests {
 
   @Test func aPanelExactlyAtTheSwitchingValueIsNoKeyDriveTarget() {
     // The live hole, measured on the rig: the panel sat at stored 0.5 with the
-    // default switching value of 0.5, the instrument's first press went DOWN
-    // into the software zone (no write, by the app's design), and the press
-    // back up restored a register value the coalescer dropped. Zero writes, and
-    // the check blamed the Accessibility grant, the event tap and the DDC path:
-    // three named causes, none of them true.
+    // default switching value of 0.5, the first press went DOWN into the
+    // software zone (no write, by design), and the press back up restored a
+    // register value the coalescer dropped. Zero writes, and the check blamed
+    // the Accessibility grant, the event tap and the DDC path, none of them
+    // true.
     #expect(!AppRegression.survivesDownStep(stored: 0.5, switchingValue: 0.5))
   }
 
@@ -506,11 +499,10 @@ struct AppRegressionTests {
   }
 
   @Test func aFanOutIntoTheSoftwareZoneAloneCannotProduceAWrite() {
-    // Every DDC panel sitting below its switching value is the state the two
+    // Every DDC panel below its switching value is the state the two
     // combined-dimming checks LEAVE the rig in: a fan-out there computes the
     // register value the panel already holds, the coalescer drops the repeat,
-    // and no write can appear whatever the app does. Convicting the app of
-    // that is a false failure the run reaches by construction.
+    // and no write can appear whatever the app does.
     let outcome = AppRegression.fanOutVerdict(
       preWindowFanOuts: 0, fanOutLinesFromSource: 3, ddcWrites: 0,
       anyTargetInHardwareZone: false)
@@ -900,13 +892,12 @@ struct AppRegressionTests {
   }
 
   @Test func aHalfFlushedSegmentIsNotLanded() {
-    // The rows persist in the order the dump writes them, which is the panel's
-    // own title order, so the DENYING panel's row can arrive before the
-    // write-only panel's. Its unsupported verdict is exactly what the wait is
-    // watching for, so a poll landing in that gap would stop, judge a segment
-    // with no MAG row in it, and FAIL a healthy rig for a missing row. The
-    // header already says how many rows are coming, so the count is what the
-    // wait holds out for.
+    // Rows persist in the order the dump writes them, the panel's own title
+    // order, so the DENYING panel's row can arrive before the write-only panel's.
+    // Its unsupported verdict is what the wait watches for, so a poll landing in
+    // that gap would judge a segment with no MAG row and FAIL a healthy rig. The
+    // header says how many rows are coming, so the count is what the wait holds
+    // out for.
     let window = [Self.header(pass: 2, rows: 3), Self.dellAfterVerdict]
     #expect(!AppRegression.panelDumpVerdictLanded(inLogLines: window))
   }
@@ -936,10 +927,9 @@ struct AppRegressionTests {
   #if os(macOS)
     @Test func theTmpAliasNamesTheSameFile() {
       // `ps` reports a process's executable by its RESOLVED path, so a build
-      // launched from a path spelled through /tmp comes back spelled through
-      // /private/tmp. Compared as strings, a rig that IS in the state its
-      // teardown claims reports that it is not. /tmp is a symlink on every
-      // macOS, so these two literals are an honest fixture on this platform.
+      // launched through /tmp comes back spelled through /private/tmp. Compared
+      // as strings, a rig that IS in the state its teardown claims reports that
+      // it is not. /tmp is a symlink on every macOS, so this fixture is honest.
       #expect(AppRegression.sameFile("/tmp/candela/Candela.app", "/private/tmp/candela/Candela.app"))
     }
 

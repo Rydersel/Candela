@@ -3,11 +3,10 @@ import Foundation
 /// Two exposure maps accumulated over the SAME instants: one from measured
 /// samples, one from the permission-free model.
 ///
-/// EM2 is the whole point of the type. A pair books on both sides or on
-/// neither, so a grant outage, a skipped capture or a decode failure stops both
-/// maps together and the comparison can never read the permission's absence as
-/// a modelling error. Same unit as `ExposureMap`: content luminance (0...1)
-/// times seconds, with no brightness term on either side (EM13).
+/// EM2 is the whole point. A pair books on both sides or on neither, so a grant
+/// outage or a skipped capture stops both maps together and the comparison can
+/// never read the permission's absence as a modelling error. Same unit as
+/// `ExposureMap`, with no brightness term on either side (EM13).
 public struct ModelComparison: Equatable, Sendable, Codable {
   /// Both always `PanelGrid.cellCount` long, in panel-physical order (EM12).
   /// `.empty` is the only way in from outside and decoding rejects any other
@@ -28,10 +27,9 @@ public struct ModelComparison: Equatable, Sendable, Codable {
 
   /// Books one paired instant, or refuses the pair whole.
   ///
-  /// Refusing whole rather than per-side is what keeps the comparison fair: a
-  /// half-booked pair offsets one map against the other by exactly one sample,
-  /// the store is persisted, and nothing later can tell the offset from a real
-  /// disagreement.
+  /// Refusing whole keeps the comparison fair: a half-booked pair offsets one
+  /// map against the other by one sample, the store is persisted, and nothing
+  /// later can tell the offset from a real disagreement.
   public mutating func addPair(
     measured: [Double], modelled: [Double], elapsed: TimeInterval, at now: Date
   ) {
@@ -53,9 +51,9 @@ public struct ModelComparison: Equatable, Sendable, Codable {
 
   /// The four figures of EM10, or nil while the answer would not be a verdict.
   ///
-  /// Nil below the sample floor, and nil when either map is flat: a correlation
-  /// against a map with no spread is arithmetic on noise, and the hottest decile
-  /// of a flat map is an artefact of the tie-break rather than a hot region.
+  /// Nil below the sample floor, and nil when either map is flat: correlation
+  /// against a map with no spread is arithmetic on noise, and a flat map's
+  /// hottest decile is a tie-break artefact.
   public func statistics() -> ModelComparisonStats? {
     guard pairCount >= ExposureAccumulator.minimumSamplesForAnalysis else { return nil }
     guard let pearson = Self.pearson(measuredCells, modelledCells) else { return nil }
@@ -101,11 +99,9 @@ public struct ModelComparison: Equatable, Sendable, Codable {
     return min(1, max(-1, covariance / (varianceX * varianceY).squareRoot()))
   }
 
-  /// Ranks 0 upward, with tied values sharing the average of the ranks they
-  /// span. Index order breaks ties only for the sort's stability, never for the
-  /// rank itself: two cells that accumulated identical exposure agree with the
-  /// other map equally well, and letting their grid position decide would invent
-  /// a correlation out of the numbering.
+  /// Ranks 0 upward, tied values sharing the average of the ranks they span.
+  /// Index order breaks ties only for sort stability: letting grid position
+  /// decide the rank would invent a correlation out of the numbering.
   private static func averageRanks(_ values: [Double]) -> [Double] {
     let ascending = values.indices.sorted { lhs, rhs in
       values[lhs] == values[rhs] ? lhs < rhs : values[lhs] < values[rhs]
@@ -141,9 +137,9 @@ public struct ModelComparison: Equatable, Sendable, Codable {
     return peak / mean
   }
 
-  /// Spelled out rather than synthesised for the same reason as `ExposureMap`:
-  /// these strings are shipped on-disk schema (§4), and a synthesised key turns
-  /// an ordinary rename into silent data loss.
+  /// Spelled out rather than synthesised, as in `ExposureMap`: these strings are
+  /// shipped on-disk schema, and a synthesised key turns a rename into silent
+  /// data loss.
   private enum CodingKeys: String, CodingKey {
     case schemaVersion = "schemaVersion"
     case measuredCells = "measuredCells"
@@ -164,9 +160,9 @@ public struct ModelComparison: Equatable, Sendable, Codable {
   }
 
   /// The `ExposureMap` taxonomy exactly, so the coordinator's quarantine path
-  /// applies to this store unchanged: `OledStoreDecodeFailure` means intact
-  /// history this build cannot interpret (keep the bytes, write nothing), while
-  /// a `DecodingError` means junk that may be discarded.
+  /// applies unchanged: `OledStoreDecodeFailure` means intact history this build
+  /// cannot interpret (keep the bytes, write nothing), a `DecodingError` means
+  /// junk that may be discarded.
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     // Absent means v1, the same forward-migration rule the exposure map follows.
@@ -209,12 +205,12 @@ public struct ModelComparison: Equatable, Sendable, Codable {
 /// The fixed statistics of EM10. Fixed in advance so the gate is judged on
 /// numbers chosen before the result was known.
 public struct ModelComparisonStats: Equatable, Sendable {
-  /// Linear agreement over the 240 accumulated cell pairs.
+  /// Linear agreement across every accumulated cell pair.
   public var pearson: Double
   /// Order agreement, which survives a model that is right about where the heat
   /// is and wrong about how much.
   public var spearmanRank: Double
-  /// Share of each map's 24 hottest cells that the other also calls hottest.
+  /// Share of each map's hottest decile that the other also calls hottest.
   public var hottestDecileOverlap: Double
   /// Peak cell as a multiple of that map's own mean.
   public var measuredHottestMultiple: Double

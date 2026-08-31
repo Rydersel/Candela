@@ -3,9 +3,8 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// SplitMix64. The property tests below sample tens of thousands of points, so
-/// a failure has to be reproducible — `SystemRandomNumberGenerator` would make
-/// every run a different test.
+/// SplitMix64. The property tests sample tens of thousands of points, so a failure
+/// has to reproduce; `SystemRandomNumberGenerator` makes every run a different test.
 struct SeededGenerator: RandomNumberGenerator {
   private var state: UInt64
 
@@ -30,9 +29,8 @@ struct ArrangementGeometryTests {
   }
 
   @Test func rectsSharingInteriorOverlap() {
-    // Every other overlap expectation in the suite is `false`, so `overlaps`
-    // returning a constant `false` used to pass the whole suite — and
-    // `ArrangementRules` is built entirely on it.
+    // Every other overlap expectation here is `false`, so a constant-`false`
+    // `overlaps` used to pass the suite, and `ArrangementRules` is built on it.
     let a = DisplayRect(x: 0, y: 0, width: 100, height: 100)
     let b = DisplayRect(x: 99, y: -50, width: 100, height: 100) // one point of interior
     #expect(a.overlaps(b))
@@ -80,7 +78,7 @@ struct ArrangementGeometryTests {
 
 @Suite("Canvas transform")
 struct CanvasTransformTests {
-  // The harness setup from drag-canvas §1.3: MAG + built-in + Dell in an L.
+  // MAG, built-in and Dell in an L.
   private static let canvas = CanvasSize(width: 560, height: 320)
   private static let margin: Double = 14
   private static let headroom: Double = 0.18
@@ -101,11 +99,8 @@ struct CanvasTransformTests {
     CanvasTransform.fitting(arrangement.bounds, in: Self.canvas, margin: Self.margin, headroom: Self.headroom)
   }
 
-  /// A spread of fits, so R1/R2 are not pinned to one lucky scale: the
-  /// three-display L (s ≈ 0.064), a small virtual panel (s ≈ 0.45), a bounds far
-  /// larger than any real desktop (s ≈ 0.004, where float error is worst), a
-  /// 3×3 rect with no margin or headroom (s ≈ 106.7, the only entry above 1),
-  /// and an off-origin oddly-sized one.
+  /// A spread of fits, so R1/R2 are not pinned to one lucky scale: a real L, a small
+  /// panel, a bounds far larger than any desktop (worst float error), a scale above 1.
   private var transforms: [CanvasTransform] {
     [
       transform,
@@ -133,7 +128,7 @@ struct CanvasTransformTests {
       if failure != nil { break }
     }
 
-    // EXACT equality, no tolerance. Every later task builds on this mapping.
+    // Exact equality, no tolerance: everything else builds on this mapping.
     #expect(failure == nil, "\(failure ?? "")")
   }
 
@@ -142,9 +137,8 @@ struct CanvasTransformTests {
     var failure: String?
 
     for t in transforms {
-      // scale/2 is exactly the quantum: display space is integral, so a canvas
-      // point can only ever land within half a display point of a grid line.
-      // The 1e-9 absorbs float error in the two conversions, not slack.
+      // scale/2 is the quantum: display space is integral, so a canvas point lands
+      // within half a display point of a grid line. The 1e-9 absorbs float error, not slack.
       let bound = t.scale / 2 + 1e-9
       for _ in 0 ..< 5_000 {
         let c = CanvasPoint(x: Double.random(in: -2_000 ... 2_000, using: &rng),
@@ -184,16 +178,11 @@ struct CanvasTransformTests {
   }
 
   @Test func t_translationInvariance() {
-    // What T constrains is that the offset TRACKS THE BOUNDS — an offset that
-    // ignores them entirely moves the picture when the arrangement is translated
-    // (positive control: `offsetX = canvas.width / 2`, measured 9 failures here).
-    //
-    // It does NOT distinguish origin from centre: any offset of the form
-    // `k − s·(a point that translates with the bounds)` is translation-invariant,
-    // so substituting `cx = bounds.x` leaves T green. `c_theArrangementIsCentred`
-    // is the only test that constrains WHICH point lands at the canvas centre —
-    // that substitution also fails F and aSingleDisplayCentres, but only
-    // incidentally, because at this scale it pushes tiles off the canvas.
+    // This only constrains that the offset tracks the bounds: an offset ignoring
+    // them (`offsetX = canvas.width / 2`) moves the picture when the arrangement
+    // translates. It does not pin WHICH point lands at the canvas centre, so
+    // substituting `cx = bounds.x` stays green here; `c_theArrangementIsCentred`
+    // is the test that catches that.
     let base = arrangement
     let baseTransform = CanvasTransform.fitting(base.bounds, in: Self.canvas, margin: Self.margin, headroom: Self.headroom)
 
@@ -227,11 +216,8 @@ struct CanvasTransformTests {
     #expect(r.maxX <= Self.canvas.width - Self.margin + 1e-9)
   }
 
-  /// The "no upper clamp" rule in `fitting`. F and C only ever exercise scales
-  /// far below 1, and a `min(fit, 1.0)` clamp only ever shrinks — a shrunken
-  /// arrangement still fits inside the canvas and is still centred, so the clamp
-  /// used to leave the entire suite green. What it actually breaks is filling
-  /// the canvas, which is what this asserts.
+  /// A `min(fit, 1.0)` clamp in `fitting` left the rest of the suite green: a shrunken
+  /// arrangement still fits and is still centred. What it breaks is filling the canvas.
   @Test func f_aSmallArrangementIsScaledUpToFillTheCanvas() {
     let small = DisplayArrangement(tiles: [
       ArrangementFixtures.tile(1, DisplayRect(x: -40, y: 12, width: 100, height: 100)),
@@ -252,9 +238,8 @@ struct CanvasTransformTests {
     #expect(r.maxY <= Self.canvas.height - Self.margin + 1e-9)
   }
 
-  /// `scale` is documented finite and > 0 and the memberwise init enforces it.
-  /// Exit tests, because a precondition failure kills the process: the paired
-  /// `.success` case is the control proving the mechanism can tell them apart.
+  /// Exit tests, because a precondition failure kills the process. The paired
+  /// `.success` case proves the mechanism can tell the two apart.
   @Test func aNonPositiveOrNonFiniteScaleTrapsAtConstruction() async {
     await #expect(processExitsWith: .failure) { _ = CanvasTransform(scale: 0, offsetX: 0, offsetY: 0) }
     await #expect(processExitsWith: .failure) { _ = CanvasTransform(scale: -1, offsetX: 0, offsetY: 0) }
@@ -290,7 +275,7 @@ struct CanvasTransformTests {
     let t = transform
     // A length must not pick up the centring offset — only a point does.
     #expect(t.displayDistance(0) == 0)
-    // The snap threshold's own conversion, from §3.3.
+    // The snap threshold's own conversion.
     #expect(t.displayDistance(8) == Int((8 / t.scale).rounded()))
   }
 

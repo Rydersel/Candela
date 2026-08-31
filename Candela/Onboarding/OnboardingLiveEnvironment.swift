@@ -4,9 +4,9 @@ import Foundation
 /// Everything one display contributes to an `OnboardingEnvironment`, as plain
 /// values.
 ///
-/// The split exists so that every mapping rule below is reachable from a test
-/// with no attached display, no enumerated catalog and no defaults domain. The
-/// live side (`OnboardingLiveEnvironment`) only fills this in.
+/// The split exists so every mapping rule below is reachable from a test with
+/// no attached display, no enumerated catalog and no defaults domain. The live
+/// side only fills this in.
 struct OnboardingDisplayInput {
   var persistenceKey: String
   /// Already resolved through `DisplayOrdering.title`: the user's chosen name
@@ -126,13 +126,12 @@ enum OnboardingEnvironmentBuilder {
   /// described a 175 Hz panel as a 100 Hz one.
   ///
   /// Quantized before comparing: rates arrive carrying float noise, and the
-  /// quantizer is what keeps a genuine 59.9 apart from 60 while collapsing
-  /// 59.9998 onto it.
+  /// quantizer keeps a genuine 59.9 apart from 60 while collapsing 59.9998 onto
+  /// it.
   ///
-  /// The running rate is a floor rather than only a fallback. An enumeration
-  /// taken while the display sits in a mirror set describes the master, so its
-  /// rates can be lower than the one the panel is demonstrably scanning out,
-  /// and claiming less than that is a claim we can see is false.
+  /// The running rate is a floor, not only a fallback. An enumeration taken
+  /// while the display sits in a mirror set describes the master, so its rates
+  /// can be lower than what the panel is demonstrably scanning out.
   private static func maximumRefreshHz(for input: OnboardingDisplayInput) -> Double {
     let current = DisplayMode.quantizedRefresh(input.currentRefreshHz)
     let offered = input.offeredRefreshRates.map(DisplayMode.quantizedRefresh)
@@ -167,27 +166,22 @@ enum OnboardingEnvironmentBuilder {
   /// suggestion gets no size page at all, so the flow never asks a person to
   /// confirm what is already correct.
   ///
-  /// These are the conditions the settings hub's recommendation callout
-  /// applies (PD8), so the two surfaces cannot disagree about whether a display
-  /// has anything to correct. The model named a size; the person has not
-  /// dismissed it; no size was applied on this display this session; the named
-  /// size has a curated row to apply, since the wire-timing guard can withhold
-  /// one; and the display is not already running it.
+  /// The conditions match the settings hub's recommendation callout (PD8), so
+  /// the two surfaces cannot disagree about whether a display has anything to
+  /// correct.
   ///
   /// Matched against `recommendation` rather than `bestInBand`, which the
   /// verdict documents as equal whenever a recommendation exists. Only a
-  /// recommendation is a correction: `bestInBand` outlives it as an
-  /// endorsement, and an endorsement is a mark on a picker, not a page.
+  /// recommendation is a correction: `bestInBand` outlives it as an endorsement,
+  /// and an endorsement is a mark on a picker, not a page.
   ///
-  /// **Published rows only.** The catalog's rows are the MERGED list, so a
-  /// display that has opted into synthesized sizes carries stops in there too,
-  /// and two rows can share one logical size. Three reasons the flow takes the
-  /// published half: a `Choice` is identified by its size alone, so a duplicate
-  /// would collide in the picker's `ForEach`; the flow's apply seam names a
-  /// size rather than a mode, and a synthesized-only size cannot be resolved
-  /// from one; and the density model itself is handed published rows for the
-  /// stated reason that recommending a size which costs a virtual display is a
-  /// v1 non-goal. Offering stops as alternatives would put that back.
+  /// **Published rows only**, though the catalog's rows are the MERGED list, so
+  /// a display opted into synthesized sizes carries stops there and two rows can
+  /// share one logical size. A `Choice` is identified by its size alone, so a
+  /// duplicate collides in the picker's `ForEach`; the apply seam names a size
+  /// rather than a mode, and a synthesized-only size cannot be resolved from
+  /// one; and recommending a size that costs a virtual display is a v1
+  /// non-goal.
   private static func sizeSuggestion(for input: OnboardingDisplayInput) -> OnboardingSizeSuggestion? {
     guard let recommendation = input.recommendation,
           !input.recommendationDismissed,
@@ -216,12 +210,11 @@ enum OnboardingEnvironmentBuilder {
   }
 }
 
-/// The live half: field reads off the app's own objects, handed straight to
-/// the builder.
+/// The live half: field reads off the app's own objects, handed straight to the
+/// builder.
 ///
-/// Nothing here decides anything, deliberately. It is covered by the hardware
-/// pass rather than by unit tests, which is only defensible while every rule
-/// stays above.
+/// Nothing here decides anything. It is covered by the hardware pass rather than
+/// by unit tests, which is only defensible while every rule stays above.
 @MainActor
 enum OnboardingLiveEnvironment {
   /// Externals only: `AppModel.displays` excludes the built-in structurally,
@@ -252,10 +245,10 @@ enum OnboardingLiveEnvironment {
     defaults: UserDefaults
   ) -> OnboardingDisplayInput {
     let key = state.display.persistenceKey
-    // A catalog is enumerated on demand, and onboarding is usually the first
+    // A catalog is enumerated on demand and onboarding is usually the first
     // surface a display is shown on, so an absent one means "nobody has asked
-    // yet" rather than "no modes". This is the same call the settings hub makes
-    // when a display's page appears, and it enumerates without configuring.
+    // yet" rather than "no modes". Same call the settings hub makes when a
+    // display's page appears; it enumerates without configuring.
     if coordinator.catalogs[state.id] == nil {
       coordinator.refreshCatalog(for: state.id)
     }

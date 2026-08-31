@@ -5,13 +5,11 @@ import Testing
 
 /// The verified engage/disengage sequence and its reverse unwind (SS1, SS10).
 ///
-/// Everything here runs against the shared fake world, so every step of the
-/// sequence is observable: the call log records the ORDER of the mirror change
-/// and the virtual-display destroy, which is the part of the contract a call
-/// count cannot express.
-/// `Result<Void, _>` cannot be `Equatable` because `Void` is not, so the
-/// disengage assertions read the failure out instead of comparing the whole
-/// result.
+/// Everything runs against the shared fake world, so every step is observable:
+/// the call log records the ORDER of the mirror change and the virtual-display
+/// destroy, which a call count cannot express. `Result<Void, _>` cannot be
+/// `Equatable`, so the disengage assertions read the failure out instead of
+/// comparing whole results.
 extension Result {
   fileprivate var failureValue: Failure? {
     if case let .failure(failure) = self { failure } else { nil }
@@ -20,8 +18,7 @@ extension Result {
 
 @Suite("Mode synthesis engine (SS1, SS10)")
 struct ModeSynthesisEngineTests {
-  /// The rig's ultrawide, at the refresh Phase 0 measured the mirror
-  /// preserving.
+  /// The rig's ultrawide, at the refresh the mirror was measured preserving.
   private static let physical: CGDirectDisplayID = 2
   private static let secondPhysical: CGDirectDisplayID = 3
 
@@ -386,13 +383,12 @@ struct ModeSynthesisEngineTests {
     #expect(world.mirrors.isEmpty)
   }
 
-  /// The RETRY after a stranded destroy, which is the whole point of retaining
-  /// the pairing. The first attempt dropped the slot entry before releasing the
-  /// token, so the second one reaches the host's "no such slot" arm while the
-  /// virtual display is still online. Answering true there would report a clean
-  /// revert over a display nothing can destroy again, and take the pairing that
-  /// is its only record with it: SS10's departure check is this return value
-  /// and nothing else.
+  /// The RETRY after a stranded destroy, which is why the pairing is retained. The
+  /// first attempt dropped the slot entry before releasing the token, so the second
+  /// reaches the host's "no such slot" arm while the virtual display is still
+  /// online. Answering true there would report a clean revert over a display
+  /// nothing can destroy again, and take the pairing that is its only record with
+  /// it.
   @Test func aRetriedDisengageOverAStrandedSlotIsStillIncomplete() async {
     let world = world()
     let engine = engine(world)
@@ -437,15 +433,14 @@ struct ModeSynthesisEngineTests {
     ])
   }
 
-  /// The half of SS10's last step the rendered-size comparison alone cannot
-  /// see, and the reason that comparison stopped being enough: the engage tail
-  /// re-times the slave onto its own mode, so from two seconds after an engage
-  /// the panel already reports its own geometry and a check that only asked
-  /// "is this still the rendered size" could no longer be entered by any input.
+  /// The half of SS10's last step a rendered-size comparison cannot see: the engage
+  /// tail re-times the slave onto its own mode, so from two seconds after an engage
+  /// the panel already reports its own geometry and that comparison can no longer
+  /// be entered by any input.
   ///
   /// Here the break returns success, the panel is off the rendered size, and it
-  /// is reporting a descriptor that appears in no enumeration of its own. That
-  /// is a display that did not come back, and the teardown has to say so.
+  /// reports a descriptor that appears in no enumeration of its own. That is a
+  /// display that did not come back, and the teardown has to say so.
   @Test func aPanelReportingAModeItDoesNotPublishLeavesTheDisengageIncomplete() async {
     let world = world()
     let engine = engine(world)
@@ -466,12 +461,11 @@ struct ModeSynthesisEngineTests {
 
   /// A panel that will not say what it is running is NOT a failed teardown.
   ///
-  /// This runs immediately after breaking a mirror and destroying the display
-  /// the panel was scanning, so a nil readback is the ordinary shape of a
-  /// display mid-reconfiguration rather than evidence about the glass. Judged
-  /// as a failure it would retain the pairing: one of two slots held for the
-  /// session, the opt-out refusing, and an engine failure shown to somebody
-  /// whose teardown worked.
+  /// This runs right after breaking a mirror and destroying the display the panel
+  /// was scanning, so a nil readback is the ordinary shape of a display
+  /// mid-reconfiguration, not evidence about the glass. Judged a failure it would
+  /// retain the pairing: a slot held for the session, the opt-out refusing, and an
+  /// engine failure shown to somebody whose teardown worked.
   @Test func aPanelThatWillNotReportItsModeStillCompletesTheDisengage() async {
     let world = world()
     let engine = engine(world)

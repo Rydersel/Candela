@@ -5,11 +5,10 @@ import SwiftUI
 /// Shared geometry for every surface that draws a display's exposure history.
 enum OledPanelGeometry {
   /// The map's drawn aspect, panel-native (the manufactured landscape
-  /// rectangle), because that is the geometry the cells were binned in. Not
-  /// the grid's own 24:10: that ratio is one panel's, and drawing another
-  /// display's history at it stretches the picture. Nil when the geometry
-  /// cannot be read or the rotation is not a right angle; callers fall back
-  /// to the grid's ratio rather than guessing.
+  /// rectangle), because that is the geometry the cells were binned in. Not the
+  /// grid's own ratio, which is one panel's and stretches every other display's
+  /// history. Nil when the geometry cannot be read or the rotation is not a
+  /// right angle; callers fall back to the grid's ratio rather than guessing.
   static func panelNativeAspect(for displayID: CGDirectDisplayID?) -> CGFloat? {
     guard let displayID else { return nil }
     let width = CGFloat(CGDisplayPixelsWide(displayID))
@@ -20,16 +19,15 @@ enum OledPanelGeometry {
     return rotation.swapsAxes ? height / width : width / height
   }
 
-  /// The peak cell of a normalized map, ties to the first index, the same
-  /// answer `ExposureMap.hottestCell` gives.
+  /// The peak cell of a normalized map, ties to the first index, the same answer
+  /// `ExposureMap.hottestCell` gives.
   static func hottestIndex(_ cells: [Double]) -> Int? {
     guard let peak = cells.max(), peak > 0 else { return nil }
     return cells.firstIndex(of: peak)
   }
 
-  /// The display's CURRENT logical aspect, rotation included, for surfaces
-  /// that draw the map the way the glass hangs on the desk. Storage stays
-  /// panel-native; this is presentation only.
+  /// The display's CURRENT logical aspect, rotation included, for surfaces that
+  /// draw the map the way the glass hangs. Storage stays panel-native.
   static func displayAspect(for displayID: CGDirectDisplayID?) -> CGFloat? {
     guard let displayID else { return nil }
     let width = CGFloat(CGDisplayPixelsWide(displayID))
@@ -43,12 +41,10 @@ enum OledPanelGeometry {
     return DisplayRotation(degrees: CGDisplayRotation(displayID)) ?? .standard
   }
 
-  /// The stored panel-native grid re-ordered into DISPLAY orientation, with
-  /// both index maps, so a rotated monitor's surface shows what the desk
-  /// shows while every data lookup stays in the panel-native store. The
-  /// mapping goes through `PanelSpaceTransform`'s own point function; a
-  /// right-angle rotation maps cell centers to cell centers exactly, so this
-  /// is a re-ordering, never a resample.
+  /// The stored panel-native grid re-ordered into DISPLAY orientation, with both
+  /// index maps, so a rotated monitor shows what the desk shows while every data
+  /// lookup stays panel-native. A right-angle rotation maps cell centers to cell
+  /// centers exactly, so this is a re-ordering, never a resample.
   static func displayOriented(
     _ cells: [Double], rotation: DisplayRotation
   ) -> (cells: [Double], cols: Int, rows: Int, panelFromDisplay: [Int]) {
@@ -74,15 +70,13 @@ enum OledPanelGeometry {
   }
 }
 
-/// The glance rendering of an exposure map: the stored 24 by 10 grid as a
-/// tiny image, magnified with interpolation so it reads as one continuous
-/// heat surface filling the display's shape.
+/// The glance rendering of an exposure map: the stored grid as a tiny image,
+/// magnified with interpolation so it reads as one continuous heat surface
+/// filling the display's shape.
 ///
-/// Deliberately not the health sheet's discrete cell grid. That grid is the
-/// reading instrument, honest about the storage resolution; at glance size
-/// its inset cells read as floating squares and a non-ultrawide panel's
-/// taller cells read as stretched. The hottest cell keeps its outline here so
-/// the words beside the hero still point at something.
+/// Deliberately not the health sheet's discrete cell grid, which is the reading
+/// instrument: at glance size its inset cells read as floating squares and a
+/// non-ultrawide panel's taller cells read as stretched.
 struct PanelExposureSurface: View {
   /// Panel-native, always; the surface re-orders for presentation itself.
   let cells: [Double]
@@ -92,9 +86,8 @@ struct PanelExposureSurface: View {
   let aspect: CGFloat
   /// How the glass hangs. Presentation only: storage never rotates.
   var rotation: DisplayRotation = .standard
-  /// 0 disables the emission glow; the strip runs it low, the hero higher.
-  /// The glow is the same rasterized data blurred, so it can only bloom where
-  /// the panel has actually been lit.
+  /// 0 disables the emission glow. The glow is the same rasterized data
+  /// blurred, so it can only bloom where the panel has actually been lit.
   var glowStrength: Double = 0
   /// Draw fine corner ticks, the hero's instrument framing.
   var reticle: Bool = false
@@ -124,8 +117,8 @@ struct PanelExposureSurface: View {
             .interpolation(.high)
         } else {
           // Fixed opacities, not `.quaternary`/`.separator`: every surface this
-          // draws on is painted by the theme, so nothing here may resolve
-          // against the system appearance (SV2).
+          // draws on is theme-painted, so nothing here may resolve against the
+          // system appearance (SV2).
           Rectangle().fill(Color.white.opacity(0.06))
         }
       }
@@ -155,16 +148,15 @@ struct PanelExposureSurface: View {
       }
     }
     // The id swap makes a data change an insertion the transition can
-    // crossfade; without it a replaced CGImage snaps. Reduce Motion snaps on
-    // purpose.
+    // crossfade; without it a replaced CGImage snaps.
     .id(reduceMotion ? 0 : cells.hashValue)
     .animation(reduceMotion ? nil : .easeInOut(duration: 0.8), value: cells.hashValue)
     .accessibilityHidden(true)
   }
 
   /// One pixel per stored cell, colored through the shared ramp. Row 0 of a
-  /// `CGImage` is the top row, the same top-left convention the cells are
-  /// stored in, so no flip.
+  /// `CGImage` is the top row, the convention the cells are stored in, so no
+  /// flip.
   private static func rasterize(_ cells: [Double], cols: Int, rows: Int) -> CGImage? {
     guard cells.count == cols * rows else { return nil }
     var pixels = [UInt8](repeating: 255, count: cols * rows * 4)
@@ -194,27 +186,23 @@ struct PanelExposureSurface: View {
 struct PanelExposureMiniSurface: View {
   /// Panel-native cells; the surface re-orders for presentation itself.
   let cells: [Double]
-  /// Live handle, read only for the display's current geometry. Never stored:
-  /// IDs reassign across a replug.
+  /// Read only for the display's current geometry. Never stored: IDs reassign
+  /// across a replug.
   let displayID: CGDirectDisplayID?
   /// False draws the blank frame. The map is drawn only from a `.measured`
-  /// history; every other state gets the blank frame, never a stale or
-  /// estimated picture presented as one (OC11).
+  /// history, never a stale or estimated picture presented as one (OC11).
   let showsMap: Bool
 
-  /// The display hero's fit rule at card scale: the box the mini map fits
-  /// inside, preserving aspect, so an ultrawide and a portrait-mounted panel
-  /// take the same vertical room.
-  // Sized so the overview's whole default page fits the window without a
-  // scroll bar; measured against the 900 by 520 saved frame with two
-  // externals connected.
+  /// The box the mini map fits inside, preserving aspect, so an ultrawide and a
+  /// portrait-mounted panel take the same vertical room.
+  // Sized so the overview's default page fits without a scroll bar; measured
+  // against a 900 by 520 saved frame with two externals connected.
   @ScaledMetric(relativeTo: .body) private var boxWidth: CGFloat = 104
   @ScaledMetric(relativeTo: .body) private var boxHeight: CGFloat = 44
 
   var body: some View {
-    // Display aspect, not panel-native: the card stands for the monitor on
-    // the desk, so a portrait mount draws tall. Storage stays panel-native;
-    // the surface re-orders for presentation.
+    // Display aspect, not panel-native: the card stands for the monitor on the
+    // desk, so a portrait mount draws tall.
     let aspect =
       OledPanelGeometry.displayAspect(for: displayID)
       ?? CGFloat(PanelGrid.cols) / CGFloat(PanelGrid.rows)
@@ -223,7 +211,7 @@ struct PanelExposureMiniSurface: View {
     Group {
       if showsMap {
         // No hottest-cell marker at this size (OCR8): the box would be an
-        // unreadable speck, and the status line carries the fact in words.
+        // unreadable speck, and the status line says it in words.
         PanelExposureSurface(
           cells: cells,
           highlighted: nil,
@@ -231,8 +219,7 @@ struct PanelExposureMiniSurface: View {
           rotation: OledPanelGeometry.rotation(for: displayID),
           glowStrength: 0.35)
       } else {
-        // No dotted placeholder: a blank surface with the status line beside
-        // it is quieter and does not read as faint data.
+        // No dotted placeholder: it would read as faint data.
         RoundedRectangle(cornerRadius: 5, style: .continuous)
           .fill(Color.white.opacity(0.06))
           .overlay {
@@ -251,13 +238,13 @@ struct PanelExposureMiniSurface: View {
 /// overview's cards and the Health pane's (SC4) so the two surfaces cannot
 /// report the same display's measurement differently.
 enum OledCareCardCopy {
-  /// Hours of use, and what the measurement is doing, in that order. The
-  /// honesty precedence is the health window's exactly: Safe Mode first, then
-  /// a missing Screen Recording grant, then the confidence states.
+  /// Hours of use, then what the measurement is doing. Honesty precedence is the
+  /// health window's: Safe Mode first, then a missing Screen Recording grant,
+  /// then the confidence states.
   ///
-  /// `confidence` is a pure function of the telemetry pref and the stored
-  /// sample count, so it stays `.measured` through a revoked grant and through
-  /// a Safe Mode session; both are tested ahead of the switch for that reason.
+  /// `confidence` is a pure function of the telemetry pref and the stored sample
+  /// count, so it stays `.measured` through a revoked grant and through a Safe
+  /// Mode session; both are tested ahead of the switch for that reason.
   static func measurementLine(
     hours: String, summary: PanelHealthSummary, safeMode: Bool, grantPresent: Bool
   ) -> String {
@@ -281,15 +268,11 @@ enum OledCareCardCopy {
   }
 }
 
-/// One display on the OLED Care overview: mini heat surface, name, enrollment
-/// badge, and a status line. The WHOLE card is the navigation row (OCR3); it
-/// holds no toggles, and it previews its page's value (SO3). The map is drawn
-/// only when the stored history is `.measured`; every other state gets the
-/// blank frame, never a stale or estimated picture presented as one (OC11).
-///
-/// The status line follows the health page's honesty precedence exactly:
-/// Safe Mode first, then a missing Screen Recording grant, then the
-/// confidence states.
+/// One display on the OLED Care overview. The WHOLE card is the navigation row
+/// (OCR3): no toggles, and it previews its page's value (SO3). The map is drawn
+/// only from a `.measured` history, never a stale or estimated picture presented
+/// as one (OC11), and the status line follows the health page's honesty
+/// precedence: Safe Mode, then a missing grant, then confidence.
 @MainActor
 struct OledCareDisplayCard: View {
   let state: AppModel.DisplayState
@@ -311,9 +294,8 @@ struct OledCareDisplayCard: View {
     Button {
       path.wrappedValue.append(.display(persistenceKey))
     } label: {
-      // An enrolled display sits a shade warmer than the rest, the card's own
-      // lit state. The tint only underlines the badge's word; enrollment is
-      // never carried by colour alone.
+      // An enrolled display sits a shade warmer, the card's own lit state. The
+      // tint only underlines the badge's word: never colour alone.
       SettingsCard(isLit: prefs.oledCareEnrolled) {
         HStack(alignment: .center, spacing: 14) {
           miniSurface(summary: summary)
@@ -349,12 +331,11 @@ struct OledCareDisplayCard: View {
     .accessibilityHint(Text("Shows this display's OLED care settings."))
   }
 
-  /// The word IS the state; the tint only underlines it (never state by
-  /// colour alone).
+  /// The word IS the state; the tint only underlines it, never colour alone.
   @ViewBuilder private var enrollmentBadge: some View {
     if prefs.oledCareEnrolled {
-      // The window's own badge: the accent here means "this is on", which is
-      // exactly what enrollment is.
+      // The window's own badge: the accent means "this is on", which is what
+      // enrollment is.
       SettingsBadge(text: "Enrolled")
     } else {
       Text("Not enrolled")
@@ -373,10 +354,9 @@ struct OledCareDisplayCard: View {
       showsMap: prefs.oledCareEnrolled && summary.confidence == .measured)
   }
 
-  /// SO3's value preview, in words the data can support. For an enrolled
-  /// display: the engine's own dim state first (`dimStates` is the
-  /// coordinator's published truth, never a second opinion computed here),
-  /// then the line the glance tile carried: hours, then grant or confidence.
+  /// SO3's value preview, in words the data can support: the engine's own dim
+  /// state first (`dimStates` is the coordinator's published truth, never a
+  /// second opinion computed here), then hours, then grant or confidence.
   private func statusLine(summary: PanelHealthSummary) -> String {
     guard prefs.oledCareEnrolled else { return "Enroll to start dimming when idle" }
     var parts: [String] = []
@@ -393,9 +373,9 @@ struct OledCareDisplayCard: View {
       case .lockDim:
         parts.append(OledCareCopy.lockDimPreview(model.oledCare.lockDimSkips[persistenceKey]))
       case .blackout: parts.append("Screen off")
-      // The tile's only words, so they name which pause rather than reporting a
-      // user mirroring that never happened. One call feeds the sighted line and
-      // the accessibility value, which are the same string by construction.
+      // The tile's only words, so they name WHICH pause rather than reporting a
+      // user mirroring that never happened. One call feeds both the sighted line
+      // and the accessibility value.
       case .suspended:
         parts.append(
           OledCareCopy.suspendedPreview(
@@ -429,13 +409,11 @@ struct OledTileButtonStyle: ButtonStyle {
 }
 
 /// A note about the control directly ABOVE it, drawn inside that control's own
-/// `Form` row. Never its own row: a `Form` puts a divider and full padding
-/// around every row, so a note about a control reads as a separate setting,
-/// the defect `SettingRow` exists to prevent.
+/// row. Never its own row: the divider and full padding make a note read as a
+/// separate setting, the defect `SettingRow` exists to prevent.
 ///
-/// Symbol AND text, like the General pane's Safe Mode note; never state by
-/// colour alone. Stronger than a caption on purpose: every use says the
-/// control above it did not do, or is not doing, what it says.
+/// Symbol AND text, never state by colour alone. Stronger than a caption on
+/// purpose: every use says the control above it is not doing what it says.
 struct OledInlineNote: View {
   private let text: Text
 
@@ -449,18 +427,15 @@ struct OledInlineNote: View {
         .fixedSize(horizontal: false, vertical: true)
     }
     // Brighter than a caption and monochrome: the accent means "this is on"
-    // everywhere else in the window, and every use of this note says something
-    // is not.
+    // everywhere else in the window, and every use of this note says it is not.
     .font(.callout)
     .foregroundStyle(SettingsTheme.titleColor)
   }
 }
 
-/// The hottest-area marker's explanation, drawn ON the map: a tag on a
-/// hairline leader beside the hottest cell, so the reticle
-/// `PanelExposureSurface` draws is never a bare, legendless box (OCR8).
-/// Decorative to VoiceOver: every fact it shows is stated in words beside or
-/// below the map, which is the hero's standing rule.
+/// The hottest-area marker's explanation, drawn ON the map, so the reticle
+/// `PanelExposureSurface` draws is never a bare legendless box (OCR8).
+/// Decorative to VoiceOver: every fact it shows is also stated in words.
 struct OledHotspotTag: View {
   /// Panel-native cells; the tag re-orients the same way the surface does.
   let cells: [Double]
@@ -479,14 +454,12 @@ struct OledHotspotTag: View {
             * geometry.size.width,
           y: (CGFloat(displayIndex / oriented.cols) + 0.5) / CGFloat(oriented.rows)
             * geometry.size.height)
-        // Leads right of the cell unless that would run off the map's edge;
-        // the anchor point is the leader's cell-side end either way, and the
-        // vertical position is clamped so the tag never clips top or bottom.
+        // Leads right of the cell unless that runs off the map's edge, with the
+        // vertical position clamped so the tag never clips.
         //
-        // `position` centres, so pinning one END of a variable-width tag to
-        // the anchor goes through an aligned frame spanning anchor-to-edge:
-        // the frame's aligned edge IS the anchor, and its centre is knowable
-        // without measuring the tag.
+        // `position` centres, so pinning one END of a variable-width tag to the
+        // anchor goes through an aligned frame spanning anchor-to-edge: that
+        // frame's centre is knowable without measuring the tag.
         let leadsRight = anchor.x < geometry.size.width * 0.6
         let y = min(max(anchor.y, 11), geometry.size.height - 11)
         let span = leadsRight
@@ -543,10 +516,9 @@ struct ReticleTicks: View {
   }
 }
 
-/// The mission-control strip under the hero map. Every field is a real
-/// reading: the count and timestamp come off the map itself and the grant is
-/// the live preflight, so this line cannot describe a pipeline that is not
-/// running.
+/// The strip under the hero map. Every field is a real reading: the count and
+/// timestamp come off the map itself and the grant is the live preflight, so
+/// this line cannot describe a pipeline that is not running.
 struct OledTelemetryTicker: View {
   let sampleCount: Int
   let lastSample: Date?
@@ -574,9 +546,8 @@ struct OledTelemetryTicker: View {
 }
 
 /// The breathing measurement indicator. It may only breathe while readings
-/// genuinely land (`lastSample` within two sampling intervals), so the motion
-/// IS the telemetry: a dead grant stills it within two minutes, which is the
-/// honesty tie the stalled 2026-08-11 soak earned.
+/// genuinely land (`lastSample` within two sampling intervals), so the motion IS
+/// the telemetry: a dead grant stills it within two minutes.
 struct OledMeasuringDot: View {
   let live: Bool
 
@@ -584,24 +555,21 @@ struct OledMeasuringDot: View {
 
   var body: some View {
     // A symbol effect, not a custom repeatForever animation: a repeating
-    // animation attached to a view inside a scrolling Form also animates the
-    // view's POSITION, so the dot rode every layout change across the whole
-    // window. Symbol effects are contained to the glyph by construction.
+    // animation on a view inside a scroll also animates its POSITION, so the dot
+    // rode every layout change in the window. Symbol effects stay in the glyph.
     Image(systemName: "circle.fill")
       .font(.system(size: 7))
       // Green stays: it is the ticker's "grant OK" in a colour, and the words
-      // beside it carry the same fact.
+      // beside it carry the same fact anyway.
       .foregroundStyle(live ? Color.green : SettingsTheme.faintColor)
       .symbolEffect(.pulse, options: .repeating, isActive: live && !reduceMotion)
       .accessibilityHidden(true)
   }
 }
 
-/// Time at brightness, from the wear signal histogram nothing displayed
-/// before. Ten bars, one per stored level bucket, each scaled to the busiest
-/// bucket and colored through the shared ramp so dark-to-bright reads
-/// left-to-right. Seconds are real accumulated counts (OC20); the dim share
-/// is `wearWeightableFraction`, a count of seconds with no model in it.
+/// Time at brightness: one bar per stored level bucket, scaled to the busiest
+/// and colored through the shared ramp so dark-to-bright reads left-to-right.
+/// Seconds are real accumulated counts (OC20), not a model.
 struct OledBrightnessHistogram: View {
   let secondsByBucket: [Double]
 

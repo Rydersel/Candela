@@ -7,9 +7,8 @@ public enum MediaKey: Sendable, Hashable {
   case mute
 }
 
-/// Modifier flags accompanying a media-key press. The event tap normalizes
-/// NSEvent modifier flags down to exactly these four — "exactly `[.option]`"
-/// comparisons are over this 4-flag domain.
+/// Modifier flags on a media-key press. The event tap normalizes NSEvent flags
+/// down to exactly these four, so `== [.option]` comparisons are safe.
 public struct KeyModifiers: OptionSet, Sendable, Hashable {
   public let rawValue: Int
   public init(rawValue: Int) { self.rawValue = rawValue }
@@ -19,7 +18,7 @@ public struct KeyModifiers: OptionSet, Sendable, Hashable {
   public static let command = KeyModifiers(rawValue: 1 << 3)
 }
 
-/// A single media-key event as delivered by the event tap (Task 4).
+/// A single media-key event as delivered by the event tap.
 public struct MediaKeyPress: Sendable {
   public let key: MediaKey
   public let isPressed: Bool // true on keyDown, false on keyUp

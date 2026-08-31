@@ -16,9 +16,8 @@ struct PrefsSchemaTests {
   }
 
   @Test func downgradeNeverWipes() {
-    // A FUTURE version is left alone, and no other key is touched — the app
-    // runs on its enum unknown-value fallbacks (D13; anti-fork: the fork
-    // wipes the whole domain on any downgrade).
+    // A future version is left alone and no other key is touched; the app runs
+    // on its enum unknown-value fallbacks (D13). The fork wiped the whole domain.
     let d = InMemoryDefaults()
     d.set(99, forKey: "prefsSchemaVersion")
     d.set(true, forKey: "showContrast")
@@ -36,8 +35,8 @@ struct PrefsSchemaTests {
     #expect(d.bool(forKey: "showContrast"))
   }
 
-  /// Counts writes so a no-op can be distinguished from a rewrite of the same
-  /// value — asserting on the stored value alone cannot tell those apart.
+  /// Counts writes: asserting on the stored value cannot tell a no-op from a
+  /// rewrite of the same value.
   private final class WriteCountingDefaults: InMemoryDefaults {
     private(set) var writes: [String] = []
     override func set(_ value: Any?, forKey key: String) {
@@ -47,16 +46,9 @@ struct PrefsSchemaTests {
   }
 
   @Test func currentVersionIsAnUntouchedNoOp() {
-    // The branch that runs on EVERY normal launch, and the only one with no
-    // coverage before this (Task 1 review, Minor 4). `stored == current` must
-    // fall through the `stored < currentVersion` guard and write NOTHING.
-    //
-    // The write count is the whole point: relaxing the guard to `<=` would
-    // re-record an identical value, so every value-based assertion would still
-    // pass. Harmless while this function only bumps an integer — but the moment
-    // a real migration lands, an off-by-one guard re-runs its side effects on
-    // every launch, which is exactly the kind of bug that surfaces as data
-    // drift months later.
+    // Relaxing the guard to `<=` would rewrite an identical value, so every
+    // value-based assertion still passes. Once a real migration lands, that
+    // off-by-one re-runs its side effects on every launch.
     let d = WriteCountingDefaults()
     d.set(PrefsSchema.currentVersion, forKey: "prefsSchemaVersion")
     d.set(true, forKey: "showContrast")
@@ -68,9 +60,8 @@ struct PrefsSchemaTests {
   }
 
   @Test func anAbsentVersionIsLeftAbsent() {
-    // First run is signalled by the ABSENCE of the key (D14). migrateIfNeeded
-    // must not record it — onboarding completion does (Task 15), so an
-    // interrupted first run re-onboards.
+    // Absence of the key signals first run (D14). Onboarding completion records
+    // it, not this, so an interrupted first run re-onboards.
     let d = InMemoryDefaults()
     PrefsSchema.migrateIfNeeded(in: d)
     #expect(PrefsSchema.storedVersion(in: d) == nil)

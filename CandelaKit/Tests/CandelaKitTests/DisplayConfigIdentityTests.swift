@@ -17,13 +17,9 @@ struct DisplayConfigIdentityTests {
     #expect(dell != mag)
   }
 
-  /// There is exactly one built-in panel and it cannot be swapped, so it gets
-  /// a fixed token rather than a vendor triple — its CG values are not
-  /// meaningfully more stable and a fixed token is legible in a defaults dump.
-  ///
-  /// The token matches the `persistenceKey` spelling `BuiltInDisplayPane` and
-  /// `AppModel` already use, so the same panel reads as one display in a
-  /// `defaults` dump. Exact-string on purpose: the format is frozen on ship.
+  /// The built-in panel cannot be swapped, so it gets a fixed token rather than a
+  /// vendor triple, spelled as `persistenceKey` already spells it so the same panel
+  /// reads as one display in a defaults dump. Exact-string: the format ships frozen.
   @Test func theBuiltInDisplayUsesAFixedToken() {
     let a = DisplayConfigIdentity(vendor: 0x610, model: 0xA04E, serial: 0xFD626D62, isBuiltIn: true)
     let b = DisplayConfigIdentity(vendor: 0x999, model: 0x111, serial: 0x222, isBuiltIn: true)

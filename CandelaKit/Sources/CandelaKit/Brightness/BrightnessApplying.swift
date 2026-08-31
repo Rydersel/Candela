@@ -1,30 +1,28 @@
 import CoreGraphics
 import os
 
-/// Wiring-bug diagnostics for the appliers: a mismatched target kind means
-/// path selection handed a target to the wrong applier.
+/// Wiring-bug diagnostics for the appliers: a mismatched target kind means path
+/// selection handed a target to the wrong applier.
 ///
-/// **Every line in this category is an assertion about the APP.** The tests
-/// that exercise the guards therefore never reach it: they inject a recorder
-/// (see `ApplierMismatchReporting`). The test process logs into this same
-/// subsystem, so a line written by `swiftpm-testing-helper` reads exactly like a
-/// line written by Candela. That is the whole of #148, which read three lines
-/// per `swift test` run as three per app launch.
+/// **Every line in this category is an assertion about the APP**, so the guard tests
+/// inject a recorder instead (`ApplierMismatchReporting`). The test process logs
+/// into this same subsystem, and a line written by `swiftpm-testing-helper` reads
+/// exactly like one written by Candela.
 let applierLog = Logger(subsystem: "com.rydersel.Candela", category: "applier")
 
 /// One hardware brightness endpoint's target value. `Equatable` so the
 /// coalescer's duplicate-skip compares what actually hits hardware,
 /// independent of which applier carries the write.
 public enum HardwareTarget: Sendable, Equatable {
-  /// Raw DDC value (0...maxDDCValue) for the applier's command — brightness
-  /// VCP 0x10 by default, but a remapped or non-brightness command's raw
-  /// rides the same case; the code lives with the writer, not here.
+  /// Raw DDC value (0...maxDDCValue) for the applier's command: brightness VCP 0x10
+  /// by default, though a remapped or non-brightness command's raw rides the same
+  /// case. The code lives with the writer, not here.
   case ddc(raw: UInt16)
   /// Native Apple-display brightness in 0...1 (DisplayServices).
   case native(Float)
 
-  /// The target's kind, stripped of its payload, so a pairing can be compared
-  /// without unwrapping a value nothing here needs.
+  /// The kind without the payload, so a pairing compares without unwrapping a value
+  /// nothing here needs.
   public var kind: HardwareTargetKind {
     switch self {
     case .ddc: .ddc
@@ -40,38 +38,36 @@ public enum HardwareTargetKind: Sendable, Equatable {
 }
 
 /// Where a pairing mismatch is reported. Production leaves it nil and the line
-/// reaches `applierLog`; a test that deliberately drives the guard passes a
-/// recorder, which both keeps the app's assertion channel clean (#148) and
-/// turns "it logged" into something a test can actually assert.
+/// reaches `applierLog`; a test that drives the guard passes a recorder, which keeps
+/// the app's assertion channel clean and turns "it logged" into something a test can
+/// assert.
 public typealias ApplierMismatchReporting = @Sendable (String) -> Void
 
 /// Applies one hardware brightness target. Implementations serialize their
 /// own I/O.
 public protocol BrightnessApplying: Sendable {
   /// The one kind of target this applier carries. Every other kind is a
-  /// path-selection wiring bug and is rejected by `apply`.
+  /// path-selection wiring bug and `apply` rejects it.
   ///
-  /// Stated here rather than left implicit in `apply`'s pattern match so the
-  /// pairing is a checkable invariant: a mismatch used to be observable only as
-  /// a log line two layers downstream of the site that chose the applier, and a
-  /// log line is only an assertion if somebody reads it (#148).
+  /// Stated here rather than left implicit in `apply`'s pattern match so the pairing
+  /// is a checkable invariant: a mismatch used to surface only as a log line two
+  /// layers downstream of the site that chose the applier.
   var accepts: HardwareTargetKind { get }
 
   func apply(_ target: HardwareTarget) async -> Bool
 }
 
-/// Native-brightness applier over an injected apply closure: the app injects
-/// `DisplayServices.setBrightness`; injection keeps this type (and CandelaKit
-/// tests) independent of the private-framework shim. A `.ddc` target is a
-/// path-selection wiring bug: rejected (`false`), reported once per instance.
+/// Native-brightness applier over an injected apply closure (the app injects
+/// `DisplayServices.setBrightness`), which keeps this type and the CandelaKit tests
+/// independent of the private-framework shim. A `.ddc` target is a path-selection
+/// wiring bug: rejected (`false`), reported once per instance.
 public struct NativeBrightnessApplier: BrightnessApplying {
   public let accepts = HardwareTargetKind.native
 
-  /// Per-instance, not static (review M2): with multiple displays a static
-  /// flag would let the first display's wiring bug suppress the report for all
-  /// others. Copies share the lock's heap storage, so copies of one instance
-  /// still report once; the per-submit-constructed applier reports once per
-  /// affected write, which is acceptable: a live wiring bug is a must-fix.
+  /// Per-instance, not static: with several displays a static flag would let the
+  /// first display's wiring bug suppress the report for all the others. Copies share
+  /// the lock's heap storage, so the per-submit applier reports once per affected
+  /// write, which is acceptable for a must-fix.
   private let mismatchReported = OSAllocatedUnfairLock(initialState: false)
   private let displayID: CGDirectDisplayID
   private let applyNative: @Sendable (Float, CGDirectDisplayID) -> Bool
@@ -98,11 +94,10 @@ public struct NativeBrightnessApplier: BrightnessApplying {
   }
 }
 
-/// Reports `message` only the first time its (per-instance) flag is seen unset:
-/// repeated mismatches on the same applier instance produce one report.
-///
-/// `report` receives exactly the line production would log, so a test asserting
-/// on it is asserting on the real diagnostic and not on a paraphrase.
+/// Reports `message` only the first time its flag is seen unset, so repeated
+/// mismatches on one applier instance produce one report. `report` receives exactly
+/// the line production would log, so a test asserts on the real diagnostic rather
+/// than a paraphrase.
 func reportMismatchOnce(
   _ flag: OSAllocatedUnfairLock<Bool>,
   _ message: String,

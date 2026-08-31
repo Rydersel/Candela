@@ -5,9 +5,8 @@ import Foundation
 
 // Shared fakes for the app suite (AT3): tests never construct a hardware
 // service. Everything here answers without touching a wire, a panel, or
-// CoreAudio. Owned by the scaffold task; sibling test files add their own
-// file-local helpers rather than editing this one, so parallel work stays
-// on disjoint files.
+// CoreAudio. Sibling test files add their own file-local helpers rather than
+// editing this one.
 
 final class FakeDDCWriter: DDCWriting, @unchecked Sendable {
   // Lock-free single-threaded test use; @unchecked because the test suite
@@ -63,10 +62,9 @@ actor FakeHDR: HDRToggling {
   func repinFrames() {}
 }
 
-/// Holds no baselines, so SS15's `assumingLinearBaseline` leg deliberately
-/// takes the protocol's forwarding default: there is nothing here for it to do
-/// differently. A fake that DID hold baselines would have to implement it, and
-/// nothing would say so at compile time.
+/// Holds no baselines, so SS15's `assumingLinearBaseline` leg takes the
+/// protocol's forwarding default. A fake that DID hold baselines would have to
+/// implement it, and nothing would say so at compile time.
 @MainActor final class FakeGamma: GammaApplying {
   func applyGammaScale(
     _ scale: Double, on displayID: CGDirectDisplayID,
@@ -90,10 +88,9 @@ final class FakeAudio: AudioDeviceProviding, @unchecked Sendable {
   func setOnDefaultOutputChange(_ handler: (@Sendable () -> Void)?) {}
 }
 
-/// A discovery seam whose answer a test sets between passes: the only route to
-/// a populated `AppModel` display list, and the only way to script a topology
-/// change that no cable arrangement can produce (a same-port panel swap always
-/// splits into a departure pass and an arrival pass on real hardware).
+/// A discovery seam a test sets between passes: the only route to a populated
+/// `AppModel` display list, and the only way to script a same-port panel swap,
+/// which on real hardware always splits into a departure and an arrival pass.
 @MainActor
 final class ScriptedDiscovery {
   var topology: [(id: CGDirectDisplayID, key: String, name: String)] = []
@@ -128,9 +125,8 @@ final class ScriptedDiscovery {
 }
 
 enum TestFixtures {
-  /// A prefs domain that cannot collide with the app's or another test's:
-  /// unique suite per call, torn down by never being persisted anywhere the
-  /// app reads.
+  /// A unique suite per call, so a test collides with neither the app's domain
+  /// nor another test's, and nothing lands where the app would read it.
   static func prefs(persistenceKey: String, safeMode: Bool = false) -> DisplayPrefs {
     let suite = UserDefaults(suiteName: "app-tests-\(UUID().uuidString)")!
     return DisplayPrefs(defaults: suite, persistenceKey: persistenceKey, safeMode: safeMode)
@@ -162,10 +158,9 @@ enum TestFixtures {
       writer: writer)
   }
 
-  /// A hardware-free AppModel (AT3): every injectable seam filled with a
-  /// fake, so no MonitorPanelService and no CoreAudioDeviceProvider is ever
-  /// constructed. Its display list is empty until something refreshes it; the
-  /// `discovery` overload below is what fills one.
+  /// A hardware-free AppModel (AT3): every injectable seam filled with a fake,
+  /// so no MonitorPanelService and no CoreAudioDeviceProvider is constructed.
+  /// The display list stays empty until the `discovery` overload below fills it.
   @MainActor static func appModel(safeMode: Bool = false) -> AppModel {
     AppModel(
       shade: FakeShade(), gamma: FakeGamma(),
@@ -176,11 +171,10 @@ enum TestFixtures {
   /// The same hardware-free model with its discovery scripted, so a caller can
   /// `await model.refresh()` into a known external topology.
   ///
-  /// The BUILT-IN slot is not scripted and cannot be: `refreshBuiltIn` reads
+  /// The BUILT-IN slot cannot be scripted: `refreshBuiltIn` reads
   /// `BuiltInDisplayDiscovery` directly, so whether `model.builtIn` is filled
   /// depends on the machine running the suite. Nothing built on this may assert
-  /// on the built-in's presence, which is also why it is worth asserting that
-  /// the built-in never reaches `displays`.
+  /// on the built-in's presence.
   @MainActor static func appModel(
     discovery: ScriptedDiscovery, safeMode: Bool = false
   ) -> AppModel {

@@ -3,24 +3,19 @@ import SwiftUI
 /// A chevron row that pushes a sub-page, with the sub-page's current value
 /// previewed on the right.
 ///
-/// ONE accessibility element carrying the button trait (accessibility contract
-/// 5): the chevron is decoration, and the value gets a spoken form so VoiceOver
-/// reads `2,560 by 1,440 at 60 hertz` rather than the glyph-packed display
-/// string. At accessibility text sizes the value drops onto its own line
-/// instead of truncating (contract 10) — `ViewThatFits` measures the side-by-side
-/// layout's ideal width and falls through when it no longer fits.
+/// ONE accessibility element carrying the button trait: the chevron is
+/// decoration, and the value gets a spoken form so VoiceOver reads
+/// `2,560 by 1,440 at 60 hertz` rather than the glyph-packed display string. At
+/// accessibility text sizes `ViewThatFits` drops the value onto its own line
+/// instead of truncating.
 ///
-/// **Never `.accessibilityElement(children: .ignore)` on a `Button`** (#142).
-/// It does not annotate the button's element, it REPLACES it with a synthesized
-/// generic one that keeps the label and the value and drops everything that
-/// made the row operable: measured on macOS 26, the row lost `AXPress` (an
-/// `AXUIElementPerformAction` still returned `.success` and pushed nothing) and
-/// lost the `AXFocused` attribute outright, so a screen-reader user could not
-/// reach Advanced or Diagnostics at all and the pop-focus restoration on this
-/// row's `.focused` tag had nothing to restore to. `.accessibilityAction` gives
-/// the press back but not the focus. The `Button` is already one element with
-/// the button trait and already merges its own content, so the label and value
-/// modifiers alone do the whole job.
+/// Never `.accessibilityElement(children: .ignore)` on a `Button`. It does not
+/// annotate the button's element, it REPLACES it with a synthesized generic one:
+/// measured on macOS 26, the row lost `AXPress` (an `AXUIElementPerformAction`
+/// still returned `.success` and pushed nothing) and lost `AXFocused` outright,
+/// so a screen-reader user could not reach the pushed pages at all.
+/// `.accessibilityAction` gives the press back but not the focus. The `Button`
+/// is already one element with the button trait and merges its own content.
 struct NavigationRow: View {
   let title: String
   let value: String?

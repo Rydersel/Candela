@@ -3,21 +3,16 @@ import SwiftUI
 
 /// The half of the diagnostics page's copy that cannot leave the app target.
 ///
-/// The split with `DiagnosticsCopy` (CandelaKit) is exactly the split
-/// `PanelHealthCopy` and `OledCareCopy` already draw, for the same reason: a
-/// sentence derived from values returns `String` and gets a test, and a sentence
-/// that is a `LocalizedStringKey` cannot, because CandelaKit imports no SwiftUI
-/// and there is no app test target. So the VALUES on the right of every row live
-/// in Kit and the CAPTIONS explaining them live here.
+/// The split with `DiagnosticsCopy` (CandelaKit) is the one `PanelHealthCopy`
+/// and `OledCareCopy` already draw: a sentence derived from values returns
+/// `String` and gets a test, and a `LocalizedStringKey` cannot, because
+/// CandelaKit imports no SwiftUI. Values in Kit, captions here.
 ///
-/// Moved out of `DiagnosticsPage` (#127) with no word changed. These are the
-/// page's explanations, and several of them are load-bearing: the caption under
-/// "Reading values back" names the two causes that are knowable and claims no
-/// others, and the caption under "Capability request" tells four states apart.
-/// Read the comment on each before rewording it.
+/// Several captions are load-bearing: the one under "Reading values back" names
+/// only the causes that are knowable, and the one under "Capability request"
+/// tells four states apart. Read each comment before rewording it.
 ///
-/// `LocalizedStringKey` is not `Sendable`, so these are computed `static var`s
-/// rather than `static let`s, matching `MirroringCopy`.
+/// `LocalizedStringKey` is not `Sendable`, so these are computed `static var`s.
 enum DiagnosticsPageCopy {
 
   // MARK: - This Display
@@ -26,21 +21,16 @@ enum DiagnosticsPageCopy {
     "Which cable this display is connected through."
   }
 
-  /// Shown ONLY when it applies, and only once the facts have actually arrived:
-  /// a caveat raised while we still know nothing would claim the display
-  /// reported no serial before it reported anything at all. A standing caveat
-  /// about a hazard the user does not have is noise, and noise is what makes
-  /// real warnings ignorable.
+  /// Shown only once the facts have arrived: raised earlier it would claim the
+  /// display reported no serial before it reported anything at all.
   static var noSerialNumber: LocalizedStringKey {
     "This display reports no serial number. Two identical units would share one set of saved settings."
   }
 
 
 
-  /// The caption has to survive the case where the two keys are IDENTICAL,
-  /// which is what the built-in shows (`builtIn` / `builtIn`). The original
-  /// sentence explained the mechanism and left the user staring at two equal
-  /// values under text implying a distinction they could not see.
+  /// Has to survive the two keys being IDENTICAL, which is what the built-in
+  /// shows: text implying a distinction the user cannot see is worse than none.
   static func identityKeys(keysMatch: Bool) -> LocalizedStringKey {
     if keysMatch {
       return "Settings are saved under the first key and resolution under the second. They are the same here: this display has no DDC identity for resolution to key off, so both fall back to the same name."
@@ -91,11 +81,10 @@ enum DiagnosticsPageCopy {
 
   // MARK: - Reported Capabilities
 
-  /// The caption side of `DiagnosticsCopy.capabilityAnswer`, which is why it
-  /// takes the same three facts plus one the value does not need. Four states,
-  /// and the HDR arm is the one skip that is not "hasn't got round to it yet":
-  /// DDC is dead under HDR, so `CapabilityProbePolicy` refuses to probe and
-  /// refuses to cache a verdict that would outlive its cause.
+  /// The caption side of `DiagnosticsCopy.capabilityAnswer`, so it takes the same
+  /// facts plus one the value does not need. The HDR arm is the one skip that is
+  /// not "hasn't got round to it yet": DDC is dead under HDR, so
+  /// `CapabilityProbePolicy` refuses to probe and refuses to cache a verdict.
   static func capabilityAnswer(
     hasDescription: Bool, parsedACommandList: Bool, wasAsked: Bool, isHDREngaged: Bool
   ) -> LocalizedStringKey {
@@ -107,11 +96,9 @@ enum DiagnosticsPageCopy {
     }
     if wasAsked {
       // "Once this session" would be wider than the cache's real window:
-      // `AppModel.performRefresh` evicts both the volume verdict and the
-      // capability string for any display that is no longer live, because a
-      // replug hands out a fresh `IOAVService` and an old answer is not evidence
-      // about the new wire. So the window is the plug, not the session, and
-      // unplugging re-asks.
+      // `AppModel.performRefresh` evicts the volume verdict and the capability
+      // string for any display no longer live, because a replug hands out a fresh
+      // `IOAVService`. The window is the plug, not the session.
       return "\(AppInfo.productName) asked once since this display was plugged in. Either the display sent nothing or it sent something that could not be put back together. From here the two look the same."
     }
     if isHDREngaged {
@@ -128,9 +115,8 @@ enum DiagnosticsPageCopy {
     "\(AppInfo.productName) uses four commands: brightness, contrast, volume and mute. A display can advertise a command it ignores, or ignore one it advertises."
   }
 
-  /// Collapsed, and a plain block of text rather than a list with affordances
-  /// (R12): it is the wire's own words, kept for copying into a bug report, not
-  /// a thing to browse.
+  /// Collapsed, and plain text rather than a browsable list (R12): it is the
+  /// wire's own words, kept for pasting into a bug report.
   static var rawDescriptionDisclosure: LocalizedStringKey {
     "What the display sent, exactly"
   }
@@ -148,19 +134,14 @@ enum DiagnosticsPageCopy {
     }
   }
 
-  /// An earlier sentence, "startup behaviour for THIS DISPLAY is not set to read
-  /// values back", asserted a cause it could not know, at a scope that does not
-  /// exist. `startupAction` is app-level (`DisplayPrefs` reads it straight off
-  /// the `startupAction` default, unkeyed), and `.notAttempted` also arises from
-  /// Safe Mode, from all three commands being turned off for this display, and
-  /// simply from the first read not having happened yet.
+  /// Names only the two causes knowable from here. `startupAction` is app-level,
+  /// not per-display, and `.notAttempted` also arises from Safe Mode, from all
+  /// three commands being turned off, or from the first read not having happened.
   ///
-  /// So the two causes that ARE knowable from here are named, in the order that
-  /// matches how they mask each other: under Safe Mode the `startupAction`
-  /// getter reports `.doNothing` regardless of what is stored (D11), so reading
-  /// it first would report the pref rather than the session. Everything else
-  /// falls through to a sentence that states the consequence and claims no
-  /// cause.
+  /// Safe Mode is checked first because under it the `startupAction` getter
+  /// reports `.doNothing` whatever is stored (D11), so reading the pref first
+  /// would report the pref rather than the session. Everything else falls through
+  /// to a sentence that claims no cause.
   static func notAttempted(isSafeMode: Bool, readsBackAtStartup: Bool) -> LocalizedStringKey {
     if isSafeMode {
       return "Safe Mode is on for this session, so nothing is read back from any display. The values shown elsewhere in this window come from your saved settings, not from the display."
@@ -182,47 +163,40 @@ enum DiagnosticsPageCopy {
 
   // MARK: - Right Now
 
-  /// `hdrMode` is the POLICY and `isHDREngaged` the STATE, so the two
-  /// disagreeing is not a bug: it is somebody having turned HDR on in System
-  /// Settings, and it explains why the hardware commands stopped.
+  /// `hdrMode` is the POLICY and `isHDREngaged` the STATE, so the two disagreeing
+  /// is not a bug: somebody turned HDR on in System Settings, which is why the
+  /// hardware commands stopped.
   static var hdrTurnedOnOutside: LocalizedStringKey {
     "HDR was turned on outside \(AppInfo.productName). Hardware commands do not reach a display while it is in HDR mode."
   }
 
-  /// The epoch gate stops every submit, native and DDC alike, but the built-in
-  /// has no hardware command to stop, so calling its row "Hardware commands"
-  /// would name a wire it does not have.
+  /// The epoch gate stops every submit, but the built-in has no hardware command
+  /// to stop, so calling its row "Hardware commands" would name a missing wire.
   static func writeGateLabel(isBuiltIn: Bool) -> LocalizedStringKey {
     isBuiltIn ? "Brightness commands" : "Hardware commands"
   }
 
-  /// One of the three safe-mode summaries, and the words are `SafeModeCopy`'s
-  /// (#147): this row named three suppressions while the app performed four.
-  /// `String` rather than `LocalizedStringKey` for the same reason the rest of
-  /// `DiagnosticsCopy` is: the shared list lives in Kit, which imports no
-  /// SwiftUI. The call site takes it through `SettingsCaption(verbatim:)`.
+  /// `SafeModeCopy`'s words, so this row cannot drift from what the app actually
+  /// suppresses. `String` rather than `LocalizedStringKey` because the shared list
+  /// lives in Kit; the call site takes it through `SettingsCaption(verbatim:)`.
   static var safeMode: String {
     SafeModeCopy.diagnosticsRow(app: AppInfo.productName)
   }
 
-  /// Attached whenever a family is missing, which now includes the partial
-  /// states: the not-running sibling gives its reason in the value, and a bare
-  /// "None" gave none at all. It states the gates rather than picking one: which
-  /// of them is holding is not visible from here, and all of them are necessary
-  /// conditions.
+  /// Attached whenever a family is missing, partial states included. It states
+  /// the gates rather than picking one: which is holding is not visible from
+  /// here, and all of them are necessary.
   ///
-  /// ONE consequence sentence (SO15). The conditions themselves are a list, so
-  /// they are a list on screen (`requirements` below), with the prose each row
-  /// replaces kept as that row's accessibility label (SO16).
+  /// ONE consequence sentence (SO15); the conditions are a list on screen
+  /// (`requirements` below), with the prose kept as each row's accessibility
+  /// label (SO16).
   static var watchedKeys: LocalizedStringKey {
     "\(AppInfo.productName) watches a family of keys only while a press could land on something, and keys it does not watch go straight to macOS."
   }
 
-  /// What each family needs before its keys are watched, as `(title, needs,
-  /// spoken)`. The visible half states only what holds in every mode; the
-  /// mode-dependent corners live in the spoken half, which is where the prose
-  /// this list replaced went (SO16). The Keyboard pane states those corners in
-  /// full, each next to the control that rules it.
+  /// What each family needs before its keys are watched. The visible half states
+  /// only what holds in every mode; the mode-dependent corners live in the spoken
+  /// half (SO16), and the Keyboard pane states them in full.
   static var keyWatchRequirements: [(title: String, needs: String, spoken: String)] {
     [
       (

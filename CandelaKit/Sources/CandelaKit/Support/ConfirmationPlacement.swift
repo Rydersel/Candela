@@ -3,19 +3,15 @@ import Foundation
 
 /// Where a keep-or-revert window goes when it is not the only one asking.
 ///
-/// Every reconfiguration surface owns its own confirmation window and every one
-/// of them centred on the display it was asking about, so two questions that
-/// resolved to the same display landed on exactly the same point and neither
-/// ever moved again. In the case that found this, a refused mirroring change
-/// reported itself directly on top of an outstanding arrangement countdown: the
-/// gate produced the words AR12 requires and then drew them over the live
-/// safety question they were about (#126).
+/// Every reconfiguration surface owns its own confirmation window and each one
+/// centred on the display it was asking about, so two questions resolving to the
+/// same display landed on exactly the same point. A refused mirroring change
+/// once drew the words AR12 requires straight over a live arrangement countdown.
 ///
-/// The rule is that the incumbent keeps its place and the newcomer moves. That
-/// is deliberately not a judgement about which question matters more, which
-/// would need exactly the cross-surface knowledge DT16 keeps out of the islands.
-/// It does not need one: the newcomer is placed CLEAR of what is already on
-/// screen, so both are fully readable whichever arrived first.
+/// The incumbent keeps its place and the newcomer moves. That is not a judgement
+/// about which question matters more, which would need the cross-surface
+/// knowledge DT16 keeps out of the islands: the newcomer is placed CLEAR of what
+/// is already on screen, so both are readable whichever arrived first.
 public enum ConfirmationPlacement {
   /// Between two windows. Enough to read as separate windows rather than one
   /// mis-drawn one.
@@ -26,16 +22,14 @@ public enum ConfirmationPlacement {
 
   /// The origin for a window of `size`, in AppKit's y-up coordinates.
   ///
-  /// Centred when nothing else is up, which is every ordinary case. Otherwise
-  /// the closest position to that centre that fits entirely on screen and
-  /// touches none of `occupied`: below, above, left, right, in that order, so
-  /// the result is stable rather than dependent on how the candidates happen to
-  /// tie.
+  /// Centred when nothing else is up. Otherwise the closest position to that
+  /// centre that fits entirely on screen and touches none of `occupied`: below,
+  /// above, left, right, in that order, so the result is stable rather than
+  /// dependent on how the candidates happen to tie.
   ///
   /// Falls back to a step off the centre when the screen has no room for two
-  /// windows at all. That case is a compromise and it is still an improvement:
-  /// the pair overlaps, but the one underneath is visibly there, which an exact
-  /// stack never was.
+  /// windows at all. The pair overlaps, but the one underneath is visibly there,
+  /// which an exact stack never was.
   public static func origin(
     size: CGSize, in visibleFrame: CGRect, avoiding occupied: [CGRect]
   ) -> CGPoint {

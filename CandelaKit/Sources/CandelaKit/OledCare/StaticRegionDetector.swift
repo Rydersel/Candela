@@ -1,30 +1,28 @@
 import Foundation
 
-/// Nominates panel regions for detection dimming (#20).
+/// Nominates panel regions for detection dimming.
 ///
 /// **The conjunction is the feature, but it is narrower than it sounds.** A
 /// cell is nominated only when it is both bright in the latest sample and
 /// covered by a window whose bounds have not moved past
-/// `WindowObserver.stationaryThresholdSeconds`. Staticness alone would nominate
-/// a dark-mode terminal, which is not wearing the panel, so the dim would be
-/// spent where there is nothing to protect. Brightness alone would nominate
-/// anything bright, including a region under a window being dragged.
+/// `WindowObserver.stationaryThresholdSeconds`. Staticness alone nominates a
+/// dark-mode terminal, which is not wearing the panel; brightness alone
+/// nominates a region under a window being dragged.
 ///
 /// **It does NOT exclude a windowed video, and nothing here should claim it
-/// does.** `WindowObserver`'s own doc says so and is right: bounds stability is
-/// not content staticness, and a player holding a fixed rect for five minutes
-/// passes BOTH halves. Only `fullScreenOwner` protects, and only for a genuinely
-/// full-screen window. That is why OC18 calls geometry a prior and never a
-/// verdict, and why the user-visible caption promises exactly what is true
-/// ("full-screen video is never dimmed") and no more. A windowed player is a
-/// known gap, recorded on #20.
+/// does.** Bounds stability is not content staticness, and a player holding a
+/// fixed rect for five minutes passes BOTH halves. Only `fullScreenOwner`
+/// protects, and only for a genuinely full-screen window. That is why OC18 calls
+/// geometry a prior and never a verdict, and why the caption promises exactly
+/// "full-screen video is never dimmed" and no more. A windowed player is a known
+/// gap.
 ///
 /// "Persistently" is also weaker than it reads: `recentGrid` is ONE 60-second
 /// sample, not the accumulated map. Persistence comes from the staticness half
 /// alone.
 ///
-/// Pure and static: everything arrives as an argument, including the grid, so
-/// the coordinator owns the sampling cadence and this type owns only the rule.
+/// Pure and static: everything arrives as an argument, so the coordinator owns
+/// the sampling cadence and this type owns only the rule.
 public struct StaticRegionDetector: Sendable {
 
   public struct Thresholds: Equatable, Sendable {
@@ -35,19 +33,17 @@ public struct StaticRegionDetector: Sendable {
     public let depth: Double
 
     /// **Unmeasured, and it should stay labelled that way until a real sample
-    /// runs on this machine.** What can be said is where it sits: the grid is
-    /// LINEAR luminance, because `LuminanceSampler` applies the sRGB EOTF
-    /// before the Rec. 709 weights, so encoded values spread much further apart
-    /// than they look. A dark-mode window at #1E1E1E lands at 0.013, mid grey
-    /// at 0.216, light-mode chrome at #F2F2F7 at 0.887. This number sits above
-    /// mid grey and well below light chrome, which is the separation the
-    /// conjunction is written about; the exact placement inside that gap is a
-    /// guess to tune on hardware.
+    /// runs.** What can be said is where it sits: the grid is LINEAR luminance,
+    /// because `LuminanceSampler` applies the sRGB EOTF before the Rec. 709
+    /// weights, so encoded values spread much further apart than they look. A
+    /// dark-mode window at #1E1E1E lands at 0.013, mid grey at 0.216, light-mode
+    /// chrome at #F2F2F7 at 0.887. This sits above mid grey and well below light
+    /// chrome; the exact placement in that gap is a guess to tune on hardware.
     public static let defaultMinimumLuminance: Double = 0.5
 
-    /// Also a guess. #20 alters the screen while the user is working, so the
-    /// default errs subtle: about 15% coverage is enough to cut drive current
-    /// on a nominated region without reading as a fault in the display.
+    /// Also a guess. This feature alters the screen while the user is working,
+    /// so the default errs subtle: about 15% coverage cuts drive current on a
+    /// nominated region without reading as a fault in the display.
     public static let defaultDepth: Double = 0.15
 
     public static let `default` = Thresholds()
@@ -67,13 +63,13 @@ public struct StaticRegionDetector: Sendable {
   /// `recentGrid` is per-cell linear luminance in PANEL-PHYSICAL order,
   /// `PanelGrid.cellCount` long, matching `ExposureMap.cells`.
   ///
-  /// Returns nil when nothing qualifies, which the caller needs to be
-  /// distinguishable from a mask that is present but all zeros: the first means
-  /// skip the mask entirely and keep the cheap uniform-alpha path.
+  /// Nil when nothing qualifies, which the caller needs distinguishable from a
+  /// mask that is present but all zeros: nil means skip the mask entirely and
+  /// keep the cheap uniform-alpha path.
   ///
   /// No feathering here. The renderer magnifies 24×10 with a linear filter and
-  /// that is what produces OC17's falloff; smoothing the nomination as well
-  /// would blur an edge twice and buy nothing.
+  /// that is OC17's falloff; smoothing the nomination too would blur an edge
+  /// twice.
   public static func nominate(
     recentGrid: [Double],
     observation: WindowObservation,
@@ -85,10 +81,9 @@ public struct StaticRegionDetector: Sendable {
     guard observation.fullScreenOwner == nil else { return nil }
 
     // All or nothing, the rule `ExposureAccumulator` applies to a malformed
-    // sample. A partially applied mask is a visible artifact on the user's
-    // screen and there is no version of it better than none. The flag-array
-    // length is not decoration either: relaxing it to a minimum traps on the
-    // cell walk below, verified by mutating it.
+    // sample: a partially applied mask is a visible artifact on screen. The
+    // flag-array length check is not decoration either; relaxing it to a
+    // minimum traps on the cell walk below.
     guard recentGrid.count == PanelGrid.cellCount,
       observation.stationaryByCell.count == PanelGrid.cellCount
     else { return nil }

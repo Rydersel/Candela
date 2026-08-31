@@ -12,8 +12,8 @@ import CandelaKit
 protocol BrightnessHUDPresenting: AnyObject {
   @MainActor func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double,
                                  nameSuffix: String?, position: HUDPosition, style: HUDStyle)
-  /// Generic pill (M4): volume/contrast/mute. Exposed through the protocol so
-  /// the executor talks to a presenter, not the concrete panel.
+  /// Volume, contrast and mute. Through the protocol so the executor talks to a
+  /// presenter, not the concrete panel.
   @MainActor func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String,
                           value: Float, maxValue: Float, nameSuffix: String?,
                           position: HUDPosition, style: HUDStyle)
@@ -51,11 +51,8 @@ enum HUDType {
 /// ControlCenter-based OSD ignores the value of repeat showImage calls while its HUD is visible,
 /// so the pill would freeze mid-interaction.
 ///
-/// Three looks (KMR-A3), chosen by the caller like the position: `.system` is
-/// the native-matching default (KMR-A4), `.segments` swaps the bar for the
-/// classic 16-chiclet strip, `.compact` is a smaller name-less pill. The
-/// island keeps holding no judgement: style and position both arrive from the
-/// caller, which reads them from prefs at announce time.
+/// Style and position both arrive from the caller (KMR-A3), which reads them
+/// from prefs at announce time; the island holds no judgement.
 @MainActor
 final class BrightnessHUD: BrightnessHUDPresenting {
   private struct HUD {
@@ -69,10 +66,9 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     let fillBox: NSBox?
     /// The track's interval dots (continuous-bar styles only). Held so a show
     /// can hide the ones the fill has passed: `labelColor` is translucent in
-    /// dark appearance, so a covered dot would ghost through the fill, and the
-    /// native track shows dots on the unfilled remainder only (KMR-A4).
+    /// dark appearance, so a covered dot would ghost through (KMR-A4).
     let tickBoxes: [NSBox]
-    /// The 16 chiclets; empty for the continuous-bar styles.
+    /// The chiclets; empty for the continuous-bar styles.
     let segmentBoxes: [NSBox]
     let style: HUDStyle
   }
@@ -113,30 +109,26 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     }
   }
 
-  // KMR-A4 fidelity knobs, one line each so the side-by-side pass can tune
-  // them without archaeology. The deltas they close, from Ryder's reference
-  // screenshots against the native pill: ours read darker (material), wore a
-  // near-black outline (separatorColor resolved over dark content), and
-  // missed the track's interval dots and the larger name.
+  // KMR-A4 fidelity knobs, one line each so a side-by-side pass against the
+  // native pill can tune them without archaeology.
   /// `.popover` blends lighter and brighter than `.hudWindow` in both
   /// appearances; the sheen below pushes it the rest of the way.
   private static let material: NSVisualEffectView.Material = .popover
   /// White wash over the material, the "bright glass" half of the fix.
   private static let sheenAlpha: CGFloat = 0.07
-  /// The native edge reads as a LIGHT inner hairline in both appearances (a
-  /// glass highlight), so this is constant white, not a semantic color: the
-  /// old `separatorColor` CGColor resolved near-black and drew the outline
-  /// Ryder flagged. Static, so the per-show appearance refresh went with it.
+  /// The native edge reads as a LIGHT inner hairline in both appearances, so
+  /// this is constant white rather than a semantic color: `separatorColor`
+  /// resolved near-black and drew a visible outline. Static, so no per-show
+  /// appearance refresh.
   private static let hairlineColor = NSColor.white.withAlphaComponent(0.25)
   private static let hairlineWidth: CGFloat = 0.75
-  /// The native pill keeps a soft shadow; the heaviness Ryder saw was the
-  /// dark border plus the dark material. Flip this if the pass still reads
-  /// heavy after those two.
+  /// The native pill keeps a soft shadow; the heaviness came from the dark
+  /// border plus the dark material, not from this.
   private static let panelHasShadow = true
-  /// Native name label: one point larger than ours was.
+  /// Matches the native name label.
   private static let nameFontSize: CGFloat = 13
-  /// Interval dots on the track at the sixteenths, covered by the fill on the
-  /// filled side exactly as the native track shows them.
+  /// Interval dots at the sixteenths, covered by the fill exactly as the native
+  /// track shows them.
   private static let tickCount = 15
   private static let tickDiameter: CGFloat = 2
 
@@ -146,29 +138,25 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   private static let segmentCornerRadius: CGFloat = 2
 
   private static let screenMargin: CGFloat = 20
-  /// Extra clearance added on top of the menu-bar allowance so the pill sits
-  /// clearly below the bar rather than hugging it. Ryder eyeballed this against
-  /// the native macOS OSD pill.
+  /// Extra clearance on top of the menu-bar allowance so the pill sits clearly
+  /// below the bar rather than hugging it. Eyeballed against the native OSD.
   private static let menuBarClearance: CGFloat = 10
 
   /// Vertical space to keep free at the top of `screen`: the menu bar, plus
   /// clearance. While the bar is showing, the frame/visibleFrame difference
   /// measures it exactly and wins the `max`; while it is auto-hidden that
-  /// difference collapses (often to 0), so we reserve the bar's own thickness
-  /// instead — the space it will occupy the moment it reveals. The clearance
-  /// applies either way, so it sits outside the `max`.
+  /// difference collapses (often to 0), so the bar's own thickness stands in for
+  /// the space it will occupy the moment it reveals. The clearance applies
+  /// either way, so it sits outside the `max`.
   private static func menuBarAllowance(for screen: NSScreen) -> CGFloat {
     max(screen.frame.maxY - screen.visibleFrame.maxY, NSStatusBar.system.thickness) + self.menuBarClearance
   }
 
-  /// ONE window per display, shared by every pill kind. Brightness, volume,
-  /// contrast and mute cannot be on screen together on one display, and never
-  /// could be: a show reuses the window the last one left, retitles it and
-  /// re-places it. With per-kind positions that reuse is visible as a move,
-  /// because a volume press followed by a brightness press inside the 1.5 s
-  /// fade takes the same window from one anchor to the other. Keying by kind as
-  /// well as by display would make simultaneous pills possible, which is a
-  /// product change nobody has ruled on, not a bug fix.
+  /// ONE window per display, shared by every pill kind: a show reuses the
+  /// window the last one left, retitles it and re-places it. With per-kind
+  /// positions that reuse is visible as a move when a second press lands inside
+  /// the fade. Keying by kind as well as by display would make simultaneous
+  /// pills possible, which is a product change nobody has ruled on.
   ///
   /// A window built for one STYLE is torn down and rebuilt when a show arrives
   /// with another (KMR-A3): the anatomies differ structurally, so
@@ -190,22 +178,20 @@ final class BrightnessHUD: BrightnessHUDPresenting {
 
   // MARK: - Presentation
 
-  /// `displayID` must ALREADY be a drawable display — resolved through the
-  /// mirror topology by the caller (DT15/DT16). A mirror slave is absent from
+  /// `displayID` must ALREADY be a drawable display, resolved through the mirror
+  /// topology by the caller (DT15/DT16). A mirror slave is absent from
   /// `NSScreen.screens`, so an unresolved ID lands in the guard below and shows
   /// nothing at all, silently, while the write still reaches the panel.
   ///
-  /// The island keeps its one-line lookup and no judgement; the mirror
-  /// awareness lives in the engine. `menuBarAllowance(for:)` therefore measures
-  /// the MASTER's menu bar for a mirror set, which is correct — the set's menu
-  /// bar is the master's — and is not a thing to "fix" back.
+  /// `menuBarAllowance(for:)` therefore measures the MASTER's menu bar for a
+  /// mirror set, which is correct: the set's menu bar is the master's. Not a
+  /// thing to "fix" back.
   ///
-  /// The name is a separate question from the placement and is deliberately NOT
-  /// resolved here either. Note what that costs the CALLER: because the windows
-  /// are keyed by `displayID`, every member of a mirror set addresses ONE
-  /// window, and calling this once per member leaves the last call's name and
-  /// value on screen. `HUDGrouping` exists so that choice is made once and on
-  /// purpose rather than by iteration order (#123).
+  /// The name is not resolved here either, and that costs the CALLER: the
+  /// windows are keyed by `displayID`, so every member of a mirror set addresses
+  /// ONE window and calling this once per member leaves the last call's name and
+  /// value on screen. `HUDGrouping` makes that choice once rather than by
+  /// iteration order.
   func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String, value: Float,
                maxValue: Float = 1, nameSuffix: String? = nil,
                position: HUDPosition, style: HUDStyle) {
@@ -232,9 +218,8 @@ final class BrightnessHUD: BrightnessHUDPresenting {
       var fillFrame = fillBox.frame
       fillFrame.size.width = max(Metrics.barHeight, metrics.barWidth * normalized)
       fillBox.frame = fillFrame
-      // Being UNDER the fill is not enough: `labelColor` is translucent in
-      // dark appearance, so a covered dot ghosts through. Hide what the fill
-      // has passed; the native track shows dots on the remainder only.
+      // Being UNDER the fill is not enough: `labelColor` is translucent in dark
+      // appearance, so a covered dot ghosts through. Hide what the fill passed.
       for tick in hud.tickBoxes {
         tick.isHidden = tick.frame.midX <= fillFrame.maxX
       }
@@ -246,9 +231,8 @@ final class BrightnessHUD: BrightnessHUDPresenting {
         box.fillColor = index < filled ? .labelColor : .quaternaryLabelColor
       }
     }
-    // The anchor arrives from the caller and the arithmetic lives in the Kit,
-    // where a rotated display's bounds can be tested (DT16: the island holds no
-    // judgement). `screen.frame` is already the EFFECTIVE geometry, so a
+    // The arithmetic lives in the Kit, where a rotated display's bounds can be
+    // tested (DT16). `screen.frame` is already the EFFECTIVE geometry, so a
     // display mounted at 270° needs nothing special here.
     hud.panel.setFrameOrigin(HUDPlacement.origin(
       position,
@@ -268,8 +252,8 @@ final class BrightnessHUD: BrightnessHUDPresenting {
       hud.panel.animator().alphaValue = 1
     }
     hud.panel.orderFrontRegardless()
-    // The timer body is `@Sendable`-typed but provably runs on the main run loop (we add it to
-    // `RunLoop.main` below), so hopping actors would only add latency to the fade.
+    // `@Sendable`-typed but provably on the main run loop (added to `RunLoop.main`
+    // below), so hopping actors would only add latency to the fade.
     let timer = Timer(timeInterval: 1.5, repeats: false) { [weak self] _ in
       MainActor.assumeIsolated {
         self?.fadeOut(displayID: displayID)
@@ -308,13 +292,10 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     effectView.material = Self.material
     effectView.blendingMode = .behindWindow
     effectView.state = .active
-    // The fork forces `.vibrantDark`; the native pill adapts to the system
-    // appearance, and so do we (Ryder, 2026-07-30): dynamic semantic colors
-    // everywhere. KMR-A4 moved the material off `.hudWindow` (too dark next to
-    // the native pill) and the border off `separatorColor` (resolved
-    // near-black, the "outline" in Ryder's screenshot); the hairline is now a
-    // constant white glass highlight, so nothing here needs an appearance
-    // refresh at show time any more.
+    // DIVERGENCE from the fork, which forces `.vibrantDark`: the native pill
+    // adapts to the system appearance and so does this one, with dynamic
+    // semantic colors. The hairline is a constant white glass highlight, so
+    // nothing here needs an appearance refresh at show time.
     effectView.wantsLayer = true
     effectView.layer?.cornerRadius = metrics.cornerRadius
     effectView.layer?.masksToBounds = true
@@ -357,17 +338,17 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     case .system, .compact:
       let barBackground = NSBox(frame: NSRect(x: metrics.barX, y: metrics.barY, width: metrics.barWidth, height: Metrics.barHeight))
       barBackground.boxType = .custom
-      // The fork says `borderType = .noBorder`; that is deprecated and applies only to the old-style
-      // box. `borderWidth = 0` is the custom-box equivalent (Apple's suggested `transparent` would
-      // also suppress the fill, which is the only thing we draw here).
+      // DIVERGENCE from the fork's `borderType = .noBorder`, which is deprecated
+      // and applies only to the old-style box. `borderWidth = 0` is the
+      // custom-box equivalent; Apple's suggested `transparent` would also
+      // suppress the fill, the only thing drawn here.
       barBackground.borderWidth = 0
       barBackground.fillColor = .quaternaryLabelColor
       barBackground.cornerRadius = Metrics.barHeight / 2
       effectView.addSubview(barBackground)
 
       // Interval dots at the sixteenths (KMR-A4). Added BEFORE the fill so the
-      // filled side covers its dots, which is exactly how the native track
-      // reads: dots visible on the unfilled remainder only.
+      // filled side covers its dots, as the native track reads.
       for index in 1 ... Self.tickCount {
         let centerX = metrics.barX + metrics.barWidth * CGFloat(index) / CGFloat(Self.tickCount + 1)
         let tick = NSBox(frame: NSRect(
@@ -392,8 +373,8 @@ final class BrightnessHUD: BrightnessHUDPresenting {
       fillBox = fill
 
     case .segments:
-      // KMR-A3 pinned geometry: 16 chiclets across the system bar rect,
-      // 8 pt tall, radius 2, 2 pt gaps, centered on the bar's line.
+      // KMR-A3 pinned geometry: chiclets across the system bar rect, centered
+      // on the bar's line.
       let segmentWidth = (metrics.barWidth - CGFloat(Self.segmentCount - 1) * Self.segmentGap) / CGFloat(Self.segmentCount)
       let segmentY = metrics.barY + Metrics.barHeight / 2 - Self.segmentHeight / 2
       for index in 0 ..< Self.segmentCount {
@@ -410,8 +391,8 @@ final class BrightnessHUD: BrightnessHUDPresenting {
       }
     }
 
-    // Do not drop this line: without it the panel has no content view and the HUD is invisible
-    // (see docs/ENGINEERING-NOTES.md, "OSD / HUD").
+    // Do not drop this line: without it the panel has no content view and the
+    // HUD is invisible (docs/ENGINEERING-NOTES.md, "OSD / HUD").
     panel.contentView = rootView
 
     return HUD(panel: panel, effectView: effectView, nameLabel: nameLabel, leftIcon: leftIcon,
@@ -428,8 +409,8 @@ final class BrightnessHUD: BrightnessHUDPresenting {
       context.duration = Motion.windowFadeOut(reduceMotion: Motion.systemReduceMotion)
       panel.animator().alphaValue = 0
     } completionHandler: { [weak self] in
-      // The completion handler is `@Sendable`-typed but fires on the main thread, where the panel
-      // it orders out already lives.
+      // `@Sendable`-typed but fires on the main thread, where the panel it
+      // orders out already lives.
       MainActor.assumeIsolated {
         // A show that arrived mid-fade already restored alpha and bumped the
         // generation; ordering out here would hide a visible HUD.
@@ -454,8 +435,8 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   }
 }
 
-/// Internal, not fileprivate: used by every AppKit island that places a window
-/// on a particular display, and a second copy is a second thing to get wrong.
+/// Internal, not fileprivate: every AppKit island that places a window on a
+/// particular display uses it, and a second copy is a second thing to get wrong.
 extension NSScreen {
   var displayID: CGDirectDisplayID? {
     self.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID

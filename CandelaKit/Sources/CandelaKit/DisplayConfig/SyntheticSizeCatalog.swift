@@ -5,8 +5,8 @@ import Foundation
 ///
 /// Both axes come out of `SyntheticSizeCatalog` even-rounded, because a virtual
 /// display's framebuffer is twice the logical size and an odd axis would put a
-/// half pixel in it. The type itself does not enforce evenness; the catalog is
-/// the only thing that should be building these.
+/// half pixel in it. The type does not enforce that; the catalog is the only
+/// thing that should build these.
 public struct SyntheticSize: Sendable, Equatable, Hashable {
   public let logicalWidth: Int
   public let logicalHeight: Int
@@ -15,7 +15,7 @@ public struct SyntheticSize: Sendable, Equatable, Hashable {
 
   /// The virtual display renders at exactly 2x, so the framebuffer is the
   /// logical size doubled. Phase 0 measured a 2x mint landing at scale 2.0 on
-  /// the rig, so this is the achieved shape and not an assumption.
+  /// the rig, so this is achieved shape rather than assumption.
   public var pixelWidth: Int { logicalWidth * 2 }
   public var pixelHeight: Int { logicalHeight * 2 }
 
@@ -26,11 +26,9 @@ public struct SyntheticSize: Sendable, Equatable, Hashable {
   }
 }
 
-/// The persisted form of a synthesized-size choice: logical geometry only.
-///
-/// No framebuffer and no refresh, unlike `DisplayModeDescriptor`. A synthesized
-/// row's framebuffer is derived (2x) and its refresh is a sentinel, so storing
-/// either would persist a value the resolver would have to ignore.
+/// The persisted form of a synthesized-size choice: logical geometry only. No
+/// framebuffer and no refresh, unlike `DisplayModeDescriptor`, because a
+/// synthesized row's framebuffer is derived (2x) and its refresh is a sentinel.
 public struct SyntheticSizeDescriptor: Sendable, Equatable, Codable {
   public let logicalWidth: Int
   public let logicalHeight: Int
@@ -40,10 +38,9 @@ public struct SyntheticSizeDescriptor: Sendable, Equatable, Codable {
     self.logicalHeight = logicalHeight
   }
 
-  /// Spelled out rather than synthesized on purpose: these strings are an
-  /// on-disk format, and a synthesized key tracks its property name, so a later
-  /// rename would silently orphan stored preferences instead of forcing a
-  /// deliberate decision about the old data.
+  /// Spelled out rather than compiler-synthesized: these strings are an on-disk
+  /// format, and a synthesized key tracks its property name, so a later rename
+  /// would silently orphan stored preferences.
   private enum CodingKeys: String, CodingKey {
     case logicalWidth
     case logicalHeight
@@ -57,7 +54,7 @@ public struct SyntheticSizeDescriptor: Sendable, Equatable, Codable {
 /// whole ladder is testable without a panel.
 public enum SyntheticSizeCatalog {
   /// Fixed by SS3. Free width-by-height entry is a filed non-goal, so this is
-  /// the entire space of sizes synthesis can offer.
+  /// the whole space of sizes synthesis can offer.
   public static let stopPercents: [Int] = [95, 90, 85, 80, 75, 70, 65]
 
   /// How far a stop's aspect ratio may drift from native before it is dropped.
@@ -73,12 +70,9 @@ public enum SyntheticSizeCatalog {
   /// rather than merely large.
   private static let minorAxisFloor = 720
 
-  /// The ladder for one panel, in descending percent order.
-  ///
-  /// A stop is dropped when its aspect drifts past 2% of native, when its
-  /// framebuffer EXCEEDS the virtual-display ceiling (a stop landing exactly on
-  /// the ceiling survives), when its minor axis falls under 720 points, or when
-  /// an existing HiDPI row already serves it within 2% on both axes (SS2).
+  /// The ladder for one panel, in descending percent order. A stop whose
+  /// framebuffer lands exactly on the virtual-display ceiling survives; only
+  /// exceeding it drops.
   public static func stops(
     nativeLogicalWidth: Int, nativeLogicalHeight: Int,
     existingRows: [DisplayMode],
@@ -110,7 +104,7 @@ public enum SyntheticSizeCatalog {
   /// The `refreshHz: 0` sentinel is safe only because synthesized rows are
   /// appended after curation and never enter `DisplayModeCatalog.curated`,
   /// `DisplayModeList.deduplicated` or `ModePersistence.resolve`, none of which
-  /// would survive a zero rate.
+  /// survive a zero rate.
   public static func row(for size: SyntheticSize) -> DisplayMode {
     DisplayMode(
       ioModeID: DisplayMode.syntheticIoModeID(stopIndex: stopIndex(forPercent: size.percentOfNative)),
@@ -121,11 +115,9 @@ public enum SyntheticSizeCatalog {
   }
 
   /// Re-find a stored choice in the ladder the current panel and rows generate.
-  ///
   /// Regenerates rather than trusting the descriptor, so a size an older ladder
-  /// produced, or one SS2 precedence has since taken over, resolves nil instead
-  /// of engaging a size the catalog would no longer offer. The caller decides
-  /// what to do with nil.
+  /// produced, or one SS2 precedence has taken over, resolves nil instead of
+  /// engaging something the catalog would no longer offer.
   public static func size(
     matching descriptor: SyntheticSizeDescriptor,
     ofNativeWidth: Int, nativeHeight: Int,
@@ -158,8 +150,8 @@ public enum SyntheticSizeCatalog {
   }
 
   /// Twin of `PanelDensityModel.evenRounded`, duplicated rather than shared:
-  /// that one is private to a model this catalog must not depend on, and the
-  /// two lines are cheaper than a coupling. Keep them in step.
+  /// that one is private to a model this catalog must not depend on. Keep them
+  /// in step.
   private static func evenRounded(_ value: Double) -> Int {
     Int((value / 2).rounded() * 2)
   }

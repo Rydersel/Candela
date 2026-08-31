@@ -1,9 +1,8 @@
 import Testing
 @testable import CandelaKit
 
-/// The full 3 × 3 of D24's resolution table. Written exhaustively on purpose:
-/// this replaces behavior already shipped to `main` (7b5be00 / 1f117b3), so
-/// every cell is an explicit assertion rather than an implication.
+/// The full 3 × 3 of D24's resolution table, written exhaustively so every cell
+/// is an explicit assertion rather than an implication.
 @Suite("Volume slider enablement (D24)")
 struct VolumeSliderPolicyTests {
   @Test func overrideWinsOverEveryCapabilityVerdict() {
@@ -21,20 +20,18 @@ struct VolumeSliderPolicyTests {
 
   @Test func supportedAndUnknownBothStayEnabled() {
     #expect(VolumeSliderPolicy.isEnabled(override: .auto, volumeSupport: .supported))
-    // The MAG 341C's permanent state: write-only panel, every read returns
-    // zeros, so the probe can never do better than .unknown — and its 3.5 mm
-    // jack works, so the slider must stay live.
+    // The MAG 341C's permanent state: a write-only panel, so the probe never
+    // does better than .unknown, while its 3.5 mm jack works.
     #expect(VolumeSliderPolicy.isEnabled(override: .auto, volumeSupport: .unknown))
   }
 
   @Test func notProbedYetIsIndistinguishableFromAFailedProbe() {
     // AppModel passes `.unknown` for an absent cache entry, so the panel is
-    // fully usable before the first probe lands — nothing about opening the
-    // panel waits on DDC.
+    // usable before the first probe lands and nothing about it waits on DDC.
     #expect(VolumeSliderPolicy.isEnabled(override: .auto, volumeSupport: .unknown))
   }
 
-  // MARK: - The tooltip (Checkpoint 1 item 81)
+  // MARK: - The tooltip
 
   /// The bug this pins: one hardcoded sentence blamed the DISPLAY for every
   /// grey. A user who set the slider to always off was told their monitor
@@ -87,7 +84,7 @@ struct VolumeSliderPolicyTests {
     }
   }
 
-  // MARK: - The menu bar's short form (#130)
+  // MARK: - The menu bar's short form
 
   /// The panel draws this directly under the display's own name header in a
   /// 280 pt column, so it must NOT name the display: that word is already on
@@ -158,11 +155,9 @@ struct VolumeKeyAcceptanceTests {
       isKeyboardDisabled: false, override: .auto, volumeSupport: .unsupported))
   }
 
-  /// The MAG 341C's permanent state, and the regression that would hurt most:
-  /// every DDC read on it returns zeros, so its capabilities can never resolve
-  /// better than `.unknown`, while its 3.5 mm jack works. D24 greys on a clean
-  /// denial only, never on absence of evidence, and the keys inherit that.
-  /// A gate keyed on "no positive evidence" would kill the keys on this panel.
+  /// Every DDC read on the MAG returns zeros, so its capabilities never resolve
+  /// better than `.unknown` while its 3.5 mm jack works. D24 greys on a clean
+  /// denial only, so a gate keyed on "no positive evidence" kills its keys.
   @Test func noEvidenceIsNotADenial() {
     #expect(VolumeSliderPolicy.acceptsVolumeKeys(
       isKeyboardDisabled: false, override: .auto, volumeSupport: .unknown))
@@ -190,11 +185,9 @@ struct VolumeKeyAcceptanceTests {
       isKeyboardDisabled: false, override: .forceNone, volumeSupport: .supported))
   }
 
-  /// The anti-drift pin. It pins DELEGATION, not independent correctness: what
-  /// it proves is that `acceptsVolumeKeys` reaches its capability verdict by
-  /// calling `isEnabled` rather than restating it, so the keys and the slider
-  /// are structurally incapable of disagreeing. Whether that shared verdict is
-  /// itself right is D24's own table, pinned by the suite above.
+  /// Pins DELEGATION, not correctness: `acceptsVolumeKeys` reaches its verdict
+  /// by calling `isEnabled` rather than restating it, so the keys and the slider
+  /// cannot disagree. Whether that verdict is right is the suite above.
   @Test func theKeysAndTheSliderNeverDisagree() {
     for override in [AudioSinkOverride.auto, .forceNone, .forcePresent] {
       for support in [VCPSupport.supported, .unsupported, .unknown] {
@@ -395,9 +388,9 @@ struct DegradedMuteReasonTests {
     }
   }
 
-  /// The other cause, kept apart for the reason the slider's tooltip was split
-  /// (Checkpoint 1 item 81): "Always disabled" demotes the strategy too, and
-  /// telling that user their monitor refused sends them to check a cable.
+  /// Kept apart for the reason the slider's tooltip was split: "Always disabled"
+  /// demotes the strategy too, and telling that user their monitor refused sends
+  /// them to check a cable.
   @Test func aUserSetDegradeBlamesTheSettingAndNotTheDisplay() {
     let reason = VolumeSliderPolicy.degradedMuteReason(
       commandIsAvailable: true, prefEnabled: true, override: .forceNone, muteSupport: .supported)
@@ -479,12 +472,10 @@ struct DegradedMuteReasonTests {
   }
 }
 
-/// The tap decides what to WATCH before it knows what a press would act on, and
-/// a watched key is CONSUMED: it reaches neither the app's displays nor macOS.
-/// So the arming question is not the acting question. It asks everything that
-/// makes a press IMPOSSIBLE on this display (the capability verdict, and the
-/// engine's own availability switch for the register) and nothing that merely
-/// makes the press a deliberate no-op (the per-display keyboard switch).
+/// A watched key is CONSUMED: it reaches neither the app's displays nor macOS,
+/// so arming is not acting. Arming asks what makes a press IMPOSSIBLE (the
+/// capability verdict, the engine's availability switch) and never what makes it
+/// a deliberate no-op (the per-display keyboard switch).
 @Suite("Arming the volume keys asks what makes a press impossible")
 struct VolumeKeyArmingTests {
   /// The whole point: a rig whose every display denies the register must let the
@@ -513,12 +504,10 @@ struct VolumeKeyArmingTests {
     #expect(VolumeSliderPolicy.armsVolumeKeys(commandIsAvailable: true, override: .forcePresent, volumeSupport: .unsupported))
   }
 
-  /// R1, and the reason arming is not simply `acceptsVolumeKeys`. A display
-  /// whose keyboard control the user switched off SWALLOWS its press, exactly as
-  /// it does for brightness, so it must keep the keys watched even though it
-  /// will act on nothing. Handing that press to macOS instead would make the
-  /// switch mean something it has never meant. The two verdicts DISAGREE here,
-  /// on purpose, and that disagreement is the whole difference between them.
+  /// R1, and why arming is not simply `acceptsVolumeKeys`. A display whose
+  /// keyboard control is off SWALLOWS its press, as it does for brightness, so
+  /// it keeps the keys watched while acting on nothing. The two verdicts
+  /// disagree here on purpose.
   @Test func aKeyboardDisabledDisplayStillArmsTheKeys() {
     #expect(VolumeSliderPolicy.armsVolumeKeys(commandIsAvailable: true, override: .auto, volumeSupport: .supported))
     #expect(!VolumeSliderPolicy.acceptsVolumeKeys(
@@ -546,14 +535,10 @@ struct VolumeKeyArmingTests {
       usesDedicatedMuteCommand: false))
   }
 
-  /// Dead-key rig (a): a single external whose Volume row On switch is off. That
-  /// writes the per-command availability pref, which the tap's DDC-capable pool
-  /// does not filter on, so the keys armed on a display whose every volume write
-  /// the engine refuses. The press then died between the two: the tap consumed
-  /// it, and `DDCValueController.isAvailable` dropped it.
-  ///
-  /// It outranks the capability verdict and the override alike, because it is not
-  /// an opinion about what the display can do: it switches the wire off.
+  /// Dead-key rig (a): the Volume row's On switch writes the per-command
+  /// availability pref, which the tap's DDC-capable pool does not filter on, so
+  /// the tap consumed a press that `DDCValueController.isAvailable` then dropped.
+  /// It outranks the capability verdict and the override: it switches the wire off.
   @Test func theEnginesOwnAvailabilitySwitchRefusesToArm() {
     for volume in VCPSupport.allCases {
       for override in AudioSinkOverride.allCases {
@@ -574,12 +559,9 @@ struct VolumeKeyArmingTests {
     }
   }
 
-  /// Dead-key rig (b): two externals, one forced to software dimming and one that
-  /// denies the register. The software-dimmed display is where the pool went
-  /// wrong twice over, because its capabilities can still read `.unknown` and D24
-  /// resolves that to enabled: it armed the whole rig on its own account and then
-  /// refused every press. Its DDC volume traffic is switched off, so it arms
-  /// nothing, which leaves only the denying display and sends the keys to macOS.
+  /// Dead-key rig (b): a software-dimmed display's capabilities still read
+  /// `.unknown`, which D24 resolves to enabled, so it armed the whole rig and
+  /// then refused every press. Its DDC volume traffic is off, so it arms nothing.
   @Test func aSoftwareDimmedDisplayWithNoVerdictArmsNothing() {
     #expect(!VolumeSliderPolicy.armsVolumeKeys(
       commandIsAvailable: false, override: .auto, volumeSupport: .unknown))
@@ -587,11 +569,9 @@ struct VolumeKeyArmingTests {
       commandIsAvailable: true, override: .auto, volumeSupport: .unsupported))
   }
 
-  /// The anti-drift pin: with the register available, arming IS the acting
-  /// verdict with the keyboard switch held off, delegated rather than restated,
-  /// so the two can never disagree about a capability. Every input, both key
-  /// families, with the case lists derived so a new case cannot slip in
-  /// under-covered.
+  /// With the register available, arming IS the acting verdict with the keyboard
+  /// switch held off, delegated rather than restated. Case lists are derived so a
+  /// new case cannot slip in under-covered.
   @Test func armingIsTheActingVerdictWithoutTheKeyboardSwitch() {
     for override in AudioSinkOverride.allCases {
       for volume in VCPSupport.allCases {
@@ -618,12 +598,10 @@ struct VolumeKeyArmingTests {
     }
   }
 
-  /// The cell where arming and acting can silently part company: the pref is
-  /// on, the display denies 0x8D and takes 0x62, so the engine degrades the
-  /// mute to the volume register. Both gates have to be told the STRATEGY, and
-  /// the raw pref is kept here as the counterexample: passed instead, it hands
-  /// the mute key to macOS on the one display whose mute the degrade just made
-  /// work.
+  /// Where arming and acting can part company: the display denies 0x8D and takes
+  /// 0x62, so the engine degrades the mute to the volume register. Both gates
+  /// need the STRATEGY; the raw pref hands the mute key to macOS on the one
+  /// display whose mute the degrade just made work.
   @Test func theDegradedMuteKeyIsArmedAndAcceptedFromTheSameStrategy() {
     let strategy = VolumeSliderPolicy.usesDedicatedMuteCommand(
       prefEnabled: true, override: .auto, muteSupport: .unsupported)

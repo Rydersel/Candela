@@ -1,10 +1,8 @@
 import Testing
 @testable import CandelaKit
 
-/// D21: the probe-eligibility rule is branching logic, so it lives in the Kit
-/// with tests rather than inside `AppModel` (app target, no test target). The
-/// subtle case — "HDR means leave the entry ABSENT, do not cache `.unknown`" —
-/// is pinned here instead of surviving as a comment.
+/// D21: the probe-eligibility rule is branching logic, so it lives in the Kit with
+/// tests rather than inside `AppModel`, which has no test target.
 @Suite("Capability probe eligibility (D24/D21)")
 struct CapabilityProbePolicyTests {
   @Test func probesOnlyWhenNothingIsCachedAndNothingIsInFlight() {
@@ -22,9 +20,8 @@ struct CapabilityProbePolicyTests {
   }
 
   @Test func hdrSuppressesTheProbeWithoutCachingAnything() {
-    // DDC is dead while HDR is engaged. Probing now would cache a false
-    // `.unknown` for the rest of the session; the caller must skip and leave
-    // the entry absent so the post-HDR reconfiguration re-probes.
+    // DDC is dead while HDR is engaged, so probing now caches a false `.unknown` for the
+    // session. The entry stays absent and the post-HDR reconfiguration re-probes.
     #expect(!CapabilityProbePolicy.shouldProbe(cached: nil, inFlight: false, hdrEngaged: true))
     #expect(!CapabilityProbePolicy.shouldProbe(cached: nil, inFlight: true, hdrEngaged: true))
   }

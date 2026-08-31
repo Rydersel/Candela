@@ -102,12 +102,10 @@ struct ModelReplayLogTests {
     try log.append(record(t: 1))
     try log.append(record(t: 2))
 
-    // Bytes, not String. The previous version of this test built its fixture
-    // through `String(contentsOf:)` and `write(atomically:encoding:.utf8)`, so
-    // the file stayed valid UTF-8 and a String-based reader passed it: it did
-    // not exercise the tear it was written for. A capture killed mid-write
-    // truncates wherever the write got to, and an owner name is the field most
-    // likely to carry a multi-byte character.
+    // Bytes, not String: a fixture built through `String(contentsOf:)` stays valid
+    // UTF-8 and never exercises the tear. A capture killed mid-write truncates
+    // wherever the write got to, and an owner name is the field most likely to
+    // carry a multi-byte character.
     let file = directory.appendingPathComponent("replay-00001.jsonl")
     var bytes = try Data(contentsOf: file)
     bytes.append(contentsOf: Array("{\"v\":3,\"t\":3,\"windows\":[{\"owner\":\"Caf".utf8))
@@ -143,10 +141,9 @@ struct ModelReplayLogTests {
     let directory = temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    // A future tool that ADDS a required field writes a line this decoder
-    // cannot build a record from. Deciding the version after the decode booked
-    // that as damage, which sends the operator to rerun a capture when the fix
-    // is to rebuild the tool.
+    // A future tool that ADDS a required field writes a line this decoder cannot
+    // build a record from. Deciding the version after the decode booked that as
+    // damage, sending the operator to rerun a capture when the fix is a new tool.
     let file = directory.appendingPathComponent("replay-00001.jsonl")
     let line = "{\"v\":\(ModelReplayRecord.formatVersion + 2),\"onlyField\":true}\n"
     try Data(line.utf8).write(to: file)
@@ -166,10 +163,9 @@ struct ModelReplayLogTests {
     for index in 0..<4 { try log.append(record(t: Double(index))) }
     #expect(try ModelReplayLog.existingIndices(in: directory).count == 2)
 
-    // Enumerated, then unopenable: the fit is polled DURING capture, and
-    // pruning deletes files between the listing and the open. Chmod reproduces
-    // that window deterministically, and a whole file of records must not
-    // report as the single skip one torn line would.
+    // Enumerated, then unopenable: the fit is polled DURING capture and pruning
+    // deletes files between the listing and the open. Chmod reproduces that window
+    // deterministically, and a whole lost file must not report as one torn line.
     let second = directory.appendingPathComponent("replay-00002.jsonl")
     try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: second.path)
     defer {
@@ -188,9 +184,9 @@ struct ModelReplayLogTests {
   func restartRotates() throws {
     let directory = temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
-    // The reviewer's measurement: five restarts of ten appends with a cap of
-    // 100. Resuming INTO the highest existing index put all fifty in
-    // replay-00001 and rotated nothing, so `filesKept` bounded no disk at all.
+    // Five restarts of ten appends with a cap of 100. Resuming INTO the highest
+    // existing index put all fifty in replay-00001 and rotated nothing, so
+    // `filesKept` bounded no disk at all.
     var t = 0.0
     for _ in 0..<5 {
       let log = try ModelReplayLog(directory: directory, samplesPerFile: 100, filesKept: 5)
@@ -261,10 +257,10 @@ struct ModelReplayLogTests {
 
   @Test("the shipped defaults bound retained disk to what the comment claims")
   func defaultsBoundDisk() throws {
-    // The old defaults were derived when a record was 11.5 KB. The capture
-    // oversample went to 16 cells per grid-cell edge and nothing downstream was
-    // re-derived: 2000 records across 5 files became about 6 GB. This pins the
-    // arithmetic so the next change to either constant fails here.
+    // The old defaults were derived when a record was 11.5 KB. The oversample went
+    // to 16 cells per grid-cell edge and nothing downstream was re-derived: 2000
+    // records across 5 files became about 6 GB. Pinned so the next change to
+    // either constant fails here.
     #expect(ModelReplayLog.retainedBytesCeiling <= 600 * 1024 * 1024)
     #expect(ModelReplayLog.defaultBytesPerFile <= 64 * 1024 * 1024)
 
@@ -297,10 +293,9 @@ struct ModelReplayLogTests {
     let log = try ModelReplayLog(directory: directory)
     try log.append(record(t: 1))
 
-    // A write that threw part way, exactly as a full disk leaves it: bytes on
-    // disk with no closing newline. Without the seal the next append
-    // concatenates onto these and produces ONE unparseable line spanning two
-    // records, so the good record is lost with the torn one.
+    // A write that threw part way, as a full disk leaves it: bytes on disk with no
+    // closing newline. Without the seal the next append concatenates onto these
+    // into ONE unparseable line, losing the good record with the torn one.
     let file = directory.appendingPathComponent("replay-00001.jsonl")
     var bytes = try Data(contentsOf: file)
     bytes.append(contentsOf: Array("{\"v\":3,\"t\":2,\"elap".utf8))

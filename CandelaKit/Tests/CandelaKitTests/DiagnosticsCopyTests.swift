@@ -3,21 +3,13 @@ import Testing
 
 @testable import CandelaKit
 
-/// The diagnostics copy is the app's most load-bearing writing: it is the one
-/// surface whose entire purpose is to tell the truth about hardware precisely.
-/// Until #127 these sentences lived inline in `DiagnosticsPage`, where the only
-/// thing defending their distinctions was somebody reading them carefully in
-/// situ.
+/// These pin EXACT STRINGS on purpose. The failure mode is an edit that collapses
+/// two states into one plausible generic sentence, and that passes any test which
+/// only checks "contains the word unavailable". A red test here asks whether the
+/// distinction was meant to go, not how to make it pass.
 ///
-/// So these tests pin EXACT STRINGS. That is deliberate and it is the point: an
-/// edit that collapses two states into one plausible generic sentence is exactly
-/// the failure mode, and it passes every test that only checks "contains the
-/// word unavailable". If a test here fails, the question to ask is not "how do I
-/// make it pass" but "was this distinction meant to go".
-///
-/// The product name is passed in as "Candela" throughout, which is what
-/// `AppInfo.productName` holds. `theProductNameIsNeverBakedIn` is the one test
-/// that varies it.
+/// The product name is passed in as `AppInfo.productName` holds it;
+/// `theProductNameIsNeverBakedIn` is the one test that varies it.
 @Suite("Diagnostics copy")
 struct DiagnosticsCopyTests {
 
@@ -25,13 +17,10 @@ struct DiagnosticsCopyTests {
 
   // MARK: - The three distinctions this type exists to keep
 
-  /// DISTINCTION 1: readback has THREE answers past "not asked", not two.
-  ///
-  /// "Not answering" is a display that stayed silent; "write-only" is a display
-  /// that is on the bus, takes every command, and never answers a read. That is
-  /// the MAG, it is permanent, it explains every other value on the page, and a
-  /// user who has it needs the words to search for. Folding it into "not
-  /// answering" would delete the only sentence that names the fault.
+  /// Readback has three answers past "not asked", not two. "Not answering" is a
+  /// display that stayed silent; "write-only" is one on the bus that takes every
+  /// command and never answers a read. That is the MAG, permanently, and folding
+  /// the two would delete the only sentence that names the fault.
   @Test func readbackHasThreeAnswersAndNoneIsTheOther() {
     #expect(
       DiagnosticsCopy.readEvidence(.answered, app: Self.app)
@@ -52,9 +41,8 @@ struct DiagnosticsCopyTests {
     #expect(Set(all).count == 4)
   }
 
-  /// The same three states in the SHORT form, which is what the hub's chevron
-  /// preview and the report's `readback:` field carry. Capitalised as the page
-  /// capitalises them, which is the casing ruling this type owns.
+  /// The short form the hub's chevron preview and the report's `readback:` field
+  /// carry, capitalised as the page capitalises it.
   @Test func theShortReadbackVerdictKeepsTheSameThreeStates() {
     #expect(DiagnosticsCopy.readbackVerdict(.notAttempted) == "Not asked yet")
     #expect(DiagnosticsCopy.readbackVerdict(.answered) == "Answers reads")
@@ -84,14 +72,9 @@ struct DiagnosticsCopyTests {
         == "Not asked yet")
   }
 
-  /// DISTINCTION 2: a maximum that was READ never reads like one that was
-  /// assumed.
-  ///
-  /// "This display reported a maximum of 100" is a fact the display supplied.
-  /// The other two arms both say "Assumed 100" outright, and they are two arms
-  /// rather than one because `didReadMax == false` is not a single fact: the
-  /// read may never have been attempted, which is not the display declining to
-  /// answer.
+  /// A maximum that was read never reads like one that was assumed. The two
+  /// assumed arms stay separate because `didReadMax == false` covers a read that
+  /// was never attempted as well as a display that declined to answer.
   @Test func aReadMaximumIsNeverConfusedWithAnAssumedOne() {
     #expect(
       DiagnosticsCopy.brightnessScale(
@@ -121,13 +104,10 @@ struct DiagnosticsCopyTests {
         == "This display reported a maximum of 255")
   }
 
-  /// DISTINCTION 3: the DISPLAY denying volume and a SETTING turning it off are
-  /// different sentences, because they have different fixes.
-  ///
-  /// The `.unsupported` sentence is reachable only from a description that
-  /// parsed cleanly end to end and did not list VCP 0x62 (D24). That is the
-  /// Dell. It must never be worded so that a display that merely stayed silent
-  /// could wear it.
+  /// The display denying volume and a setting turning it off need different
+  /// sentences because they have different fixes. `.unsupported` is reachable only
+  /// from a description that parsed cleanly and listed no VCP 0x62 (D24), so it
+  /// must never be worded so a display that merely stayed silent could wear it.
   @Test func theDisplayDenyingVolumeIsNotASettingTurningItOff() {
     #expect(
       DiagnosticsCopy.volumeAvailability(
@@ -155,14 +135,10 @@ struct DiagnosticsCopyTests {
         == "Unavailable: hardware control is turned off for this display")
   }
 
-  /// D24's doctrine said out loud: unknown resolves to ENABLED, and the sentence
-  /// says why the control stays on. A page that flattened three states to two
-  /// would grey a working control on a display that merely stayed silent.
-  ///
-  /// The two `.unknown` arms are separate because a stored `.unknown` has two
-  /// producers, and only one of them is silence. Saying "this display sent no
-  /// answer" when a description IS on screen three rows above contradicts the
-  /// page's own evidence.
+  /// D24 out loud: unknown resolves to ENABLED, so the sentence says why the
+  /// control stays on. The two `.unknown` arms stay separate because only one of
+  /// its producers is silence, and "this display sent no answer" contradicts a
+  /// description shown three rows above.
   @Test func unknownVolumeSupportKeepsTheControlOnAndSaysWhy() {
     #expect(
       DiagnosticsCopy.volumeAvailability(
@@ -230,11 +206,9 @@ struct DiagnosticsCopyTests {
         == "Unavailable: the volume command is turned off for this display")
   }
 
-  /// The row's help is "VCP 0x8D", so it answers whether the display's own mute
-  /// command is what carries a mute here. Reading the pref alone made it say
-  /// "Available" on a display that denies the register, where the engine degrades
-  /// the mute to a volume-register write: the row named a command the mute never
-  /// reaches.
+  /// The row's help is "VCP 0x8D", so it answers whether that command carries the
+  /// mute. Reading the pref alone said "Available" on a display that denies the
+  /// register, where the engine degrades to a volume write instead.
   @Test func theMuteRowNamesTheRegisterThatActuallyCarriesTheMute() {
     #expect(
       DiagnosticsCopy.muteAvailability(
@@ -243,10 +217,9 @@ struct DiagnosticsCopyTests {
         == "Unavailable: this display's description parsed cleanly and does not list the mute command, so muting turns the volume command all the way down instead")
   }
 
-  /// The escape hatch is the one cell that writes the mute command into a
-  /// display saying it has no mute command, which is where a mute the app
-  /// records and no register carries comes from. A bug report needs both facts,
-  /// and the setting is named the way the volume row names it.
+  /// The one cell that writes the mute command into a display saying it has none,
+  /// which is where a mute the app records and no register carries comes from. A
+  /// bug report needs both facts.
   @Test func theEscapeHatchNamesItselfAndWhatItIsOverriding() {
     #expect(
       DiagnosticsCopy.muteAvailability(
@@ -276,9 +249,8 @@ struct DiagnosticsCopyTests {
     }
   }
 
-  /// The same split the volume row makes and the slider's tooltip was fixed to
-  /// make: "Always disabled" demotes the strategy as well, and that is the user's
-  /// own setting rather than the display refusing anything.
+  /// "Always disabled" demotes the strategy too, and that is the user's own
+  /// setting rather than the display refusing anything.
   @Test func theMuteRowBlamesTheOverrideWhenTheOverrideIsWhatDemotedIt() {
     let setting = DiagnosticsCopy.muteAvailability(
       muteEnabled: true, volumeAvailable: true, forceSoftware: false,
@@ -294,9 +266,8 @@ struct DiagnosticsCopyTests {
         override: .forceNone, muteSupport: .unsupported) == setting)
   }
 
-  /// The pref is still the first word, and the row keeps the sentence it already
-  /// had: with the pref off, 0x8D is out of use because it was switched off, not
-  /// because anything was refused.
+  /// With the pref off, 0x8D is out of use because it was switched off, not because
+  /// anything was refused, so the pref stays the first word.
   @Test func theMuteRowStillNamesThePrefFirst() {
     for override in AudioSinkOverride.allCases {
       for support in VCPSupport.allCases {
@@ -325,12 +296,9 @@ struct DiagnosticsCopyTests {
     }
   }
 
-  /// The row reads Available exactly where the display's own mute command really
-  /// is the one carrying the mute, and the strategy is read from
-  /// `VolumeSliderPolicy` rather than restated here. The MAG's permanent
-  /// `.unknown` keeps the command, and so does "Always enabled" over a clean
-  /// denial. Asserted on the verdict word, not the whole sentence, because some
-  /// available cells name the setting that got them there.
+  /// Available exactly where the display's own mute command carries the mute, with
+  /// the strategy read from `VolumeSliderPolicy` rather than restated. Asserted on
+  /// the verdict word alone, since some available cells also name the setting.
   @Test func theMuteRowSaysAvailableExactlyWhileTheDedicatedCommandIsInForce() {
     for override in AudioSinkOverride.allCases {
       for support in VCPSupport.allCases {
@@ -401,10 +369,9 @@ struct DiagnosticsCopyTests {
         == "Unavailable: combined dimming is off for this display and its hardware brightness command is turned off")
   }
 
-  /// `supportsHDR` false has three causes and only one of them is the display's
-  /// fault, so the sentence names two possibilities and says they are
-  /// indistinguishable from here. The DisplayServices arm is checked FIRST and
-  /// is a different framework.
+  /// `supportsHDR` false has three causes and only one is the display's fault, so
+  /// the sentence names two and says they are indistinguishable from here. The
+  /// DisplayServices arm is a different framework and is checked first.
   @Test func hdrNamesBothCausesRatherThanBlamingTheDisplay() {
     #expect(
       DiagnosticsCopy.hdrAvailability(
@@ -427,13 +394,10 @@ struct DiagnosticsCopyTests {
 
   // MARK: - Verdict
 
-  /// The arms are an ORDER, not a set, and each was previously tested only with
-  /// the others neutral, so swapping two of them changed no test. Added after a
-  /// review mutation swapped `.unavailable` past `lastApplyFailed` and all 39
-  /// tests still passed: a display with DDC turned off AND a failed apply would
-  /// have said "try a different cable" about a path that sends nothing over a
-  /// cable at all. The HDR precedence below was already pinned this way, so the
-  /// omission was an oversight rather than a decision.
+  /// The arms are an ORDER, not a set, and testing each with the others neutral
+  /// let a mutation swap `.unavailable` past `lastApplyFailed` with the suite still
+  /// green: DDC off plus a failed apply then said "try a different cable" about a
+  /// path that sends nothing over a cable.
   @Test func unavailableOutranksAFailedApplyWhenBothAreTrue() {
     #expect(
       DiagnosticsCopy.verdict(
@@ -465,10 +429,9 @@ struct DiagnosticsCopyTests {
         == "Candela has not sent anything to this display yet.")
   }
 
-  /// The three "it is working" endings, and the write-only one is its own
-  /// sentence: a display that is accepting every command while never answering
-  /// a read is working, and saying so without the caveat would leave every
-  /// other row on the page unexplained.
+  /// The write-only ending is its own sentence: a display taking every command
+  /// while never answering a read is working, and saying that without the caveat
+  /// leaves every other row on the page unexplained.
   @Test func aWorkingDisplayStillReportsHowItAnswersReads() {
     func verdict(_ evidence: DDCReadEvidence) -> String {
       DiagnosticsCopy.verdict(
@@ -487,16 +450,10 @@ struct DiagnosticsCopyTests {
 
   // MARK: - This display
 
-  /// "Not enumerated yet" and "reported nothing" are different facts, and this
-  /// row used to collapse them, saying the display reported nothing when nothing
-  /// had been READ.
-  /// `notStated` is a tag the capabilities string does not CARRY, which is not
-  /// the display answering with an empty one. Its own docstring forbids "None"
-  /// for exactly that reason, and nothing enforced it: a review mutation
-  /// changed it to "None" and all 39 tests passed, because it appeared only
-  /// inside the everySentence sweep and never in an equality. Its neighbour
-  /// `notEnumerated` was pinned below from the start, so this was an asymmetry
-  /// rather than a decision.
+  /// `notStated` is a tag the capabilities string does not carry, which is not the
+  /// display answering with an empty one, so it may never read "None". Nothing
+  /// enforced that until here: it appeared only in the everySentence sweep, so a
+  /// mutation to "None" left the suite green.
   @Test func aTagTheDescriptionLacksIsNeverReportedAsNone() {
     #expect(DiagnosticsCopy.notStated == "Not stated")
   }
@@ -686,10 +643,8 @@ struct DiagnosticsCopyTests {
         == ["volume and mute"])
   }
 
-  /// The volume keys and the mute key are armed on separate verdicts, because
-  /// they write separate registers: a display can list one and deny the other.
-  /// The report has to be able to say so, or it describes a tap that is not the
-  /// one running.
+  /// Volume keys and the mute key are armed on separate verdicts because they write
+  /// separate registers, so a display can list one and deny the other.
   @Test func volumeAndMuteAreNamedApartWhenOnlyOneIsWatched() {
     #expect(
       DiagnosticsCopy.watchedKeyFamilies(brightness: false, volume: true, mute: false)
@@ -709,9 +664,8 @@ struct DiagnosticsCopyTests {
         == "MacBook Pro Speakers: not matched to this display")
   }
 
-  /// A failure after a success keeps BOTH facts: what is on the display now, and
-  /// that the most recent attempt did not land. Reporting only the second would
-  /// lose the value the display is actually showing.
+  /// A failure after a success keeps both facts: reporting only the failure loses
+  /// the value the display is actually showing.
   @Test func aFailedCommandNeverErasesTheLastAcceptedOne() {
     #expect(
       DiagnosticsCopy.lastWrite(target: nil, failed: false)
@@ -738,14 +692,9 @@ struct DiagnosticsCopyTests {
     #expect(DiagnosticsCopy.mirroring(isMirrorSlave: false) == "Showing its own contents")
   }
 
-  /// SS7: a synthesized size is not the user mirroring anything, and the page
-  /// must never report the panel as showing another display's contents while it
-  /// is showing its own desktop at a size Candela renders.
-  ///
-  /// The pairing OUTRANKS the mirror flag in all three of its states, the
-  /// not-enumerated one included: the engine's table is the authority on
-  /// synthesis topology (SS1), and a catalog nobody has built yet is not
-  /// evidence against it.
+  /// SS7: a synthesized size is not the user mirroring anything. The pairing
+  /// outranks the mirror flag in all three of its states, not-enumerated included,
+  /// because the engine's table is the authority on synthesis topology (SS1).
   @Test func aSynthesizedSizeIsNeverReportedAsAnotherDisplaysContents() {
     #expect(
       DiagnosticsCopy.mirroring(isMirrorSlave: true, isSynthesized: true)
@@ -794,8 +743,8 @@ struct DiagnosticsCopyTests {
 
   // MARK: - House rules
 
-  /// The product name is provisional (it lives in `AppInfo` so the rename is one
-  /// line), so nothing here may bake in the literal.
+  /// The product name lives in `AppInfo` so a rename is one line; nothing here may
+  /// bake in the literal.
   @Test func theProductNameIsNeverBakedIn() {
     let renamed = DiagnosticsCopy.readEvidence(.notAttempted, app: "Lumen")
     #expect(renamed == "Lumen has not read from this display")
@@ -815,21 +764,16 @@ struct DiagnosticsCopyTests {
     }
   }
 
-  /// §6: no em dashes in user-visible copy. The one exception used to be the
-  /// row label "Not offered - no matching timing", which lived inline in the
-  /// view where no test could reach it, and shipped with an em dash from the
-  /// day it was written until #129. It is now `wireTimingWithheldLabel` here,
-  /// so this guard covers it and the class of defect is closed rather than
-  /// documented.
+  /// §6: no em dashes in user-visible copy. Labels that live inline in a view are
+  /// where this leaks, so they are moved onto `DiagnosticsCopy` to be swept here.
   @Test func noProducedStringContainsAnEmDash() {
     for produced in Self.everySentence() {
       #expect(!produced.contains("—"), "em dash: \(produced)")
     }
   }
 
-  /// Internal key names never reach copy (D25). `forceSw` and `unavailableDDC`
-  /// are the two that the availability sentences are derived from and so the two
-  /// most likely to leak.
+  /// Internal key names never reach copy (D25). The availability sentences are
+  /// derived from `forceSw` and `unavailableDDC`, so those two leak first.
   @Test func noProducedStringLeaksAPrefKeyName() {
     for produced in Self.everySentence() {
       for key in ["forceSw", "unavailableDDC", "audioSinkOverride", "enableMuteUnmute"] {

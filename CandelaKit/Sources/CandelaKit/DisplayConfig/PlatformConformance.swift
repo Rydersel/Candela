@@ -3,37 +3,30 @@ import CoreGraphics
 import Foundation
 import ObjectiveC
 
-/// Does the platform still behave as this app assumes? (#82)
+/// Does the platform still behave as this app assumes?
 ///
 /// Every private-API guard in the codebase fails POLITELY: a renamed symbol or
-/// a moved descriptor field becomes "0 modes revealed" and the whole test suite
-/// stays green, because the suites prove our logic against fixtures typed in on
-/// the day the assumption was measured. This is the other kind of test. It runs
-/// against attached hardware, asserts the assumptions themselves, and exits
-/// non-zero, so `candela-probe conform` is one command to run after every macOS
-/// update instead of a note at the end of each spike doc that nobody can
-/// execute without redoing the investigation.
+/// a moved descriptor field becomes "0 modes revealed" while the suites stay
+/// green, because they prove our logic against fixtures typed in on the day the
+/// assumption was measured. This runs against attached hardware, asserts the
+/// assumptions themselves, and exits non-zero, so `candela-probe conform` is one
+/// command to run after a macOS update.
 ///
 /// Three rules, each the lesson of a measured failure elsewhere in the repo:
 ///
 /// - **A skip is a reported fact, never a silent pass** (DT30's honesty rule).
-///   A write-only panel cannot exercise the DDC read path; the run says so
-///   rather than counting it green.
-/// - **A run that demonstrates nothing is a failure.** Zero passing checks
-///   exits non-zero even with zero failures, because "checked nothing" printed
-///   as green is exactly the vacuous pass the CI test floor exists to catch.
-/// - **The verdict logic is pure and red-tested.** Every threshold below has a
-///   unit test proving it can fail, because an invariant never observed failing
-///   is not yet a test.
+///   A write-only panel cannot exercise the DDC read path; the run says so.
+/// - **A run that demonstrates nothing is a failure.** Zero passing checks exit
+///   non-zero even with zero failures.
+/// - **The verdict logic is pure and red-tested.** An invariant never observed
+///   failing is not yet a test.
 public enum PlatformConformance {
   public enum Outcome: Sendable, Equatable {
     case pass(String)
     case fail(String)
     case skip(String)
     /// HP7: the check ran but its positive control did not fire, so the
-    /// measurement means nothing either way. Neither a pass (nothing was
-    /// demonstrated) nor a fail (the platform was never actually observed
-    /// misbehaving); it counts against the exit code all the same.
+    /// measurement means nothing either way. Counts against the exit code.
     case inconclusive(String)
   }
 
@@ -47,8 +40,7 @@ public enum PlatformConformance {
   public struct Check: Sendable, Equatable {
     public let name: String
     public let outcome: Outcome
-    /// Absent on checks with no positive control; the conformance run's checks
-    /// are all control-free, so this stays nil there.
+    /// Absent on checks with no positive control.
     public let control: ControlOutcome?
 
     public init(name: String, outcome: Outcome, control: ControlOutcome? = nil) {
@@ -58,13 +50,11 @@ public enum PlatformConformance {
     }
   }
 
-  /// One run's record. `checks` is publicly appendable because the probe adds
-  /// checks of its own (the child-process mode apply needs the executable's
-  /// path, which only the probe has), and those must fold into the same exit
-  /// code rather than invent a second one.
+  /// One run's record. `checks` is publicly appendable so the probe's own
+  /// checks fold into the same exit code instead of inventing a second one.
   public struct Report: Sendable {
-    /// The macOS version and build this run describes. Printed first: a
-    /// passing run is a dated record against one build, never a general claim.
+    /// The macOS version and build this run describes. A passing run is a
+    /// dated record against one build, never a general claim.
     public let platform: String
     public var checks: [Check]
 
@@ -80,11 +70,10 @@ public enum PlatformConformance {
       checks.count { if case .inconclusive = $0.outcome { true } else { false } }
     }
 
-    /// Zero only when something failed is absent AND something passed is
-    /// present. All-skips is non-zero: a run that demonstrated nothing must
-    /// not read as the platform conforming. An inconclusive check is non-zero
-    /// too (HP7): a dead positive control makes the whole run unbelievable, so
-    /// it must not print green next to the checks that did measure something.
+    /// Zero needs no failure AND at least one pass. All-skips is non-zero: a
+    /// run that demonstrated nothing must not read as the platform conforming.
+    /// An inconclusive check is non-zero too (HP7), because a dead positive
+    /// control makes the whole run unbelievable.
     public var exitCode: Int32 {
       failed == 0 && inconclusive == 0 && passed > 0 ? 0 : 1
     }
@@ -101,8 +90,8 @@ public enum PlatformConformance {
         case let .inconclusive(detail): out.append("INCONCLUSIVE \(check.name.padding(toLength: 34, withPad: " ", startingAt: 0)) \(detail)")
         }
       }
-      // The inconclusive count is appended only when it is non-zero, so a
-      // control-free run's summary line is the one the baseline pins.
+      // Appended only when non-zero, so a control-free run's summary line is
+      // the one the committed baseline pins.
       var summary = "\(label): \(passed) passed, \(failed) failed, \(skipped) skipped"
       if inconclusive > 0 { summary += ", \(inconclusive) inconclusive" }
       out.append(summary)
@@ -126,10 +115,9 @@ public enum PlatformConformance {
     return .pass("modeNumber == index across \(pairs.count) descriptors")
   }
 
-  /// The check that earns its keep: CoreGraphics' own published list, an
-  /// entirely public API, cross-validates the private descriptor layout. If
-  /// any field offset moves, geometry stops agreeing here and the run fails
-  /// loudly instead of the feature quietly revealing nothing.
+  /// CoreGraphics' published list, a public API, cross-validates the private
+  /// descriptor layout: if a field offset moves, geometry stops agreeing here
+  /// and the run fails loudly instead of the feature revealing nothing.
   public static func subset(
     published: [(id: Int32, logicalWidth: Int, logicalHeight: Int, pixelWidth: Int, pixelHeight: Int)],
     cgs: [Int32: CGSModeDescriptor]
@@ -194,10 +182,9 @@ public enum PlatformConformance {
     limitTo: CGDirectDisplayID? = nil
   ) async -> Report {
     var report = Report(platform: ProcessInfo.processInfo.operatingSystemVersionString)
-    // `limitTo` is the probe's `--display` contract carried through: a filter
-    // that matches nothing leaves every hardware check skipped, and the
-    // zero-passes rule then makes the run FAIL rather than print green, which
-    // is that rule demonstrated on real hardware.
+    // `limitTo` carries the probe's `--display` contract: a filter matching
+    // nothing skips every hardware check, and the zero-passes rule then fails
+    // the run rather than printing green.
     let displays = configurator.displays().filter { limitTo == nil || $0.id == limitTo }
     let noDisplays = limitTo != nil && displays.isEmpty
       ? "no online display matches --display \(limitTo!)"
@@ -245,10 +232,9 @@ public enum PlatformConformance {
         : .fail("CGSConfigureDisplayMode did not resolve from SkyLight")
     ))
 
-    // Every early exit still names every remaining check: a check that
-    // disappears from the output entirely is a silent absence, and the first
-    // red-matrix run caught exactly that (five checks vanished behind a
-    // missing symbol instead of reporting why they could not run).
+    // Every early exit still names every remaining check: one that vanishes
+    // from the output is a silent absence, and the first red-matrix run had
+    // five disappear behind a missing symbol.
     func bailingOut(_ reason: String) -> [Check] {
       checks + ["cgs.count", "cgs.descriptor.bounds", "cgs.index", "cgs.subset",
                 "cgs.plausibility", "cgs.density", "cgs.reveals"]
@@ -285,9 +271,8 @@ public enum PlatformConformance {
         .map { Check(name: $0, outcome: .skip("unreachable while cgs.count fails: \(countFailure)")) }
     }
 
-    // Descriptor bounds: the callee must write nothing past the declared 212
-    // bytes. The buffer is poisoned rather than zeroed so an overwrite of any
-    // value is visible, zero included.
+    // The callee must write nothing past the declared 212 bytes. The buffer is
+    // poisoned rather than zeroed so an overwrite of any value is visible.
     let poison: UInt8 = 0xAA
     let byteCount = 1024
     let buffer = UnsafeMutableRawPointer.allocate(byteCount: byteCount, alignment: 16)
@@ -317,8 +302,6 @@ public enum PlatformConformance {
           : .fail("no descriptor could be read to sample"))
     ))
 
-    // The per-display descriptor work: index identity, the CG cross-check,
-    // plausibility, density, and the revelation canary.
     var indexPairs: [(index: Int, modeNumber: Int32)] = []
     var subsetOutcome: Outcome = .skip("no display produced both lists")
     var subsetValidated = 0
@@ -334,10 +317,9 @@ public enum PlatformConformance {
       let (published, revealed) = configurator.enumerate(display.id)
       revealedTotal += revealed?.modes.count ?? 0
 
-      // Every display is cross-checked; the first divergence is kept as the
-      // answer, because one moved field is a platform fact, not a per-panel
-      // quirk. The pass detail counts across displays so a green line cannot
-      // be read as one panel's evidence.
+      // The first divergence is kept as the answer: one moved field is a
+      // platform fact, not a per-panel quirk. The pass detail counts across
+      // displays so a green line is not read as one panel's evidence.
       if !published.isEmpty, !descriptors.isEmpty, isFail(subsetOutcome) == false {
         let next = subset(
           published: published.map {
@@ -378,10 +360,10 @@ public enum PlatformConformance {
     checks.append(Check(name: "cgs.plausibility", outcome: plausibilityOutcome))
     checks.append(Check(name: "cgs.density", outcome: densityRange(densities: densities)))
 
-    // The anti-graceful-degradation canary: without it, "the feature silently
-    // reveals nothing" is indistinguishable from "these panels hide nothing".
-    // Any external panel on this rig reveals dozens, so zero means the pipeline
-    // broke somewhere the gates cannot name.
+    // Without this canary, "the feature silently reveals nothing" is
+    // indistinguishable from "these panels hide nothing". Any external panel on
+    // the rig reveals dozens, so zero means the pipeline broke somewhere the
+    // gates cannot name.
     checks.append(Check(
       name: "cgs.reveals",
       outcome: revealedTotal > 0
@@ -432,8 +414,8 @@ public enum PlatformConformance {
     ))
 
     // RS5's measured no-ops. If a macOS update ever makes 360 or -90 a real
-    // rotation, this is the run that must find out, not a user; the restore
-    // attempt below is why it still needs the operator's consent.
+    // rotation, this run must find out rather than a user; the restore attempt
+    // below is why it needs the operator's consent.
     guard applyDestructive else {
       checks.append(Check(
         name: "rotation.noop",
@@ -472,9 +454,9 @@ public enum PlatformConformance {
 
   // MARK: MonitorPanel
 
-  /// The sharpest edge in the app: `unsafeBitCast` to an @objc protocol
-  /// crashes rather than degrades if Apple reshapes these classes, so the
-  /// property is checked through the ObjC runtime BEFORE anything casts.
+  /// `unsafeBitCast` to an @objc protocol crashes rather than degrades if Apple
+  /// reshapes these classes, so the property is checked through the ObjC
+  /// runtime BEFORE anything casts.
   private static func monitorPanelChecks() -> [Check] {
     var checks: [Check] = []
     guard dlopen(
@@ -547,10 +529,9 @@ public enum PlatformConformance {
         : .fail("\(missing.joined(separator: ", ")) did not resolve")
     )
 
-    // Read from the built-in: it is the one panel DisplayServices answers for
-    // on every machine this app runs on. Every early exit still names the
-    // roundtrip check, because a check that silently disappears is the silent
-    // pass this suite exists to refuse.
+    // Read from the built-in: the one panel DisplayServices answers for on
+    // every machine this app runs on. Every early exit still names the
+    // roundtrip check, because a check that disappears is a silent pass.
     func pair(_ read: Outcome, roundtrip: Outcome) -> [Check] {
       [symbols,
        Check(name: "displayservices.read", outcome: read),
@@ -577,9 +558,8 @@ public enum PlatformConformance {
         read, roundtrip: .skip("requires --apply (writes brightness, even if to its current value)")
       )
     }
-    // Same value back, so the panel never visibly moves; what is being tested
-    // is that a set is OBSERVABLE by a get, which is the pair every controller
-    // trusts.
+    // Same value back, so the panel never visibly moves. What is tested is that
+    // a set is OBSERVABLE by a get, the pair every controller trusts.
     let wrote = DisplayServices.setBrightness(value, for: builtIn.id)
     let reread = DisplayServices.getBrightness(for: builtIn.id)
     return pair(read, roundtrip: wrote && reread.map({ abs($0 - value) < 0.01 }) == true
@@ -589,10 +569,9 @@ public enum PlatformConformance {
 
   // MARK: DDC reply frames
 
-  /// The transports validate every Get VCP reply through `DDCReplyFrame`
-  /// (source 0x6E, op 0x02, result 0x00, VCP echo), so a read that returns a
-  /// parsed value IS the frame-layout check. A panel that does not answer
-  /// reads cannot exercise it, and says so.
+  /// The transports validate every Get VCP reply through `DDCReplyFrame`, so a
+  /// read that returns a parsed value IS the frame-layout check. A panel that
+  /// does not answer reads cannot exercise it, and says so.
   private static func ddcChecks(
     panels: [(name: String, writer: any DDCWriting)]
   ) async -> [Check] {

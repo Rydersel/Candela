@@ -2,15 +2,11 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// The plumbing four display-configuration coordinators used to hold four copies
-/// of each (#68). It sat in the app target, which has no test target (#80), so
-/// none of it was ever covered; moving it into CandelaKit is what makes these
-/// possible at all.
 @MainActor
 @Suite("Preview queue and countdown driver (#68)")
 struct PreviewPlumbingTests {
-  /// A recorder that is main-actor confined, so no locking is needed and the
-  /// order it records IS the order the operations ran.
+  /// Main-actor confined, so no locking is needed and the order it records IS
+  /// the order the operations ran.
   @MainActor
   final class Log {
     private(set) var entries: [String] = []
@@ -19,8 +15,8 @@ struct PreviewPlumbingTests {
 
   // MARK: - PreviewQueue
 
-  /// The whole point of the type: two reconfigurations of the same kind are
-  /// never in flight at once, however fast they are asked for.
+  /// Two reconfigurations of the same kind are never in flight at once, however
+  /// fast they are asked for.
   @Test func operationsRunInTheOrderTheyWereQueuedAndNeverOverlap() async {
     let queue = PreviewQueue()
     let log = Log()
@@ -40,9 +36,8 @@ struct PreviewPlumbingTests {
     #expect(log.entries == ["a.start", "a.end", "b.start", "b.end", "c"])
   }
 
-  /// The second half of the chain contract: a returning operation both waits for
-  /// what is already queued AND holds up what is queued after it, even though the
-  /// chain is Void-typed and cannot carry its result.
+  /// A returning operation waits for what is queued AND holds up what follows,
+  /// even though the Void-typed chain cannot carry its result.
   @Test func aReturningOperationJoinsTheSameChainInBothDirections() async {
     let queue = PreviewQueue()
     let log = Log()
@@ -63,11 +58,9 @@ struct PreviewPlumbingTests {
 
   // MARK: - PreviewCountdownDriver
 
-  /// Waits for a condition rather than for a fixed span. The suite runs in
-  /// parallel and detached work shares the cooperative pool, so a fixed window
-  /// makes a test that measures machine load rather than behaviour. The first
-  /// draft of this file did exactly that and failed the moment it ran alongside
-  /// the other 1300 tests instead of on its own.
+  /// Waits for a condition, not a fixed span. The suite runs in parallel and
+  /// detached work shares the cooperative pool, so a fixed window would measure
+  /// machine load rather than behaviour.
   private func waitUntil(
     _ condition: @escaping @Sendable () async -> Bool, within: Duration = .seconds(5)
   ) async -> Bool {
@@ -131,13 +124,10 @@ struct PreviewPlumbingTests {
     driver.stop()
   }
 
-  /// The reason the driver is detached: a main actor wedged inside a synchronous
-  /// reconfiguration callback must not be able to stop the expiry.
-  ///
-  /// Asserted by WHERE the tick runs, not by how many ticks fit in a window. The
-  /// window version measures how busy the machine is; this one fails if the
-  /// detached task ever becomes a plain `Task`, which is the regression that
-  /// matters and the one a count cannot distinguish from a slow test host.
+  /// Why the driver is detached: a main actor wedged inside a synchronous
+  /// reconfiguration callback must not be able to stop the expiry. Asserted by
+  /// WHERE the tick runs, since a tick count cannot tell a plain `Task` apart
+  /// from a slow test host.
   @Test func theClockNeverRunsOnTheMainActor() async {
     let driver = PreviewCountdownDriver(interval: .milliseconds(10))
     let observed = ThreadWitness()
@@ -155,7 +145,6 @@ struct PreviewPlumbingTests {
   }
 }
 
-/// The clock the Mode, Mirror and Arrangement sessions each held a copy of (#68).
 @Suite("Preview countdown (#68)")
 struct PreviewCountdownTests {
   @Test func anArmedClockSpendsItselfExactlyOnce() {
@@ -172,11 +161,9 @@ struct PreviewCountdownTests {
     #expect(clock.isArmed == false)
   }
 
-  /// THE reason this is a type and not an `Int`. A failed expiry revert disarms
-  /// rather than re-attempting from every later tick; re-attempting is
-  /// `revert()`'s job, on a person's say-so. If `isArmed` were derived from
-  /// `remaining > 0` the two facts would collapse and a spent clock would fire
-  /// again the moment anything nudged it.
+  /// Why this is a type and not an `Int`: a failed expiry revert disarms rather
+  /// than re-attempting, and re-attempting is `revert()`'s job. `isArmed`
+  /// derived from `remaining > 0` would let a spent clock fire again.
   @Test func aSpentClockNeverFiresAgainHoweverOftenItIsTicked() {
     var clock = PreviewCountdown()
     clock.arm(seconds: 1)
@@ -228,8 +215,6 @@ struct PreviewCountdownTests {
   }
 }
 
-/// The other half of #68's consolidation: the five-term geometry match that was
-/// spelled out in `ModeReapplyPolicy` and in the apply cross-check.
 @Suite("Mode geometry matching (#68)")
 struct ModeGeometryMatchTests {
   private func mode(

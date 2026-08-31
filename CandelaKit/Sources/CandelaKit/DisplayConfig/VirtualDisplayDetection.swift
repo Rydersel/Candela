@@ -5,12 +5,10 @@ import Foundation
 /// Is this display SYNTHETIC: Sidecar, AirPlay, a dummy-plug emulator,
 /// another app's virtual display, or one of ours?
 ///
-/// One dictionary lookup, on a dictionary the app already fetches in
-/// `BuiltInDisplayDiscovery.productName` and `Arm64DDC.ioregMatchScore`, so
-/// this adds NO new private-API dependency (VD3). Measured 1 for every
-/// CGVirtualDisplay created and 0 for the built-in, including from a second
-/// process with no part in creating them, which is what makes it a
-/// FOREIGN-display predicate and not just a memory of what we did.
+/// One lookup on a dictionary the app already fetches elsewhere, so it adds NO
+/// new private-API dependency (VD3). Measured 1 for every CGVirtualDisplay and 0
+/// for the built-in, including from a second process that created none of them,
+/// which is what makes it a FOREIGN-display predicate.
 ///
 /// It answers "virtual", NEVER "ours". Ownership is
 /// `VirtualDisplayProviding.ownedDisplayIDs` and nothing else may decide
@@ -25,9 +23,8 @@ public enum VirtualDisplayDetection {
   static let virtualDeviceKey = "kCGDisplayIsVirtualDevice"
 
   /// nil when the dictionary or the key is absent; the caller then treats the
-  /// display as ORDINARY, which is exactly today's behavior. That is the
-  /// degrade path the project rule requires of every private-API call site,
-  /// and it is why our own displays' protection rests on ownership instead.
+  /// display as ORDINARY. That is the degrade path every private-API call site
+  /// owes, and why our own displays' protection rests on ownership instead.
   public static func isVirtual(_ displayID: CGDirectDisplayID) -> Bool? {
     guard let dictionary = CoreDisplay_DisplayCreateInfoDictionary(displayID)?
       .takeRetainedValue() as NSDictionary?

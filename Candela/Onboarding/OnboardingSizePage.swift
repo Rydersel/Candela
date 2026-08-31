@@ -190,9 +190,8 @@ struct OnboardingSizePage: View {
     .padding(.horizontal, 60)
   }
 
-  /// The keep and revert bar, the safety shape the picker ships (PD9). The
-  /// sentence states the shipped semantic: expiry reverts, so the size only
-  /// sticks when Keep is clicked.
+  /// The keep and revert bar, the safety shape the picker ships (PD9). The copy
+  /// states the semantic: expiry reverts, so the size sticks only on Keep.
   private func countdownBar(seconds: Int) -> some View {
     VStack(spacing: 12) {
       Text("Reverting to the previous size in \(seconds)s unless you keep it")

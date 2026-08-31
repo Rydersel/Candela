@@ -1,12 +1,10 @@
 import CandelaKit
 import SwiftUI
 
-/// Display names for the three DDC commands, in ONE place: the grid's row
-/// labels, its accessibility labels and the Advanced page's VCP Overrides group
-/// all name the same three things.
-///
-/// Never `DDCCommand.rawValue` — those raws are shipped on-disk schema (D22)
-/// that happens to read as English by coincidence (lens-2 m-2).
+/// Display names for the DDC commands, in ONE place: the grid's row labels, its
+/// accessibility labels and the Advanced page's VCP Overrides group all name the
+/// same things. Never `DDCCommand.rawValue`: those raws are shipped on-disk
+/// schema (D22) that reads as English by coincidence.
 enum DDCCommandCopy {
   /// Mid-sentence form, for accessibility labels and captions.
   static func name(_ command: DDCCommand) -> String {
@@ -36,36 +34,29 @@ enum DDCCommandCopy {
   }
 }
 
-/// Per-command DDC tuning for one display: Enabled / Min / Max / Invert, for
-/// brightness, volume and contrast. D26 shrank the fork's six columns to these
-/// four; A1 then promoted the response curve and the hex control-code remap
-/// into the Advanced page's VCP Overrides sub-group, which renders directly
-/// below this grid in the same section.
+/// Per-command DDC tuning for one display: Enabled / Min / Max / Invert for
+/// brightness, volume and contrast (D26). The response curve and the hex
+/// control-code remap live in the Advanced page's VCP Overrides sub-group (A1)
+/// below, and that page owns the section header and the SO12 traffic-block
+/// explanation, so neither is drawn here.
 ///
-/// Rendered inside `AdvancedPage`'s Command Tuning section, which owns the
-/// section header and the SO12 traffic-block explanation — so neither is drawn
-/// here.
+/// Every edit is a read-modify-write of ONE command's tuning; the modify half is
+/// `DDCOverrideValidation.committed` in CandelaKit, under test. The fork rewrote
+/// all 18 keys and forced brightness to 100% on any single edit (QUIRK 7); here
+/// nothing writes brightness at all, and the D20 seam re-applies the SAME
+/// published value through `reapplyAfterPrefChange()` (D4/D28), which is what
+/// makes an override take effect without waiting for the next slider drag.
 ///
-/// Every edit is a read-modify-write of ONE command's tuning, and the
-/// modify half is `DDCOverrideValidation.committed` in CandelaKit, under test.
-/// The fork rewrote all 18 keys and forced brightness to 100% on any single
-/// edit (chapter 2 QUIRK 7); here nothing writes brightness at all — the D20
-/// seam re-applies the SAME published value through `reapplyAfterPrefChange()`
-/// (D4/D28), which is also what makes an override take effect immediately
-/// instead of on the user's next slider drag.
-///
-/// `@MainActor` for the same reason as `DisplayDetailView`: it stores a `@MainActor`
-/// `DisplayPrefWriter` and reads it from computed properties that are
-/// nonisolated on a plain `View` (lens-1 I3).
+/// `@MainActor`: it stores a `@MainActor` `DisplayPrefWriter` and reads it from
+/// computed properties that are nonisolated on a plain `View`.
 @MainActor
 struct CommandTuningGrid: View {
   let state: AppModel.DisplayState
   let writer: DisplayPrefWriter
 
-  /// Carries the `DDCCommand` itself, not its raw string: the previous shape
-  /// forced a `DDCCommand(rawValue:) ?? .brightness` fallback, so a mis-keyed
-  /// target would silently write against BRIGHTNESS (lens-4 M7). This is a
-  /// compile-time elimination, which is why it needs no test.
+  /// Carries the `DDCCommand` itself, not its raw string: a raw-string target
+  /// needed a `?? .brightness` fallback, so a mis-key silently wrote against
+  /// BRIGHTNESS. Eliminated at compile time, so it needs no test.
   private enum Target: Hashable {
     case minimum(DDCCommand)
     case maximum(DDCCommand)
@@ -84,33 +75,22 @@ struct CommandTuningGrid: View {
     }
   }
 
-  /// A hard 60 pt clipped the value at larger text sizes: three digits plus the
-  /// caret do not fit a fixed box once the font grows (accessibility contract
-  /// 10). The base stays 60 so the grid's columns are unchanged at the default
-  /// size.
+  /// A hard 60 pt clipped three digits plus the caret once the font grew (a11y
+  /// contract 10). The base stays 60, so default-size columns are unchanged.
   @ScaledMetric(relativeTo: .body) private var fieldWidth: CGFloat = 60
 
   @Environment(\.settingsAccent) private var lighting
 
   private var prefs: DisplayPrefs { writer.prefs }
 
-  /// Why no DDC command is reaching this display, if none is — read from the
-  /// ENGINE'S OWN PATH, the same one the Diagnostics section renders.
+  /// Why no DDC command is reaching this display, if none is, read from the
+  /// ENGINE'S OWN PATH, the same one Diagnostics renders. Computing it here from
+  /// `prefs.forceSoftware` missed live HDR (DDC is dead outright there) and
+  /// contradicted the Diagnostics row, so one page gave two answers.
   ///
-  /// It used to be `prefs.forceSoftware`, computed here, which made this the
-  /// second and contradicting claim about the control path on a page that
-  /// already had one. It was wrong in both directions: it missed live HDR (DDC
-  /// is dead outright there, yet the grid presented itself as live), and the
-  /// caption below it fired on the brightness command's `unavailableDDC`, so a
-  /// display whose Diagnostics row read "Nothing is moving this display's
-  /// brightness" was told three sections down that it "dims in software only".
-  /// Both now come off `BrightnessPath`, so the page gives one answer.
-  ///
-  /// Disable, don't hide (panel §5.4). The mute recovery affordance that D29
-  /// rule 3 requires for this state lives on the hub
-  /// (`DisplayHubView.recoverFromHardwareMute`) and is never disabled; the
-  /// Advanced page's DDC toggle, which is the other way out, is gated only by
-  /// live HDR for the same reason.
+  /// Disable, don't hide. The mute recovery D29 rule 3 requires for this state
+  /// lives on the hub and is never disabled; the Advanced page's DDC toggle, the
+  /// other way out, is gated only by live HDR for the same reason.
   private var trafficBlock: DDCTrafficBlock? {
     DisplayCardPolicy.ddcTrafficBlock(
       for: state.controller.brightnessPath,
@@ -123,10 +103,8 @@ struct CommandTuningGrid: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-        // Visible column headers are an ADDITION (spec §6). The per-control
-        // accessibility labels below stay exactly as they were — a11y contract
-        // 9 makes them load-bearing, and a visible header does not reach
-        // VoiceOver from inside a `Grid` cell.
+        // A visible header does not reach VoiceOver from inside a `Grid` cell,
+        // so the per-control accessibility labels below stay (a11y contract 9).
         GridRow {
           Color.clear.frame(width: 1, height: 1)
           columnHeader("On")
@@ -134,22 +112,19 @@ struct CommandTuningGrid: View {
           columnHeader("Max")
           columnHeader("Invert")
         }
-        // No row-level accessibility group: a modifier applied to a `GridRow`
-        // distributes onto EACH CELL, so the old `.accessibilityElement(
-        // children: .contain)` + row label pair wrapped every cell in its own
-        // container named after the command (the T15 concern, confirmed by the
-        // combined pass's D5). The per-control labels below carry the command
-        // name themselves, so a11y contract 9's per-control clause holds; the
-        // row-as-group clause is traded away because no spelling of it
-        // survives `GridRow`'s modifier distribution.
+        // No row-level accessibility group: a modifier on a `GridRow`
+        // distributes onto EACH CELL, so `.accessibilityElement(children:
+        // .contain)` wrapped every cell in its own container named after the
+        // command. The per-control labels below carry the command name, so a11y
+        // contract 9's per-control clause holds; no spelling of the row-as-group
+        // clause survives `GridRow`'s modifier distribution.
         ForEach(DDCCommand.allCases, id: \.self) { command in
           GridRow {
             Text(verbatim: DDCCommandCopy.title(command))
               .settingsText(SettingsTheme.titleColor)
-            // The native switch under the window's tint, NOT `themedSwitch()`:
-            // that style draws the label at the leading edge and spreads the
-            // row, and here the label is the grid's own first column and the
-            // cell has to BE the switch for the header to sit above it.
+            // NOT `themedSwitch()`: it draws the label at the leading edge and
+            // spreads the row. Here the first column is the label, and the cell
+            // has to BE the switch for the header to sit above it.
             switchCell(
               DDCCommandCopy.enabledSwitchLabel(command), isOn: enabledBinding(command)
             )
@@ -163,9 +138,8 @@ struct CommandTuningGrid: View {
           }
         }
       }
-      // Belt to the card-level disable `AdvancedPage` applies (SO12): this
-      // grid is the thing a traffic block actually voids, so it states the
-      // condition itself rather than trusting its container.
+      // Belt to the card-level disable `AdvancedPage` applies (SO12): the grid
+      // is what a traffic block voids, so it states the condition itself.
       .disabled(isInert)
       captions
     }
@@ -175,9 +149,8 @@ struct CommandTuningGrid: View {
   // MARK: - Cells
 
   /// The label is the control's own, not an `.accessibilityLabel` over an empty
-  /// one; `.labelsHidden()` hides it because the row's first column draws the name.
-  ///
-  /// This is not what fixes a refused press. Measured 2026-08-27, the old shape
+  /// one; `.labelsHidden()` hides it because the first column draws the name.
+  /// This is not what fixes a refused press: measured 2026-08-27, the old shape
   /// published `AXPress` too and the switches were `AXEnabled=0` under the MAG's
   /// live HDR, so a refused press means the traffic block below.
   private func switchCell(_ label: String, isOn: Binding<Bool>) -> some View {
@@ -191,12 +164,9 @@ struct CommandTuningGrid: View {
       .fixedSize()
   }
 
-  /// The `Grid` is built `.leading`, which put every header at the left edge of
-  /// a column wider than the header itself: "On" sat left of its switch and
-  /// "Min"/"Max" left of their fields. `gridColumnAlignment` set on a cell
-  /// governs the whole COLUMN, so declaring it here centers header and control
-  /// on one axis. The command-name column is not a header cell and keeps the
-  /// grid's leading alignment.
+  /// `gridColumnAlignment` on a cell governs the whole COLUMN, so centering here
+  /// puts header and control on one axis. The grid is `.leading`, which otherwise
+  /// parks each header at the left edge of a wider column.
   private func columnHeader(_ title: LocalizedStringKey) -> some View {
     Text(title)
       .font(.caption)
@@ -204,17 +174,13 @@ struct CommandTuningGrid: View {
       .gridColumnAlignment(.center)
   }
 
-  /// A `String`, not a `LocalizedStringKey`: interpolating a
-  /// `LocalizedStringKey` INTO a `LocalizedStringKey` literal has no matching
-  /// interpolation overload, so the accessibility labels above would not
-  /// compile (lens-1 M4), and the same names are needed mid-sentence in the
-  /// captions.
+  /// A `String`, not a `LocalizedStringKey`: there is no overload for
+  /// interpolating one `LocalizedStringKey` into another, so the labels above
+  /// would not compile.
   private func rowName(_ command: DDCCommand) -> String { DDCCommandCopy.name(command) }
 
-  /// The bezel, the width and the accessibility label are the same as they
-  /// always were; what `CommitOnBlurField` adds is that leaving the box applies
-  /// the number, which typing into one box and clicking the next always looked
-  /// like it did (#144).
+  /// `CommitOnBlurField` applies the number when the box loses focus: typing
+  /// into one box and clicking the next always looked like it committed.
   private func overrideField(_ target: Target) -> some View {
     CommitOnBlurField(
       stored: { storedText(target) },
@@ -222,11 +188,9 @@ struct CommandTuningGrid: View {
       fieldLabel: Text(accessibilityLabel(for: target)),
       width: fieldWidth
     )
-    // Keyed to the display: SO23's switcher can carry this page onto another
-    // display while a box is being typed in, and a field that kept its text
-    // across that would commit one display's number to another's pref. A new
-    // identity per display also lets a pending edit commit to the display it
-    // was typed for, on the way out.
+    // Keyed to the display: SO23's switcher can carry this page to another
+    // display mid-typing, and a field that kept its text would commit one
+    // display's number to another's pref.
     .id(state.display.persistenceKey)
     // The Target carries the field, so the name it composes cannot drift from
     // the name `commit` writes: both branch on the same `target.field`.
@@ -246,9 +210,8 @@ struct CommandTuningGrid: View {
     Binding(
       get: { !prefs.tuning(for: command).unavailableDDC },
       set: { enabled in
-        // D29 rule 1, second of the three controls that can make the volume
-        // command unavailable: `toggleMute` refuses once `isAvailable` is
-        // false, so unmute BEFORE disabling it.
+        // D29 rule 1: `toggleMute` refuses once `isAvailable` is false, so
+        // unmute BEFORE disabling the volume command.
         if command == .volume, !enabled, state.volume.isMuted {
           _ = state.volume.toggleMute()
         }
@@ -280,16 +243,13 @@ struct CommandTuningGrid: View {
     }
   }
 
-  /// Return and focus loss both arrive here, so neither route can validate the
-  /// text more loosely than the other (#144).
-  ///
-  /// ONE command's tuning in, the same tuning with ONE field changed out.
-  /// `DDCOverrideValidation.committed` returns nil for both refusals, garbage
-  /// and "that is already the stored value", and nil means write nothing at
-  /// all: the field snaps itself back, and a typo never fans out to a
-  /// `reapplyAfterPrefChange()`. Note there is no loop over
-  /// `DDCCommand.allCases` anywhere in this function: that shape is the fork's
-  /// QUIRK 7, and `DDCOverrideApplicationTests` is what keeps it out.
+  /// Return and focus loss both arrive here, so neither route validates more
+  /// loosely than the other. ONE command's tuning in, the same tuning with ONE
+  /// field changed out. `DDCOverrideValidation.committed` returns nil for
+  /// garbage, for a refusal and for "already the stored value", and nil writes
+  /// nothing: the field snaps back and a typo never fans out to a
+  /// `reapplyAfterPrefChange()`. No loop over `DDCCommand.allCases` here; that
+  /// shape is the fork's QUIRK 7, and `DDCOverrideApplicationTests` keeps it out.
   private func commit(_ target: Target, _ text: String) {
     let command = target.command
     guard let tuning = DDCOverrideValidation.committed(
@@ -302,20 +262,16 @@ struct CommandTuningGrid: View {
   // MARK: - Captions
 
   @ViewBuilder private var captions: some View {
-    // SO12: the block's explanation is stated ONCE for the page, by
-    // `AdvancedPage` at the foot of Control Method — the section above the
-    // first section a block greys out. It used to be repeated here, which is
-    // the duplication SO12 exists to remove; what stays is the silence, because
-    // the captions below describe controls that are not currently doing
-    // anything.
+    // SO12: `AdvancedPage` states the block's explanation once for the page.
+    // What stays here is the silence, because the captions below describe
+    // controls that are doing nothing.
     if trafficBlock == nil {
       SettingsCaption("Most displays need none of this. Use it when a display bottoms out or tops out early, or runs backwards. Leave a box empty to use the display's own range.")
-      // Stated before the click, not after it: Invert is the one column here
-      // whose wrong setting produces a shape nobody would read as "I set this
-      // wrong". It is a hardware correction, so on a display that does not run
-      // backwards it turns the register around while the software leg keeps
-      // running forwards, and the combined response peaks at the switching
-      // point. `InvertCompositionTests` pins that shape as ruled behaviour.
+      // Said before the click: Invert is the one column whose wrong setting
+      // makes a shape nobody reads as "I set this wrong". It corrects hardware,
+      // so on a display that does not run backwards the register turns around
+      // while the software leg keeps running forwards, and the combined response
+      // peaks at the switching point. `InvertCompositionTests` pins that shape.
       SettingsCaption("Invert is only for a display whose brightness runs backwards. On any other display it runs the slider the wrong way, and with combined dimming on the slider peaks in the middle and dims again above that.")
       brightnessLegCaption
       let ignored = ignoredMaxCommands
@@ -327,12 +283,10 @@ struct CommandTuningGrid: View {
     }
   }
 
-  /// What turning the BRIGHTNESS command off actually did, in the same words
-  /// the Diagnostics section uses, because it is derived from the same value.
-  ///
-  /// The old caption read `tuning(for: .brightness).unavailableDDC` and always
-  /// said "dims in software only" — true on one of the two paths that flag can
-  /// produce, and flatly contradicted by the Diagnostics row on the other.
+  /// What turning the BRIGHTNESS command off actually did, in the Diagnostics
+  /// section's words because it comes off the same value. Reading
+  /// `unavailableDDC` instead always said "dims in software only", true on only
+  /// one of the two paths that flag produces.
   @ViewBuilder private var brightnessLegCaption: some View {
     switch state.controller.brightnessPath {
     case let .softwareOnly(_, .ddcTurnedOff, dimsBelow):
@@ -341,7 +295,7 @@ struct CommandTuningGrid: View {
       SettingsCaption("With brightness off, nothing is moving this display's brightness.")
     // Silent about the wire on purpose: this caption explains the Off switch
     // above it, and a display that stopped answering did not get there from
-    // this control. The panel row and the Diagnostics page say that instead.
+    // this control.
     case .softwareOnly(_, .ddcUnresponsive, _), .unavailable(.ddcUnresponsiveWithNoSoftwareLeg):
       EmptyView()
     case .native, .software, .hardware, .combined:
@@ -349,8 +303,7 @@ struct CommandTuningGrid: View {
     }
   }
 
-  /// Commands whose stored max override is silently inert — the rule the fork
-  /// never surfaced.
+  /// Commands whose stored max override is silently inert.
   private var ignoredMaxCommands: [DDCCommand] {
     DDCCommand.allCases.filter { command in
       let tuning = prefs.tuning(for: command)

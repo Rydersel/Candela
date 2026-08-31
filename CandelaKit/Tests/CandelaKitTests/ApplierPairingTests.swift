@@ -4,10 +4,9 @@ import Testing
 @testable import CandelaKit
 
 /// Collects the lines an applier's wiring-bug guard would otherwise write to
-/// the unified log. Injected by every test that deliberately trips a guard, so
-/// the suite never puts a production-shaped assertion line into the app's own
-/// `applier` category (#148), and so "it reported the mismatch" becomes
-/// something a test asserts rather than something a human notices.
+/// the unified log. Injected by every test that trips a guard, so the suite
+/// never puts a production-shaped assertion line into the app's own `applier`
+/// category, and so "it reported the mismatch" is something a test asserts.
 struct MismatchRecorder: Sendable {
   private let lines = OSAllocatedUnfairLock<[String]>(initialState: [])
 
@@ -21,11 +20,10 @@ struct MismatchRecorder: Sendable {
 
 /// Submits whose applier does not accept the kind of target it was handed.
 ///
-/// The pairing is chosen in `applyPaths`, one branch at a time, and until #148
-/// nothing checked it: a swapped branch would produce a rejected write, a log
-/// line nobody greps, and a display that silently did not move. Every test here
-/// asserts this list is empty, so the check travels with the branch table
-/// rather than with whoever happens to be reading the log.
+/// The pairing is chosen in `applyPaths`, one branch at a time, and nothing
+/// used to check it: a swapped branch produced a rejected write, a log line
+/// nobody greps, and a display that silently did not move. Every test here
+/// asserts this list is empty, so the check travels with the branch table.
 @MainActor
 private func mispairedSubmits(_ h: Harness) -> [String] {
   h.submittedPairs
@@ -66,8 +64,8 @@ struct ApplierPairingTests {
 
   /// The built-in's constitutively native path (role `.builtIn`) pairs natively
   /// too. Its own row because it reaches `applyPaths` through a different
-  /// predicate than HDR does, and #148 was reported on a rig whose built-in is
-  /// the one native display.
+  /// predicate than HDR does, and the mispairing was reported on a rig whose
+  /// built-in is the one native display.
   @Test func theBuiltInRolePairsNatively() {
     let h = Harness(withHDR: false, role: .builtIn, readNative: { _ in 0.5 })
     h.controller.setBrightness(0.75)
@@ -77,8 +75,8 @@ struct ApplierPairingTests {
 
   /// One controller crossing between paths: HDR live (native), then off
   /// (combined DDC). Both kinds go through the SAME controller and each still
-  /// meets an applier that accepts it. This is the shape #148 suspected: an
-  /// applier chosen once and reused after the path changed under it.
+  /// meets an applier that accepts it. This is the suspected shape: an applier
+  /// chosen once and reused after the path changed under it.
   @Test func crossingBetweenPathsRepairsTheApplierWithTheTarget() async {
     let h = Harness(hdrEnabled: true) { prefs, _ in prefs.hdrMode = .alwaysOn }
     await h.prime()
@@ -93,9 +91,8 @@ struct ApplierPairingTests {
   }
 
   /// The paths that write no register submit through NOBODY: force-software,
-  /// combined with the DDC leg turned off, and the fully blocked corner. A path
-  /// that submits no target cannot mispair one, and the empty list is what
-  /// proves the software legs never borrowed an applier.
+  /// combined with the DDC leg turned off, and the fully blocked corner. The
+  /// empty list is what proves the software legs never borrowed an applier.
   @Test func thePathsThatWriteNoRegisterSubmitNothingAtAll() {
     let forced = Harness { prefs, _ in prefs.forceSoftware = true }
     forced.controller.setBrightness(0.75)
@@ -119,16 +116,15 @@ struct ApplierPairingTests {
     #expect(blocked.submittedPairs.isEmpty)
   }
 
-  /// The register writers that are not the slider pair correctly too: #146's
-  /// split delivery (register first, software after), the temporary dim, the
-  /// re-assert, and #143's full-range hand-back. Each is its own entry point
-  /// into `applyPaths` or `submitDDCBrightness`, so each could pick an applier
-  /// of its own.
+  /// The register writers that are not the slider pair correctly too: the split
+  /// delivery (register first, software after), the temporary dim, the
+  /// re-assert, and the full-range hand-back. Each is its own entry point into
+  /// `applyPaths` or `submitDDCBrightness`, so each could pick its own applier.
   @Test func everySecondaryRegisterWriterPairsCorrectly() async {
     let h = Harness()
     h.controller.setBrightness(0.4)
     h.prefs.disableCombinedBrightness = true
-    h.controller.reapplyAfterPrefChange() // #146 register-then-software delivery
+    h.controller.reapplyAfterPrefChange() // register-then-software delivery
     h.controller.beginTemporaryDim(factor: 0.5)
     h.controller.endTemporaryDim()
     h.controller.reassertHardware()

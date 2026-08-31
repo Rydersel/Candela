@@ -1,16 +1,16 @@
 import Foundation
 
-/// Validation for the Displays pane's per-command min/max DDC overrides — the
-/// one part of the tuning grid with real logic, so it lives here under test
-/// rather than inline in the view (D21).
+/// Validation for the Displays pane's per-command min/max DDC overrides, the one
+/// part of the tuning grid with real logic, so it lives here under test rather
+/// than inline in the view (D21).
 ///
 /// Two fork behaviors are deliberately not reproduced:
 ///
 /// * The fork range-checks Min (0…65535) but accepts any `UInt` for Max
-///   (chapter 2 QUIRK 9). Candela bounds both with the same range.
-/// * The fork silently discards a Max override that is not greater than Min
-///   — `CommandTuning.effectiveMaxDDC` just ignores it. Candela keeps the
-///   rule (it is shipped engine behavior) but SAYS SO, via `warning(min:max:)`.
+///   (QUIRK 9). Candela bounds both with the same range.
+/// * The fork silently discards a Max override that is not greater than Min:
+///   `CommandTuning.effectiveMaxDDC` just ignores it. Candela keeps the rule (it
+///   is shipped engine behavior) but SAYS SO, via `warning(min:max:)`.
 public enum DDCOverrideValidation {
   /// Stored `0` means "no override" for both fields, and that is the engine's
   /// own meaning: `minDDCOverride` 0 is the natural low end, and a
@@ -18,7 +18,7 @@ public enum DDCOverrideValidation {
   public static let unset = 0
 
   /// Accepted range, applied symmetrically to both fields. 65535 is the fork's
-  /// Min bound — the widest a 16-bit DDC value can be.
+  /// Min bound, the widest a 16-bit DDC value can be.
   public static let range = 0...65535
 
   /// Which of a command's two override fields is being edited.
@@ -47,8 +47,7 @@ public enum DDCOverrideValidation {
   }
 
   /// Field text for a stored value. `unset` renders empty, so "never touched"
-  /// and "explicitly zero" look the same — which is what the engine means by 0
-  /// (the presence-semantics question the M4 triage deferred to M5).
+  /// and "explicitly zero" look the same, which is what the engine means by 0.
   public static func text(for stored: Int) -> String {
     stored == unset ? "" : String(stored)
   }
@@ -57,12 +56,10 @@ public enum DDCOverrideValidation {
   /// tuning in, the same tuning with exactly one field changed out. `nil` means
   /// the input was rejected and the caller must write nothing at all.
   ///
-  /// This lives here rather than in the view because the mistake it prevents is
-  /// invisible from the app target: a `commit` that loops over
-  /// `DDCCommand.allCases` (the fork's QUIRK 7, and an easy slip next to the
-  /// grid's own `ForEach(DDCCommand.allCases)`) reproduces the exact defect
-  /// this task exists to avoid, and no test in the milestone could see it while
-  /// the logic stayed inline (lens-4 C3).
+  /// Here rather than in the view because the mistake it prevents is invisible
+  /// from the app target: a `commit` looping over `DDCCommand.allCases` (the
+  /// fork's QUIRK 7, an easy slip next to the grid's own `ForEach`) reproduces
+  /// the exact defect, and no test could see it while the logic stayed inline.
   public static func applied(
     _ input: Input, to tuning: CommandTuning, field: Field
   ) -> CommandTuning? {
@@ -84,16 +81,15 @@ public enum DDCOverrideValidation {
   /// tuning it is editing in, the tuning to write out, or `nil` for "write
   /// nothing at all".
   ///
-  /// `nil` covers both refusals, and the caller cannot tell them apart on
+  /// `nil` covers both refusals and the caller cannot tell them apart on
   /// purpose: text that does not parse or falls outside `range`, and text that
   /// resolves to the value already stored. Either way the field snaps back to
-  /// `text(for:)` and no pref is written, so a focus change passing through a
-  /// box nobody typed in costs nothing (D4).
+  /// `text(for:)` and no pref is written, so a focus change through a box nobody
+  /// typed in costs nothing (D4).
   ///
-  /// It exists as one function because a field commits on Return AND on losing
-  /// focus (#144). Two routes parsing their own text is how a looser second
-  /// validation gets in: the fork accepted `abc`, `70000` and `-1` in these
-  /// boxes, and a blur path with its own parsing could reintroduce that.
+  /// One function, because a field commits on Return AND on losing focus. Two
+  /// routes parsing their own text is how a looser second validation gets in:
+  /// the fork accepted `abc`, `70000` and `-1` in these boxes.
   public static func committed(
     _ text: String, to tuning: CommandTuning, field: Field
   ) -> CommandTuning? {
@@ -118,10 +114,10 @@ public enum DDCOverrideValidation {
 }
 
 public extension CommandTuning {
-  /// The tuning an untouched display reports, as ONE definition. The
-  /// per-display reset writes this; it never hand-types a second copy in the
-  /// app target, which is how `curveIndex: 5` (the fork's "linear", QUIRK 8)
-  /// would otherwise slip back in with a green suite.
+  /// The tuning an untouched display reports, as ONE definition. The per-display
+  /// reset writes this; a second hand-typed copy in the app target is how
+  /// `curveIndex: 5` (the fork's "linear", QUIRK 8) slips back in with a green
+  /// suite.
   static let unset = CommandTuning(
     unavailableDDC: false,
     minDDCOverride: DDCOverrideValidation.unset,

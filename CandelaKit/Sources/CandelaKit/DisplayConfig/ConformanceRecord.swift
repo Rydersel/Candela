@@ -1,14 +1,12 @@
 import Foundation
 
-/// R-B: the verification ledger consumes a JSON encoding of the same `Report`
-/// the human-readable lines come from, so the two forms cannot drift.
+/// R-B: the verification ledger encodes the same `Report` the human-readable
+/// lines come from, so the two forms cannot drift.
 ///
-/// Two fields the printed lines never carried, both of which the ledger needs:
-/// the **commit under test** (a run's verdict is about one build, and a verdict
-/// that outlives its commit is how a fixed bug gets rediscovered weeks later)
-/// and the **positive-control outcome per check** (a check whose control did
-/// not fire is a third result, distinct from both a pass and a skip, and it has
-/// to survive into the record or the ledger reads it as green).
+/// Two fields the printed lines never carried: the commit under test (a verdict
+/// that outlives its build is how a fixed bug gets rediscovered weeks later),
+/// and the positive-control outcome per check (a control that did not fire is a
+/// third result, and without it the ledger reads the check as green).
 extension PlatformConformance {
   public struct RunRecord: Codable, Sendable, Equatable {
     public struct CheckRecord: Codable, Sendable, Equatable {
@@ -93,9 +91,8 @@ extension PlatformConformance.Report {
     )
   }
 
-  /// Sorted keys and an ISO 8601 stamp: the ledger is a committed directory, so
-  /// two runs of the same shape have to diff as one changed line rather than as
-  /// a reshuffled object.
+  /// Sorted keys and an ISO 8601 stamp: the ledger is committed, so two runs of
+  /// the same shape must diff as one changed line, not a reshuffled object.
   public func jsonData(label: String, commit: String, timestamp: Date) throws -> Data {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]

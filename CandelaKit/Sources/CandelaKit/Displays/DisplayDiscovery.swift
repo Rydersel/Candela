@@ -4,23 +4,18 @@ public enum DisplayDiscovery {
   /// External, non-dummy, DDC-capable displays with a ready writer and the
   /// IOKit facts for each.
   ///
-  /// The third element is B8: every one of those facts (bar the panel size,
-  /// which comes from a dictionary the match scorer was already building) was
-  /// read on this very pass and thrown away by this very `.map`. Returning it
-  /// costs no additional IOKit iteration and, emphatically, no DDC traffic.
+  /// The facts element costs no extra IOKit iteration and no DDC traffic: every
+  /// one of those facts (bar the panel size, from a dictionary the match scorer
+  /// already builds) was read on this pass and thrown away by this `.map`.
   ///
-  /// A third tuple element rather than three fields on `ExternalDisplay`: that
-  /// type is three fields under the engine's one-submitter invariant, and
-  /// widening it would touch every construction site and every fixture for the
-  /// benefit of one read-only pane. Callers that want only the display and the
-  /// writer keep compiling — they already destructure by label.
+  /// A third tuple element rather than three fields on `ExternalDisplay`:
+  /// widening that type would touch every construction site and every fixture
+  /// for the benefit of one read-only pane.
   ///
   /// - Parameter ownedVirtualIDs: displays Candela itself created. They are
-  ///   removed from the candidate pool BEFORE `Arm64DDC.getServiceMatches`
-  ///   sees it, alongside foreign virtual displays; see `DDCCandidatePolicy`
-  ///   for what happens if they are not. Empty by default so a caller that
-  ///   owns no virtual displays reads naturally; the app passes
-  ///   `AppModel.virtualDisplays.ownedDisplayIDs`.
+  ///   removed from the candidate pool BEFORE `Arm64DDC.getServiceMatches` sees
+  ///   it, alongside foreign virtual displays; `DDCCandidatePolicy` says what
+  ///   happens if they are not.
   public static func discover(excluding ownedVirtualIDs: Set<CGDirectDisplayID> = [])
     -> [(display: ExternalDisplay, writer: any DDCWriting, facts: DisplayHardwareFacts)] {
     #if arch(arm64)
@@ -52,7 +47,7 @@ public enum DisplayDiscovery {
            ))
         }
     #else
-      return [] // Intel adapter arrives in a later milestone (spec §2 keeps IntelDDC compiled).
+      return [] // Intel adapter arrives in a later milestone; IntelDDC stays compiled.
     #endif
   }
 
@@ -60,12 +55,10 @@ public enum DisplayDiscovery {
     service.productName.isEmpty ? "Display \(displayID)" : service.productName
   }
 
-  /// Known limitation: two identical monitors (same model/firmware) can share
-  /// an EDID UUID, and the fallback triple collides even more easily when the
-  /// serial is 0 — twins would then share saved brightness. The fork
-  /// disambiguated with CGDirectDisplayID at the cost of stability across
-  /// ports/reboots. Single-monitor dev hardware can't test this; revisit if a
-  /// multi-monitor user reports it.
+  /// Known limitation: two identical monitors can share an EDID UUID, and the
+  /// fallback triple collides more easily when the serial is 0, so twins would
+  /// share saved brightness. The fork disambiguated with CGDirectDisplayID at
+  /// the cost of stability across ports and reboots.
   static func persistenceKey(from service: Arm64DDC.IOregService) -> String {
     if !service.edidUUID.isEmpty {
       return service.edidUUID

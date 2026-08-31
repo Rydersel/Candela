@@ -13,11 +13,11 @@ struct OverlayMaskTests {
 
   // MARK: - Quantization, and why it exists
 
-  /// **The load-bearing property.** `OledOverlay` skips the window-server round
-  /// trip when the applied state is unchanged. A mask derived from live
-  /// luminance differs in the twelfth decimal every tick, so without this every
-  /// apply is a memo miss and the overlay re-orders ~10 times a second per
-  /// display, each time re-stacking above whatever else is at shielding level.
+  /// The load-bearing property. `OledOverlay` skips the window-server round trip
+  /// when the applied state is unchanged. A mask derived from live luminance
+  /// differs in the twelfth decimal every tick, so without this every apply is a
+  /// memo miss and the overlay re-orders ten times a second per display,
+  /// re-stacking above whatever else is at shielding level each time.
   @Test func masksDifferingBelowTheQuantumAreEqual() {
     var a = cells(0.5)
     var b = a
@@ -103,12 +103,10 @@ struct OverlayMaskTests {
     #expect(composed.cells[11] == OverlayMask.quantize(0.5))
   }
 
-  /// **The regression this replaced `max` to fix.** `max` satisfies "never
-  /// lighter" and passed its test, while making the feature a no-op exactly
-  /// where it matters: a 0.15 nomination under a 0.5 idle dim composed to
-  /// `max(0.5, 0.15)` = 0.5, identical to its surroundings, so the region a
-  /// user turned this on to protect got no more protection than the region
-  /// beside it.
+  /// The regression `max` produced. It satisfies "never lighter" and passed its
+  /// test while making the feature a no-op where it matters: a 0.15 nomination
+  /// under a 0.5 idle dim composed to `max(0.5, 0.15)` = 0.5, so the region a user
+  /// turned this on to protect got no more protection than the region beside it.
   @Test func aShallowNominationStillDarkensUnderADeepUniformDim() {
     var regions = cells(0)
     regions[10] = 0.15
@@ -192,15 +190,12 @@ struct OverlayMaskTests {
     }
   }
 
-  /// **The memo guard, end to end.** `OledOverlay` compares `Oriented` values,
-  /// not `OverlayMask` values, so quantizing the mask is only useful if the
-  /// property survives orientation. This simulates what actually happens: two
-  /// consecutive luminance samples that differ by less than the render can show
-  /// must produce an EQUAL oriented mask, or every apply is a memo miss and the
-  /// overlay re-orders ten times a second per display.
-  ///
-  /// There is no app test target, so this is the only place the property is
-  /// checkable at all.
+  /// The memo guard, end to end. `OledOverlay` compares `Oriented` values, not
+  /// `OverlayMask` values, so quantizing the mask only helps if the property
+  /// survives orientation: two consecutive luminance samples that differ by less
+  /// than the render can show must produce an EQUAL oriented mask, or every apply
+  /// is a memo miss and the overlay re-orders ten times a second per display. No
+  /// app test target reaches this, so here is the only place it is checkable.
   @Test func sensorNoiseBelowTheQuantumDoesNotChangeTheOrientedMask() {
     let t = PanelSpaceTransform(
       displaySize: CGSize(width: 2160, height: 3840), rotation: .twoSeventy)

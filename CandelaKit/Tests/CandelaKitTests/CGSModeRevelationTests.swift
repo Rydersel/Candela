@@ -96,11 +96,9 @@ struct CGSModeRevelationMergeTests {
     #expect(m.isHiDPI)
   }
 
-  /// A revealed mode is never the panel's own timing.
-  ///
-  /// Uses the 100 Hz rung deliberately: the 120 Hz one is withheld by the
-  /// wire-timing guard, and `allSatisfy` over an empty list is vacuously true —
-  /// this test would then pass without testing anything.
+  /// A revealed mode is never the panel's own timing. Uses the 100 Hz rung deliberately:
+  /// the wire-timing guard withholds the 120 Hz one, and `allSatisfy` over an empty list
+  /// is vacuously true.
   @Test func revealedModesAreNeverNative() {
     let result = revealMag([CGSModeFixtures.magRevealedNativeAt2x100])
     #expect(result.modes.count == 1)
@@ -171,14 +169,10 @@ struct CGSModeRevelationMergeTests {
     #expect(revealMag([]).modes.isEmpty)
   }
 
-  /// Fail CLOSED with no CoreGraphics list to judge against: an empty list is
-  /// no evidence about what the panel advertises, and #110 is a hazard we can
-  /// only avoid provoking, never detect after the fact.
-  ///
-  /// Unreachable in production — `CoreGraphicsDisplayConfigurator` derives the
-  /// native pixel size from a member of this very list, so it is non-empty
-  /// wherever revelation runs — but the behaviour is pinned rather than left
-  /// to whichever branch happens to execute.
+  /// Fail closed with no CoreGraphics list to judge against: an empty list is no evidence
+  /// about what the panel advertises, and a mode that crops the desktop can only be avoided,
+  /// never detected afterwards. Unreachable in production, since the native pixel size is
+  /// derived from a member of this very list, but pinned rather than left to chance.
   @Test func noCoreGraphicsListMeansNoRevealedModes() {
     let noExisting = CGSModeRevelation.reveal(
       cgs: [CGSModeFixtures.magRevealed1920x804], existing: [],
@@ -225,9 +219,8 @@ struct RevealedModeCurationTests {
   private let nativeW = 3440
   private let nativeH = 1440
 
-  /// The MAG's real shape: CoreGraphics publishes a 1x mode at a logical size,
-  /// and revelation adds a 2x mode at the SAME logical size. Both land in the
-  /// same curation group, and only one row survives.
+  /// CoreGraphics publishes a 1x mode at a logical size and revelation adds a 2x mode at
+  /// the same size, so both land in one curation group and only one row survives.
   private func collidingPair(logicalWidth: Int, logicalHeight: Int, cgID: Int32, cgsID: Int32)
     -> [DisplayMode]
   {
@@ -243,10 +236,9 @@ struct RevealedModeCurationTests {
     ]
   }
 
-  /// The defect this suite exists for: curation tie-broke on the LOWER
-  /// ioModeID, and CoreGraphics ids are lower than revealed ones — so the
-  /// blurry 1x mode won its size group and the revealed 2x mode never
-  /// reached the picker at all.
+  /// The defect this suite exists for: curation tie-broke on the lower ioModeID, and
+  /// CoreGraphics ids are lower than revealed ones, so the blurry 1x mode won its size
+  /// group and the revealed 2x mode never reached the picker.
   @Test func aRevealedHiDPIModeBeatsTheOneXModeAtTheSameSize() throws {
     let rows = DisplayModeCatalog.curated(
       collidingPair(logicalWidth: 1920, logicalHeight: 804, cgID: 57, cgsID: 101),
@@ -258,9 +250,8 @@ struct RevealedModeCurationTests {
     #expect(row.mode.pixelWidth == 3840)
   }
 
-  /// Preferring HiDPI must NOT displace the panel's own timing. The native row
-  /// is what a user reads as "native resolution", and promoting a 2x variant
-  /// there would silently make the default a 6880x2880 framebuffer.
+  /// Preferring HiDPI must not displace the panel's own timing: the native row is what a
+  /// user reads as native resolution, and a 2x variant there makes the default 6880x2880.
   @Test func theNativeModeKeepsItsOwnSizeGroup() throws {
     let modes = [
       DisplayMode(

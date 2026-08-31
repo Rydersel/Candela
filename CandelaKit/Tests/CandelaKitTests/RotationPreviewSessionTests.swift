@@ -31,10 +31,8 @@ struct RotationPreviewSessionTests {
     #expect(await session.isCountingDown)
   }
 
-  /// The structural difference from every other preview session here: a
-  /// rotation is already permanent when it is applied (RS7), so confirming it
-  /// writes NOTHING. A `confirm` that re-applied would be a second blocking
-  /// second-long call for no effect.
+  /// A rotation is already permanent when applied (RS7), so confirming writes
+  /// nothing. Re-applying would be a second blocking second-long call.
   @Test func confirmingWritesNothingBecauseTheRotationIsAlreadyPermanent() async {
     let fake = FakeConfigurator()
     fake.rotations = [2: .standard]
@@ -91,8 +89,7 @@ struct RotationPreviewSessionTests {
   }
 
   /// A second request supersedes rather than nests, and its `from` is where the
-  /// display actually is — so one revert returns to the previous preview's
-  /// angle, not two steps back.
+  /// display is, so one revert goes back one angle and not two.
   @Test func aSecondPreviewSupersedesTheFirstAndRevertsToItsOwnStartingAngle() async {
     let fake = FakeConfigurator()
     fake.rotations = [2: .standard]
@@ -117,8 +114,8 @@ struct RotationPreviewSessionTests {
     #expect(await session.isCountingDown == false)
   }
 
-  /// A revert that fails spends the clock rather than retrying every second —
-  /// and reports the failure instead of claiming the display came back.
+  /// A failed revert spends the clock rather than retrying every second, and
+  /// reports instead of claiming the display came back.
   @Test func aFailedRevertStopsTheClockAndReportsRatherThanRetrying() async {
     let fake = FakeConfigurator()
     fake.rotations = [2: .standard]
@@ -131,11 +128,9 @@ struct RotationPreviewSessionTests {
     #expect(await session.tick() == nil)
   }
 
-  /// The seam threw something with no case of its own. That is a different fact
-  /// from a CoreGraphics refusal, and the code the session invents has to say
-  /// so: `CGError.failure` (1000) is what a real platform refusal reports, so
-  /// reusing it here would make the two unreadable apart. `-1` is what the three
-  /// sibling sessions use.
+  /// A throw with no case of its own is a different fact from a CoreGraphics
+  /// refusal, which reports `CGError.failure` (1000). Reusing that code would
+  /// make the two unreadable apart, so the sibling sessions all report `-1`.
   @Test func anUntypedThrowFromTheSeamReportsTheSentinelAndNotAPlatformCode() async {
     let fake = FakeConfigurator()
     fake.rotations = [2: .standard]
@@ -172,7 +167,7 @@ struct RotationPreviewSessionTests {
     await session.discardOnDeparture()
     #expect(await session.previewed == nil)
     #expect(await session.isCountingDown == false)
-    // Nothing was rotated back — an absent display cannot be.
+    // Nothing was rotated back: an absent display cannot be.
     #expect(fake.appliedRotations.count == 1)
   }
 }

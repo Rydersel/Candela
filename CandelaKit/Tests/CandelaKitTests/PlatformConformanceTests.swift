@@ -1,9 +1,8 @@
 import Testing
 @testable import CandelaKit
 
-/// The conformance suite's own failure mode is passing vacuously, so every
-/// verdict here is demonstrated RED as well as green (#82's hardware
-/// verification item 1): an invariant never observed failing is not yet a test.
+/// This suite's own failure mode is passing vacuously, so every verdict is
+/// demonstrated RED as well as green.
 @Suite("Platform conformance")
 struct PlatformConformanceTests {
   private typealias PC = PlatformConformance
@@ -80,7 +79,7 @@ struct PlatformConformanceTests {
     }
   }
 
-  // MARK: - The CG cross-check (the one that earns its keep)
+  // MARK: - The CG cross-check
 
   private func descriptor(
     id: Int32, logical: (Int, Int), pixels: (Int, Int)

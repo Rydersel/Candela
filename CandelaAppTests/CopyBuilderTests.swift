@@ -3,28 +3,20 @@ import CoreGraphics
 import SwiftUI
 import Testing
 
-// Direct assertions over the app target's eight copy builders (AT5), plus the
-// two suite-wide scans that make house rules mechanical rather than review
-// habits: no em dash anywhere, and no visible "panel" (SO14). `OledCareCopy`
-// and `SynthesisCopy` are the two most recent; `SynthesisCopy`'s own pins, and
-// the two scans only that feature needs, live in `SynthesisCopyTests`.
+// Direct assertions over the app target's copy builders (AT5), plus the two
+// suite-wide scans that make house rules mechanical rather than review habits:
+// no em dash anywhere, and no visible "panel" (SO14). `SynthesisCopy`'s own
+// pins, and the scans only that feature needs, live in `SynthesisCopyTests`.
 //
-// The builders return three different types and every one of them is read
-// through `String(describing:)`:
+// Every builder is read through `String(describing:)`. `Text` reflects to its
+// resolved words because an unlocalized bundle falls back to the key, but a
+// `LocalizedStringKey` reflects to the KEY plus its arguments as separate
+// values: an interpolated sentence comes back as "%@ could not ..." with
+// "Candela" alongside rather than spliced in, so assertions on those pin the
+// literal half and the argument half separately.
 //
-// - `String` is itself.
-// - `Text` reflects to its resolved words, arguments substituted, because an
-//   unlocalized bundle falls back to the key.
-// - `LocalizedStringKey` reflects to the KEY plus its arguments as separate
-//   values, so an interpolated sentence appears as "%@ could not ..." with
-//   "Candela" alongside rather than spliced in. Assertions on those sentences
-//   therefore pin the literal half and the argument half separately. That is
-//   the honest reading of a key: it is not resolved copy, and nothing here
-//   pretends otherwise.
-//
-// `theScanCanSeeThroughEveryReturnType` is the positive control for all of it:
-// if reflection ever stops carrying the words, both scans would pass
-// vacuously, and that test fails first.
+// `theScanCanSeeThroughEveryReturnType` is the positive control: if reflection
+// stops carrying the words, both scans pass vacuously and that test fails first.
 @Suite("Copy builders")
 @MainActor
 struct CopyBuilderTests {
@@ -173,9 +165,9 @@ struct CopyBuilderTests {
         .layoutNoLongerFits([.overlap(Self.mag, Self.dell)]), name: Self.bothNamed))
     #expect(refit == render(ArrangementCopy.invalidLayout([.overlap(Self.mag, Self.dell)], name: Self.bothNamed)))
 
-    // #180. A layout declined because a display resized must NOT borrow the
-    // overlap sentence: nothing on the machine overlaps, and that sentence was
-    // written for someone who had just dragged one display onto another.
+    // A layout declined because a display resized must NOT borrow the overlap
+    // sentence: nothing on the machine overlaps, and that sentence was written
+    // for someone who had just dragged one display onto another.
     let resized = render(
       ArrangementCopy.restoreNotice(.savedForDifferentGeometry(["a"]), name: Self.bothNamed))
     #expect(resized.contains("not the size they were"))
@@ -691,10 +683,8 @@ struct CopyBuilderTests {
   }
 
   /// OC17's denominator is MASK-COULD-APPLY time (ruled 2026-08-18) and the
-  /// histogram beside it covers every state, so the page says which is which.
-  /// Pinned because the whole value of the sentence is that it names both
-  /// scopes: a caption that lost either half would leave the two numbers
-  /// looking like a share of each other again.
+  /// histogram beside it covers every state. Pinned because a caption that lost
+  /// either scope leaves the two numbers looking like a share of each other.
   @Test func theWearFractionCaptionNamesBothScopes() {
     #expect(OledCareCopy.wearFractionScope == """
       The bars cover every state this display was tracked in. \
@@ -713,11 +703,6 @@ struct CopyBuilderTests {
   /// SO14 over every builder rather than over one feature's. Hardware is always
   /// a "display" in visible copy; the type and comment vocabulary keeps the
   /// word, and none of that is read here.
-  ///
-  /// Lifted out of `SynthesisCopyTests`, where the same scan covered only the
-  /// newest builder: the rule binds all of them, and it was verified free
-  /// across the whole set before this test was written, so it starts green
-  /// rather than carrying an allowance.
   @Test func noBuilderSaysPanel() {
     for entry in everyBuilderString() {
       #expect(!entry.text.lowercased().contains("panel"), "\(entry.site) says panel: \(entry.text)")
@@ -725,10 +710,9 @@ struct CopyBuilderTests {
   }
 
   @Test func theScanCanSeeThroughEveryReturnType() {
-    // Positive control. The scan reads three return types through reflection;
-    // if any of them stopped carrying words the scan would pass over an em dash
-    // it never saw. Each shape is proven readable, and a planted em dash is
-    // proven detectable through each.
+    // Positive control: the scan reads three return types through reflection,
+    // and one that stopped carrying words would pass over an em dash it never
+    // saw. Each shape is proven readable and a planted em dash detectable.
     #expect(render(RotationCopy.question).contains("Keep this orientation?"))
     #expect(render(MirroringCopy.refusal(.notInASet, name: Self.noneNamed)).contains("not mirroring anything"))
     #expect(MirroringCopy.countdown(2).contains("2 seconds"))
@@ -738,14 +722,14 @@ struct CopyBuilderTests {
     #expect(render(Text(LocalizedStringKey("planted \(Self.emDash) localized"))).contains(Self.emDash))
     #expect(render(LocalizedStringKey("planted panel key")).lowercased().contains("panel"))
 
-    // A collapse detector, not a ratchet: the scan covering a handful of
-    // strings would pass while covering almost nothing. 295 at the time of
-    // writing; the floor is deliberately far below it.
+    // A collapse detector, not a limit that only tightens: a scan down to a
+    // handful of strings would still pass. The floor sits far below the real
+    // count.
     #expect(everyBuilderString().count > 100)
   }
 
-  /// Every string the six builders can emit under fixture inputs, each tagged
-  /// with the call that produced it so a violation names its site.
+  /// Every string the builders can emit under fixture inputs, each tagged with
+  /// the call that produced it so a violation names its site.
   private func everyBuilderString() -> [(site: String, text: String)] {
     var out: [(site: String, text: String)] = []
     func add(_ site: String, _ text: String) { out.append((site, text)) }
@@ -989,10 +973,9 @@ struct CopyBuilderTests {
       add("RotationCopy.refusal(\(refusal))", RotationCopy.refusal(refusal))
     }
 
-    // SynthesisCopy. Its strings are pinned, and scanned for a rate and for a
-    // sharpness claim, in `SynthesisCopyTests`; they are here as well because
-    // this is the suite-wide em-dash scan and a builder outside it is a builder
-    // the house rule is not mechanical for.
+    // SynthesisCopy. Pinned, and scanned for a rate and a sharpness claim, in
+    // `SynthesisCopyTests`; listed here too because a builder outside the
+    // suite-wide scan is one the house rule is not mechanical for.
     add("SynthesisCopy.reportMode", SynthesisCopy.reportMode(width: 3096, height: 1296, slot: 4))
     add("SynthesisCopy.optInTitle", SynthesisCopy.optInTitle)
     add("SynthesisCopy.optInCaption", SynthesisCopy.optInCaption)
@@ -1015,11 +998,10 @@ struct CopyBuilderTests {
 
   // MARK: - Case samples, each pinned by an exhaustiveness guard
   //
-  // The guards below exist to FAIL TO COMPILE when a case is added to one of
-  // these Kit enums. Every one of them feeds a builder that switches without a
-  // `default:` arm, so a new case arriving with no copy is the defect worth
-  // catching, and a sample list nothing forces anyone to update would not catch
-  // it.
+  // The guards below FAIL TO COMPILE when a case is added to one of these Kit
+  // enums. Each feeds a builder that switches with no `default:` arm, so a new
+  // case arriving with no copy is the defect worth catching, and a sample list
+  // nothing forces anyone to update would miss it.
 
   private static let allReportSubjects: [ArrangementReportSubject] =
     [.nothingChanged, .restoreFailed, .diverged]

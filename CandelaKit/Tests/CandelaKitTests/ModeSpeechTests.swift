@@ -33,10 +33,10 @@ struct ModeSpeechTests {
         == "960 by 600 at 59.9 hertz")
   }
 
-  /// The rate on its own, for callers that speak a rate without a size — the
-  /// hero's "(max 175 Hz)" annotation is one. It exists so that stays ONE
-  /// helper (accessibility contract 5): a second private copy in a view is how
-  /// "175 Hz" reaches VoiceOver as a glyph, or 119.998 as nine spoken digits.
+  /// The rate on its own, for callers that speak a rate without a size, such as
+  /// the hero's "(max 175 Hz)" annotation. ONE helper on purpose: a second private
+  /// copy in a view is how "175 Hz" reaches VoiceOver as a glyph, or 119.998 as
+  /// nine spoken digits.
   @Test func speaksABareRateWithTheSameRules() {
     #expect(ModeSpeech.spokenRate(60.0) == "60 hertz")
     #expect(ModeSpeech.spokenRate(175.0) == "175 hertz")
@@ -44,9 +44,9 @@ struct ModeSpeechTests {
     #expect(ModeSpeech.spokenRate(59.9998) == "60 hertz")
   }
 
-  /// The refactor's whole point: `spoken` must not keep a second copy of the
-  /// rate rules. Pinned by composition rather than by inspection, so a later
-  /// edit to either one that breaks the agreement fails here.
+  /// `spoken` must not keep a second copy of the rate rules. Pinned by composition
+  /// rather than inspection, so an edit to either one that breaks the agreement
+  /// fails here.
   @Test func spokenClosesOverTheBareRateHelper() {
     for hz in [60.0, 59.9998, 59.94, 175.0, 24.0] {
       #expect(

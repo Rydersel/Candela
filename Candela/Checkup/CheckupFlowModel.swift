@@ -4,11 +4,10 @@ import Foundation
 import Observation
 
 /// The checkup state machine (CK25): owns the report under construction and
-/// every verdict in it; the pages render and decide nothing. Nothing but the
-/// user aborts a run (CK27), so refusals are recorded and both early exits
-/// still save a report. A run that has ended stays ended, so a leg still in
-/// flight cannot write into a saved report. The planted control alone grades
-/// attestations (CK21), so its states live here.
+/// every verdict in it, including the planted control's grading (CK21). Only the
+/// user aborts a run (CK27), so refusals are recorded and both early exits still
+/// save a report. An ended run stays ended: a leg in flight cannot write into a
+/// saved report.
 @MainActor
 @Observable
 final class CheckupFlowModel {
@@ -38,7 +37,8 @@ final class CheckupFlowModel {
 
   /// The one field the control is planted on. Optional only because `first(where:)` is.
   static let plantedField = CheckupFieldKind.protocolOrder.first { $0.carriesPlant }
-  /// CK21's two sizes. The first pass plants 4 px; a miss re-shows once at 8.
+  /// CK21's two sizes: the first pass plants the smaller, a miss re-shows once
+  /// at the larger.
   static let firstPlantPixels = 4
   static let retryPlantPixels = 8
   /// A tap this many plant-widths from the control still counts as finding it:
@@ -296,7 +296,7 @@ final class CheckupFlowModel {
   }
 
   /// CK17's cap, enforced where every showing passes. The confirmation re-show
-  /// is exempt and uncounted, so a field tops out at four showings.
+  /// is exempt and uncounted, so a field tops out at the cap plus one.
   @discardableResult
   private func show(
     kind: CheckupFieldKind, plant: CheckupPlant?, on display: CheckupDisplayEntry,

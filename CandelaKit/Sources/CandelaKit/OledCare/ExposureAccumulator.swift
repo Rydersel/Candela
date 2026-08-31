@@ -3,9 +3,9 @@ import Foundation
 
 /// Cumulative light exposure per panel-native grid cell.
 ///
-/// The unit is arbitrary — luminance (0...1) times seconds — because it is only
-/// ever compared against itself. OC11: this supports "3.2× this panel's
-/// average", which is measured, and nothing about lifespan, which is not.
+/// The unit is arbitrary (luminance times seconds) because it is only ever
+/// compared against itself. OC11: it supports "3.2x this panel's average" and
+/// nothing about lifespan.
 public struct ExposureMap: Equatable, Sendable, Codable {
   /// Always `PanelGrid.cellCount` long: `.empty` is the only way in from
   /// outside the module and decoding rejects any other length.
@@ -23,9 +23,8 @@ public struct ExposureMap: Equatable, Sendable, Codable {
     return cells.reduce(0, +) / Double(cells.count)
   }
 
-  /// Cell value relative to the panel mean. 1.0 == average. Nil when the mean
-  /// is zero (nothing accumulated yet) — there is no such thing as "3.2×
-  /// nothing", and returning 0 there would read as "cool".
+  /// Cell value relative to the panel mean; 1.0 is average. Nil when the mean
+  /// is zero, since returning 0 there would read as "cool".
   public func relativeExposure(atCell cell: Int) -> Double? {
     guard cells.indices.contains(cell) else { return nil }
     let mean = mean
@@ -50,9 +49,8 @@ public struct ExposureMap: Equatable, Sendable, Codable {
     sampleCount += 1
   }
 
-  /// Light the app itself put on the panel. `sampleCount` is one 60 s capture,
-  /// and the analysis gate and "N of 30 readings" stand on it, so emission moves
-  /// the cells without inflating the count.
+  /// Light the app itself put on the panel. Moves the cells without touching
+  /// `sampleCount`, which the analysis gate counts in 60 s captures.
   mutating func addEmission(panelGrid: [Double], elapsed: TimeInterval, at now: Date) {
     for cell in cells.indices {
       cells[cell] += panelGrid[cell] * elapsed
@@ -61,9 +59,9 @@ public struct ExposureMap: Equatable, Sendable, Codable {
     lastSample = now
   }
 
-  /// Raw values are spelled out rather than synthesised from the property
-  /// names: these strings are shipped on-disk schema (§4), and a synthesised
-  /// key turns an ordinary rename into a silent data loss.
+  /// Raw values spelled out rather than synthesised from the property names:
+  /// these strings are shipped on-disk schema, and a synthesised key turns an
+  /// ordinary rename into silent data loss.
   private enum CodingKeys: String, CodingKey {
     case schemaVersion = "schemaVersion"
     case cells = "cells"
@@ -81,17 +79,14 @@ public struct ExposureMap: Equatable, Sendable, Codable {
     try container.encodeIfPresent(lastSample, forKey: .lastSample)
   }
 
-  /// Two failure modes with opposite correct responses, which is why they throw
-  /// different error types. A short `cells` array would trap the first time the
-  /// health view indexed it, so neither decodes into a mine; but a grid change
-  /// or a newer schema is intact history and throws
-  /// `OledStoreDecodeFailure` so the caller keeps the bytes, while malformed
-  /// JSON throws `DecodingError` and may be discarded.
+  /// Two failure modes with opposite responses, hence two error types. A grid
+  /// change or a newer schema is intact history and throws
+  /// `OledStoreDecodeFailure`, so the caller keeps the bytes; malformed JSON
+  /// throws `DecodingError` and may be discarded.
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
-    // Absent means v1: stores written before the version field existed are
-    // valid v1 data, and treating them as unreadable would quarantine every
-    // existing user's history on upgrade.
+    // Absent means v1: those stores predate the version field, and rejecting
+    // them would quarantine every existing user's history on upgrade.
     let version = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
     guard version <= OledStoreSchema.currentVersion else {
       throw OledStoreDecodeFailure.unsupportedVersion(
@@ -118,9 +113,8 @@ public struct ExposureMap: Equatable, Sendable, Codable {
 
 /// Folds periodic luminance samples into an `ExposureMap`.
 public struct ExposureAccumulator: Sendable {
-  /// 30 minutes at the 60 s cadence. Named because OC17 and OC19 both need "is
-  /// this map worth believing yet" to be a decision, not arithmetic on an
-  /// empty array.
+  /// 30 minutes at the 60 s cadence. Named so "is this map worth believing yet"
+  /// is one decision (OC17, OC19) rather than arithmetic on an empty array.
   public static let minimumSamplesForAnalysis = 30
 
   public private(set) var map: ExposureMap
@@ -129,10 +123,8 @@ public struct ExposureAccumulator: Sendable {
     self.map = map
   }
 
-  /// Accumulates one sample. `grid` is in DISPLAY orientation.
-  ///
-  /// A sample is taken whole or refused whole; see `panelGrid(from:...)` below
-  /// for what a refusal is protecting.
+  /// Accumulates one sample. `grid` is in DISPLAY orientation, and a sample is
+  /// taken whole or refused whole; see `panelGrid` for what that protects.
   public mutating func accumulate(
     displayGrid grid: [Double], cols: Int, rows: Int,
     through transform: PanelSpaceTransform,
@@ -144,9 +136,8 @@ public struct ExposureAccumulator: Sendable {
     map.add(panelGrid: panel, elapsed: elapsed, at: now)
   }
 
-  /// Books light the app itself put on the panel (a checkup field: one flat
-  /// luminance for a few seconds). Same validation and all-or-nothing rule as
-  /// `accumulate`; leaves `sampleCount` alone, see `ExposureMap.addEmission`.
+  /// Books light the app itself put on the panel (a checkup field). Same
+  /// all-or-nothing rule as `accumulate`; leaves `sampleCount` alone.
   public mutating func bookEmission(
     displayGrid grid: [Double], cols: Int, rows: Int,
     through transform: PanelSpaceTransform,

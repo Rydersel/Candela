@@ -1,24 +1,22 @@
 #if DEBUG
   import Foundation
 
-  /// Makes one display's DDC brightness writes report failure, so the wire
+  /// Makes one display's DDC brightness writes report failure, so wire
   /// degradation can be provoked on a rig where every cable works (WD6). The
   /// alternatives are unplugging the data cable mid-session, or engaging HDR,
   /// which is the one case the feature must NOT react to.
   ///
-  /// The whole file is inside `#if DEBUG`, and so is its call site in
-  /// `BrightnessController.brightnessApplier`, so the standing Release marker
-  /// grep can prove it is gone.
+  /// File and call site are both inside `#if DEBUG`, so the standing Release
+  /// marker grep can prove it is gone.
   ///
   /// `CANDELA_DEBUG_DDC_FAIL` takes a PREFIX of the display's persistence key,
-  /// normally its EDID UUID: read the key off the panel dump's `key=` field or
-  /// the Diagnostics page and pass enough of its start to be unique.
+  /// normally its EDID UUID; read it off the panel dump's `key=` field or the
+  /// Diagnostics page.
   ///
   ///   CANDELA_DEBUG_DDC_FAIL=4C2D0B0F Candela.app/Contents/MacOS/Candela &
   ///
-  /// An empty value matches nothing, so this is not a way to fail every display
-  /// at once. It fails the BRIGHTNESS applier only, not the writer underneath
-  /// it, so the same display's volume and contrast keep working.
+  /// An empty value matches nothing. It fails the BRIGHTNESS applier only, not
+  /// the writer underneath it, so volume and contrast keep working.
   enum DebugDDCFailure {
     static let environmentKey = "CANDELA_DEBUG_DDC_FAIL"
 

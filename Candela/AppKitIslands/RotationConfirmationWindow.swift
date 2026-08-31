@@ -3,19 +3,16 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// The "Keep this orientation?" surface — the third caller of
-/// `ConfirmationPanel`, which is why it is this short.
+/// The "Keep this orientation?" surface, the third caller of `ConfirmationPanel`.
 ///
-/// **RT12: it goes on the display it rotated**, resolved through
-/// `drawableDisplayID` like the other two, so a rotated mirror slave asks on its
-/// master. That is also the surface most likely to look wrong, because RS3
-/// measured that a rotation swaps the display's bounds — this window centres
-/// itself in `visibleFrame`, which is exactly the value that changes.
+/// RT12: it goes on the display it rotated, resolved through `drawableDisplayID`,
+/// so a rotated mirror slave asks on its master. RS3 measured that rotation swaps
+/// the display's bounds, and this window centres itself in `visibleFrame`.
 @MainActor
 final class RotationConfirmationWindow: RotationConfirmationPresenting {
   private let coordinator: RotationCoordinator
   var displayName: (CGDirectDisplayID) -> String = { _ in "" }
-  /// Identity by default — right for every unmirrored display; wired at launch.
+  /// Identity by default, right for every unmirrored display. Wired at launch.
   var drawableDisplayID: (CGDirectDisplayID) -> CGDirectDisplayID = { $0 }
 
   private let window = ConfirmationPanel<RotationConfirmationView>(
@@ -49,8 +46,7 @@ final class RotationConfirmationWindow: RotationConfirmationPresenting {
 }
 
 /// Reads the coordinator directly, so ticks and late failures render themselves.
-/// Deliberately the same words as the settings section — two spellings of one
-/// statement are two things to keep true.
+/// Same words as the settings section, deliberately: two spellings drift apart.
 struct RotationConfirmationView: View {
   let coordinator: RotationCoordinator
   let content: RotationConfirmationContent
@@ -64,8 +60,7 @@ struct RotationConfirmationView: View {
   }
 
   @ViewBuilder private var previewBody: some View {
-    // Rendered from the coordinator's own answer, never from what the caller
-    // remembered passing in.
+    // Rendered from the coordinator's own answer, not what the caller passed in.
     if let preview = coordinator.preview {
       ConfirmationCard {
         ConfirmationTitle(RotationCopy.question)
@@ -82,8 +77,8 @@ struct RotationConfirmationView: View {
         }
 
         ConfirmationAnswers {
-          // Both answers carry the preview THIS window is rendering, so an
-          // answer can only ever resolve what the user was looking at.
+          // Both answers carry the preview this window rendered, so an answer
+          // can only resolve what the user was looking at.
           Button(RotationCopy.revert) { Task { await coordinator.revert(preview) } }
             .buttonStyle(AnswerButtonStyle(isPrimary: false))
             .keyboardShortcut(.cancelAction)
@@ -106,8 +101,8 @@ struct RotationConfirmationView: View {
         ConfirmationCaption(RotationCopy.applyFailure)
           .help("CoreGraphics error \(failure.cgErrorCode)")
       }
-      // The four-way gate said no (AR12). Nothing was applied, so this is
-      // neither a refusal about the display nor a failed apply.
+      // AR12's gate said no. Nothing was applied, so this is neither a refusal
+      // about the display nor a failed apply.
       if let blockedBy = coordinator.blockedBy {
         ConfirmationCaption(ReconfigurationCopy.blocked(by: blockedBy))
       }

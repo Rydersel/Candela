@@ -2,16 +2,14 @@ import Foundation
 
 /// Validation of a DDC/CI Get VCP Feature reply frame.
 ///
-/// Pure and testable on purpose: the arm64 transport previously accepted any
-/// frame whose checksum happened to come out right, then read bytes 6–9 as the
-/// max and current values. A checksum is a 1-in-256 guard on its own — a
+/// Pure and testable on purpose. A checksum is a 1-in-256 guard on its own: a
 /// monitor that answers a Get VCP with stale bytes, or answers a DIFFERENT VCP
-/// code than the one asked for, produced a plausible-looking `max` that
-/// silently compressed the whole brightness range.
+/// code than the one asked for, yields a plausible-looking `max` that silently
+/// compresses the whole brightness range.
 ///
-/// The Intel transport has always checked the op code and result code
-/// (`IntelDDC.swift`). This is the same contract, expressed once, so the two
-/// transports cannot drift apart again.
+/// The Intel transport has always checked the op code and result code. This is
+/// the same contract, expressed once, so the two transports cannot drift
+/// apart.
 enum DDCReplyFrame {
   /// Byte 0 — the display's source address on the DDC/CI bus.
   static let sourceAddress: UInt8 = 0x6E
@@ -49,9 +47,8 @@ enum DDCReplyFrame {
 
   /// Big-endian 16-bit read.
   ///
-  /// Spelled with the widening BEFORE the shift. `UInt16(high << 8)` shifts in
-  /// `UInt8` and is always zero — the bug this helper exists to make
-  /// unrepeatable.
+  /// Spelled with the widening BEFORE the shift: `UInt16(high << 8)` shifts in
+  /// `UInt8` and is always zero.
   static func value(high: UInt8, low: UInt8) -> UInt16 {
     UInt16(high) << 8 | UInt16(low)
   }

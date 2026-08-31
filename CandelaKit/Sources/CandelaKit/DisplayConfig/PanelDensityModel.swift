@@ -1,11 +1,8 @@
 import Foundation
 
 /// The physical facts about a panel that density reasoning needs, in
-/// panel-native orientation.
-///
-/// Native pixels come from the mode carrying the native flag, never from
-/// `CGDisplayPixelsWide`, which reports whatever the display is currently
-/// running.
+/// panel-native orientation. Native pixels come from the mode carrying the
+/// native flag, never `CGDisplayPixelsWide`, which reports the current mode.
 public struct PanelGeometry: Sendable, Equatable {
   public let nativePixelWidth: Int
   public let nativePixelHeight: Int
@@ -80,27 +77,22 @@ public struct IdealSize: Sendable, Equatable {
 }
 
 /// One call in, one result out: nothing here knows which surface is asking.
-///
 /// Exactly one of `recommendation` and `abstention` is non-nil.
 ///
-/// Two fields name a size, and they answer different questions.
 /// `recommendation` is a CORRECTION, so it drives the callout and disappears
 /// the moment nothing needs correcting. `bestInBand` is an ENDORSEMENT, so it
-/// drives the passive mark and survives both in-band abstentions: a person
-/// already running the size the model would pick still gets to see that.
+/// drives the passive mark and survives both in-band abstentions.
 public struct DensityVerdict: Sendable, Equatable {
   public let recommendation: SizeRecommendation?
   public let abstention: RecommendationAbstention?
-  /// The ranked best of the applicable sizes whose density falls inside the
-  /// band, whether or not the model went on to recommend it. Nil only where no
-  /// ranking happened (virtual, no trustworthy physical size) or where no
-  /// applicable size reaches the band. Equal to `recommendation` whenever that
-  /// is non-nil.
+  /// The ranked best of the applicable in-band sizes, recommended or not. Nil
+  /// only where no ranking happened (virtual, no trustworthy physical size) or
+  /// no applicable size reaches the band. Equal to `recommendation` whenever
+  /// that is non-nil.
   public let bestInBand: SizeRecommendation?
-  /// Nil when the panel is virtual, or when its declared physical size is
-  /// missing or untrustworthy: the three states where no ranking happened.
-  /// A virtual display's density IS computable from its invented size, so
-  /// "density is unknown" would be the wrong test to write against.
+  /// Nil where no ranking happened: virtual, or a declared physical size that
+  /// is missing or untrustworthy. A virtual display's density IS computable from
+  /// its invented size, so "density is unknown" is the wrong test to write.
   public let ideal: IdealSize?
   /// Nil when no current size was supplied, or when density is unknown.
   public let currentPlacement: BandPlacement?
@@ -119,66 +111,55 @@ public struct DensityVerdict: Sendable, Equatable {
 /// Density is the model: how big things actually look on a given panel at a
 /// given logical size, in logical pixels per physical inch.
 ///
-/// Foundation only, like `DisplayModeCatalog`, so every judgement is testable
-/// against captured fixtures rather than against attached hardware.
+/// Foundation only, so every judgement is testable against captured fixtures
+/// rather than against attached hardware.
 ///
-/// Both derivations pair the two MAJOR axes: the largest pixel dimension over
-/// the largest physical dimension. That is orientation-invariant, which is the
-/// load-bearing decision here. The development Dell mounts rotated 270°, so
-/// its pixel dimensions and its declared physical size need not agree about
-/// which field holds the long axis; pairing majors means no rotation special
-/// case and no dependence on that agreement. Aspect ratio is preserved by the
-/// hardware, so the minor axis carries no information the major axis lacks.
+/// Both derivations pair the MAJOR axes, largest pixel dimension over largest
+/// physical dimension, which is orientation-invariant. A rotated panel need not
+/// agree with its declared physical size about which field holds the long axis,
+/// so pairing majors removes the rotation special case. The hardware preserves
+/// aspect, so the minor axis carries nothing the major axis lacks.
 public enum PanelDensityModel {
-  /// Band center for the "looks right" target, and the distance origin the
-  /// ranking measures against.
-  ///
-  /// Calibration output, not a design guess: pinned by the fixture set
-  /// captured from the three panels on the rig (MAG, Dell portrait, built-in).
-  /// It is the macOS desktop convention rather than an invention; the 27-inch
-  /// 5K default sits near 109, and the MAG's native mode measures 109.2.
+  /// Band centre for "looks right", and the origin the ranking measures
+  /// against. Calibration output, not a design guess: pinned by the fixture set
+  /// captured from the three rig panels. It follows the macOS desktop
+  /// convention, where the 27-inch 5K default sits near 109 and the MAG's
+  /// native mode measures 109.2.
   public static let targetLooksLikePPI = 110.0
 
-  /// A logical size whose density falls inside this band already looks right,
-  /// so the engine has nothing to recommend.
+  /// A logical size inside this band already looks right, so the engine has
+  /// nothing to recommend.
   ///
-  /// Calibration output pinned by the same three-panel fixture set. The
-  /// acceptance constraint the edges satisfy: the MAG's native mode (109.2)
-  /// and the Dell's looks-like-2560x1440 rung (108.4) are both in band, the
-  /// built-in's default (128.0) is in band so the Retina laptop is silenced
-  /// with no special case, and the Dell's 1x native (162.6) is above it.
-  /// Retuning after new panel evidence is expected; the fixtures make that a
-  /// visible diff rather than a silent drift.
+  /// Calibration output pinned by the same fixture set. The edges satisfy: the
+  /// MAG's native mode (109.2) and the Dell's looks-like-2560x1440 rung (108.4)
+  /// in band, the built-in's default (128.0) in band so a Retina laptop is
+  /// silenced with no special case, the Dell's 1x native (162.6) above it.
   public static let bandLooksLikePPI = 95.0...135.0
 
   /// Below this density everything on screen is comically huge, so the size is
   /// not a usable desktop. Replaces the flat minor-axis pixel floor wherever
   /// physical size is known.
   ///
-  /// Calibration output pinned by the fixture set. The acceptance constraint:
-  /// the MAG's three hidden mid-ladder rungs (1600x670 at 50.8, 1344x562 at
-  /// 42.7, 1280x536 at 40.6) clear it and return to the curated list, while
-  /// the junk sizes the pixel floor exists to remove (the Dell's 300x400 at
-  /// 16.9) stay out.
+  /// Calibration output pinned by the fixture set: the MAG's hidden mid-ladder
+  /// rungs (down to 1280x536 at 40.6) clear it and return to the curated list,
+  /// while the junk the pixel floor exists to remove (the Dell's 300x400 at
+  /// 16.9) stays out.
   public static let floorLooksLikePPI = 38.0
 
-  /// Usability floor when physical size is unknown, as a fraction of the
-  /// native minor axis. The floor has to work on every panel, so it cannot
-  /// require the physical claim a recommendation requires.
+  /// Usability floor when physical size is unknown, as a fraction of the native
+  /// minor axis: the floor has to work on panels that make no physical claim.
   ///
-  /// Calibration output pinned by the fixture set, chosen so that no size
-  /// currently curated on any of the three panels disappears when the model
-  /// runs without a declared physical size.
+  /// Calibration output, chosen so no currently curated size on the three rig
+  /// panels disappears when the model runs without a declared physical size.
   public static let fallbackFloorMinorAxisFraction = 0.33
 
   /// Sanity bounds on derived physical PPI. Outside them the declared size is
   /// garbage EDID, and the answer is abstention rather than a guess.
   ///
-  /// Calibration output pinned by the fixture set: the three measured panels
-  /// (109.2, 162.6, 256.0) sit well inside, while a 4K panel declaring 1 cm
-  /// reads 9753.6 and is rejected. Wide on purpose, since integer-centimetre
-  /// truncation costs 1 to 2 percent on a 27 to 34 inch panel and this range
-  /// is only asked to catch nonsense.
+  /// Calibration output: the three measured panels (109.2, 162.6, 256.0) sit
+  /// well inside, while a 4K panel declaring 1 cm reads 9753.6 and is rejected.
+  /// Wide on purpose, since integer-centimetre truncation costs 1 to 2 percent
+  /// and this range only has to catch nonsense.
   public static let plausiblePhysicalPPIRange = 40.0...400.0
 
   /// The panel's own pixel density: native pixels per physical inch. Nil when
@@ -216,23 +197,15 @@ public enum PanelDensityModel {
   /// verdict out.
   ///
   /// Only rows the caller hands over are ranked, so a size with no apply path
-  /// is never recommended. `ideal` is computed unconditionally alongside, which
-  /// is what tells a later synthesis layer what it would need to build.
+  /// is never recommended. `ideal` is computed regardless, which is what tells
+  /// a later synthesis layer what it would need to build.
   ///
-  /// Decision order, and why the two "you are already fine" outcomes sit this
-  /// way round: the more specific one is tested first. Any size whose density
-  /// is in band and which the ranking would have chosen anyway is reported as
-  /// `.currentIsBest`, and `.currentInBand` covers the rest of the band, where
-  /// a different size might still rank higher but nothing needs saying. Testing
-  /// the band first would make `.currentIsBest` unreachable, since every
-  /// candidate is in band by construction.
+  /// The more specific "you are already fine" outcome is tested first: checking
+  /// the band before `.currentIsBest` would make that case unreachable, since
+  /// every candidate is in band by construction.
   ///
-  /// Both abstentions still carry `bestInBand`, and that is the point of the
-  /// field: the ranking ran and had an answer, the model simply had no
-  /// correction to offer. A surface showing a passive mark reads `bestInBand`
-  /// so the mark stays put while the display runs that size; a surface making
-  /// a suggestion reads `recommendation` so it goes quiet the moment there is
-  /// nothing to suggest.
+  /// Both abstentions still carry `bestInBand`: the ranking ran and had an
+  /// answer, the model simply had no correction to offer.
   public static func evaluate(
     rows: [DisplayModeRow],
     currentLogicalWidth: Int?, currentLogicalHeight: Int?,

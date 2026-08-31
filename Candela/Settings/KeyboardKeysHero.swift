@@ -2,17 +2,14 @@ import CandelaKit
 import SwiftUI
 
 /// Pure derivation for the keycap hero (KMR3): every word and every lit key
-/// comes from these functions, computed from the same `KeyModePolicy` rules
-/// and prefs the engine reads, so the strip cannot disagree with what a key
-/// press actually does. Nameable rather than inline in `body` for the
-/// row-model tests (AT10).
+/// comes from the same `KeyModePolicy` rules and prefs the engine reads, so the
+/// strip cannot disagree with what a key press does. Named rather than inline in
+/// `body` for the row-model tests (AT10).
 enum KeyboardHeroModel {
-  // MARK: - Cluster annotations (KMR2: the space under the keys IS the information)
+  // MARK: - Cluster annotations (KMR2)
 
-  // Sentences with a verb, not noun phrases: "The brightness keys · the
-  // display under the pointer" read as a caption describing the feature, and
-  // the line's whole job is to state what the keys are doing RIGHT NOW
-  // (Ryder, 2026-08-17).
+  // Sentences with a verb, not noun phrases: the line says what the keys are
+  // doing right now rather than captioning the feature (Ryder, 2026-08-17).
   static func brightnessLine(mode: KeyMode, target: MultiKeyboardBrightness) -> String {
     switch mode {
     case .media: "Media keys act on \(phrase(for: target))"
@@ -32,8 +29,8 @@ enum KeyboardHeroModel {
   }
 
   /// F14/F15 light only while a brightness mode watches media keys AND the
-  /// alternate-keys pref accepts them; `AppModel.tapConfig` applies the same
-  /// conjunction, which is the point.
+  /// alternate-keys pref accepts them, the conjunction `AppModel.tapConfig`
+  /// applies.
   static func alternateLine(brightnessMode: KeyMode, accepted: Bool) -> String {
     alternateLit(brightnessMode: brightnessMode, accepted: accepted)
       ? "Treated as brightness keys"
@@ -46,10 +43,9 @@ enum KeyboardHeroModel {
     KeyModePolicy.watchesMediaKeys(brightnessMode) && accepted
   }
 
-  /// The good-news line (KMR3). Shown only when it is true AND relevant: the
-  /// grant is held and some lit key actually goes through the tap it names.
-  /// When the grant is missing and warranted, the pane's warning section is
-  /// the one voice and this stays nil rather than saying the same thing twice.
+  /// The good-news line (KMR3), shown only when the grant is held and a lit key
+  /// goes through the tap it names. Stays nil while the pane's warning section
+  /// is warranted, so the two never say the same thing twice.
   static func showsAccessibilityLine(
     granted: Bool, brightnessMode: KeyMode, volumeMode: KeyMode
   ) -> Bool {
@@ -58,8 +54,8 @@ enum KeyboardHeroModel {
 
   // MARK: - Chevron previews (KMR4)
 
-  /// Static on purpose: the page enumerates a fixed legend, so the row states
-  /// its size, not a value that could go stale.
+  /// Static on purpose: the legend is fixed, so the row states its size rather
+  /// than a value that could go stale.
   static let modifiersPreview = "5 combinations"
 
   static func targetingPreview(
@@ -107,11 +103,10 @@ enum KeyboardHeroModel {
   }
 }
 
-/// The Keyboard pane's hero (KMR2): three key clusters, each annotated
-/// directly beneath itself with family, mode and target on a bracket. Lit
-/// keys are handled by Candela and grey ones pass to macOS, and the lighting
-/// is never the only signal: the cluster's own line says the same thing, and
-/// each cluster is ONE accessibility element whose label is that sentence.
+/// The Keyboard pane's hero (KMR2): key clusters annotated beneath with family,
+/// mode and target. Lit keys are handled by Candela, grey ones pass to macOS,
+/// and lighting is never the only signal: each cluster is ONE accessibility
+/// element whose label is its sentence.
 struct KeyboardKeysHero: View {
   let brightnessMode: KeyMode
   let volumeMode: KeyMode
@@ -125,8 +120,7 @@ struct KeyboardKeysHero: View {
 
   var body: some View {
     VStack(spacing: 12) {
-      // Wraps rather than clips when the window is narrow; each cluster
-      // stays intact because it is its own unit.
+      // Wraps rather than clips when the window is narrow.
       HStack(alignment: .top, spacing: 18) {
         cluster(
           heading: "Brightness & contrast",
@@ -150,10 +144,9 @@ struct KeyboardKeysHero: View {
         )
       }
       .frame(maxWidth: .infinity)
-      // A crossfade between two renderings of the same data, which `Motion`
-      // leaves to its own site with its own Reduce Motion guard. Keys relight
-      // under a mode change rather than snapping, so the eye follows what the
-      // control below just did.
+      // Keys relight rather than snap under a mode change, so the eye follows
+      // the control below. `Motion` leaves a crossfade to its own site, hence
+      // the local Reduce Motion guard.
       .animation(relight, value: brightnessMode)
       .animation(relight, value: volumeMode)
       .animation(relight, value: alternateAccepted)
@@ -243,8 +236,8 @@ struct KeyboardKeysHero: View {
   }
 }
 
-/// The under-cluster bracket: an open-topped outline with rounded bottom
-/// corners, the diagram idiom that ties a label to the keys above it.
+/// The under-cluster bracket: an open-topped outline tying a label to the keys
+/// above it.
 private struct ClusterBracket: Shape {
   func path(in rect: CGRect) -> Path {
     var path = Path()

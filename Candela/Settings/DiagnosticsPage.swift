@@ -3,14 +3,10 @@ import CandelaKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Diagnostics sub-page (spec §7): what this display is, how its brightness
-/// is being driven, what it told us, what is unavailable and why, and what is
-/// true right now — plus the two report actions.
-///
-/// It replaces `DisplayDiagnosticsSection`, whose five caption-headed
-/// pseudo-groups are now real `Section` headers, and it leads with a
-/// plain-English verdict so the answer to "is this working?" is the first thing
-/// on the page rather than something to be assembled from six rows.
+/// The Diagnostics sub-page: what this display is, how its brightness is being
+/// driven, what it told us, what is unavailable and why, what is true right now,
+/// and the two report actions. It leads with a plain-English verdict so "is this
+/// working?" is answered before the rows start.
 ///
 /// The feature is the HONESTY RULES (DT30), not the rows:
 /// - every "unavailable" row states a REASON drawn from a typed value;
@@ -20,30 +16,22 @@ import UniformTypeIdentifiers
 /// - "not measured yet" (nil) is never rendered as "no answer" (empty);
 /// - internal key names never reach copy (D25).
 ///
-/// The SENTENCES those rules govern are not here (#127). Every value on the
-/// right of a row comes from `DiagnosticsCopy` in CandelaKit, where each
-/// distinction is pinned by a test, and every caption from
-/// `DiagnosticsPageCopy` in this target. What is left in this file is which rows
-/// exist, for which display, and which facts each one is handed: read a row's
-/// wording in the copy enum, and read WHEN it is shown here.
+/// The sentences those rules govern are not here: every row's value comes from
+/// `DiagnosticsCopy` in CandelaKit, where each distinction is pinned by a test,
+/// and every caption from `DiagnosticsPageCopy`. This file holds which rows
+/// exist, for which display, and which facts each one is handed.
 ///
-/// It renders under the BUILT-IN display too (DT45), not only under externals —
-/// and the rules above are what make that worth doing rather than merely
-/// possible. "Why can't hardware control reach my laptop screen?" is a real
-/// question this feature exists to answer, and it is answered here, once, in
-/// the brightness section. Every row that describes a data cable, an EDID or a
-/// DDC answer is OMITTED for the built-in rather than rendered against a fact
-/// that will never arrive: `DisplayDiscovery` is external-only by construction,
-/// so a "Connection: not enumerated yet" on the built-in would be a permanent
-/// promise of an answer, which is exactly the shape DT30 rule (e) forbids.
+/// It renders under the BUILT-IN display too (DT45). Every row about a data
+/// cable, an EDID or a DDC answer is OMITTED there rather than rendered against
+/// a fact that never arrives: `DisplayDiscovery` is external-only, so
+/// "Connection: not enumerated yet" would be a permanent promise of an answer,
+/// the shape DT30 rule (e) forbids.
 ///
-/// `@MainActor` is load-bearing: a `View`'s stored and computed properties
-/// other than `body` are nonisolated under complete concurrency, and this one
-/// constructs and reads main-actor types.
+/// `@MainActor` is load-bearing: a `View`'s properties other than `body` are
+/// nonisolated under complete concurrency, and this one reads main-actor types.
 ///
-/// The page WRITES NO PREF (DT31). Its two buttons touch the pasteboard and the
-/// filesystem, and the one chevron row is navigation. D29 does not bind it, and
-/// binds the moment a control that can disable a command is added.
+/// The page WRITES NO PREF (DT31), so D29 does not bind it. It binds the moment
+/// a control that can disable a command is added.
 @MainActor
 struct DiagnosticsPage: View {
   let state: AppModel.DisplayState
@@ -58,17 +46,14 @@ struct DiagnosticsPage: View {
   private var facts: DisplayHardwareFacts? { model.hardwareFacts[persistenceKey] }
   private var brightnessPath: BrightnessPath { state.controller.brightnessPath }
 
-  /// Asked of the model's own slot rather than of the persistence key: the
-  /// model is the thing that decides which display is the built-in, and a
-  /// literal key compared here would be a second, driftable copy of that
-  /// decision.
+  /// Asked of the model's own slot, not the persistence key: a literal key
+  /// compared here would be a second, driftable copy of that decision.
   private var isBuiltIn: Bool { model.builtIn?.id == state.id }
 
   var body: some View {
-    // MANDATORY. `DisplayPrefs` is plain `UserDefaults` and is not observable;
-    // `prefsRevision` is the ONLY invalidation signal, and this page reads
-    // prefs in four of its five sections. Omitting it yields a silently stale
-    // page.
+    // MANDATORY. `DisplayPrefs` is plain `UserDefaults`, not observable, so
+    // `prefsRevision` is the ONLY invalidation signal for the prefs most of
+    // these sections read. Without it the page goes silently stale.
     let _ = model.prefsRevision
 
     SettingsPageScaffold {
@@ -79,11 +64,9 @@ struct DiagnosticsPage: View {
         onSwitch: onSwitch
       )
 
-      // Spec §7: one sentence, above everything, on a card of its own so it
-      // reads as the page's answer rather than as the first of forty rows.
-      // Composed from the same state the "Last brightness command" and
-      // "Reading values back" rows below render, so the summary cannot
-      // disagree with its own evidence.
+      // One sentence on a card of its own, so it reads as the page's answer
+      // rather than the first of forty rows. Composed from the same state the
+      // rows below render, so it cannot disagree with its own evidence.
       SettingsCard {
         Text(verbatim: verdictText)
           .foregroundStyle(SettingsTheme.titleColor)
@@ -98,12 +81,10 @@ struct DiagnosticsPage: View {
         brightnessRows
       }
 
-      // Every row in this section is about a DDC answer, and the built-in never
-      // gives one — it has no wire and `probeVolumeCapabilities` walks
-      // `model.displays`, which is external-only. Rendering it there would put
-      // "Not asked yet" under a heading promising an answer that can never
-      // arrive (DT30 rule (e)); the built-in's DDC story is already stated
-      // once, in Brightness Control, where it is true.
+      // Every row here is about a DDC answer and the built-in never gives one,
+      // so rendering it there would put "Not asked yet" under a heading
+      // promising an answer that cannot arrive (DT30 rule (e)). The built-in's
+      // DDC story is stated once, in Brightness Control.
       if !isBuiltIn {
         SettingsCardSection(title: "Reported Capabilities") {
           reportedCapabilitiesRows
@@ -122,8 +103,8 @@ struct DiagnosticsPage: View {
     }
   }
 
-  /// The right-hand half of a row, in the window's body weight. One helper for
-  /// forty-odd rows, so the answers cannot end up styled forty different ways.
+  /// One helper for every row's value, so the answers cannot end up styled
+  /// differently row by row.
   private func valueText(_ value: String) -> some View {
     Text(verbatim: value).foregroundStyle(SettingsTheme.bodyColor)
   }
@@ -155,9 +136,9 @@ struct DiagnosticsPage: View {
       }
     }
 
-    // The cable-and-EDID rows. Omitted wholesale for the built-in panel — see
-    // the type comment. The hub's identity block deliberately does NOT carry
-    // "Connection" (T12); it lives here, where the rest of the cable's story is.
+    // The cable-and-EDID rows, omitted wholesale for the built-in (see the type
+    // comment). The hub's identity block deliberately has no "Connection"; it
+    // lives here, with the rest of the cable's story.
     if !isBuiltIn {
       SettingsCardDivider()
       SettingRow(DiagnosticsPageCopy.connection) {
@@ -189,10 +170,9 @@ struct DiagnosticsPage: View {
       }
     }
 
-    // `onScreen`, never the raw readback. While a size this app renders is
-    // engaged the readback names the display's native geometry, and this row
-    // would then contradict the "Synthesized size active" line further down the
-    // same page and the mode line of the report pasted from it.
+    // `onScreen`, never the raw readback: while a size this app renders is
+    // engaged the readback names the display's native geometry, which would
+    // contradict the "Synthesized size active" line further down this page.
     if let native = model.displayModes.catalogs[state.id], native.nativeKnown,
        let onScreen = native.onScreen {
       SettingsCardDivider()
@@ -207,23 +187,16 @@ struct DiagnosticsPage: View {
     identityKeysRow
   }
 
-  /// Where this display's resolutions came from.
-  ///
-  /// DT30 rule (d): this describes OUR OWN enumeration, never a claim about
-  /// what macOS is hiding. "Listed by macOS" is a count we made; "found beyond
-  /// that list" is a count we made. Neither asserts why macOS omitted them.
+  /// Where this display's resolutions came from. DT30 rule (d): this describes
+  /// OUR OWN enumeration. Both counts are ours, and neither asserts why macOS
+  /// omitted anything.
   @ViewBuilder private var resolutionSourceRows: some View {
     if let catalog = model.displayModes.catalogs[state.id] {
-      // Two counts, two predicates, and they are not each other's complement.
-      // "Listed by macOS" names ONE source explicitly; `isRevealed` switches
-      // over the provenance, so a third source is a compile error there and a
-      // silent miscount here.
-      //
-      // Synthesis was that third source, and it is counted separately below
-      // rather than folded into either of these: `catalog.all` is the display's
-      // OWN enumeration and holds no synthesized stop, so neither count is
-      // wrong, and a synthesized size is not a resolution anyone found. It is
-      // one this app renders.
+      // Two counts, and they are not each other's complement. "Listed by macOS"
+      // names ONE source; `isRevealed` switches over the provenance, so a new
+      // source is a compile error there and a silent miscount here. Synthesis is
+      // counted separately below: `catalog.all` is the display's OWN enumeration
+      // and holds no synthesized stop.
       let publishedCount = catalog.all.count { $0.provenance == .coreGraphics }
       let revealedCount = catalog.all.count(where: \.isRevealed)
 
@@ -244,14 +217,10 @@ struct DiagnosticsPage: View {
   }
 
   /// The third source (SS4/SS5), silent unless this display's opt-in is on: a
-  /// count of 0 under an opt-in nobody turned on would read as a feature that
-  /// looked and found nothing.
-  ///
-  /// A whole line rather than a label and a value, because it is a report line
-  /// about what this app added rather than a property of the display, and the
-  /// two facts it carries (that sizes are offered at all, and how many) only
-  /// mean anything together. Secondary, like every value in this page's rows,
-  /// so a line that is not a heading does not read as one.
+  /// count of 0 under an opt-in nobody turned on reads as a feature that looked
+  /// and found nothing. A whole line rather than a label and a value, because
+  /// its two facts (that sizes are offered, and how many) only mean anything
+  /// together.
   @ViewBuilder private func synthesizedOfferRow(
     _ catalog: DisplayModeCoordinator.Catalog
   ) -> some View {
@@ -264,8 +233,8 @@ struct DiagnosticsPage: View {
     }
   }
 
-  /// #110. Silent when the guard is on and had nothing to withhold, which is
-  /// the ordinary case on most panels.
+  /// Silent when the guard is on and had nothing to withhold, the ordinary case
+  /// on most panels.
   @ViewBuilder private func wireTimingRow(withheld: Int) -> some View {
     if !model.displayModes.guardsWireTiming {
       SettingsCardDivider()
@@ -282,10 +251,10 @@ struct DiagnosticsPage: View {
     }
   }
 
-  /// The two keys this display's settings hang off. Split out of the section so
-  /// the IOReg tooltip can be attached for externals and left off the built-in,
-  /// whose IOReg facts are never read at all: a tooltip there would be
-  /// reporting a lookup that never ran.
+  /// The two keys this display's settings hang off. Split out so the IOReg
+  /// tooltip can be attached for externals and left off the built-in, whose
+  /// IOReg facts are never read: a tooltip there would report a lookup that
+  /// never ran.
   @ViewBuilder private var identityKeysRow: some View {
     let caption = DiagnosticsPageCopy.identityKeys(keysMatch: displayKey == persistenceKey)
     let row = SettingRow(caption) {
@@ -337,18 +306,13 @@ struct DiagnosticsPage: View {
       }
     }
 
-    // Gamma interference is a fight over ONE backend, and the row is shown
-    // only to a display actually using it.
-    //
-    // Two claims an earlier version of this row could not support. First, the
-    // counter is only ever touched inside `checkBeforeApply`, which runs one
-    // statement before a GAMMA apply — a display on the hardware, native or
-    // overlay path is never looked at, so its permanent 0 rendered as "None
-    // this session" asserted absence on the strength of a probe that never
-    // ran. Omit rather than blank (DT45). Second, the window was wrong:
-    // `resetCounter()` fires on EVERY display reconfiguration
-    // (`StatusItemController`), so "this session" told a user who had watched
-    // a conflict happen, then woken the Mac, that there had been none.
+    // Gamma interference is a fight over ONE backend, so the row is shown only
+    // to a display using it. Two claims it could not otherwise support. The
+    // counter is touched only inside `checkBeforeApply`, which runs before a
+    // GAMMA apply, so a display on another path keeps a permanent 0 that
+    // rendered as "None this session": omit rather than blank (DT45). And
+    // `resetCounter()` fires on EVERY display reconfiguration, so "this session"
+    // told a user who had watched a conflict, then woken the Mac, of none.
     if usesGammaLeg, let monitor = model.gammaInterference {
       SettingsCardDivider()
       SettingRow(DiagnosticsPageCopy.gammaConflicts) {
@@ -363,8 +327,8 @@ struct DiagnosticsPage: View {
     }
   }
 
-  /// Whether the gamma backend is the one carrying this display's software
-  /// leg — the only configuration in which anything checks for a clobber.
+  /// Whether the gamma backend carries this display's software leg, the only
+  /// configuration in which anything checks for a clobber.
   private var usesGammaLeg: Bool {
     switch brightnessPath {
     case .software(.gamma), .combined(_, .gamma), .softwareOnly(.gamma, _, _):
@@ -483,18 +447,14 @@ struct DiagnosticsPage: View {
 
   // MARK: - Availability
 
-  /// DT30 rule (a) is enforced in `DiagnosticsCopy`: no row here may read just
-  /// "Unavailable" or "Not supported", every one names the thing that took the
-  /// feature away, and every reason comes off a typed value rather than being
-  /// composed from prefs at the point of display.
+  /// DT30 rule (a), enforced in `DiagnosticsCopy`: no row here reads just
+  /// "Unavailable", every one names the thing that took the feature away, and
+  /// every reason comes off a typed value.
   ///
-  /// Volume, contrast and mute are the DDC audio and picture commands, and the
-  /// built-in has no wire to carry them: nothing in this app ever offers them
-  /// for it. HDR is likewise external-only: `BrightnessController` builds the
-  /// built-in slot with no HDR backend at all, so `supportsHDR` there is a
-  /// hardwired false that would render as "this display reports no HDR modes"
-  /// about a panel whose HDR macOS drives perfectly well. Both are omitted
-  /// rather than answered wrongly.
+  /// Volume, contrast and mute are DDC commands the built-in has no wire for.
+  /// HDR too: `BrightnessController` builds the built-in slot with no HDR
+  /// backend, so `supportsHDR` is a hardwired false that would render as "this
+  /// display reports no HDR modes" about a panel whose HDR macOS drives fine.
   @ViewBuilder private var availabilityRows: some View {
     LabeledContent("Brightness") {
       valueText(DiagnosticsCopy.brightnessAvailability(brightnessPath))
@@ -546,14 +506,10 @@ struct DiagnosticsPage: View {
 
   // MARK: - Right Now
 
-  /// State, not settings. Everything here can be different a second from now,
-  /// and every one of them has words — nothing in this section is carried by a
-  /// colour or an icon alone.
-  ///
-  /// The HDR and sound-output rows are external-only for the same reasons as
-  /// in Availability: the built-in has no HDR backend in this app and no volume
-  /// command, so both would answer from a hardwired default rather than from
-  /// anything observed.
+  /// State, not settings: everything here can be different a second from now,
+  /// and every row has words, never a colour or an icon alone. HDR and sound
+  /// output are external-only for Availability's reasons: on the built-in both
+  /// would answer from a hardwired default rather than anything observed.
   @ViewBuilder private var rightNowRows: some View {
     if !isBuiltIn {
       LabeledContent("HDR") {
@@ -586,10 +542,8 @@ struct DiagnosticsPage: View {
 
     SettingsCardDivider()
 
-    // The caption is attached whenever a family is missing, not only when they
-    // all are. Partial states are ordinary now that volume and mute arm
-    // separately, and a row that names two families out of three explains the
-    // absent one to nobody.
+    // Attached whenever a family is missing, not only when they all are:
+    // partial states are ordinary now that volume and mute arm separately.
     if model.lastArmedTapConfig != nil, !watchesEveryFamily {
       SettingRow(DiagnosticsPageCopy.watchedKeys) {
         LabeledContent("Keys being watched") {
@@ -641,11 +595,10 @@ struct DiagnosticsPage: View {
     SettingsCardDivider()
 
     LabeledContent("Mirroring") {
-      // SS7: a synthesis set is not user mirroring, and the CG flag says it is.
-      // The pairing table is the authority (SS1), so it decides here and the
-      // flag answers only when it is not a synthesis set. Without this the row
-      // reads "Showing another display's contents" about a display that is
-      // showing its own picture at a size this app renders.
+      // SS7: a synthesis set is not user mirroring, though the CG flag says it
+      // is. The pairing table is the authority (SS1) and decides here; without
+      // it the row claims a display shows another's contents while it is showing
+      // its own picture at a size this app renders.
       valueText(DiagnosticsCopy.mirroring(
         isMirrorSlave: model.displayModes.catalogs[state.id]?.display.isMirrorSlave,
         isSynthesized: model.synthesis.isEngaged(displayID: state.id)))
@@ -654,15 +607,12 @@ struct DiagnosticsPage: View {
     synthesizedActiveRow
   }
 
-  /// The engaged pairing, from the ENGINE's own table (SS1) and never from a CG
-  /// mirror flag or a mode readback: the engage tail re-times the slave, so a
+  /// The engaged pairing, from the ENGINE's own table (SS1), never a CG mirror
+  /// flag or a mode readback: the engage tail re-times the slave, so a
   /// synthesis-engaged display reports its own native mode [MEASURED
-  /// 2026-08-18]. "Current mode" above reads `Catalog.onScreen` for exactly
-  /// that reason, so the two rows name the same size; this one adds the slot,
-  /// which is what tells two engaged displays apart in a pasted report.
-  ///
-  /// Directly under Mirroring, which is where the same set shows up as a
-  /// mirror. This line is what says whose mirror it is.
+  /// 2026-08-18]. It adds the slot, which is what tells two engaged displays
+  /// apart in a pasted report, and it sits under Mirroring because that is where
+  /// the same set shows up as a mirror.
   @ViewBuilder private var synthesizedActiveRow: some View {
     if let pairing = model.synthesis.pairing(forPhysical: state.id) {
       SettingsCardDivider()
@@ -677,8 +627,8 @@ struct DiagnosticsPage: View {
     }
   }
 
-  /// Reads the LAST ARMED config, not a freshly computed one. The two differ
-  /// exactly when a rearm failed — which is the case this row is for (B9).
+  /// Reads the LAST ARMED config, not a freshly computed one: the two differ
+  /// exactly when a rearm failed, which is the case this row is for (B9).
   private var watchedKeysText: String {
     DiagnosticsCopy.watchedKeys(
       families: watchedKeyFamilies, tapRunning: model.lastArmedTapConfig != nil)
@@ -729,21 +679,18 @@ struct DiagnosticsPage: View {
         DiagnosticsReportActions()
       }
 
-      // A link, not a setting — the page stays read-only in content (spec §7).
-      // Offered only where there is something on the other end: the built-in's
-      // destination has no Advanced sub-page, because it has no hardware
-      // control to method.
+      // A link, not a setting: the page stays read-only. Offered only where
+      // there is something on the other end, and the built-in has no Advanced
+      // sub-page because it has no hardware control to method.
       if !isBuiltIn {
         SettingsCardDivider()
         NavigationRow(
           title: DiagnosticsPageCopy.controlMethodTitle,
           value: DiagnosticsPageCopy.controlMethodValue
         ) {
-          // Replaces the stack rather than pushing onto it, so Back from
-          // Control Method returns to the display's own page. The user came
-          // here for an answer and is being sent to the control that acts on
-          // it; the diagnostics page is not a step they need to walk back
-          // through.
+          // Replaces the stack rather than pushing, so Back from Control Method
+          // returns to the display's own page instead of walking back through
+          // Diagnostics.
           path = [.advanced]
         }
       }
@@ -751,12 +698,10 @@ struct DiagnosticsPage: View {
   }
 }
 
-/// One key family and what it needs before its keys are watched.
-///
-/// Same shape and same reasoning as the Keyboard pane's modifier legend: a
-/// two-column row that narrows to two lines, read aloud as one sentence rather
-/// than as two fragments. Not that type reused, because its columns are a
-/// shortcut and a key combination, and these are a family and a condition.
+/// One key family and what it needs before its keys are watched: a two-column
+/// row that narrows to two lines and is read aloud as one sentence. Not the
+/// Keyboard pane's modifier legend reused, because its columns are a shortcut
+/// and a key combination.
 private struct KeyRequirementRow: View {
   let title: String
   let needs: String
@@ -785,10 +730,9 @@ private struct KeyRequirementRow: View {
   }
 }
 
-/// The Copy/Save pair and the transient confirmation, in one component because
-/// they exist in two places: here and in About, which survives every display's
-/// departure (spec §7). Two copies of a clipboard write and an `NSSavePanel` is
-/// two things to keep in agreement.
+/// The Copy/Save pair and its transient confirmation, in one component because
+/// they exist here and in About: two copies of a clipboard write and an
+/// `NSSavePanel` are two things to keep in agreement.
 @MainActor
 struct DiagnosticsReportActions: View {
   @Environment(AppModel.self) private var model
@@ -803,8 +747,8 @@ struct DiagnosticsReportActions: View {
   var body: some View {
     HStack(spacing: 8) {
       // Copy takes the primary: pasting the report into a message is what a
-      // person came to this page's foot to do, and saving a file is the
-      // fallback for the report too long to paste.
+      // person came here to do, and Save is the fallback for one too long to
+      // paste.
       Button(DiagnosticsPageCopy.copyReport) { copyReport() }
         .buttonStyle(SettingsPrimaryButtonStyle())
         .accessibilityLabel(Text(DiagnosticsPageCopy.copyReport))
@@ -852,8 +796,8 @@ struct DiagnosticsReportActions: View {
       try DiagnosticsReport.render(model.diagnosticsSnapshot())
         .write(to: url, atomically: true, encoding: .utf8)
     } catch {
-      // Silence here would look exactly like success. The report exists to be
-      // handed to somebody, so a save that did not happen has to say so.
+      // Silence would look exactly like success, and this report exists to be
+      // handed to somebody.
       saveError = error.localizedDescription
     }
   }

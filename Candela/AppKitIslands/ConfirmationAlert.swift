@@ -3,19 +3,16 @@ import SwiftUI
 
 /// The alert design language every keep-or-revert question is drawn in.
 ///
-/// It exists because there is more than one such question — a resolution
-/// preview, a mirror preview, and rotation next — and they are the same question
-/// wearing different words: *an irreversible-looking change is in effect, keep it
-/// or revert*. Two visual languages for one decision is the inconsistency the
-/// settings redesign exists to remove, and it is not merely cosmetic here: the
-/// mirror window drew a grey primary for weeks (#54) because it re-derived its
-/// buttons instead of sharing these.
+/// One language, because every one of them is the same question wearing
+/// different words: an irreversible-looking change is in effect, keep it or
+/// revert. Not merely cosmetic: the mirror window drew a grey primary for weeks
+/// because it re-derived its buttons instead of sharing these.
 ///
 /// Centred, icon-first and 340pt wide: the shape of a macOS alert, because that
-/// is what these are. The earlier 320pt leading-aligned card read as a tooltip,
-/// and a safety question that reads as a tooltip gets treated like one.
+/// is what these are. A leading-aligned card read as a tooltip, and a safety
+/// question that reads as a tooltip gets treated like one.
 
-/// The card. The icon is the app's own — nothing else on screen says WHO is
+/// The card. The icon is the app's own: nothing else on screen says WHO is
 /// asking, and a screen that reconfigured itself is otherwise indistinguishable
 /// from the display or macOS doing it.
 struct ConfirmationCard<Content: View>: View {
@@ -63,9 +60,9 @@ struct ConfirmationSubtitle: View {
   }
 }
 
-/// Same three modifiers as a subtitle — the distinction is what it says, not how
-/// it looks, and keeping them one type means a caption built from a payload
-/// cannot end up styled differently from a written one.
+/// Same modifiers as a subtitle: the distinction is what it says, not how it
+/// looks. One type means a caption built from a payload cannot end up styled
+/// differently from a written one.
 struct ConfirmationCaption: View {
   private let text: Text
   init(_ key: LocalizedStringKey) { text = Text(key) }
@@ -77,7 +74,7 @@ struct ConfirmationCaption: View {
 }
 
 /// A number that changes every second must not be able to change the WIDTH of
-/// what it sits in — the buttons below would shuffle under the pointer once a
+/// what it sits in, or the buttons below shuffle under the pointer once a
 /// second.
 struct ConfirmationCountdown: View {
   private let string: String
@@ -92,10 +89,9 @@ struct ConfirmationCountdown: View {
   }
 }
 
-/// The answers, side by side and equally wide, the way an alert asks a question
-/// it expects an answer to. Not trailing-aligned: at this width a trailing row
-/// reads as a form's footer, which is exactly the "easy to miss" these windows
-/// were promoted to fix.
+/// The answers, side by side and equally wide. Not trailing-aligned: at this
+/// width a trailing row reads as a form's footer, which is the "easy to miss"
+/// these windows were promoted to fix.
 struct ConfirmationAnswers<Content: View>: View {
   @ViewBuilder let content: Content
 
@@ -112,15 +108,13 @@ struct ConfirmationAnswers<Content: View>: View {
 /// **`.borderedProminent` renders GREY in these windows and always will.**
 /// Candela is an `.accessory` app that is essentially never the active
 /// application, and AppKit draws controls in an inactive app in their inactive
-/// appearance — measured 2026-08-04, the two answers came out visually
-/// identical. On an alert whose whole job is to be impossible to miss, "which
-/// one is the primary action?" being unanswerable is a defect.
-/// `controlAccentColor` is a system colour that does not dim with activation, so
-/// asking for it directly is the only thing that survives.
+/// appearance: the two answers came out visually identical [MEASURED
+/// 2026-08-04]. `controlAccentColor` does not dim with activation, so asking for
+/// it directly is the only thing that survives.
 ///
 /// Both answers share one style so the two capsules cannot end up different
 /// heights, which is what happened when only the primary was custom. Hover and
-/// pressed states are required of any custom button (`buttons.md`) — and these
+/// pressed states are required of any custom button (`buttons.md`), and these
 /// reconfigure a screen, so a click that feels unregistered invites a second one.
 struct AnswerButtonStyle: ButtonStyle {
   let isPrimary: Bool

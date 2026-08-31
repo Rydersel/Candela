@@ -35,9 +35,6 @@ public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
   public let refreshHz: Double
   /// `kDisplayModeNativeFlag` — the panel's own timing.
   public let isNative: Bool
-  /// Where this mode came from, and therefore what applies it: one of the two
-  /// enumerations and its matching call, or synthesis, which no configurator
-  /// call applies at all.
   public let provenance: ModeProvenance
 
   public init(
@@ -58,11 +55,8 @@ public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
   public var id: Int32 { ioModeID }
 
   /// CoreGraphics reports refresh rates like 59.9998 rather than 60. Normalise
-  /// at the boundary so no consumer downstream has to reason about float noise:
-  /// the picker dedupes cleanly, and stored descriptors compare sanely.
-  ///
-  /// Rounds to one decimal, which keeps genuinely distinct rates apart
-  /// (59.94 NTSC vs 60) while collapsing measurement noise.
+  /// at the boundary so nothing downstream reasons about float noise. Rounds to
+  /// one decimal, which keeps 59.94 NTSC and 60 apart while collapsing noise.
   public static func quantizedRefresh(_ raw: Double) -> Double {
     (raw * 10).rounded() / 10
   }
@@ -75,13 +69,11 @@ public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
   /// Reads the recorded provenance and nothing else. Sharpness is not
   /// provenance: `kCGDisplayShowDuplicateLowResolutionModes` puts HiDPI modes
   /// INTO the CoreGraphics list, so a flag derived by diffing the two
-  /// enumerations is a synonym for `!isHiDPI`, which was built once and removed
-  /// for exactly that reason.
+  /// enumerations is a synonym for `!isHiDPI`.
   ///
   /// Switched rather than compared so a third source cannot be added without
-  /// deciding whether the pickers mark it, and with which words. Synthesis was
-  /// that third source: it gets its own badge, so this stays true for the
-  /// revealed rows alone.
+  /// deciding whether the pickers mark it. Synthesis was that third source and
+  /// got its own badge.
   public var isRevealed: Bool {
     switch provenance {
     case .coreGraphics: false
@@ -107,10 +99,10 @@ public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
     Int32(-(1000 + stopIndex))
   }
 
-  /// A scaled mode renders oversized and downsamples. The comparison is
-  /// against the PANEL's native pixel count — taken from the mode flagged
-  /// `isNative` — and NOT against `CGDisplayPixelsWide`, which reports the
-  /// current mode's LOGICAL width and would make everything look native.
+  /// A scaled mode renders oversized and downsamples. The comparison is against
+  /// the PANEL's native pixel count, taken from the mode flagged `isNative`, and
+  /// NOT against `CGDisplayPixelsWide`, which reports the current mode's LOGICAL
+  /// width and would make everything look native.
   public func isScaled(nativePixelWidth: Int, nativePixelHeight: Int) -> Bool {
     pixelWidth != nativePixelWidth || pixelHeight != nativePixelHeight
   }
@@ -123,7 +115,7 @@ public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
   }
 }
 
-/// The persisted form of a mode choice. Geometry + refresh only — enough to
+/// The persisted form of a mode choice. Geometry and refresh only: enough to
 /// re-find the mode on a display whose `ioModeID`s have been reassigned.
 public struct DisplayModeDescriptor: Sendable, Equatable, Hashable, Codable {
   public let logicalWidth: Int
@@ -140,10 +132,9 @@ public struct DisplayModeDescriptor: Sendable, Equatable, Hashable, Codable {
     self.refreshHz = refreshHz
   }
 
-  /// Spelled out rather than synthesized on purpose: these strings are an
-  /// on-disk format. Synthesized keys track the property names, so a later
-  /// rename would silently orphan every stored preference rather than forcing
-  /// a deliberate decision about the old data.
+  /// Spelled out rather than synthesized: these strings are an on-disk format,
+  /// and synthesized keys track the property names, so a rename would silently
+  /// orphan every stored preference.
   private enum CodingKeys: String, CodingKey {
     case logicalWidth
     case logicalHeight
@@ -175,10 +166,6 @@ extension DisplayModeDescriptor: LogicalGeometry {}
 public extension DisplayMode {
   /// Whether two modes denote the same GEOMETRY: both size pairs, and the
   /// refresh rate within tolerance.
-  ///
-  /// Spelled out twice before (#68), in `ModeReapplyPolicy`'s already-running
-  /// test and in the apply cross-check. Those two answer different questions and
-  /// must stay where they are; the predicate underneath them is one rule.
   ///
   /// Never `ioModeID`, and never `==`. The ID is a positional handle that is
   /// reassigned across reconfiguration, so two equal IDs are not evidence of the

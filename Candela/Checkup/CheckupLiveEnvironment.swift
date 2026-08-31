@@ -32,10 +32,9 @@ enum CheckupLiveEnvironment {
     var pointHeight: Double
   }
 
-  /// CK26: a virtual display is never a target, and neither is a mirroring one
-  /// (`CheckupCopy.mirroringReason`), so both drop here rather than at every
-  /// surface. `isOnlyDisplay` counts what survives: a display the flow cannot
-  /// target is also one the flow window cannot be sent to (CK16).
+  /// CK26: a virtual display is never a target, and neither is a mirroring one,
+  /// so both drop here rather than at every surface. `isOnlyDisplay` counts what
+  /// survives: a display the flow cannot target cannot host the window either.
   static func entries(from sources: [Source]) -> [CheckupDisplayEntry] {
     let real = sources.filter { !$0.isVirtual && !$0.isMirroring }
     return real.map { source in
@@ -58,17 +57,15 @@ enum CheckupLiveEnvironment {
     }
   }
 
-  /// Reads the live state the plan grades off, BEFORE it grades anything: HDR from
-  /// the panel itself, then a capability string for every external the D24 probe
-  /// lacks one for. A nil `hdr` leaves the caller's value alone; the built-in is
-  /// never measured.
+  /// Reads the live state the plan grades off, BEFORE it grades anything: HDR
+  /// from the panel, then a capability string for every external the D24 probe
+  /// lacks one for. A nil `hdr` leaves the caller's value alone.
   ///
-  /// The controller's HDR mirror goes stale when HDR is toggled outside the app,
-  /// and a stale `false` pre-grades the capability rows write-only when readback
-  /// cannot be observed in HDR at all. A failed capability read caches the verdict,
-  /// not the string, and `CapabilityProbePolicy` will not retry that session, so
-  /// inheriting that nil would class a Dell write-only in a saved report. HDR skips
-  /// the capability read since DDC is dead while HDR is engaged.
+  /// Both re-reads exist because the cached answers lie. The controller's HDR
+  /// mirror goes stale when HDR is toggled outside the app, and a failed
+  /// capability read caches the verdict with no retry that session, which would
+  /// class a panel that answers DDC as write-only in a saved report. HDR skips
+  /// the capability read, since DDC is dead while HDR is engaged.
   @MainActor
   static func readingLiveState(
     into sources: [Source], writers: [String: any DDCWriting], hdr: (any HDRToggling)?

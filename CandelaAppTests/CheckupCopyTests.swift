@@ -28,8 +28,8 @@ struct CheckupCopyTests {
     #expect(CheckupCopy.showAgainCap.contains("three"))
   }
 
-  /// `CheckupPage.name` reaches the summary and the exported file. The guard
-  /// skips raw values that are ordinary words ("black"); what it catches is `gray7` and `gray50`.
+  /// `CheckupPage.name` reaches the summary and the exported file. Raw values that
+  /// are ordinary words ("black") are skipped; storage keys like `gray7` are not.
   @Test func noPageNameCarriesAFieldsStorageKey() {
     var pages: [CheckupPage] = [
       .scenario, .displayPick, .plan, .identity, .capabilities, .nativeMode, .refresh,

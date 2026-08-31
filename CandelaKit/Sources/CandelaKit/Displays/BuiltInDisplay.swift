@@ -2,10 +2,10 @@ import CandelaPrivateAPIs
 import CoreGraphics
 import Foundation
 
-/// How a `BrightnessController` routes its display's brightness (Task 10).
-/// `.builtIn` is a hard short-circuit: always the native leg, no DDC, no
-/// software/combined routing, no HDR machinery, and no persistence — macOS
-/// owns built-in brightness across launches.
+/// How a `BrightnessController` routes its display's brightness. `.builtIn` is a
+/// hard short-circuit: always the native leg, no DDC, no software or combined
+/// routing, no HDR machinery, and no persistence, because macOS owns built-in
+/// brightness across launches.
 public enum DisplayRole: Sendable {
   case external
   case builtIn
@@ -13,7 +13,7 @@ public enum DisplayRole: Sendable {
 
 public enum BuiltInDisplayDiscovery {
   /// The built-in display, if one is online. Name from
-  /// `CoreDisplay_DisplayCreateInfoDictionary`'s product name, fallback
+  /// `CoreDisplay_DisplayCreateInfoDictionary`'s product name, falling back to
   /// "Built-in Display".
   public static func discover() -> (id: CGDirectDisplayID, name: String)? {
     var displayIDs = [CGDirectDisplayID](repeating: 0, count: 16)
@@ -45,9 +45,9 @@ public enum BuiltInDisplayDiscovery {
 }
 
 /// DDC writer for displays with no DDC wire (the built-in panel): every write
-/// fails and every read returns nil, so any DDC path reached by mistake
-/// degrades instead of touching hardware. Public because the app target
-/// constructs it when wiring the built-in controller (re-review T10-D).
+/// fails and every read returns nil, so any DDC path reached by mistake degrades
+/// instead of touching hardware. Public because the app target constructs it
+/// when wiring the built-in controller.
 public struct NoopDDCWriter: DDCWriting {
   public init() {}
 

@@ -3,9 +3,9 @@ import Foundation
 
 /// A display's orientation, as one of the only four values the platform accepts.
 ///
-/// **RT6 — closed, not an `Int`.** `SLSSetDisplayRotation` refuses `45` with
+/// **RT6: closed, not an `Int`.** `SLSSetDisplayRotation` refuses `45` with
 /// `kCGErrorIllegalArgument`, which is the safe half. The dangerous half is that
-/// `-90` and `360` return `CGError` **0 and do nothing** (RS5) — so the obvious
+/// `-90` and `360` return `CGError` **0 and do nothing** (RS5), so the obvious
 /// spelling of "rotate counter-clockwise" is silently ignored while reporting
 /// success. A raw-integer API would make that the natural thing to write.
 public enum DisplayRotation: Int, Sendable, CaseIterable, Codable {
@@ -16,7 +16,7 @@ public enum DisplayRotation: Int, Sendable, CaseIterable, Codable {
 
   /// From a `CGDisplayRotation` reading, which is degrees as a `Double`.
   ///
-  /// **RT7 — `nil` rather than a nearest match.** A display reporting 45° is one
+  /// **RT7: `nil` rather than a nearest match.** A display reporting 45° is one
   /// this feature must decline to describe, not one it should round into a lie.
   /// The tolerance is for float representation only, not for snapping.
   public init?(degrees: Double) {
@@ -30,21 +30,21 @@ public enum DisplayRotation: Int, Sendable, CaseIterable, Codable {
 
   public var degrees: Int32 { Int32(rawValue) }
 
-  /// 90 and 270 exchange the display's width and height — measured, not assumed:
-  /// the MAG went 3440×1440 → 1440×3440 and its reported *mode* changed with it
-  /// (RS3). This is why a curated mode list captured before a rotation describes
-  /// the other orientation.
+  /// 90 and 270 exchange the display's width and height, measured rather than
+  /// assumed: the MAG went 3440×1440 → 1440×3440 and its reported *mode* changed
+  /// with it (RS3). A curated mode list captured before a rotation describes the
+  /// other orientation.
   public var swapsAxes: Bool { self == .ninety || self == .twoSeventy }
 }
 
-/// Why a rotation was not attempted. Four, and each is stated to the user rather
-/// than collapsed into "it did not work".
+/// Why a rotation was not attempted. Each case is stated to the user rather than
+/// collapsed into "it did not work".
 ///
-/// **RT13** — deliberately short. A refusal list that guesses at what the
-/// hardware will refuse goes stale. Mirroring needed eight because CoreGraphics
-/// really does refuse eight ways; rotation is not known to refuse at all, so
-/// anything not listed here is attempted and the verification in
-/// `applyRotation` produces a truthful failure if it does not take.
+/// **RT13**: deliberately short. A refusal list that guesses at what the hardware
+/// will refuse goes stale. Mirroring needed eight because CoreGraphics really does
+/// refuse eight ways; rotation is not known to refuse at all, so anything not
+/// listed here is attempted and `applyRotation`'s verification produces a truthful
+/// failure if it does not take.
 public enum RotationRefusal: Sendable, Equatable {
   /// This build cannot rotate: the SkyLight symbol did not resolve (RT5).
   case unavailable
@@ -53,8 +53,8 @@ public enum RotationRefusal: Sendable, Equatable {
   /// The display reports an orientation that is not a right angle, so there is
   /// no honest "from" to show or to revert to (RT7).
   case unreadable
-  /// The requested angle is already the current one. No countdown opens — a
-  /// no-op that starts a 30-second timer is a bug, not a courtesy.
+  /// The requested angle is already the current one. No countdown opens: a no-op
+  /// that starts a 30-second timer is a bug, not a courtesy.
   case unchanged(DisplayRotation)
 }
 

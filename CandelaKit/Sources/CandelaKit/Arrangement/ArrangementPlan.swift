@@ -1,10 +1,8 @@
 import CoreGraphics
 import Foundation
 
-/// One display's requested origin. `CGConfigureDisplayOrigin`'s two arguments,
-/// named — a tuple would not be `Equatable`, and every test here asserts a whole
-/// change list against an expected one (the same reason `MirrorChange` is a
-/// struct).
+/// One display's requested origin. A struct rather than a tuple so a whole change
+/// list is `Equatable`, the same reason `MirrorChange` is one.
 public struct DisplayOriginChange: Sendable, Equatable {
   public let id: CGDirectDisplayID
   public let origin: DisplayPoint
@@ -18,21 +16,16 @@ public struct DisplayOriginChange: Sendable, Equatable {
 /// A layout change, staged as ONE transaction.
 ///
 /// **AR4 is structural here, not a check.** The plan stores a whole
-/// `DisplayArrangement` and *derives* `changes` from its tiles, so a partial
-/// plan is not a value this type can hold — there is no initialiser that takes
-/// a change list. That matters because CoreGraphics repositions any display
-/// whose origin is not explicitly set: *"Any display whose origin is not
-/// explicitly set in a reconfiguration will be repositioned to a location as
-/// close as possible to its current location"* (`CGDisplayConfiguration.h:45-47`,
-/// arrangement research §4.2). Naming one display and leaving the rest implicit
-/// hands the rest to a heuristic, and the user never touched them.
+/// `DisplayArrangement` and derives `changes` from its tiles, so no initialiser takes
+/// a change list and a partial plan is unrepresentable. CoreGraphics repositions any
+/// display whose origin is not explicitly set (`CGDisplayConfiguration.h`,
+/// arrangement research §4.2), so naming one display hands the rest to a heuristic.
 ///
-/// **AR6:** mirror slaves get no tile, so they get no change. Setting the origin
-/// of a display that is mirroring another *removes it from the mirror set*
-/// (`CGDisplayConfiguration.h:49-50`), which is a silent, unrequested topology
-/// change. `ArrangementTile.mirroredIDs` names them; `init` REFUSES an
-/// arrangement in which a mirror slave also holds a tile, rather than quietly
-/// dropping it — dropping it would produce exactly the partial plan above.
+/// **AR6:** mirror slaves get no tile, so they get no change. Setting the origin of a
+/// display that is mirroring another *removes it from the mirror set*
+/// (`CGDisplayConfiguration.h`), a silent unrequested topology change. `init` REFUSES
+/// an arrangement where a mirror slave also holds a tile rather than dropping it,
+/// because dropping it produces the partial plan above.
 public struct ArrangementPlan: Sendable, Equatable {
   /// The layout being asked for, in display space.
   public let arrangement: DisplayArrangement
@@ -41,72 +34,48 @@ public struct ArrangementPlan: Sendable, Equatable {
     arrangement.tiles.map { DisplayOriginChange(id: $0.id, origin: $0.rect.origin) }
   }
 
-  /// The display this layout puts at (0,0), which is what MAKES it main — there
-  /// is no `CGSetMainDisplay` (arrangement research §3). `nil` when no tile sits
-  /// at the origin, which is a layout macOS will re-anchor on a display of its
-  /// own choosing; see `relativeLayout` for why that is compared for rather than
-  /// forbidden.
+  /// The display this layout puts at (0,0), which is what MAKES it main: there is no
+  /// `CGSetMainDisplay` (arrangement research §3). `nil` when no tile sits at the
+  /// origin, a layout macOS re-anchors on a display of its own choosing.
   public var requestedMain: CGDirectDisplayID? { arrangement.mainDisplayID }
 
   /// Whether the achieved origins are allowed to differ from the requested ones.
   ///
   /// macOS adjusts a requested layout *"to remove gaps or overlaps"*
-  /// (`CGDisplayConfiguration.h:25-26`) — so for a layout that has neither,
-  /// there is nothing left for it to adjust, and a difference in the achieved
-  /// relative layout is the platform not honouring the request (#53). For a
-  /// layout that does have gaps or overlaps — a saved layout restored against
-  /// displays that have since changed resolution — the adjustment is the
-  /// documented behaviour, and `ArrangementOutcomePolicy` reports it as a
-  /// notice instead.
+  /// (`CGDisplayConfiguration.h`), so for a layout with neither there is nothing left
+  /// to adjust and a difference in the achieved relative layout is the platform
+  /// accepting and ignoring the request. A layout that does have gaps or overlaps gets
+  /// the documented adjustment, and `ArrangementOutcomePolicy` reports it as a notice.
   ///
-  /// This is the whole reason the gate lives on the plan: it keeps the decision
-  /// in a pure type, so `CoreGraphicsArrangementConfigurator` has none to make.
+  /// The gate lives on the plan so the decision stays in a pure type and
+  /// `CoreGraphicsArrangementConfigurator` has none to make.
   ///
-  /// **It has no production call site that can make it `false`** [audited
-  /// 2026-08-05], so the paragraph above describes a path the shipped app does
-  /// not currently take. All three plan-building sites refuse an invalid layout
-  /// before a plan exists: `ArrangementCoordinator.performApply` checks
-  /// `ArrangementRules.problems` before calling `begin`,
-  /// `ArrangementReapplyPolicy.decide` checks it before returning a layout to
-  /// restore, and `ArrangementPreviewSession.revert` builds from a capture of a
-  /// layout the machine was actually in.
-  ///
-  /// Kept, and stated rather than pretended away — the same treatment the
-  /// unreachable AR4 totality guard in `ArrangementPersistence.resolve` got.
-  /// It is the right shape: it keeps the configurator judgement-free, and the
-  /// alternative (a blanket throw) would make `.adjusted` unreportable the
-  /// moment any caller does need the documented gap/overlap adjustment. What it
-  /// must NOT be described as is the live path, because a reader who believes
-  /// the post-commit check is routinely off will reason wrongly about #53.
+  /// **No production call site can make it `false`** [audited 2026-08-05]: all three
+  /// plan-building sites refuse an invalid layout before a plan exists. Kept because a
+  /// blanket throw instead would make `.adjusted` unreportable the moment a caller
+  /// does need the documented gap/overlap adjustment. Do not describe it as the live
+  /// path: a reader who believes the post-commit check is routinely off will reason
+  /// wrongly about accept-and-ignore.
   public var expectsExactOrigins: Bool { ArrangementRules.isValid(arrangement) }
 
   /// `nil` when there is nothing to apply, or when the request cannot be
   /// applied as a whole:
   ///
-  /// - **A no-op.** The ANCHORED arrangement equals the baseline: every tile
-  ///   already sits where it is being asked to sit. The comparison is on the
-  ///   anchored form, which changes exactly one family of cases: an unanchored
-  ///   pure translation (nobody at the origin, nobody asked to be main) moves
-  ///   nothing relative to anything and is a no-op, while "make this display
-  ///   main" (`makingMain`) puts a DIFFERENT tile at (0,0) and is still a plan,
-  ///   since the menu bar and Dock follow it.
-  /// - **A layout that cannot be anchored.** CG's global space is defined with
-  ///   the main display at (0,0), so a layout with no tile at the origin is not
-  ///   a request CG can honour. Measured live (2026-08-07): staging a non-zero
-  ///   origin for the main display is silently dropped; every stage and the
-  ///   complete return `.success` and nothing moves, which the post-commit
-  ///   check then reports as unhonoured (#53's accept-and-ignore class, again).
-  ///   `anchored(preservingMainOf:)` re-expresses such a layout on the
-  ///   baseline's main, and only a baseline with no main either is refused.
+  /// - **A no-op.** The ANCHORED arrangement equals the baseline. Comparing the
+  ///   anchored form changes one family of cases: an unanchored pure translation
+  ///   moves nothing relative to anything and is a no-op, while `makingMain` puts a
+  ///   DIFFERENT tile at (0,0) and is still a plan, since the menu bar follows it.
+  /// - **A layout that cannot be anchored.** CG's global space is defined with the
+  ///   main display at (0,0). Measured live (2026-08-07): staging a non-zero origin
+  ///   for the main display is silently dropped, every stage and the complete return
+  ///   `.success`, and nothing moves. `anchored(preservingMainOf:)` re-expresses such
+  ///   a layout on the baseline's main; only a baseline with no main either is refused.
   /// - **A different display set.** The baseline is what was on screen when the
-  ///   gesture started; if a display has arrived or left since, the plan
-  ///   describes a machine that no longer exists, and applying it would leave
-  ///   the newcomer's origin unset (§4.2 again).
+  ///   gesture started, so applying it after an arrival or departure would leave the
+  ///   newcomer's origin unset (§4.2 again).
   /// - **A mirror slave holding a tile** (AR6, above).
-  /// - **An origin outside `Int32`.** `CGConfigureDisplayOrigin` takes
-  ///   `int32_t`, so an origin that does not fit is not a request that can be
-  ///   made at all. Checked on the anchored form, since those are the origins
-  ///   actually staged.
+  /// - **An origin outside `Int32`.** `CGConfigureDisplayOrigin` takes `int32_t`.
+  ///   Checked on the anchored form, since those are the origins actually staged.
   public init?(applying arrangement: DisplayArrangement, to baseline: DisplayArrangement) {
     guard Set(arrangement.tiles.map(\.id)) == Set(baseline.tiles.map(\.id)) else { return nil }
     guard let anchored = arrangement.anchored(preservingMainOf: baseline) else { return nil }
@@ -127,16 +96,13 @@ public struct ArrangementPlan: Sendable, Equatable {
 extension DisplayArrangement {
   /// The same layout, expressed in coordinates CoreGraphics can honour.
   ///
-  /// The display space is anchored on the main display: the tile at (0,0) IS
-  /// main (AR5), and a request that puts no tile there is one CG demonstrably
-  /// accepts and ignores (see `ArrangementPlan.init`). A layout that already
-  /// names a main is returned unchanged. One that does not, which is what
-  /// moving the main display's own tile produces, is translated so the
-  /// BASELINE's main returns to (0,0): moving the main display does not change
-  /// which display is main, so the move is every other display shifting by the
-  /// inverse delta. `nil` when the baseline has no main either (a read that
-  /// skipped the main display's unreadable bounds); nothing can anchor that
-  /// request.
+  /// The display space is anchored on the main display: the tile at (0,0) IS main
+  /// (AR5), and a request that puts no tile there is one CG accepts and ignores (see
+  /// `ArrangementPlan.init`). A layout with no main, which is what moving the main
+  /// display's own tile produces, is translated so the BASELINE's main returns to
+  /// (0,0): moving the main display does not change which display is main, so the move
+  /// is every other display shifting by the inverse delta. `nil` when the baseline has
+  /// no main either, which nothing can anchor.
   public func anchored(preservingMainOf baseline: DisplayArrangement) -> DisplayArrangement? {
     if mainDisplayID != nil { return self }
     guard let main = baseline.mainDisplayID, let anchor = tile(main) else { return nil }
@@ -146,21 +112,16 @@ extension DisplayArrangement {
 
 /// The same layout with its bounding box at the origin.
 ///
-/// Two arrangements have the same `relativeLayout` **iff** one is a translation
-/// of the other, which is the only comparison worth making about a layout:
-/// macOS re-anchors the global space on whichever display ends up at (0,0)
-/// (arrangement research §2.2), so absolute origins shift for a layout in which
-/// nothing physically moved. §2.3 states the rule directly — *"Do not diff
-/// layouts on absolute origins… normalizing to a canonical anchor first"*.
+/// Two arrangements have the same `relativeLayout` **iff** one is a translation of
+/// the other, which is the only comparison worth making: macOS re-anchors the global
+/// space on whichever display ends up at (0,0) (arrangement research §2.2), so
+/// absolute origins shift for a layout in which nothing physically moved.
 ///
 /// The anchor is the bounding box's minimum corner rather than the main display,
-/// which §6.3 of the canvas design suggested, because a layout need not have a
-/// tile at the origin at all (drag the origin display away from it and none
-/// does) and `makingMain` returns the arrangement UNCHANGED for an id it does
-/// not hold — so a main-anchored normalisation silently degrades to an absolute
-/// comparison in exactly the case where the system did something unexpected.
-/// Both anchors are translation-equivariant, so wherever both are defined they
-/// answer identically.
+/// because a layout need not have a tile at the origin and `makingMain` returns the
+/// arrangement UNCHANGED for an id it does not hold. A main-anchored normalisation
+/// would degrade to an absolute comparison in exactly the case where the system did
+/// something unexpected. Both anchors are translation-equivariant.
 extension DisplayArrangement {
   var relativeLayout: DisplayArrangement {
     let bounds = bounds
@@ -168,9 +129,8 @@ extension DisplayArrangement {
   }
 }
 
-/// The seam between arrangement policy and the display-configuration APIs.
-/// Everything decidable is tested against `FakeArrangementConfigurator`; the
-/// real conformance is a thin adapter with no judgement in it.
+/// The seam between arrangement policy and the display-configuration APIs. The real
+/// conformance is a thin adapter with no judgement in it.
 public protocol DisplayArrangementConfiguring: Sendable {
   /// The layout ON SCREEN now. Mirror slaves are folded into their master's
   /// `mirroredIDs` and get no tile of their own (AR6).
@@ -179,29 +139,26 @@ public protocol DisplayArrangementConfiguring: Sendable {
   /// The layout AND the online display list it was derived from, from ONE
   /// enumeration.
   ///
-  /// One call rather than two, because the restore path has to compare them:
-  /// `ArrangementSnapshot` skips a display whose bounds are unreadable, so an
-  /// online display with no tile is the AR4-on-the-read-side case the reapply
-  /// policy defers on. Asking two questions a moment apart would let a display
-  /// arrive between them and look exactly like that — and, worse, let one leave
-  /// between them and look like nothing at all.
+  /// One call rather than two, because the restore path compares them:
+  /// `ArrangementSnapshot` skips a display whose bounds are unreadable, so an online
+  /// display with no tile is the AR4-on-the-read-side case the reapply policy defers
+  /// on. Two questions a moment apart would let an arrival look exactly like that,
+  /// and a departure look like nothing at all.
   func currentTopology() -> (displays: [ConfiguredDisplay], arrangement: DisplayArrangement)
 
-  /// Stages every change in the plan in ONE transaction, commits it, re-reads
-  /// the result, and returns **what is on screen now** — never what was asked
-  /// for. The return value is not discardable for that reason: macOS adjusts a
-  /// requested layout silently, so a caller that assumed its request stands
-  /// would be recording a layout the machine may not be in.
+  /// Stages every change in ONE transaction, commits, re-reads, and returns **what is
+  /// on screen now**, never what was asked for. Not discardable for that reason: macOS
+  /// adjusts a requested layout silently, so a caller assuming its request stands
+  /// records a layout the machine may not be in.
   ///
-  /// Throws `DisplayConfigError` if the transaction cannot be begun, if any
-  /// origin fails to STAGE, if the completion fails, or if the achieved layout
-  /// is not the requested one on a plan that `expectsExactOrigins`.
+  /// Throws `DisplayConfigError` if the transaction cannot be begun, if any origin
+  /// fails to STAGE, if the completion fails, or if the achieved layout is not the
+  /// requested one on a plan that `expectsExactOrigins`.
   ///
-  /// **That last throw is the one that can follow a committed change** — the
-  /// same contract as `DisplayConfiguring.applyMirroring`, for the same reason:
-  /// CoreGraphics accepted the transaction and did something else, and nothing
-  /// here puts the machine back. Recovery is a retry computed from a live
-  /// sample, never a replay of the plan that diverged.
+  /// **That last throw follows a COMMITTED change**, the same contract as
+  /// `DisplayConfiguring.applyMirroring`: CoreGraphics accepted the transaction and
+  /// did something else, and nothing here puts the machine back. Recovery is a retry
+  /// computed from a live sample, never a replay of the plan that diverged.
   func apply(_ plan: ArrangementPlan, scope: DisplayConfigScope) throws -> DisplayArrangement
 }
 
@@ -210,29 +167,26 @@ public protocol DisplayArrangementConfiguring: Sendable {
 /// same rule.
 ///
 /// **`CGCompleteDisplayConfiguration` returning `.success` is not evidence the
-/// request was honoured** — measured twice on the mirroring hardware pass with
-/// every stage AND the complete returning `.success` (#53,
-/// `docs/spikes/2026-08-04-mirroring-hardware-pass.md` §6.2). `MirrorVerification`
-/// is this rule for a topology; `CoreGraphicsDisplayConfigurator.apply` is it for
-/// a mode. This is the third member of that family.
+/// request was honoured**: measured twice on the mirroring hardware pass with every
+/// stage AND the complete returning `.success`
+/// (`docs/spikes/2026-08-04-mirroring-hardware-pass.md` §6.2). `MirrorVerification`
+/// is this rule for a topology, `CoreGraphicsDisplayConfigurator.apply` for a mode.
 enum ArrangementVerification {
   /// The first change in the plan the achieved layout does not show, or `nil`
   /// when the layout stands.
   ///
-  /// Compared on the RELATIVE layout: every successful apply comes back
-  /// translated, because the space re-anchors on whichever display ended up at
-  /// (0,0). Comparing absolute origins would report every apply as a failure.
+  /// Compared on the RELATIVE layout: every successful apply comes back translated,
+  /// because the space re-anchors on whichever display ended up at (0,0).
   static func unhonoured(plan: ArrangementPlan, achieved: DisplayArrangement) -> DisplayOriginChange? {
-    // A plan with gaps or overlaps ASKED macOS to adjust it (§4.1), so a
-    // difference here is the documented behaviour rather than a divergence.
-    // `ArrangementOutcomePolicy` reports that case; this one is for the
-    // platform ignoring a request it had nothing to correct.
+    // A plan with gaps or overlaps ASKED macOS to adjust it (§4.1), which
+    // `ArrangementOutcomePolicy` reports. This is for the platform ignoring a request
+    // it had nothing to correct.
     guard plan.expectsExactOrigins else { return nil }
 
     let requested = plan.arrangement.relativeLayout
-    // Restricted to the planned displays before normalising: a display that
-    // arrived between the commit and the read-back would otherwise move the
-    // achieved bounding box and mark every change unhonoured at once.
+    // Restricted to the planned displays before normalising: a display arriving
+    // between commit and read-back would move the achieved bounding box and mark
+    // every change unhonoured at once.
     let plannedIDs = Set(plan.changes.map(\.id))
     let achieved = DisplayArrangement(
       tiles: achieved.tiles.filter { plannedIDs.contains($0.id) }
@@ -245,83 +199,65 @@ enum ArrangementVerification {
   }
 }
 
-/// What the system did that the request did not ask for. Read AFTER the apply,
-/// from what is on screen — macOS adjusts a requested layout silently, so the
-/// only trustworthy account of a layout change is the one read back.
+/// What the system did that the request did not ask for. Read AFTER the apply, from
+/// what is on screen: macOS adjusts a layout silently, so the only trustworthy
+/// account is the one read back.
 public enum ArrangementApplyNotice: Sendable, Equatable {
-  /// The system moved something. Carries the layout that is on screen NOW, not
-  /// the one that was asked for.
+  /// The system moved something. Carries the layout on screen NOW, not the one asked
+  /// for.
   ///
-  /// **The case it was designed for is currently unreachable in production**
-  /// [audited 2026-08-05]. It exists for macOS' documented gap/overlap
-  /// adjustment, which only happens to a plan that does not
-  /// `expectExactOrigins` — and no production path builds one, because all three
-  /// refuse an invalid layout first. On a plan that DOES expect exact origins,
-  /// `ArrangementVerification.unhonoured` throws before a preview exists, so
-  /// this notice is never computed for it either.
+  /// **The case it was designed for is unreachable in production** [audited
+  /// 2026-08-05]: it exists for macOS' documented gap/overlap adjustment, which only
+  /// reaches a plan that does not `expectExactOrigins`, and no production path builds
+  /// one.
   ///
-  /// What stays reachable is narrower than the sentence above suggests: the two
-  /// comparisons ask about the same displays but not the same property — the
-  /// verification compares origins, this compares whole tiles — so a display
-  /// whose FOOTPRINT changed between the commit and the read-back still lands
-  /// here. Do not read this case as "macOS rearranged your displays" evidence
+  /// What stays reachable is narrower: the verification compares origins and this
+  /// compares whole tiles, so a display whose FOOTPRINT changed between commit and
+  /// read-back still lands here. Do not read this as "macOS rearranged your displays"
   /// without checking which of the two produced it.
   case adjusted(DisplayArrangement)
-  /// The requested main display is not at the origin, so the menu bar did not
-  /// move. Carries the display that was asked for. Expected when the target is
-  /// a mirror slave, among other refusals the API does not report.
+  /// The requested main display is not at the origin, so the menu bar did not move.
+  /// Expected when the target is a mirror slave, among other refusals the API does
+  /// not report.
   case mainDisplayUnchanged(CGDirectDisplayID)
 }
 
 public enum ArrangementOutcomePolicy {
-  /// Notices in decreasing order of scope: the layout first, then the main
-  /// display, so a caller showing only the first shows the bigger fact.
+  /// Notices in decreasing order of scope, so a caller showing only the first shows
+  /// the bigger fact.
   ///
   /// **A pure translation is not an adjustment.** The global space re-anchors on
-  /// whichever display ends up at (0,0) (§2.2), so *every* successful apply
-  /// comes back translated — a `.adjusted` notice on that would fire on every
-  /// apply the feature ever makes, and a warning that always fires is read as
-  /// noise the first time it means something. The two facts are separated
-  /// exactly as §2.3 prescribes: compare the relative layout, and compare the
-  /// main display's identity on its own.
+  /// whichever display ends up at (0,0) (§2.2), so *every* successful apply comes back
+  /// translated, and an `.adjusted` notice on that would fire every time. Compare the
+  /// relative layout, and compare the main display's identity on its own (§2.3).
   ///
-  /// `requestedMain` is optional because `ArrangementPlan.requestedMain` is: a
-  /// layout need not put any tile at the origin (drag the origin display away
-  /// and none does), and `.mainDisplayUnchanged` has to NAME the display that
-  /// was asked for. With nothing asked for there is nothing to report, so the
-  /// main-display comparison is skipped rather than answered against a guess —
-  /// the layout comparison below still runs, and it is the one that carries the
-  /// bigger fact.
+  /// `requestedMain` is optional because a layout need not put any tile at the origin.
+  /// With nothing asked for, the main-display comparison is skipped rather than
+  /// answered against a guess.
   public static func notices(
     requested: DisplayArrangement,
     resulting: DisplayArrangement,
     requestedMain: CGDirectDisplayID?
   ) -> [ArrangementApplyNotice] {
     var notices: [ArrangementApplyNotice] = []
-    // Restricted to the REQUESTED displays before normalising, exactly as
-    // `ArrangementVerification.unhonoured` does and for the same reason. A
-    // display that arrived between the commit and the read-back — or one whose
-    // `CGDisplayBounds` was momentarily unreadable at `begin` and is readable
-    // now — moves the achieved bounding box, so every requested tile normalises
-    // to a different point and a layout nothing touched compares unequal.
+    // Restricted to the REQUESTED displays before normalising, as
+    // `ArrangementVerification.unhonoured` does. A display arriving between commit and
+    // read-back, or one whose `CGDisplayBounds` was momentarily unreadable at `begin`,
+    // moves the achieved bounding box, so every requested tile normalises to a
+    // different point and a layout nothing touched compares unequal. Unfiltered, this
+    // reported `.adjusted` where verification passed, and the confirmation card told
+    // the user macOS had rearranged their displays about a change macOS had honoured.
     //
-    // The two comparisons disagreeing is the defect worth naming: verification
-    // filtered and passed, this one did not and reported `.adjusted`, so the
-    // confirmation card said "macOS moved some of the displays to a layout of
-    // its own" at the exact moment the user is deciding whether to keep the
-    // change — about a change macOS had honoured.
-    //
-    // The MAIN-display comparison below is deliberately NOT filtered: if a
-    // newcomer took the origin, the menu bar genuinely is not on the display
-    // that was asked for, and that is a fact about the machine rather than about
-    // the planned displays' relative positions.
+    // The MAIN-display comparison below is deliberately NOT filtered: if a newcomer
+    // took the origin, the menu bar genuinely is not on the display that was asked
+    // for.
     let requestedIDs = Set(requested.tiles.map(\.id))
     let compared = DisplayArrangement(
       tiles: resulting.tiles.filter { requestedIDs.contains($0.id) }
     )
     if requested.relativeLayout != compared.relativeLayout {
-      // Carries the FULL layout on screen, not the restriction: the caller has
-      // to reconcile against the machine, not against the part of it we planned.
+      // The FULL layout on screen, not the restriction: the caller reconciles against
+      // the machine, not against the part of it we planned.
       notices.append(.adjusted(resulting))
     }
     if let requestedMain, resulting.mainDisplayID != requestedMain {

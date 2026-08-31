@@ -16,12 +16,10 @@ import Testing
 // bundle is the sentence itself.
 @Suite("Protection pane") @MainActor
 struct ProtectionPaneTests {
-  /// The key's own sentence, lifted out of the reflection wrapper
-  /// (`LocalizedStringKey(key: "...", hasFormatting: false, arguments: [])`) so
-  /// an assertion can be an equality rather than a containment. The whole dump
-  /// is returned unchanged when the wrapper is not the shape above, which keeps
-  /// a future runtime's different spelling a visible failure rather than a
-  /// silent empty string.
+  /// The key's own sentence, lifted out of the reflection wrapper so an
+  /// assertion can be an equality rather than a containment. A dump in any other
+  /// shape comes back whole, so a future runtime's spelling fails visibly rather
+  /// than as an empty string.
   private func render(_ key: LocalizedStringKey) -> String {
     let dump = String(describing: key)
     guard
@@ -51,8 +49,6 @@ struct ProtectionPaneTests {
 
   // MARK: - The startup caption
 
-  /// The section moved out of General with its copy intact, so these are the
-  /// sentences that shipped there, byte for byte.
   @Test func eachStartupChoiceKeepsItsOwnSentence() {
     #expect(
       render(ProtectionPane.startupCaption(for: .doNothing))
@@ -167,11 +163,9 @@ struct ProtectionPaneTests {
 
   // MARK: - The page itself
 
-  /// Layer 2 (AT4), kept in this file rather than in the shared smoke suite so
-  /// the page that owns it owns its render too. The fixture model has no
-  /// displays, so what this covers is the page with the restore picker on it
-  /// and the summary in its empty state, which is also the state a Mac with
-  /// nothing attached opens on.
+  /// Layer 2 (AT4). The fixture model has no displays, so this covers the page
+  /// with the restore picker on it and the summary in its empty state, which is
+  /// what a Mac with nothing attached opens on.
   @Test func thePageRendersWithNoDisplaysAttached() {
     let model = TestFixtures.appModel()
     let pane = ProtectionPane()

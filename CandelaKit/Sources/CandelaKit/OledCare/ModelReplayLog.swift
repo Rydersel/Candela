@@ -3,30 +3,28 @@ import Foundation
 
 /// One paired instant, recorded so a candidate model can be scored offline.
 ///
-/// The whole point of the format is that a record carries enough to recompute
-/// BOTH sides from scratch. Iterating on the model against the live app costs a
-/// deploy plus a multi-day soak to read one number; replaying recorded inputs
-/// costs seconds, and the same log scores every future variant.
+/// A record carries enough to recompute BOTH sides from scratch. Iterating
+/// against the live app costs a deploy plus a multi-day soak to read one number;
+/// replaying recorded inputs costs seconds.
 ///
-/// **`v` is a tool file format, not shipped schema.** §4's never-rename rule
-/// governs prefs and enum raw values that live on a user's disk. This artefact
-/// can be restructured freely; the field exists only so the harness refuses a
-/// log it does not understand instead of misreading one.
+/// **`v` is a tool file format, not shipped schema.** The never-rename rule
+/// governs prefs and enum raw values on a user's disk. This artefact can be
+/// restructured freely; the field exists only so the harness refuses a log it
+/// does not understand instead of misreading one.
 public struct ModelReplayRecord: Codable, Equatable, Sendable {
   public static let formatVersion = 3
 
   public struct Display: Codable, Equatable, Sendable {
     public var persistenceKey: String
     public var displayID: UInt32
-    /// **Points, not pixels, whatever the names say.** What macOS reports for
-    /// the display, so already rotated: the Dell is a manufactured 3840x2160
-    /// panel mounted at 270 degrees and records here as 1440x2560 points.
+    /// **Points, not pixels, whatever the names say.** What macOS reports, so
+    /// already rotated: the Dell is a manufactured 3840x2160 panel mounted at
+    /// 270 degrees and records here as 1440x2560 points.
     ///
-    /// Nothing downstream is wrong, because window bounds, display bounds and
-    /// `PanelSpaceTransform` all live in that same point space; the log was
-    /// merely describing itself in the wrong unit. The names stay: the capture
-    /// tool builds this by argument label, so renaming is a coordinated change
-    /// across two targets plus a format bump, and it buys only the label.
+    /// Nothing downstream is wrong: window bounds, display bounds and
+    /// `PanelSpaceTransform` all live in that same point space. The names stay
+    /// because the capture tool builds this by argument label, so a rename is a
+    /// coordinated change across two targets plus a format bump.
     public var pixelWidth: Int
     public var pixelHeight: Int
     public var rotation: DisplayRotation
@@ -47,9 +45,8 @@ public struct ModelReplayRecord: Codable, Equatable, Sendable {
   /// shape: 24x10 on the MAG, 14x24 on the rotated Dell.
   ///
   /// Stored rather than only its panel-physical derivation because a derived
-  /// product can conceal its own cause. The letterbox defect was invisible in
-  /// the stored map and obvious in the capture; recording the measurement keeps
-  /// that distinction available to whoever reads this next.
+  /// product conceals its own cause: the letterbox defect was invisible in the
+  /// stored map and obvious in the capture.
   public struct Capture: Codable, Equatable, Sendable {
     public var cols: Int
     public var rows: Int
@@ -128,13 +125,10 @@ public struct ModelReplayRecord: Codable, Equatable, Sendable {
   /// The desktop elements the app's source filters out before the model ever
   /// sees them: the Dock, the menu bar, the desktop backdrop.
   ///
-  /// Recorded but NOT fed to the baseline model, because they are not what the
-  /// shipped model consumes. `ExposureModel.includedLayers` documents itself as
-  /// reaching "up through the Dock and the menu bar", but the source applies
-  /// `.excludeDesktopElements` first, so that range never sees them. The
-  /// measured capture does contain their light. Whether closing that asymmetry
-  /// helps is a variant this log can answer offline instead of costing another
-  /// collection run.
+  /// Recorded but NOT fed to the baseline model: the source applies
+  /// `.excludeDesktopElements` first. The measured capture does contain their
+  /// light, and whether closing that asymmetry helps is a variant this log can
+  /// answer offline.
   public var chrome: [Window]
 
   public init(
@@ -192,16 +186,15 @@ public struct ModelReplayRecord: Codable, Equatable, Sendable {
 
 /// Append-only JSON Lines writer with file rotation.
 ///
-/// One line per sample so a crash costs at most a torn line, which the reader
-/// discards. Torn LINE, not torn final line: a write that fails part way leaves
-/// an unterminated tail mid-file, and `append` seals it so the next record does
-/// not concatenate onto it. Inspectable with `grep` and `python3`, which
-/// matters more on a probe instrument than the bytes a binary format would
-/// save.
+/// One line per sample, so a crash costs at most a torn line. Torn LINE, not
+/// torn final line: a write that fails part way leaves an unterminated tail
+/// mid-file, and `append` seals it so the next record does not concatenate onto
+/// it. Inspectable with `grep`, which matters more on a probe instrument than
+/// the bytes a binary format would save.
 public final class ModelReplayLog {
   /// 1/255 is 0.0039, so five places is already past what an 8-bit capture can
-  /// express. Consequence: both replay controls compare within a tolerance and
-  /// never by exact equality.
+  /// express. Both replay controls therefore compare within a tolerance, never
+  /// by exact equality.
   public static let decimals = 5
   private static let scale = pow(10.0, Double(decimals))
 
@@ -212,32 +205,22 @@ public final class ModelReplayLog {
 
   /// Rotate on BYTES, not only on a record count.
   ///
-  /// A record-count cap is a proxy for disk, and the proxy drifted the moment
-  /// the capture oversample went to 16 cells per grid-cell edge. A record used
-  /// to be about 11.5 KB; it now carries the whole capture grid, one JSON
-  /// number per cell, and MEASURED here it is 493 KB on the MAG (a 384x161
-  /// request) and 660 KB on the rotated Dell (216x384). The old defaults of
-  /// 2000 records across 5 files were sized as 110 MB and would now retain
-  /// about 6 GB, with each whole-file read in the fit landing over a gigabyte
-  /// in one allocation.
+  /// A record-count cap is a proxy for disk, and it drifted the moment the
+  /// capture oversample went to 16. A record now carries the whole capture grid,
+  /// one JSON number per cell: MEASURED at 493 KB on the MAG and 660 KB on the
+  /// rotated Dell. The old 2000-record, 5-file defaults were sized as 110 MB and
+  /// would now retain about 6 GB, each whole-file read in the fit landing over a
+  /// gigabyte in one allocation.
   ///
-  /// Bytes cap the thing that actually matters and stay correct through the
-  /// next change to the capture shape. The arithmetic:
-  ///
-  /// - a file closes once it passes `bytesPerFile`, so it overshoots by at
-  ///   most one record. The ceiling for a record is the square case, 384x384
-  ///   cells, about 1.2 MB; no panel here is square, so this is a bound rather
-  ///   than an expectation.
-  /// - retained <= `filesKept * (bytesPerFile + 1.2 MB)`
-  ///   = 16 * (32 + 1.2) MB = **531 MB**, whatever the panel geometry.
-  /// - at the Dell's 660 KB that is about 48 records per file and 780 retained,
-  ///   comfortably more than the roughly 450 a 150-minute three-panel session
-  ///   at the default 60 second interval produces.
+  /// A file closes once it passes `bytesPerFile`, so it overshoots by at most
+  /// one record, whose ceiling is the square case at about 1.2 MB. Retained is
+  /// then `filesKept * (bytesPerFile + 1.2 MB)` = **531 MB**, whatever the panel
+  /// geometry.
   public static let defaultBytesPerFile = 32 * 1024 * 1024
   public static let defaultFilesKept = 16
-  /// Still a cap, and it binds first for a SMALL record: a 7.6 KB record (the
-  /// 24x10 grids the tests build) reaches 2000 lines at 15 MB, well under the
-  /// byte cap. Whichever limit is reached first rotates.
+  /// Still a cap, and it binds first for a SMALL record: the 24x10 grids the
+  /// tests build reach 2000 lines at 15 MB. Whichever limit is hit first
+  /// rotates.
   public static let defaultSamplesPerFile = 2000
 
   /// The bound the defaults promise, so a change to any of them fails a test
@@ -262,8 +245,7 @@ public final class ModelReplayLog {
   /// Set at init and after a rotation, so the first append of a run always
   /// opens a NEW file. Resuming INTO the last file was the whole of the
   /// never-rotates defect: `written` is 0 on a fresh process, so the count cap
-  /// could not fire, and a tool the operator is told to restart after every
-  /// wallpaper or appearance change restarts often.
+  /// could not fire.
   private var needsNewFile = true
 
   public init(
@@ -278,8 +260,8 @@ public final class ModelReplayLog {
     try FileManager.default.createDirectory(
       at: directory, withIntermediateDirectories: true)
     // Resume AFTER the highest existing index, never into it, so a restart
-    // (which MP6 requires after a wallpaper change) neither discards what the
-    // previous run collected nor grows a file the caps can no longer reach.
+    // (MP6 requires one after a wallpaper change) neither discards the previous
+    // run nor grows a file the caps can no longer reach.
     fileIndex = (try? Self.existingIndices(in: directory).max()).flatMap { $0 } ?? 0
   }
 
@@ -313,11 +295,8 @@ public final class ModelReplayLog {
       defer { try? handle.close() }
       let end = try handle.seekToEnd()
       // Seal an unterminated tail before appending. A write that throws part
-      // way (a full disk is the realistic one) lands bytes without its closing
-      // newline, and the next append would concatenate onto them: one
-      // unparseable line spanning two records, so the good record is lost
-      // along with the torn one. A lone newline costs one line and keeps the
-      // damage to the record that actually suffered it.
+      // way lands bytes without a closing newline, and the next append would
+      // concatenate onto them, losing the good record with the torn one.
       if end > 0, try Self.lastByte(of: handle, fileLength: end) != 0x0A {
         partialWrites += 1
         try handle.seekToEnd()
@@ -350,10 +329,9 @@ public final class ModelReplayLog {
   /// What a read could not use, by cause.
   ///
   /// One counter could not tell "your log is from a newer tool" from "your log
-  /// is damaged", and it charged a whole unreadable FILE the same single unit
-  /// as one torn line. Both matter on the artifact that produces a verdict: a
-  /// version mismatch is a tool to rebuild, damage is a capture to rerun, and a
-  /// missing file is an unknown number of records rather than one.
+  /// is damaged", and charged a whole unreadable FILE the same unit as one torn
+  /// line. A version mismatch is a tool to rebuild, damage is a capture to
+  /// rerun, and a missing file is an unknown number of records.
   public struct ReadLosses: Equatable, Sendable, CustomStringConvertible {
     /// Lines that are not decodable records: a torn write, a truncated
     /// multi-byte character, anything else the JSON decoder refuses.
@@ -364,8 +342,7 @@ public final class ModelReplayLog {
     /// Files that could not be opened at all. Their records are lost and their
     /// COUNT is unknown, which is why this is not folded into a line total.
     /// Reachable in the documented workflow: the fit is polled during capture,
-    /// indices are enumerated before the files are opened, and pruning deletes
-    /// files between those two moments.
+    /// and pruning deletes files between enumeration and open.
     public var unreadableFiles = 0
     /// The versions actually seen, so the operator is told which tool wrote it.
     public var mismatchedVersions: Set<Int> = []
@@ -405,20 +382,17 @@ public final class ModelReplayLog {
     }
   }
 
-  /// Just enough of a line to ask which format wrote it, WITHOUT the full
-  /// decode succeeding. Version was checked after the decode, so a record from
-  /// a newer tool that added a required field failed to decode and was booked
-  /// as damage: the two diagnoses that lead to opposite actions looked
-  /// identical.
+  /// Just enough of a line to ask which format wrote it WITHOUT the full decode
+  /// succeeding. Checking the version after the decode booked a record from a
+  /// newer tool as damage, so two diagnoses with opposite actions looked alike.
   private struct VersionEnvelope: Decodable {
     var v: Int
   }
 
   /// Every record in a log directory, oldest first. A line that fails to decode
   /// is skipped and counted rather than aborting the read: the last line of an
-  /// interrupted run is expected to be torn, and one bad line should not throw
-  /// away a week of samples. What was skipped comes back broken out by cause;
-  /// see `ReadLosses`, whose description is written to be printed as it stands.
+  /// interrupted run is expected to be torn. What was skipped comes back broken
+  /// out by cause, and `ReadLosses.description` prints as it stands.
   public static func read(directory: URL) throws -> (
     records: [ModelReplayRecord], skipped: ReadLosses
   ) {
@@ -428,15 +402,13 @@ public final class ModelReplayLog {
     var losses = ReadLosses()
     for index in indices {
       let path = directory.appendingPathComponent(String(format: "replay-%05d.jsonl", index))
-      // Read BYTES and split on newline, rather than decoding the file as one
+      // Read BYTES and split on newline rather than decoding the file as one
       // UTF-8 string. A tear that splits a multi-byte character made the whole
       // file fail to decode, so `continue` discarded every record in it and
-      // reported `skipped 0`: the count actively misdirected the diagnosis, and
-      // an interrupted capture is the ordinary way to produce that tear.
+      // still reported `skipped 0`.
       //
-      // Mapped, not slurped: the kernel pages a file in as the split walks it,
-      // so a full file is never one anonymous allocation. That is what keeps
-      // the byte cap on a file a memory bound too and not just a disk one.
+      // Mapped, not slurped: the kernel pages the file in as the split walks it,
+      // so the byte cap on a file is a memory bound too.
       guard let bytes = try? Data(contentsOf: path, options: .mappedIfSafe) else {
         losses.unreadableFiles += 1
         continue

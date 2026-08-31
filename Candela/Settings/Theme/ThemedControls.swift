@@ -1,29 +1,18 @@
 import CandelaKit
 import SwiftUI
 
-/// The accent-lit slider: capsule track, glowing fill, draggable. Custom
-/// because the system slider ignores the window's lighting entirely, so it
-/// carries its own accessibility (SV6): call sites supply the label, and a
-/// native `Slider` stands in for the drawn one to supply the role, the value
-/// and the adjustable actions.
+/// A drawn slider, because the system slider ignores the window's lighting.
+/// Being drawn, it carries its own accessibility (SV6): a native `Slider`
+/// stands in for the role, the value and the adjustable actions, and call sites
+/// supply the label.
 ///
-/// It takes what the native `Slider` takes, so a settings row converting to it
-/// keeps its semantics: a range, an optional step, a drag-boundary callback for
-/// the rows that commit on release rather than per frame, and an accessibility
-/// value for the rows whose stored number must never be spoken.
-///
-/// It is operable by pointer, by VoiceOver and by the keyboard: Tab reaches it,
-/// the arrow keys step it, and all three routes go through the same grid and
-/// the same editing edges.
-///
-/// Disabled means dimmed and inert on every route: the track takes no drag,
-/// the keyboard cannot reach it, and no write lands from the representation
-/// either. A drawn control has to say that itself; nothing greys it for us.
+/// Pointer, VoiceOver and keyboard all go through the same grid and the same
+/// editing edges. Disabled means dimmed and inert on all three, which a drawn
+/// control has to say for itself; nothing greys it for us.
 ///
 /// **Never bind this to a volume value (D29 rule 4).** It has no zero-free
-/// grid, and volume 0 is a hardware mute over VCP 0x8D; a volume row keeps the
-/// panel's `DisplaySliderRow`, which snaps and steps over
-/// `SliderSnap.stopsWithoutZero`.
+/// grid, and volume 0 is a hardware mute over VCP 0x8D. A volume row keeps the
+/// panel's `DisplaySliderRow`, which steps over `SliderSnap.stopsWithoutZero`.
 struct ThemedSlider: View {
   @Binding var value: Double
   var range: ClosedRange<Double> = 0...1
@@ -32,17 +21,16 @@ struct ThemedSlider: View {
   /// Overrides the spoken value where a percentage would be meaningless or
   /// where the stored number must not reach VoiceOver.
   var accessibilityValueText: String?
-  /// True when a drag starts, false when it ends, so a row that writes a pref
-  /// on release keeps one write per gesture. A keyboard or VoiceOver step is a
+  /// True when a drag starts, false when it ends, so a row writing a pref on
+  /// release keeps one write per gesture. A keyboard or VoiceOver step is a
   /// whole gesture of its own and sends both.
   var onEditingChanged: ((Bool) -> Void)?
 
   @Environment(\.settingsAccent) private var lighting
   @Environment(\.isEnabled) private var isEnabled
-  /// `@GestureState` and not `@State`: SwiftUI never calls `onEnded` for an
-  /// interrupted drag, and a flag left true there would swallow the next
-  /// drag's opening edge. This one resets itself on a cancel, so the editing
-  /// session closes either way.
+  /// `@GestureState`, not `@State`: SwiftUI never calls `onEnded` for an
+  /// interrupted drag, and a flag stuck true would swallow the next drag's
+  /// opening edge. This resets itself on a cancel.
   @GestureState private var dragging = false
   @FocusState private var focused: Bool
 
@@ -67,9 +55,8 @@ struct ThemedSlider: View {
       .gesture(
         DragGesture(minimumDistance: 0)
           .updating($dragging) { _, isDragging, _ in isDragging = true }
-          // Explicit, because a gesture on a drawn view is not a control:
-          // `.disabled` greys the native slider beside this one and does
-          // nothing to a `DragGesture`.
+          // Explicit: `.disabled` greys the native slider beside this one and
+          // does nothing to a `DragGesture`.
           .onChanged { gesture in
             guard isEnabled else { return }
             value = valueAt(x: gesture.location.x, width: width)
@@ -81,24 +68,20 @@ struct ThemedSlider: View {
       )
     }
     .frame(height: 22)
-    // On the whole control, so the track, the knob and the padding around them
-    // are all exempt: the window moves by its background, and without this
-    // AppKit takes every mouse-down here for a window drag before the gesture
-    // above can open. `minimumDistance: 0` does not help; the decision is made
-    // a layer below SwiftUI.
+    // On the whole control, so track, knob and padding are all exempt. Without
+    // it AppKit takes every mouse-down here for a window drag before the
+    // gesture above can open; `minimumDistance: 0` does not help, because the
+    // decision is made a layer below SwiftUI.
     .blocksWindowDrag()
-    // Nothing greys a drawn control: the same dimming the theme's button styles
-    // paint, so a slider inside a blocked section reads like its neighbours.
+    // Nothing greys a drawn control, so paint the button styles' dimming here.
     .opacity(isEnabled ? 1 : SettingsTheme.disabledOpacity)
     // Both edges come off the tracking flag rather than the two callbacks, so
-    // they pair: an unopened `false` and a swallowed `true` are both
-    // unreachable, and a cancelled drag still closes.
+    // they always pair and a cancelled drag still closes.
     .onChange(of: dragging) { _, isDragging in onEditingChanged?(isDragging) }
-    // The arrows move it, through the same stepping and committing path every
-    // other route uses: one write per keypress, on the grid. A drawn ring
-    // rather than the system's, which has no shape to trace on a view made of
-    // loose capsules. Unfocusable while disabled, so no key handler can run and
-    // no ring can draw around a control that does nothing.
+    // Arrows step through the same commit path every other route uses: one
+    // write per keypress, on the grid. A drawn ring, since the system's has no
+    // shape to trace on a view made of loose capsules. Unfocusable while
+    // disabled, so no key handler runs and no ring draws around a dead control.
     .focusable(isEnabled)
     .focused($focused)
     .overlay(focusRing)
@@ -106,14 +89,12 @@ struct ThemedSlider: View {
     .onKeyPress(.downArrow) { commitStep(up: false); return .handled }
     .onKeyPress(.rightArrow) { commitStep(up: true); return .handled }
     .onKeyPress(.upArrow) { commitStep(up: true); return .handled }
-    // A real slider stands in for the drawn one, so AX gets a native slider's
-    // role, value, adjustable actions and focusability. NOT a synthesized
-    // element: measured 2026-08-20 against the live app, `children: .ignore`
-    // published the label, the value and both adjust actions but no
-    // `AXFocused` at all, the same half of the lesson the switch style
-    // learned. The binding takes only the DIRECTION of whatever value the
-    // representation proposes and turns it into one step on the grid with its
-    // editing cycle around it, so no route here can write a raw value.
+    // A real slider stands in, so AX gets a native slider's role, value,
+    // adjustable actions and focusability. NOT a synthesized element: measured
+    // 2026-08-20 against the live app, `children: .ignore` published the label,
+    // the value and both adjust actions but no `AXFocused` at all. The binding
+    // takes only the DIRECTION of the proposed value and turns it into one step
+    // on the grid, so no route here can write a raw value.
     .accessibilityRepresentation {
       Slider(value: steppedBinding, in: representableRange)
         .accessibilityValue(Text(verbatim: spokenValue))
@@ -166,8 +147,8 @@ struct ThemedSlider: View {
     return clamped(range.lowerBound + grid * step)
   }
 
-  /// The one gate the keyboard and the representation share: both routes end
-  /// here, so a disabled control cannot open an editing cycle at all.
+  /// The one gate the keyboard and the representation share, so a disabled
+  /// control cannot open an editing cycle at all.
   private func commitStep(up: Bool) {
     guard isEnabled else { return }
     onEditingChanged?(true)
@@ -175,23 +156,18 @@ struct ThemedSlider: View {
     onEditingChanged?(false)
   }
 
-  /// One discrete step, on `SliderSnap`'s grid rather than a raw addition: it
-  /// lands ON the grid in the direction of travel and keeps the anti-drift
-  /// rounding, so repeated stepping cannot drift a grid point into a readout of
-  /// 59%.
-  ///
-  /// `SliderSnap`'s grid is defined over 0...1, so the step is taken on the
-  /// fraction and mapped back. Grid points are multiples of the step measured
-  /// from the range's floor whatever the span.
+  /// On `SliderSnap`'s grid rather than a raw addition, which keeps the
+  /// anti-drift rounding: repeated stepping cannot turn a grid point into a
+  /// readout of 59%. The grid is defined over 0...1, so the step is taken on
+  /// the fraction and mapped back.
   private func stepped(up: Bool) -> Double {
     let size = step ?? Self.defaultStep
     let span = range.upperBound - range.lowerBound
     guard span > 0, size > 0 else { return value }
     let moved = SliderSnap.stepped(
       from: fraction, up: up, step: size / span, toStops: false)
-    // Onto the nearest grid point in value units: the round trip through the
-    // fraction leaves a millionth of the span behind, which on a wide integer
-    // range is the difference between -7 and -6.999995.
+    // The round trip through the fraction leaves a millionth of the span
+    // behind, which on a wide integer range is -6.999995 instead of -7.
     let grid = ((moved * span) / size).rounded()
     return clamped(range.lowerBound + grid * size)
   }
@@ -200,13 +176,12 @@ struct ThemedSlider: View {
     min(range.upperBound, max(range.lowerBound, value))
   }
 
-  /// One VoiceOver nudge on a continuous slider, matching the panel sliders'
-  /// feel rather than the pixel resolution of a drag.
+  /// One VoiceOver nudge on a continuous slider, matching the panel sliders
+  /// rather than the pixel resolution of a drag.
   private static let defaultStep = 0.05
 }
 
-/// Segmented choice shaped like the macOS segmented control: a recessed
-/// rounded-rect track with a raised selected segment, accent-tinted.
+/// Segmented choice shaped like the macOS segmented control, accent-tinted.
 struct ThemedSegments: View {
   var options: [String]
   @Binding var selection: Int
@@ -230,8 +205,8 @@ struct ThemedSegments: View {
       RoundedRectangle(cornerRadius: 7, style: .continuous)
         .stroke(Color.white.opacity(0.08), lineWidth: 1)
     )
-    // A control is not a window-drag handle, which is what a native segmented
-    // control would tell AppKit if this one were not drawn.
+    // A native segmented control would tell AppKit this is not a drag handle;
+    // a drawn one has to say so itself.
     .blocksWindowDrag()
   }
 
@@ -259,8 +234,8 @@ struct ThemedSegments: View {
           .shadow(color: .black.opacity(isOn ? 0.25 : 0), radius: 2, y: 1)
       }
       .buttonStyle(.plain)
-      // Which one is chosen is carried by the weight and the fill, neither of
-      // which a screen reader can see.
+      // Selection is carried by weight and fill, neither of which a screen
+      // reader can see.
       .accessibilityAddTraits(isOn ? [.isSelected] : [])
       .onHover { hovering = $0 }
       .animation(SettingsTheme.hoverMotion, value: hovering)
@@ -285,20 +260,14 @@ struct SettingsBadge: View {
   }
 }
 
-/// A pop-up at row weight: the label leads, the menu sits at the trailing edge.
+/// A pop-up at row weight, label leading. The spread lives here because a
+/// `Picker` has no style point to carry it the way a `Toggle` does.
 ///
-/// The guarantee: a written label, the native `Picker`'s own value, and one
-/// accessibility element carrying both, with a `prefIdentifier` attachable from
-/// the call site.
-///
-/// The spread lives here because a `Picker` has no style point that can carry
-/// it, the way the theme's switch style carries it for a `Toggle`.
-///
-/// The pop-up stays the row's one element and keeps its own accessibility: the
-/// written label moves onto it and the drawn `Text` leaves the tree. Merging
-/// the two with `children: .combine` is what this row must NOT do: measured
-/// 2026-08-20 on the switch style, a combined element keeps `AXPress` and
-/// loses `AXFocused`, so the row falls out of the Tab order entirely.
+/// The pop-up stays the row's ONE accessibility element: the written label
+/// moves onto it and the drawn `Text` leaves the tree. Never merge the two with
+/// `children: .combine`. Measured 2026-08-20 on the switch style, a combined
+/// element keeps `AXPress` and loses `AXFocused`, dropping the row out of the
+/// Tab order.
 struct ThemedChoiceRow<Value: Hashable, Options: View>: View {
   let label: LocalizedStringKey
   @Binding var selection: Value
@@ -310,13 +279,11 @@ struct ThemedChoiceRow<Value: Hashable, Options: View>: View {
   var body: some View {
     HStack(spacing: 12) {
       // Wraps rather than truncates: at large text sizes the pop-up keeps its
-      // ideal width, so the label is the half that has to give.
+      // ideal width, so the label has to give.
       Text(label)
         .fixedSize(horizontal: false, vertical: true)
-        // The theme's own colour rather than whatever it inherits, since this
-        // row stands on a card as often as it sits inside a `SettingRow`. It
-        // is drawn beside the pop-up rather than inside it, so nothing dims it
-        // when the row is disabled except this.
+        // The theme's colour rather than whatever it inherits: the label is
+        // drawn beside the pop-up, so nothing else dims it when disabled.
         .foregroundStyle(
           isEnabled
             ? SettingsTheme.titleColor
@@ -331,21 +298,18 @@ struct ThemedChoiceRow<Value: Hashable, Options: View>: View {
       .labelsHidden()
       .fixedSize()
       .accessibilityLabel(Text(label))
-      // The control only, not the row: the label and the gap beside it stay
-      // window-drag handles like the rest of the card's deadspace.
+      // The control only. The label and the gap beside it stay window-drag
+      // handles like the rest of the card's deadspace.
       .blocksWindowDrag()
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    // Its own rhythm when it stands on the card, none when a row wrapper
-    // already gave it one.
+    // Own rhythm on the card, none when a row wrapper already gave it one.
     .padding(.vertical, rowIsPadded ? 0 : SettingsTheme.rowVerticalPadding)
   }
 }
 
-/// `LabeledContent` in the row grammar: label leading, control trailing, the
-/// same vertical rhythm `SettingRow` uses. Applied once by
-/// `SettingsPageScaffold`, so a page's existing `LabeledContent` rows land in
-/// the theme without being rewritten.
+/// `LabeledContent` in the row grammar. `SettingsPageScaffold` applies it once,
+/// so a page's existing `LabeledContent` rows land in the theme unrewritten.
 struct ThemedLabeledContentStyle: LabeledContentStyle {
   func makeBody(configuration: Configuration) -> some View {
     Row(configuration: configuration)
@@ -361,19 +325,15 @@ struct ThemedLabeledContentStyle: LabeledContentStyle {
         configuration.label
           .foregroundStyle(dimmed(SettingsTheme.titleColor))
         Spacer(minLength: 16)
-        // A value is quieter than the label naming it. Colour rather than
-        // opacity, because this slot sometimes holds a control, which dims
-        // itself and must not be dimmed twice. A control a person TYPES into
-        // is the exception and says so with `settingsEditableContent()`: a
-        // text field honours an inherited foreground style, so it would take
-        // both the secondary weight and, disabled, a second dimming on top of
-        // AppKit's own.
+        // Colour rather than opacity: this slot sometimes holds a control,
+        // which dims itself and must not be dimmed twice. A text field is the
+        // exception and opts out with `settingsEditableContent()`, since it
+        // honours an inherited foreground style.
         configuration.content
           .foregroundStyle(dimmed(SettingsTheme.bodyColor))
       }
-      // Nothing when `SettingRow` already padded this row: the two together
-      // are what made twelve rows in the window twice the height of their
-      // neighbours.
+      // Nothing when `SettingRow` already padded this row; the two together
+      // ran rows to twice the height of their neighbours.
       .padding(.vertical, rowIsPadded ? 0 : SettingsTheme.rowVerticalPadding)
     }
 
@@ -384,35 +344,31 @@ struct ThemedLabeledContentStyle: LabeledContentStyle {
 }
 
 extension View {
-  /// Marks the content of a `LabeledContent` as something a person types into,
-  /// so it keeps the system's own text colour and dims once, natively.
+  /// Marks a `LabeledContent`'s content as something a person types into, so
+  /// it keeps the system text colour and dims once, natively.
   ///
-  /// The exemption lives here at the two call sites rather than in
-  /// `ThemedLabeledContentStyle`, which cannot tell a field from a value: the
-  /// style keeps its default, so a value row added later cannot silently lose
-  /// its weight, and a field added later renders visibly wrong rather than
-  /// invisibly wrong.
+  /// Opt-in at the call site rather than in `ThemedLabeledContentStyle`, which
+  /// cannot tell a field from a value. A field added later then renders
+  /// visibly wrong rather than invisibly wrong.
   func settingsEditableContent() -> some View { foregroundStyle(Color.primary) }
 }
 
-/// The native switch under the destination tint, with the label held at the
-/// leading edge and the switch at the trailing one.
+/// The native switch under the destination tint, label leading.
 ///
-/// The spread has to live in the style: a switch-style `Toggle` sits beside its
-/// own label at its ideal width however wide a frame it is given, measured
-/// 2026-08-20 against a rendered card.
+/// The spread has to live in the style: measured 2026-08-20 against a rendered
+/// card, a switch-style `Toggle` sits beside its own label at its ideal width
+/// however wide a frame it is given.
 private struct ThemedSwitchStyle: ToggleStyle {
   let accent: Color
   let spreads: Bool
 
   func makeBody(configuration: Configuration) -> some View {
     Row(configuration: configuration, accent: accent, spreads: spreads)
-      // A real labeled toggle stands in for the drawn row, so the element is
-      // focusable, pressable and named. NOT `children: .combine`: measured
-      // 2026-08-20 against the live app, a combined element keeps `AXPress`
-      // and loses `AXFocused`, which drops every switch row out of the Tab
-      // order. The inner style is explicit because this style is still in the
-      // environment here and would otherwise recurse into itself.
+      // A real labeled toggle stands in, so the element is focusable,
+      // pressable and named. NOT `children: .combine`: measured 2026-08-20
+      // against the live app, a combined element keeps `AXPress` and loses
+      // `AXFocused`, dropping every switch row out of the Tab order. The inner
+      // style is explicit or this style recurses into itself.
       .accessibilityRepresentation {
         Toggle(isOn: configuration.$isOn) { configuration.label }
           .toggleStyle(.switch)
@@ -427,8 +383,7 @@ private struct ThemedSwitchStyle: ToggleStyle {
 
     var body: some View {
       HStack(spacing: 12) {
-        // The label is drawn outside the switch, which is the whole point of
-        // the style and also why nothing else dims it.
+        // Drawn outside the switch, which is why nothing else dims it.
         configuration.label
           .opacity(isEnabled ? 1 : SettingsTheme.disabledOpacity)
         if spreads {
@@ -439,8 +394,8 @@ private struct ThemedSwitchStyle: ToggleStyle {
           .toggleStyle(.switch)
           .controlSize(.small)
           .tint(accent)
-          // The switch only, for the reason the pop-up row gives: the label
-          // and the spread beside it are still window-drag handles.
+          // The switch only. The label and the spread beside it stay
+          // window-drag handles.
           .blocksWindowDrag()
       }
     }
@@ -458,17 +413,13 @@ private struct ThemedSwitchModifier: ViewModifier {
 }
 
 extension View {
-  /// A `Toggle` at settings weight: the native switch, small like System
-  /// Settings uses, tinted by the destination, spanning the row with the switch
-  /// at its trailing edge.
-  ///
   /// The style draws the toggle's own label at the leading edge, so a row is
   /// written as `Toggle("Label", isOn:).themedSwitch()` and nothing else.
   /// `.labelsHidden()` has no effect here: it travels in an environment key no
-  /// custom `ToggleStyle` can read, so a row that needs its label drawn
-  /// somewhere else keeps the native `.switch` style instead.
+  /// custom `ToggleStyle` can read, so a row needing its label drawn elsewhere
+  /// keeps the native `.switch` style.
   ///
-  /// `spreads: false` for a switch that shares a row with something else and
+  /// `spreads: false` for a switch sharing a row with something else, which
   /// must keep its ideal width.
   func themedSwitch(spreads: Bool = true) -> some View {
     modifier(ThemedSwitchModifier(spreads: spreads))

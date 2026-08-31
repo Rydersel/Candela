@@ -2,42 +2,33 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// Management for the three virtual display slots (VD2): creation is a
-/// deliberate, occasional act, so it lives here and nowhere else. A virtual
-/// display never gets a menu bar row or a per-display destination; it has no
-/// DDC and no brightness, and macOS itself handles its arrangement and
-/// scaling once it exists.
+/// The virtual display slots (VD2). A virtual display never gets a menu bar row
+/// or a per-display destination: it has no DDC and no brightness, and macOS
+/// handles its arrangement and scaling once it exists.
 ///
 /// Every write goes through `SettingsActions` with a `PrefName` case (D27).
 /// Only the `virtualSlotConfigured` write converges live displays (VD14),
-/// scoped to the written slot so one slot's Create never applies another
-/// slot's pending edits (VD17); field edits are inert until Create or Apply,
-/// and the captions say so.
+/// scoped to the written slot so one slot's Create never applies another slot's
+/// pending edits (VD17). Field edits are inert until Create or Apply.
 @MainActor
 struct VirtualDisplaysPane: View {
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.settingsAccent) private var lighting
-  /// Which slot the controls below describe, chosen on the tile row the way
-  /// the arrangement map chooses a display. nil until something is added or
+  /// Which slot the controls below describe. Nil until something is added or
   /// clicked; the effective selection falls back to the first added slot.
   @State private var selectedSlot: Int?
 
   /// The selected slot's create failure as RENDERED, mirroring
-  /// `AppModel.virtualSlotIssues` one update behind. The model writes that map
-  /// from the convergence pass, and neither placement of a keyed `.animation`
-  /// faded the sentence symmetrically when this pane was a grouped `Form`
-  /// (measured 2026-08-17): on a `Group` wrapping the conditional row it
-  /// animated nothing in either direction, and on an always-present container
-  /// inside the row the child faded IN and then SNAPPED out. The card layout is
-  /// not that container, but the mirror stays: it puts the sentence's arrival
-  /// AND departure inside one transaction, which is the property worth having
-  /// whatever the row is made of.
+  /// `AppModel.virtualSlotIssues` one update behind. A keyed `.animation` never
+  /// faded the sentence symmetrically (measured 2026-08-17: nothing in either
+  /// direction on a wrapping `Group`, fade IN then SNAP out on a container
+  /// inside the row). The mirror puts arrival and departure in one transaction.
   ///
   /// It carries the SLOT it is about, and the row renders nothing unless the two
-  /// agree: one value serves whichever slot is selected, and without the slot a
-  /// switch would show the previous slot's failure until the sync landed.
+  /// agree. Without the slot a switch shows the previous slot's failure until
+  /// the sync lands.
   @State private var shownIssue: ShownIssue?
 
   private struct ShownIssue: Equatable {
@@ -47,8 +38,8 @@ struct VirtualDisplaysPane: View {
 
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
 
-  /// Slots the user has ADDED, in slot order: these have tiles whether or
-  /// not a display is currently running.
+  /// Slots the user has ADDED. These have tiles whether or not a display is
+  /// currently running.
   private var definedSlots: [Int] {
     VirtualDisplayIdentity.userSlotRange.filter { prefs.virtualSlot($0).defined }
   }
@@ -58,10 +49,9 @@ struct VirtualDisplaysPane: View {
     return defined.first
   }
 
-  /// What a virtual display IS, which is the page's opening sentence. Absent
-  /// when the feature is unavailable: the quiet card below is then the whole
-  /// answer, and describing a capability this Mac does not have first is the
-  /// wrong order to read it in.
+  /// The page's opening sentence. Absent when the feature is unavailable, since
+  /// describing a capability this Mac does not have is the wrong thing to read
+  /// first.
   private static let capabilitySentence =
     "A virtual display behaves like a connected display: windows move to it, it appears in arrangement, and it can be shared or recorded."
 
@@ -78,12 +68,11 @@ struct VirtualDisplaysPane: View {
         selectorSection(defined: defined)
         if let slot = effectiveSelection(in: defined) {
           slotSection(slot)
-            // Identity, not decoration: without it SwiftUI reuses ONE text
-            // field instance across a slot change, and an uncommitted draft
-            // then commits into the slot the user just switched TO. With it,
-            // switching slots removes the old fields, whose on-disappear
-            // commit still holds the OLD slot's closures, which is the
-            // correct place for the draft to land.
+            // Load-bearing: without it SwiftUI reuses ONE text field instance
+            // across a slot change and an uncommitted draft commits into the
+            // slot the user just switched TO. With it the old fields are
+            // removed, and their on-disappear commit still holds the OLD
+            // slot's closures.
             .id(slot)
         }
       } else {
@@ -101,10 +90,9 @@ struct VirtualDisplaysPane: View {
   }
 
   private var unavailableCard: some View {
-    // VD16: the class family resolved to nothing on this macOS, so every
-    // entry point is inert and the pane says why instead of showing dead
-    // controls. No kicker: the page header already reads "Virtual Displays",
-    // and repeating it is the duplicated-title defect.
+    // VD16: the class family resolved to nothing on this macOS, so every entry
+    // point is inert and the pane says why rather than showing dead controls.
+    // No kicker, or the page header's title is said twice.
     SettingsCardSection {
       SettingsCaption("Virtual displays are unavailable on this version of macOS.")
     }
@@ -112,12 +100,10 @@ struct VirtualDisplaysPane: View {
 
   // MARK: - Slot selector
 
-  /// One tile per ADDED display, the arrangement map's visual language: a
-  /// running slot is a purple (virtual) tile carrying its achieved size, a
-  /// stopped one an empty grey tile. A ghosted Add tile follows while free
-  /// slots remain, and stands alone at hero size when nothing has been added
-  /// yet. Real buttons, so the keyboard and VoiceOver can reach every tile the
-  /// way the arrangement canvas's tiles can be reached.
+  /// One tile per ADDED display, in the arrangement map's visual language. A
+  /// ghosted Add tile follows while free slots remain and stands alone at hero
+  /// size when nothing has been added. Real buttons, so keyboard and VoiceOver
+  /// reach every tile.
   private func selectorSection(defined: [Int]) -> some View {
     SettingsCardSection {
       VStack(spacing: 12) {
@@ -141,8 +127,8 @@ struct VirtualDisplaysPane: View {
     }
   }
 
-  /// The tile row's one line about what is left, told about SLOTS rather than
-  /// about running displays: a slot with a stopped display in it is still spent.
+  /// Counts SLOTS, not running displays: a slot with a stopped display in it is
+  /// still spent.
   static func capacityCaption(definedCount: Int) -> String {
     let cap = VirtualDisplayIdentity.userSlotRange.count
     let spelled = Self.spelled(cap)
@@ -155,16 +141,16 @@ struct VirtualDisplaysPane: View {
     return "Up to \(spelled) virtual displays can run at once."
   }
 
-  /// A small count as a word, which is how the rest of the window writes one.
-  /// The digits are a fallback rather than a trap: the sentence still reads if
-  /// the slot range ever grows past the list.
+  /// A small count as a word, the way the rest of the window writes one. The
+  /// digits are a fallback, so the sentence still reads if the slot range grows
+  /// past the list.
   private static func spelled(_ count: Int) -> String {
     let words = ["zero", "one", "two", "three", "four", "five", "six"]
     return words.indices.contains(count) ? words[count] : String(count)
   }
 
-  /// Adds the lowest free slot: definition with the slot defaults, created
-  /// immediately, and selected so its controls appear below.
+  /// Adds the lowest free slot at the slot defaults, creates it immediately,
+  /// and selects it.
   @ViewBuilder private func addTile(slot: Int, isHero: Bool) -> some View {
     Button {
       var definition = prefs.virtualSlot(slot)
@@ -173,7 +159,7 @@ struct VirtualDisplaysPane: View {
       definition.uuid = UUID()
       prefs.setVirtualSlot(definition, slot: slot)
       selectedSlot = slot
-      // The batch, never a representative name, and the slot scopes the
+      // The batch, never a representative name; the slot scopes the
       // convergence to this write (VD17).
       actions.prefsDidChange(
         [.virtualSlotDefined, .virtualSlotConfigured, .virtualSlotUUID], virtualSlot: slot
@@ -188,13 +174,11 @@ struct VirtualDisplaysPane: View {
     .accessibilityIdentifier("action.slotAdd.\(slot)")
   }
 
-  /// The tile's one-line status, shared by the picture and VoiceOver so the
-  /// two can never disagree: achieved size while running (never the spec's
-  /// claim), a bare "Running" when no verdict was recorded for the slot, and
-  /// "Not created" otherwise.
+  /// Shared by the picture and VoiceOver so the two cannot disagree. The size
+  /// is the ACHIEVED one, never the spec's claim.
   ///
-  /// `achievedMode` is the host's RECORDED verdict from creation, not a read of
-  /// the live topology: this process usually cannot read a display it created.
+  /// `achievedMode` is the host's verdict recorded at creation, not a live
+  /// topology read: this process usually cannot read a display it created.
   private func tileStatus(_ slot: Int) -> (running: Bool, line: String) {
     let running = liveHandle(slot: slot) != nil
     if running, let achieved = model.virtualDisplays.achievedMode(slot: slot) {
@@ -206,9 +190,8 @@ struct VirtualDisplaysPane: View {
   @ViewBuilder private func slotTile(_ slot: Int, isSelected: Bool) -> some View {
     let definition = prefs.virtualSlot(slot)
     let status = tileStatus(slot)
-    // The tile keeps the slot's configured shape so the row previews what
-    // Create will make; a uniform height keeps the row from jumping as
-    // definitions change.
+    // The slot's configured shape, so the row previews what Create will make.
+    // Uniform height keeps the row from jumping as definitions change.
     let height = 76.0
     let width = min(150, max(96, height * Double(definition.width) / Double(max(1, definition.height))))
     Button {
@@ -267,9 +250,8 @@ struct VirtualDisplaysPane: View {
   private func statusRow(slot: Int, live: VirtualDisplayHandle?) -> some View {
     let busy = model.virtualSlotBusy.contains(slot)
     VStack(alignment: .leading, spacing: 6) {
-      // The four states below are a branch swap around a `ProgressView`, not an
-      // insert, so this row is left instant: fading a spinner into a sentence and
-      // back is the one shape the house voice has no use for.
+      // A branch swap around a `ProgressView`, not an insert, so this row is
+      // left un-animated: fading a spinner into a sentence and back reads badly.
       HStack {
         Text("Status")
         Spacer()
@@ -278,10 +260,8 @@ struct VirtualDisplaysPane: View {
           Text("Working").foregroundStyle(SettingsTheme.bodyColor)
         } else if live != nil, let achieved = model.virtualDisplays.achievedMode(slot: slot) {
           // ACHIEVED state, never the spec's claim: the Retina suffix appears
-          // only when the 2x mode actually engaged. From the host's verdict
-          // recorded at creation rather than a live read, which this process
-          // usually cannot perform on a display it created. `String(_:)`
-          // verbatim, or interpolation groups the digits (1,920 x 1,080).
+          // only when the 2x mode engaged. `String(_:)` verbatim, or
+          // interpolation groups the digits (1,920 x 1,080).
           Text("Running at \(String(achieved.width)) x \(String(achieved.height))\(achieved.hiDPI ? " (Retina)" : "")")
             .foregroundStyle(SettingsTheme.bodyColor)
         } else if live != nil {
@@ -291,8 +271,7 @@ struct VirtualDisplaysPane: View {
         }
       }
       if let shown = shownIssue, shown.slot == slot, let issue = shown.failure {
-        // The last attempt's failure, in words: a create that fails must not
-        // be indistinguishable from a click that was ignored.
+        // A create that fails must not look like a click that was ignored.
         HStack(alignment: .firstTextBaseline, spacing: 4) {
           Image(systemName: "exclamationmark.triangle.fill")
           Text(verbatim: Self.sentence(for: issue))
@@ -306,11 +285,10 @@ struct VirtualDisplaysPane: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.vertical, 6)
     .foregroundStyle(SettingsTheme.titleColor)
-    // The failure sentence's mirror hooks hang on the status row, which is
-    // always present and sits directly above it: hooks on the sentence itself
-    // would only exist while the failure does, so nothing would be watching for
-    // it to arrive. The appear sync is un-animated, and it re-runs on a slot
-    // change because `slotSection` carries the slot as its identity.
+    // The mirror hooks hang on the status row because it is always present.
+    // Hooks on the sentence would exist only while the failure does, so nothing
+    // would be watching for it to arrive. The appear sync is un-animated and
+    // re-runs on a slot change, since `slotSection` carries the slot identity.
     .onAppear { shownIssue = ShownIssue(slot: slot, failure: visibleIssue(slot: slot)) }
     .onChange(of: visibleIssue(slot: slot)) { _, issue in
       withAnimation(Motion.notice(reduceMotion: reduceMotion)) {
@@ -319,9 +297,8 @@ struct VirtualDisplaysPane: View {
     }
   }
 
-  /// The failure this slot's status row should be showing, or nil: what the
-  /// mirror follows. While the slot is busy there is no sentence, so a failure
-  /// that arrives mid-work fades in when the work ends rather than under the
+  /// What the mirror follows. No sentence while the slot is busy, so a failure
+  /// arriving mid-work fades in when the work ends rather than under the
   /// spinner.
   private func visibleIssue(slot: Int) -> VirtualDisplayFailure? {
     guard !model.virtualSlotBusy.contains(slot) else { return nil }
@@ -370,12 +347,11 @@ struct VirtualDisplaysPane: View {
     }
   }
 
-  /// Common sizes; the width and height fields BELOW the picker are always
-  /// present, so a custom size is typed directly and the picker simply reads
-  /// "Custom" whenever the fields diverge from every preset. The fields are
-  /// never unmounted by a preset choice: removing them mid-edit would fire
-  /// their on-disappear commit with a pre-choice draft and silently revert
-  /// the preset.
+  /// The width and height fields below the picker are always present, so a
+  /// custom size is typed directly and the picker reads "Custom" when the fields
+  /// match no preset. Never unmount them on a preset choice: removing them
+  /// mid-edit fires their on-disappear commit with a pre-choice draft and
+  /// silently reverts the preset.
   private static let presets: [(label: String, width: Int, height: Int)] = [
     ("1920 x 1080", 1920, 1080),
     ("2560 x 1440", 2560, 1440),
@@ -383,13 +359,11 @@ struct VirtualDisplaysPane: View {
     ("3840 x 2160 (4K)", 3840, 2160),
   ]
 
-  /// Identifier placement for the size, decided against this pane as built: the
-  /// preset picker and the two number fields are ALL on screen at once (the
-  /// fields are never unmounted, for the reason above), so the pair of
-  /// `virtualSlotWidth.<slot>` / `virtualSlotHeight.<slot>` identifiers goes on
-  /// the fields, which are what stores an arbitrary size, and the picker
-  /// carries none: two elements answering to one identifier would make an
-  /// accessibility walk pick whichever it met first.
+  /// The picker and both number fields are on screen at once, so the
+  /// `virtualSlotWidth`/`virtualSlotHeight` identifiers go on the fields, which
+  /// store an arbitrary size, and the picker carries none. Two elements
+  /// answering to one identifier leave an accessibility walk picking whichever
+  /// it meets first.
   @ViewBuilder
   private func sizeRows(slot: Int, definition: VirtualSlotDefinition) -> some View {
     let presetIndex = Self.presets.firstIndex {
@@ -399,8 +373,8 @@ struct VirtualDisplaysPane: View {
       ThemedChoiceRow(label: "Size", selection: Binding(
         get: { presetIndex ?? -1 },
         set: { newIndex in
-          // The Custom tag is a read-only state of the picker, not a choice:
-          // typing in the fields below is what makes a size custom.
+          // Custom is a read-only state of the picker, not a choice: typing in
+          // the fields below is what makes a size custom.
           guard newIndex >= 0 else { return }
           var updated = prefs.virtualSlot(slot)
           updated.width = Self.presets[newIndex].width
@@ -446,7 +420,7 @@ struct VirtualDisplaysPane: View {
     CommitOnBlurField(
       stored: { String(get(prefs.virtualSlot(slot))) },
       commit: { text in
-        // 320 floors the value at something a desktop fits on; the engine
+        // 320 floors the value at something a desktop fits on. The engine
         // still normalizes to even and clamps to the pixel ceiling on create.
         guard let value = Int(text), (320 ... 8192).contains(value) else { return }
         var updated = prefs.virtualSlot(slot)
@@ -465,18 +439,16 @@ struct VirtualDisplaysPane: View {
     let busy = model.virtualSlotBusy.contains(slot)
     HStack(spacing: 8) {
       if live == nil {
-        // A tile with no running display: either its create failed (the
-        // status row says why) or the last session ended without
-        // come-back-at-launch. Create tries again; Remove drops the tile.
-        // Create and Apply are the same write through the same path and are
-        // never on screen together, so they share one identifier.
+        // A tile with no running display: the create failed (the status row
+        // says why) or the last session ended without come-back-at-launch.
+        // Create and Apply are the same write through the same path and never
+        // appear together, so they share one identifier.
         Button("Create Display") { setConfigured(true, slot: slot) }
           .buttonStyle(SettingsPrimaryButtonStyle())
           .accessibilityIdentifier("action.slotApply.\(slot)")
       } else if drifted {
         // VD1/VD17: the apply path is destroy-and-recreate under the same
-        // slot, and the button says what will happen rather than doing it
-        // on the field edit.
+        // slot, so the button names that rather than acting on the field edit.
         Button("Apply and Recreate") { setConfigured(true, slot: slot) }
           .buttonStyle(SettingsPrimaryButtonStyle())
           .accessibilityIdentifier("action.slotApply.\(slot)")
@@ -500,16 +472,14 @@ struct VirtualDisplaysPane: View {
       names.append(.virtualSlotUUID)
     }
     prefs.setVirtualSlot(updated, slot: slot)
-    // The batch, never a representative name, and the slot scopes the
+    // The batch, never a representative name; the slot scopes the
     // convergence to this write (VD17).
     actions.prefsDidChange(names, virtualSlot: slot)
   }
 
-  /// Remove takes the tile with the display: unconfigure FIRST so the
-  /// convergence destroys the display from a snapshot that still described
-  /// it (`syncVirtualDisplays` snapshots synchronously inside the fan-out
-  /// below), then clear every stored key so the slot is free for a future
-  /// Add.
+  /// Unconfigure FIRST, so the convergence destroys the display from a snapshot
+  /// that still described it (`syncVirtualDisplays` snapshots synchronously
+  /// inside the fan-out). Only then clear the stored keys.
   private func remove(slot: Int) {
     var updated = prefs.virtualSlot(slot)
     updated.configured = false
@@ -536,23 +506,18 @@ struct VirtualDisplaysPane: View {
   }
 }
 
-/// The display that is not there yet: a dashed outline with a plus, tinted by
-/// the destination accent so it reads as an invitation rather than as an error
-/// state. At hero size it stands on the glyph's foot, which is what makes an
-/// empty page read as a stage with nothing on it yet; beside real tiles it is
-/// a face alone, so the row stays a row.
+/// The display that is not there yet: a dashed outline with a plus, accent
+/// tinted so it reads as an invitation rather than an error.
 ///
-/// It owns its hover state rather than taking one, because the cue is INSIDE
-/// the drawing: a dashed placeholder is the one tile on this row that can be
-/// mistaken for an empty-slot indicator, so the affordance has to be the
-/// outline and the glyph coming up, which no wrapper or `ButtonStyle` can
-/// reach. The real slot tiles next to it need none of this; they already look
-/// like objects and carry a selected state.
+/// It owns its hover state because the cue is INSIDE the drawing. A dashed
+/// placeholder is the one tile here that reads as an empty-slot indicator, so
+/// the affordance has to be the outline and glyph lifting, which no wrapper or
+/// `ButtonStyle` can reach.
 ///
-/// The lift follows the preview widgets' doorway affordance: scale skipped
-/// under Reduce Motion, shadow deepened either way so a non-moving cue is
-/// always there. The tint is a change of opacity on colors the tile already
-/// draws, so it survives an unfocused window the way a system accent would not.
+/// Scale is skipped under Reduce Motion and the shadow deepens either way, so a
+/// non-moving cue is always there. The tint changes opacity on colours the tile
+/// already draws, so it survives an unfocused window as a system accent would
+/// not.
 private struct GhostDisplayTile: View {
   var accent: Color
   var isHero: Bool

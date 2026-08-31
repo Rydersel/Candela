@@ -3,11 +3,8 @@ import os
 import Testing
 @testable import CandelaKit
 
-/// Construction helper for the suites that predate Task 6 path selection:
-/// combined dimming disabled and no HDR/software backends, so brightness maps
-/// onto the full DDC range — the M1/M2 shape these tests were written against.
-/// (The combined/native/software paths get their own coverage in
-/// PathSelectionTests.swift.)
+/// Combined dimming disabled and no HDR or software backends, so brightness maps onto
+/// the full DDC range. The combined, native and software paths are covered elsewhere.
 @MainActor
 func makeLegacyPathController(
   writer: any DDCWriting,
@@ -40,15 +37,12 @@ func makeLegacyPathController(
 actor FakeDDC: DDCWriting {
   private(set) var writes: [(command: UInt8, value: UInt16)] = []
   var readResult: (current: UInt16, max: UInt16)?
-  /// Defaults to the historical "every write succeeds"; flip it to model a
-  /// panel that stops accepting commands mid-session (the B4 accessors have
-  /// nothing to report otherwise). The write is still RECORDED when it fails —
-  /// the transaction was attempted, which is exactly the distinction the
-  /// failure flag exists to preserve.
+  /// Defaults to every write succeeding; flip it to model a panel that stops accepting
+  /// commands mid-session. A failed write is still recorded, because the transaction was
+  /// attempted, and that distinction is the point of the flag.
   var writesSucceed = true
-  /// Codes whose writes fail while everything else succeeds (#68, absorbed from
-  /// `PartialFailDDC`). A per-command failure is a different fact from
-  /// `writesSucceed = false`: it is what pins that a remap fan-out neither
+  /// Codes whose writes fail while everything else succeeds. A per-command failure is a
+  /// different fact from `writesSucceed = false`: it pins that a remap fan-out neither
   /// short-circuits past a failing code nor swallows the failure.
   var failingCommands: Set<UInt8> = []
 
@@ -66,11 +60,9 @@ actor FakeDDC: DDCWriting {
     return writesSucceed && !failingCommands.contains(command)
   }
 
-  /// Nonisolated mirror of `writes.count`. #146's ordering claim has to be
-  /// sampled at the instant the software leg goes out, and that instant is a
-  /// synchronous main-actor hook (`preGammaApplyHook`) which cannot await an
-  /// actor. Counting is enough: the question is only whether the register write
-  /// had landed by then.
+  /// Nonisolated mirror of `writes.count`. The ordering claim is sampled at the instant
+  /// the software leg goes out, and that instant is a synchronous main-actor hook
+  /// (`preGammaApplyHook`) which cannot await an actor.
   private nonisolated let landed = OSAllocatedUnfairLock(initialState: 0)
 
   nonisolated func landedWriteCount() -> Int { landed.withLock { $0 } }
@@ -123,11 +115,9 @@ actor FakeDDC: DDCWriting {
   await controller.waitForPendingWrites()
   let writes = await fake.recordedWrites()
   #expect(writes.last?.value == 100)
-  // No strict `count < 50` bound: when the drain keeps pace with the submit
-  // loop nothing coalesces and 50 writes is legitimate — the old bound
-  // asserted a scheduling race (flaked ~2/14 runs, T12 report). Latest-wins
-  // correctness is the ordered final value, pinned above; the drop behavior
-  // is pinned deterministically by the gated coalescer tests.
+  // No strict `count < 50` bound: when the drain keeps pace with the submit loop nothing
+  // coalesces and 50 writes is legitimate, so the old bound asserted a scheduling race and
+  // flaked. Drop behaviour is pinned deterministically by the gated coalescer tests.
   #expect(writes.count <= 50)
 }
 
@@ -137,9 +127,8 @@ actor FakeDDC: DDCWriting {
   let controller = makeLegacyPathController(writer: fake)
   await controller.refreshFromHardware()
   #expect(controller.maxDDCValue == 120)
-  // M4: the read mirrors the write through the tuning's effective max, which
-  // clamps a read max above 100 to the fork's DDC_MAX_DETECT_LIMIT — so 30
-  // maps over [0, 100], not [0, 120] (old pre-tuning expectation: 0.25).
+  // The read mirrors the write through the tuning's effective max, which clamps a read
+  // max above 100, so 30 maps over [0, 100] rather than [0, 120].
   #expect(abs(controller.brightness - 0.3) < 0.001)
 }
 
@@ -149,35 +138,26 @@ actor FakeDDC: DDCWriting {
   let controller = makeLegacyPathController(writer: fake)
   await controller.refreshFromHardware()
   #expect(controller.maxDDCValue == 100)
-  // First-run rule (Task 6, review I13): with no saved value the controller
-  // starts at full brightness, and a failed read leaves that untouched.
+  // First-run rule: with no saved value the controller starts at full brightness, and
+  // a failed read leaves that untouched.
   #expect(controller.brightness == 1.0)
 }
 
-// Coalescer-level contract tests (latest-wins, no-main-actor drain,
-// duplicate-skip, retry-after-failed-apply, superseded-generation waits,
-// epoch gate) live in HardwareTargetCoalescerTests.swift — the coalescer's
-// payload is now an applier-carrying HardwareTarget.
+// Coalescer-level contract tests (latest-wins, drain, duplicate-skip, retry, epoch
+// gate) live in `HardwareTargetCoalescerTests`.
 
 // MARK: - DisplayServices availability (B6)
 
-/// The shim degrades silently by design: a missing framework or symbol logs
-/// once at resolve time and every call thereafter returns nil/false forever.
-/// Correct, and invisible — "native brightness cannot work on this machine at
-/// all" was a fact the process learned on first use and could not state.
-///
-/// This is a real macOS host, so the framework is in the dyld shared cache and
-/// the symbol resolves. The assertion is not a tautology: it fails the day a
-/// macOS release renames or drops `DisplayServicesSetBrightness`, which is
-/// exactly when the native path silently stops working and someone needs the
-/// pane to say why.
+/// The shim degrades silently by design: a missing framework or symbol logs once at
+/// resolve time and every call after returns nil or false. This runs on a real macOS
+/// host, so the assertion is not a tautology: it fails the day a release renames or
+/// drops `DisplayServicesSetBrightness`, which is when the native path stops working.
 @Test func displayServicesReportsItsOwnAvailability() {
   #expect(DisplayServices.isAvailable)
 }
 
-/// The read half of the degradation contract, on a display ID that is never a
-/// real display: nil, not a crash and not a plausible-looking zero. Nothing is
-/// written — the private setter is left alone, one-writer discipline.
+/// The read half of the degradation contract on a display ID that is never real: nil,
+/// not a crash and not a plausible zero. Nothing is written; one-writer discipline.
 @Test func displayServicesReadOfANullDisplayIsNil() {
   #expect(DisplayServices.getBrightness(for: 0) == nil)
 }

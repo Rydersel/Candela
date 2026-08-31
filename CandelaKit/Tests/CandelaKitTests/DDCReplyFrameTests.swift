@@ -19,9 +19,8 @@ struct DDCReplyFrameTests {
     #expect(DDCReplyFrame.rejection(for: goodFrame(), command: 0x10) == nil)
   }
 
-  /// The write-only-panel case: reads come back all zeros. Before this guard
-  /// that decoded as max 0 / current 0 and was only caught by a `max > 0`
-  /// check further up, which cannot tell silence from a genuine zero.
+  /// The write-only-panel case: reads come back all zeros, which used to decode as max 0
+  /// and current 0, caught only by a `max > 0` check that cannot tell silence from zero.
   @Test func anAllZeroReplyIsRejected() {
     let zeros = [UInt8](repeating: 0, count: 11)
     #expect(DDCReplyFrame.rejection(for: zeros, command: 0x10) == .wrongSourceAddress(0))
@@ -43,9 +42,8 @@ struct DDCReplyFrameTests {
     #expect(DDCReplyFrame.rejection(for: frame, command: 0x10) == .displayReportedError(0x01))
   }
 
-  /// The failure that motivated this: a monitor answering a brightness read
-  /// with a reply for some other VCP code. The checksum is fine, the bytes
-  /// decode, and the resulting `max` compresses the usable range.
+  /// A monitor answering a brightness read with a reply for another VCP code: the
+  /// checksum is fine, the bytes decode, and the resulting `max` compresses the range.
   @Test func aReplyEchoingADifferentCommandIsRejected() {
     let frame = goodFrame(command: 0x12)
     #expect(

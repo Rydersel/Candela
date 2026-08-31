@@ -2,53 +2,35 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// One panel's accumulated exposure, in its own content-sized window (OC19;
-/// placement amended twice: OCR5 made it a pushed page instead of a sheet,
-/// and OCR-A1 (#185) made it a window, because a pushed page cannot resize
-/// the settings window to a portrait display's map and a window sized to its
-/// content can). It owns the map instruments: the History / Right now lens,
-/// the window outlines, and the crosshair readout, all moved here from the
-/// old hero so the app has ONE surface for interrogating the map.
+/// One panel's accumulated exposure, in its own content-sized window (OC19,
+/// placement amended by OCR-A1): a pushed page cannot resize the settings window
+/// to a portrait display's map, and a content-sized window can. It owns the map
+/// instruments, the History / Right now lens, the window outlines and the
+/// crosshair readout, so the app has ONE surface for interrogating the map.
 ///
-/// **Instruments only, since 2026-08-20.** The two cards that stated findings
-/// in words, the hottest area and display time by app, moved to the display's
-/// OLED Care page (`PanelHottestAreaCard` and `PanelDisplayTimeCard`), where
-/// they sit above the dimming settings they argue for. What is left here is
-/// the map, the things that interrogate it, and Delete History, which acts on
-/// the map. Do not draw a finding here again without moving its card back:
-/// two surfaces stating one measurement is how they come to disagree.
+/// Instruments only. The cards that state findings in words live on the
+/// display's OLED Care page; do not draw a finding here again without moving its
+/// card back, because two surfaces stating one measurement is how they come to
+/// disagree.
 ///
-/// `DisplayHealthWindowRoot` below is the scene's root: it resolves the
-/// window's persistence key against the connected externals, closes the
-/// window on that display's departure (the same rule that pops a pushed path
-/// on departure), and feeds the switcher.
-///
-/// Copy rule, and it is the reason half this file is text (OC11): software has
-/// two levers against OLED wear, namely reduce luminance and reduce time at
-/// luminance. Nothing here may translate a measurement into a lifespan, a date,
-/// a percentage of damage avoided or a score. **Relative exposure is measured
-/// and therefore sayable**; everything else on offer is not.
+/// Copy rule (OC11): software has two levers against OLED wear, reduce luminance
+/// and reduce time at luminance. Nothing here may translate a measurement into a
+/// lifespan, a date, a percentage of damage avoided or a score. Relative
+/// exposure is measured and therefore sayable; nothing else is.
 ///
 /// The three `PanelHealthSummary.Confidence` states are three genuinely
 /// different pages, not one page with a badge:
-/// - `.insufficient` shows **no figures at all**: under 30 samples there is
-///   nothing to be right about, and it is the state a freshly enrolled display
-///   sits in for its first half hour (and forever, if the Screen Recording
-///   grant never arrives).
-/// - `.estimated` means measuring is off, so every figure it can show is
-///   labelled an estimate.
+/// - `.insufficient` shows NO figures at all: under
+///   `minimumSamplesForAnalysis` readings there is nothing to be right about.
+/// - `.estimated` means measuring is off, so every figure is labelled an
+///   estimate.
 /// - `.measured` is the only state that shows a multiple of the panel mean.
 ///
-/// **`confidence` does not answer "is anything being recorded right now."** It
-/// is a pure function of the telemetry pref and the stored sample count, so it
-/// stays `.measured` forever once 30 samples are on disk: through a revoked
-/// Screen Recording grant, and through a Safe Mode session where the driver
-/// loop never starts. Both are checked here, ahead of the switch, and both
-/// change the page from a present-tense reading to a record of history.
-///
-/// Deliberately absent: any convergence or trend line. That needs a multi-week
-/// soak to read out and belongs to W3b-2; a placeholder for it here would be a
-/// claim the data cannot answer.
+/// `confidence` does not answer "is anything being recorded right now." It is a
+/// pure function of the telemetry pref and the stored sample count, so it stays
+/// `.measured` through a revoked Screen Recording grant and through a Safe Mode
+/// session where the driver loop never starts. Both are checked here ahead of
+/// the switch, and both turn the page from a reading into a record.
 @MainActor
 struct PanelHealthView: View {
   let state: AppModel.DisplayState
@@ -65,13 +47,12 @@ struct PanelHealthView: View {
 
   private enum SurfaceMode { case history, now }
 
-  /// The lens names in `SurfaceMode`'s own order, so the segments and the
-  /// binding below cannot come to disagree about which one index 0 is.
+  /// In `SurfaceMode`'s own order, so the segments and the binding below cannot
+  /// disagree about which lens index 0 is.
   private static let lensNames = ["History", "Right now"]
 
-  /// `ThemedSegments` chooses by index; the surface reasons in lenses. One
-  /// adapter, and an out-of-range write lands on the history lens rather than
-  /// on nothing.
+  /// `ThemedSegments` chooses by index; the surface reasons in lenses. An
+  /// out-of-range write lands on the history lens rather than on nothing.
   private var lensSelection: Binding<Int> {
     Binding(
       get: { surfaceMode == .now ? 1 : 0 },
@@ -79,11 +60,10 @@ struct PanelHealthView: View {
   }
 
   private var persistenceKey: String { state.display.persistenceKey }
-  /// Live handle, used only to ask macOS about the panel's current geometry.
-  /// Never persisted and never a key: IDs reassign across a replug. Staleness
-  /// is kept out by `DisplayHealthWindowRoot`, which resolves the key against
-  /// the connected set each render and closes the window on departure
-  /// (OCR-A1), so this view only ever renders for a connected display.
+  /// Used only to ask macOS about the panel's current geometry. Never persisted
+  /// and never a key: IDs reassign across a replug. `DisplayHealthWindowRoot`
+  /// resolves the key against the connected set each render, so this view only
+  /// ever renders for a connected display.
   private var displayID: CGDirectDisplayID? { state.display.id }
 
   private var displayName: String {
@@ -92,31 +72,27 @@ struct PanelHealthView: View {
       hardwareName: state.display.name)
   }
 
-  /// The coordinator's single door. Non-mutating by contract: it is called
-  /// from a `body`, and it deliberately does not memoize the map it may have to
-  /// load, because populating an observation-tracked dictionary during view
-  /// update is a mutation SwiftUI would report.
+  /// The coordinator's single door. Non-mutating by contract: it is called from
+  /// a `body`, and it deliberately does not memoize the map it may load, because
+  /// populating an observation-tracked dictionary during view update is a
+  /// mutation SwiftUI would report.
   private var summary: PanelHealthSummary {
     model.oledCare.healthSummary(for: persistenceKey)
   }
 
-  /// Preflight only, never `CGRequestScreenCaptureAccess`: the prompting
-  /// calls in the app are the pane's telemetry toggle and the guided setup
-  /// flow's measured choice. Gated on a live display, because with nothing
-  /// attached there is no capture to be missing a grant for and the page is
-  /// pure history either way.
+  /// Preflight only, never `CGRequestScreenCaptureAccess`: the prompting calls
+  /// are the telemetry toggle and the guided setup flow.
   ///
-  /// Re-read on every render rather than once, because the grant genuinely does
-  /// come and go under a running app: each ad-hoc re-sign of a deployed build
-  /// can drop it (CLAUDE.md §3), and so can a revocation in System Settings.
+  /// Re-read on every render, because the grant does come and go under a running
+  /// app: an ad-hoc re-sign of a deployed build can drop it, and so can a
+  /// revocation in System Settings.
   private var screenRecordingMissing: Bool {
     !CGPreflightScreenCaptureAccess()
   }
 
-  /// This display's lighting, by its position among the connected externals:
-  /// the same rule the settings sidebar and its canvas use, so this window and
-  /// the page it was opened from are lit alike (SV11: opened from settings, so
-  /// it must not look like a different app).
+  /// This display's lighting, by its position among the connected externals: the
+  /// sidebar's own rule, so this window and the page it was opened from are lit
+  /// alike (SV11).
   private var accent: SettingsAccent {
     guard
       let index = model.displays.firstIndex(where: {
@@ -135,23 +111,20 @@ struct PanelHealthView: View {
       deleteRow
     }
     .padding(20)
-    // Content-sized window (OCR-A1): the column's width decides the window's
-    // width and the sections' heights decide its height, with the map capped
-    // below so a portrait display cannot run the window off the screen.
-    // Deliberately NO ScrollView: a flexible scroll container reports no
-    // ideal height of its own, which collapses a `.contentSize` window.
-    // The page title is the window's title bar; `SubPageHeader` would draw
-    // it a second time (the duplicated-title defect), so the switcher stands
-    // alone at the trailing edge.
+    // Content-sized window (OCR-A1): this column's width and the sections'
+    // heights decide the window's size, with the map capped below so a portrait
+    // display cannot run it off the screen. Deliberately NO ScrollView: a
+    // flexible scroll container reports no ideal height and collapses a
+    // `.contentSize` window. The title bar is the page title, so the switcher
+    // stands alone rather than under a second one.
     .frame(width: 560, alignment: .leading)
-    // The settings window's ground, lit by this display's own hue. A
-    // BACKGROUND and never a container: a background is laid out against the
+    // A BACKGROUND and never a container: a background is laid out against the
     // content it sits behind, so the canvas cannot reach the fitting size the
-    // window is built from. A `ZStack` would, and would collapse the window
-    // to the canvas's own ideal size.
+    // window is built from. A `ZStack` would, collapsing the window to the
+    // canvas's own ideal size.
     .background { SettingsCanvas(accent: accent.accent, secondary: accent.secondary) }
-    // Published for the whole page, so every card, kicker and button reads
-    // this display's lighting the way the settings pages do.
+    // Published for the whole page, so every card, kicker and button reads this
+    // display's lighting.
     .environment(\.settingsAccent, accent)
     .confirmationDialog(
       "Delete this display's measurement history?",
@@ -159,10 +132,9 @@ struct PanelHealthView: View {
       titleVisibility: .visible
     ) {
       Button("Delete", role: .destructive) {
-        // The coordinator's own one-step clear, covering memory, disk and the
-        // window attribution derived from it, under its epoch guard so a
-        // capture already in flight cannot re-book into what was just deleted.
-        // Never re-implemented here.
+        // The coordinator's one-step clear: memory, disk and the window
+        // attribution derived from it, under its epoch guard so a capture in
+        // flight cannot re-book into what was just deleted. Never re-implement.
         model.oledCare.clearExposureHistory(for: persistenceKey)
       }
       Button("Cancel", role: .cancel) {}
@@ -176,9 +148,9 @@ struct PanelHealthView: View {
 
   // MARK: - Chrome
 
-  /// `SubPageHeader`'s switcher half without its title half: the window's
-  /// title bar already says Heat Map. Same callback contract (SO23):
-  /// a persistence key out, navigation meaning owned by the caller.
+  /// `SubPageHeader`'s switcher half without its title half: the window's title
+  /// bar already says Heat Map. Same callback contract (SO23): a persistence key
+  /// out, navigation meaning owned by the caller.
   @ViewBuilder private var switcherRow: some View {
     if displays.count > 1 {
       HStack {
@@ -199,29 +171,25 @@ struct PanelHealthView: View {
 
   private var deleteRow: some View {
     Button("Delete History…", role: .destructive) { confirmingDelete = true }
-      // The window's own destructive style: warning red, never the display's
-      // accent, which everywhere else means "this is on".
+      // Warning red, never the display's accent, which everywhere else in this
+      // window means "this is on".
       .buttonStyle(SettingsDangerButtonStyle())
       .accessibilityLabel("Delete History…")
   }
 
   // MARK: - Confidence
 
-  /// The one place the states are told apart, so a reader of this file can
-  /// check the honesty rule in one screen rather than by tracing `if`s through
-  /// the layout.
+  /// The one place the states are told apart, so the honesty rule is checkable
+  /// in one screen rather than by tracing `if`s through the layout.
   ///
   /// Order matters. Safe Mode and a missing grant both stop readings dead while
-  /// `confidence` carries on reporting whatever the stored sample count says,
-  /// so each is tested BEFORE the switch. Anything else lets the green
-  /// "Measured" banner claim a reading a minute in a session that has taken
-  /// none.
+  /// `confidence` carries on reporting the stored sample count, so each is tested
+  /// BEFORE the switch. Otherwise the "Measured" banner claims a reading a minute
+  /// in a session that has taken none.
   @ViewBuilder private func confidenceNote(_ summary: PanelHealthSummary) -> some View {
     if model.isSafeMode {
       // `OledCareCoordinator.start` returns before it builds the driver loop in
-      // a safe-mode session, so nothing on this page has a live producer behind
-      // it. Same statement as the pane's status row, which is where a reader
-      // arrives from.
+      // a safe-mode session, so nothing here has a live producer behind it.
       PanelHealthBanner(
         symbol: "pause.circle",
         title: Text("Paused for this session (Safe Mode)"),
@@ -229,11 +197,9 @@ struct PanelHealthView: View {
           "Shift was held at launch, so no new readings are being taken and no hours are accumulating. Everything shown here was recorded before this session."
         ))
     } else if summary.confidence != .estimated, screenRecordingMissing {
-      // Telemetry is switched on and macOS is not letting us capture. Two very
-      // different arrivals: a display that has never had the grant, and one
-      // measured for weeks whose grant went away under it. The difference is
-      // whether the page has history to stand on, so the title is the same and
-      // the second half is not.
+      // Telemetry on, macOS not letting us capture. Two arrivals: a display
+      // that never had the grant, and one measured for weeks whose grant went
+      // away. The difference is whether the page has history to stand on.
       PanelHealthBanner(
         symbol: "exclamationmark.triangle",
         title: Text("Waiting on Screen Recording"),
@@ -257,10 +223,9 @@ struct PanelHealthView: View {
         PanelHealthBanner(
           symbol: "questionmark.circle",
           title: Text("Estimated: brightness is not being measured"),
-          // The second sentence names a producer, so it has to check that the
-          // producer is running. Window observation is its own pref and can be
-          // off on its own; with both off the page was claiming window geometry
-          // while the list below it read "No data yet".
+          // The second sentence names a producer, so it checks the producer is
+          // running: window observation is its own pref, and with both off the
+          // page claimed window geometry over a list reading "No data yet".
           message: summary.observationEnabled
             ? Text(
               "Measuring is off for this display, so nothing here comes from the screen itself. What is left is window geometry: which app held which part of the display, and for how long. Turn on \"Measure how bright each part of this display is\" in OLED Care to record what the display is actually showing."
@@ -281,16 +246,13 @@ struct PanelHealthView: View {
 
   // MARK: - Map
 
-  /// The map as an instrument (OCR5): the heat surface drawn the way the
-  /// monitor hangs on the desk (`PanelExposureSurface` re-orders a rotated
-  /// display's history for presentation; storage stays panel-native), with
-  /// the lens picker, the window outlines and the crosshair readout, all
-  /// moved here from the old pane hero.
+  /// The map as an instrument (OCR5), drawn the way the monitor hangs on the
+  /// desk (`PanelExposureSurface` re-orders a rotated display's history for
+  /// presentation; storage stays panel-native).
   ///
-  /// The one section with no card under it. The map is this window's reason to
-  /// exist, and a card would both frame the instrument as one fact among
-  /// several and squeeze its measured width by the card's own padding; the
-  /// sections that state facts about it are carded below.
+  /// The one section with no card under it: a card would frame the instrument as
+  /// one fact among several and squeeze its measured width by the card's
+  /// padding.
   @ViewBuilder private func mapSection(_ summary: PanelHealthSummary) -> some View {
     let live = model.oledCare.latestSample(for: persistenceKey)
     let historyBlank = summary.confidence != .measured
@@ -299,37 +261,32 @@ struct PanelHealthView: View {
       ?? CGFloat(PanelGrid.cols) / CGFloat(PanelGrid.rows)
     let mapSize = Self.mapSize(aspect: aspect)
     let rotation = OledPanelGeometry.rotation(for: displayID)
-    // The displayed cells are the one truth every sub-layer (surface, ghosts,
-    // crosshair readout) shares, so the inspection can never describe a frame
-    // the surface is not drawing.
+    // One truth shared by every sub-layer (surface, ghosts, crosshair readout),
+    // so the inspection can never describe a frame the surface is not drawing.
     let displayed: [Double]? =
       surfaceMode == .history ? (historyBlank ? nil : summary.cells) : live?.cells
 
     VStack(alignment: .leading, spacing: 10) {
-      // The page's hero heading, and deliberately not a card kicker: the
-      // carded sections below announce themselves in small caps, and this one
-      // titles the picture rather than a group of rows.
+      // A hero heading, not a card kicker: it titles the picture rather than a
+      // group of rows.
       Text("Where this display has been lit")
         .font(.subheadline.weight(.semibold))
         .foregroundStyle(SettingsTheme.titleColor)
-        // The kicker's own inset, so this heading and the two card kickers
-        // below share a left edge.
+        // The kicker's own inset, so this heading and the card kickers below
+        // share a left edge.
         .padding(.leading, 4)
         .settingsHeading()
 
       HStack(spacing: 12) {
-        // The window's segments rather than the native segmented control,
-        // whose selected segment fills with the SYSTEM accent: the same hue
-        // the toggle below refuses for the same reason.
+        // The window's segments rather than the native control, whose selected
+        // segment fills with the SYSTEM accent.
         ThemedSegments(options: Self.lensNames, selection: lensSelection)
           // A container element, because the segments themselves are the
-          // buttons: the written label names the group, each segment keeps
-          // its own name and its selected trait.
+          // buttons: each keeps its own name and its selected trait.
           .accessibilityElement(children: .contain)
           .accessibilityLabel("Map shows")
-        // The window's switch rather than a bordered toggle button: a button
-        // toggle fills with the SYSTEM accent when on, the one hue this
-        // window never borrows.
+        // The window's switch rather than a bordered toggle button, which fills
+        // with the SYSTEM accent when on.
         Toggle("Windows", isOn: $showsWindowGhosts)
           .themedSwitch(spreads: false)
           .help("Outline the windows on this display, from the same permission-free snapshot app attribution uses.")
@@ -352,9 +309,9 @@ struct PanelHealthView: View {
           }
         }
         .overlay {
-          // The marked cell explains itself on the map (OCR8): here the tag
-          // carries the whole finding, because this page IS the reading
-          // instrument. History lens only; the live lens marks nothing.
+          // The tag carries the whole finding here (OCR8), because this page IS
+          // the reading instrument. History lens only; the live lens marks
+          // nothing.
           if surfaceMode == .history, let relative = summary.hottestRelative,
             let multiple = PanelHealthCopy.multiple(relative)
           {
@@ -371,15 +328,12 @@ struct PanelHealthView: View {
               rotation: rotation)
           }
         }
-        // An EXPLICIT frame, not an aspect box (OCR-A1): under the health
-        // window's `preferredContentSize` hosting, a flexible frame plus
-        // `aspectRatio` reports no ideal height and collapses to nothing
-        // [MEASURED 2026-08-17: the window rendered every section except the
-        // map]. The concrete size keeps a portrait map at 470 pt tall
-        // (Dell: 264 x 470) and a landscape one width-capped (MAG:
-        // 520 x 218), and it sits OUTSIDE the overlays so the crosshair's
-        // GeometryReader and the hotspot tag keep describing exactly the
-        // drawn map.
+        // An EXPLICIT frame, not an aspect box (OCR-A1): under this window's
+        // `preferredContentSize` hosting, a flexible frame plus `aspectRatio`
+        // reports no ideal height and collapses to nothing [MEASURED 2026-08-17:
+        // the window rendered every section except the map]. It sits OUTSIDE the
+        // overlays so the crosshair's GeometryReader and the hotspot tag keep
+        // describing exactly the drawn map.
         .frame(width: mapSize.width, height: mapSize.height)
         .frame(maxWidth: .infinity)
         PanelExposureLegend()
@@ -390,9 +344,8 @@ struct PanelHealthView: View {
             .fixedSize(horizontal: false, vertical: true)
         }
       } else {
-        // A recessed well, the same one the OLED Care hero draws behind a
-        // blank map: on this canvas a filled tile reads as a broken picture
-        // rather than as a place a picture will arrive.
+        // A recessed well, the OLED Care hero's: on this canvas a filled tile
+        // reads as a broken picture rather than as a pending one.
         RoundedRectangle(cornerRadius: 5, style: .continuous)
           .fill(Color.black.opacity(0.22))
           .overlay {
@@ -404,23 +357,19 @@ struct PanelHealthView: View {
           .frame(width: mapSize.width, height: mapSize.height)
           .frame(maxWidth: .infinity)
           .accessibilityHidden(true)
-        // `summary.cells` is the accumulated history and is populated whatever
-        // the confidence, so blanking the drawing must not also claim there is
-        // nothing behind it: a display measured for a month and then switched
-        // off still has that month, and this caption sits one button away from
-        // "Delete History…". Only `.insufficient` may say nothing was measured,
-        // because that state IS a map with fewer than
-        // `minimumSamplesForAnalysis` samples in it.
+        // `summary.cells` is populated whatever the confidence, so blanking the
+        // drawing must not also claim there is nothing behind it: a display
+        // measured for a month and then switched off still has that month. Only
+        // `.insufficient` may say nothing was measured, because that state IS a
+        // map under `minimumSamplesForAnalysis` samples.
         SettingsCaption(verbatim: mapPlaceholder(summary, mode: surfaceMode))
       }
     }
   }
 
-  /// The map's concrete size (OCR-A1): a portrait display's map stands
-  /// 470 pt tall and narrows to its aspect; a landscape one is capped at
-  /// 520 pt wide. One formula, both cases: the height cap wins wherever it
-  /// produces the narrower map. Explicit on purpose, because the health
-  /// window's `preferredContentSize` hosting collapses flexible frames.
+  /// The map's concrete size (OCR-A1): one formula for both orientations, the
+  /// height cap winning wherever it produces the narrower map. Explicit on
+  /// purpose, because `preferredContentSize` hosting collapses flexible frames.
   private static func mapSize(aspect: CGFloat) -> CGSize {
     let width = min(520, 470 * max(aspect, 0.01))
     return CGSize(width: width, height: width / max(aspect, 0.01))
@@ -442,15 +391,13 @@ struct PanelHealthView: View {
       : "Nothing measured to draw yet. Readings are taken once a minute while this display is awake and in use."
   }
 
-  /// Current window rectangles over the surface, the geometry model made
-  /// visible. Same layer policy as the exposure model, so what is outlined is
-  /// what the estimate counts; below-zero backdrop layers stay out.
+  /// Current window rectangles over the surface. Same layer policy as the
+  /// exposure model, so what is outlined is what the estimate counts.
   private var ghostCanvas: some View {
     let windows = model.oledCare.latestWindowSnapshots(for: persistenceKey)
     let display = OledCareCoordinator.transform(for: state.display.id)?.displaySize
     // Direct display-local mapping: the surface is drawn in display
-    // orientation, so a window rect lands exactly where the eye expects,
-    // with no panel transform in between.
+    // orientation, so a window rect needs no panel transform in between.
     return Canvas { context, size in
       guard let display, display.width > 0, display.height > 0 else { return }
       for window in windows where ExposureModel.includedLayers.contains(window.layer) {
@@ -474,10 +421,9 @@ struct PanelHealthView: View {
     .allowsHitTesting(false)
   }
 
-  /// Crosshair and readout under the pointer: the map as an instrument you
-  /// can interrogate. History mode reads the accumulated cell against the
-  /// map's own mean; Right now reads the live luminance. Both say only what
-  /// the displayed array holds.
+  /// Crosshair and readout under the pointer. History reads the accumulated cell
+  /// against the map's own mean, Right now reads the live luminance, and both
+  /// say only what the displayed array holds.
   @ViewBuilder private func inspection(
     displayed: [Double], summary: PanelHealthSummary, size: CGSize,
     rotation: DisplayRotation
@@ -493,8 +439,8 @@ struct PanelHealthView: View {
       .overlay {
         if let point = hoverPoint, size.width > 0, size.height > 0 {
           // Pointer to PANEL cell through the shared transform, so a rotated
-          // display's readout describes the cell under the pointer, not the
-          // cell at those coordinates in the manufactured frame.
+          // display's readout describes the cell under the pointer, not the one
+          // at those coordinates in the manufactured frame.
           let mapper = PanelSpaceTransform(
             displaySize: CGSize(width: 1, height: 1), rotation: rotation)
           let panelPoint = mapper.panelPointForDisplay(
@@ -562,14 +508,13 @@ struct PanelHealthView: View {
 
 // MARK: - Window root
 
-/// The Display Health window's root (OCR-A1, #185): resolves its persistence
-/// key against the connected externals, keeps the switcher's list fresh, and
-/// closes the window when its display departs, the same rule that pops a
-/// pushed path on departure. Hosted by `DisplayHealthWindowPresenter` (an
+/// The Heat Map window's root (OCR-A1): resolves its persistence key against
+/// the connected externals, keeps the switcher's list fresh, and closes the
+/// window when its display departs. Hosted by `DisplayHealthWindowPresenter` (an
 /// AppKit island; a `WindowGroup` measurably changed plain-launch behavior),
-/// which supplies the two closures: `close` closes THIS window, and `rekey`
-/// tells the presenter the switcher repointed it, so the comparison workflow
-/// (SO23) stays one window deep and a later open finds the truth.
+/// which supplies both closures: `close` closes THIS window, and `rekey` tells
+/// the presenter the switcher repointed it, so the comparison workflow (SO23)
+/// stays one window deep.
 @MainActor
 struct DisplayHealthWindowRoot: View {
   let initialKey: String
@@ -583,8 +528,8 @@ struct DisplayHealthWindowRoot: View {
   @Environment(AppModel.self) private var model
 
   var body: some View {
-    // Rename dependency, the switcher's rule: names come from `friendlyName`
-    // and `DisplayPrefs` has no observation of its own.
+    // Rename dependency: names come from `friendlyName`, and `DisplayPrefs` has
+    // no observation of its own.
     let _ = model.prefsRevision
     let key = currentKey ?? initialKey
     Group {
@@ -597,13 +542,13 @@ struct DisplayHealthWindowRoot: View {
             currentKey = newKey
           }
         )
-        // A display switch resets page state (SO10's lesson: the lens and
-        // ghost toggles describe one display's map, not a session).
+        // A display switch resets page state: the lens and ghost toggles
+        // describe one display's map, not a session.
         .id(key)
       } else {
-        // One frame of a departed display's window before `close` lands;
-        // never a blank white sheet. Neutral lighting: the display whose hue
-        // this window carried is the one that just left.
+        // One frame of a departed display's window before `close` lands, never
+        // a blank white sheet. Neutral lighting: the display whose hue this
+        // window carried is the one that just left.
         Text("This display is not connected.")
           .foregroundStyle(SettingsTheme.bodyColor)
           .padding(40)
@@ -614,8 +559,8 @@ struct DisplayHealthWindowRoot: View {
           }
       }
     }
-    // Dark-only (SV2), belt to the window's own `darkAqua`: every colour in
-    // this window comes from the theme layer and none has a light answer.
+    // Dark-only (SV2), belt to the window's own `darkAqua`: every colour here
+    // comes from the theme layer and none has a light answer.
     .preferredColorScheme(.dark)
     .onChange(of: model.displays.map(\.display.persistenceKey), initial: true) { _, connected in
       if !connected.contains(key) {
@@ -638,11 +583,8 @@ struct DisplayHealthWindowRoot: View {
 
 // MARK: - Banner
 
-/// Symbol AND text, never state by colour alone: the same rule the OLED Care
-/// pane's Safe Mode note follows, and the reason an inactive window (which
-/// draws every accent in grey) cannot make this unreadable. The card is the
-/// settings window's notice chrome, so a state note here and one in the
-/// banner region read as the same kind of statement.
+/// Symbol AND text, never state by colour alone, which is also why an inactive
+/// window (drawing every accent grey) cannot make this unreadable.
 private struct PanelHealthBanner: View {
   let symbol: String
   let title: Text
@@ -672,23 +614,21 @@ private struct PanelHealthBanner: View {
 
 /// The stored grid, drawn at the shape of the display it came from.
 ///
-/// Always `PanelGrid.cols` × `PanelGrid.rows` in PANEL-NATIVE order regardless
-/// of how the display is rotated: `PanelSpaceTransform` re-bins every sample
-/// into that orientation before it is accumulated, so this view never rotates
-/// anything and must not start.
+/// Always `PanelGrid.cols` by `PanelGrid.rows` in PANEL-NATIVE order whatever
+/// the rotation: `PanelSpaceTransform` re-bins every sample into that
+/// orientation before it is accumulated, so this view never rotates anything and
+/// must not start.
 struct PanelExposureMap: View {
   let cells: [Double]
   let highlighted: Int?
   /// Draw the grid empty. A blank grid is the honest picture of "measured
-  /// nothing"; drawing near-zero values instead produces a faint pattern that
-  /// reads as data.
+  /// nothing"; near-zero values draw a faint pattern that reads as data.
   let blank: Bool
   /// Panel-native width / height of the display this history belongs to. Nil
-  /// falls back to the grid's own 24:10, which is only correct where the
-  /// subject IS the grid rather than a display (`PanelGridMark`). The grid is
-  /// deliberately one fixed shape for every panel, so its cells are square on
-  /// the MAG and 35% taller than wide on the Dell; drawing every display at
-  /// 24:10 would show the Dell's history stretched sideways.
+  /// falls back to the grid's own ratio, which is only correct where the subject
+  /// IS the grid rather than a display (`PanelGridMark`). The grid is one fixed
+  /// shape for every panel, so drawing every display at it stretches any history
+  /// from a panel of another shape.
   var aspect: CGFloat?
 
   var body: some View {
@@ -703,10 +643,10 @@ struct PanelExposureMap: View {
             width: cellWidth, height: cellHeight
           ).insetBy(dx: 0.75, dy: 0.75)
           let path = Path(roundedRect: rect, cornerRadius: 2)
-          // Fixed white rather than `Color.primary`, for the ramp's own
-          // reason: every surface that draws this grid is dark by
-          // construction, and a cell that answered the system appearance
-          // would make one panel's history two different pictures.
+          // Fixed white rather than `Color.primary`, the ramp's own reason:
+          // every surface that draws this grid is dark by construction, and a
+          // cell answering the system appearance would make one panel's history
+          // two different pictures.
           context.fill(path, with: .color(Color.white.opacity(0.07)))
           if !blank, cells.indices.contains(index), cells[index] > 0 {
             context.fill(path, with: .color(PanelExposureScale.color(cells[index])))
@@ -731,8 +671,8 @@ struct PanelExposureMap: View {
 }
 
 /// The ramp's key, since a heat map with no key is a picture rather than a
-/// reading. Deliberately "less/more" and not a unit: the scale is each cell
-/// against this panel's own peak, which has no absolute meaning.
+/// reading. "less/more" and not a unit: the scale is each cell against this
+/// panel's own peak, which has no absolute meaning.
 struct PanelExposureLegend: View {
   var body: some View {
     HStack(spacing: 8) {
@@ -750,12 +690,10 @@ struct PanelExposureLegend: View {
   }
 }
 
-/// A sequential ramp with fixed sRGB anchors rather than semantic colours.
-///
-/// Fixed on purpose: this is quantitative encoding, and a ramp that changed
-/// between light and dark appearance would make the same panel history look
-/// like two different measurements. The anchors keep a monotonic lightness
-/// climb so the ordering survives being read in greyscale.
+/// A sequential ramp with fixed sRGB anchors rather than semantic colours: this
+/// is quantitative encoding, and a ramp that changed between light and dark
+/// appearance would make one panel's history look like two measurements. The
+/// anchors climb monotonically in lightness, so the ordering survives greyscale.
 enum PanelExposureScale {
   private static let anchors: [(r: Double, g: Double, b: Double)] = [
     (0.13, 0.15, 0.32),
@@ -782,13 +720,11 @@ enum PanelExposureScale {
   }
 }
 
-/// The grid at glyph size, so the telemetry toggle's "at about the resolution
-/// of this grid" has a grid to point at. Same dimensions as the real map: the
-/// sentence is a claim about resolution, so a decorative stand-in with a
-/// different cell count would make it false.
-///
-/// Drawn at the grid's own 24:10 and NOT at any display's aspect, because here
-/// the subject really is the stored grid.
+/// The grid at glyph size, so the telemetry toggle's "at about the resolution of
+/// this grid" has a grid to point at. Same dimensions as the real map, because
+/// the sentence is a claim about resolution and a stand-in with a different cell
+/// count would make it false. Drawn at the grid's own ratio, not any display's:
+/// here the subject really is the stored grid.
 struct PanelGridMark: View {
   var body: some View {
     PanelExposureMap(cells: [], highlighted: nil, blank: true, aspect: nil)

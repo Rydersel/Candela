@@ -1,26 +1,22 @@
 /// What DDC READS from a display have proved.
 ///
-/// There is no `isWriteOnlyPanel` flag anywhere else in this codebase. Three
-/// detection sites existed and every one of them handled the condition and
-/// then forgot it, leaving the knowledge in comments where no row could read
-/// it. Two now publish it — `BrightnessController.refreshFromHardware` and
-/// `DDCValueController.refreshFromHardware`, both through this type. The third,
-/// `Arm64DDCService.readCapabilityString`, still forgets: it returns nil on a
-/// failed fragment and the caller learns only that there was no capability
-/// string, not whether the panel went silent or answered with nothing. Wiring
-/// that one up needs a decision about what a truncated string proves, which is
-/// why it is named here rather than quietly left out.
+/// There is no `isWriteOnlyPanel` flag anywhere else in this codebase.
+/// `BrightnessController.refreshFromHardware` and
+/// `DDCValueController.refreshFromHardware` publish through this type.
+/// `Arm64DDCService.readCapabilityString` does not: it returns nil on a failed
+/// fragment, so its caller cannot tell a panel that went silent from one that
+/// answered with nothing. Wiring it up needs a decision about what a truncated
+/// string proves.
 ///
 /// [MEASURED] The MAG 341C answers every DDC read with zeros — verified across
 /// 13 timing/buffer combinations and 5 VCP codes. Silence about this is what
 /// let the fork's unvalidated reads clobber saved values to 0.
 ///
-/// Deliberately a pure value, not state on a controller-owner: `AppModel.DisplayState`
-/// holds `controller`, `volume` and `contrast` as SIBLINGS, so no one object is
-/// in a position to push a verdict down. Each site publishes what its own reads
-/// proved and the READER folds them with `worst(_:)` — an earlier draft of the
-/// spec assumed `BrightnessController` owned the `DDCValueController`s and could
-/// aggregate on their behalf; it does not.
+/// Deliberately a pure value, not state on a controller-owner:
+/// `AppModel.DisplayState` holds `controller`, `volume` and `contrast` as
+/// SIBLINGS, so no one object is in a position to push a verdict down. Each site
+/// publishes what its own reads proved and the READER folds them with
+/// `worst(_:)`.
 public enum DDCReadEvidence: Sendable, Equatable {
   /// No read has been attempted. The FLOOR, not a bad outcome.
   case notAttempted
@@ -43,23 +39,17 @@ public enum DDCReadEvidence: Sendable, Equatable {
     }
   }
 
-  /// Worst evidence wins: one `allZeros` is never cancelled by a
-  /// `notAttempted` or by a silent retry.
+  /// Worst evidence wins: one `allZeros` is never cancelled by a `notAttempted`
+  /// or by a silent retry. Without it, a panel that answered zeros on brightness
+  /// and then went quiet on the retry reports the vaguer "no reply", losing the
+  /// observation that names the fault.
   ///
-  /// The defect this prevents: without it, a panel that answered zeros on
-  /// brightness and then went quiet on the retry would report the vaguer
-  /// "no reply", losing the one observation that names the fault.
-  ///
-  /// SCOPE — read this before folding with it. `worse` is right WITHIN a
-  /// single read pass, and across a display's sibling controllers (see
-  /// `worst`). It is wrong ACROSS passes and across a successful retry: the
-  /// retry loop exists precisely because DDC reads are flaky, so "attempt 1
-  /// silent, attempt 2 answers" is the healthy case, and folding it
-  /// monotonically publishes "this display does not reply" about a panel that
-  /// just replied — a false sentence from the feature built to stop false
-  /// sentences. A read that eventually succeeded is a read that succeeded, and
-  /// a new pass supersedes the last one. The call sites are where that scope
-  /// is enforced, so it is pinned there and not only here.
+  /// SCOPE, read this before folding with it. `worse` is right WITHIN a single
+  /// read pass and across a display's sibling controllers (see `worst`). It is
+  /// wrong ACROSS passes and across a successful retry: DDC reads are flaky, so
+  /// "attempt 1 silent, attempt 2 answers" is the healthy case, and folding it
+  /// publishes "this display does not reply" about a panel that just replied.
+  /// The call sites are where that scope is enforced.
   public static func worse(_ lhs: DDCReadEvidence, _ rhs: DDCReadEvidence) -> DDCReadEvidence {
     lhs.severity >= rhs.severity ? lhs : rhs
   }

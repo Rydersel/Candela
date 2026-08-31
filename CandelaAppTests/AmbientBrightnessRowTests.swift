@@ -3,10 +3,9 @@ import CoreGraphics
 import SwiftUI
 import Testing
 
-// Whether the ambient auto-brightness row appears, and what it shows when it
-// does (AT4 layer 1). The rule is the whole feature at the view layer: the row
-// exists only where macOS has a sensor to act on, and it publishes only a state
-// macOS actually reported.
+// Whether the ambient auto-brightness row appears and what it shows (AT4
+// layer 1). The row exists only where macOS has a sensor to act on, and it
+// publishes only a state macOS reported.
 @Suite("Ambient brightness row") @MainActor
 struct AmbientBrightnessRowTests {
   private static let builtIn: CGDirectDisplayID = 1
@@ -46,10 +45,9 @@ struct AmbientBrightnessRowTests {
     #expect(rowState(displayID: Self.builtIn, isEnabled: false) == .shown(isOn: false))
   }
 
-  /// The degradation case the hardware list cannot reach by waiting for a
-  /// macOS release: run the real seam with every symbol missing, which is what
-  /// a dropped symbol and a failed dlopen both leave behind. The row is absent,
-  /// not present and inert.
+  /// Run the real seam with every symbol missing, which is what a dropped
+  /// symbol and a failed dlopen both leave behind. The row is absent, not
+  /// present and inert.
   @Test func missingSymbolsShowNoRow() {
     let degraded = AmbientLightCompensation(symbols: .none)
     let state = AmbientBrightnessRow.rowState(
@@ -59,9 +57,8 @@ struct AmbientBrightnessRowTests {
     #expect(state == .hidden)
   }
 
-  /// The same seam wired to symbols that all resolve, so the degraded result
-  /// above is a finding about the missing symbols and not about the seam
-  /// answering `.hidden` to everything.
+  /// The same seam with symbols that all resolve, so the degraded result above
+  /// is about the missing symbols and not a seam that answers `.hidden` to all.
   @Test func resolvedSymbolsShowTheRow() {
     let working = AmbientLightCompensation(symbols: AmbientLightSymbols(
       hasSensor: { _ in true },
@@ -74,11 +71,9 @@ struct AmbientBrightnessRowTests {
     #expect(state == .shown(isOn: true))
   }
 
-  /// Layer 2, and only the hidden branch: `AppModel.builtIn` reads real
-  /// discovery and cannot be scripted, so a fixture model has an empty slot on
-  /// every machine and the shown branch has no deterministic render. What this
-  /// covers is that `body` evaluates and the hidden branch draws nothing while
-  /// its `Form` still comes out at a plausible size.
+  /// Layer 2, hidden branch only: `AppModel.builtIn` reads real discovery and
+  /// cannot be scripted, so a fixture model has an empty slot on every machine.
+  /// This covers that `body` evaluates and the `Form` still lays out.
   @Test func theHiddenRowRendersNothingAndBreaksNothing() {
     let model = TestFixtures.appModel()
     let form = Form {

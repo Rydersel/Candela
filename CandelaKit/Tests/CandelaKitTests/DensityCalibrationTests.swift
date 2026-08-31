@@ -2,24 +2,18 @@ import Testing
 @testable import CandelaKit
 
 /// The calibration ledger the density model's constants are pinned against.
-///
-/// Every other suite states a RULE and picks the one or two sizes that show it.
-/// This one states the OUTCOME: the complete curated size list each of the
-/// three measured panels produces with its physical geometry supplied, plus the
-/// band membership of the densities the band edges were chosen around. A
-/// constant nudged by a point or two rarely breaks a rule, but it moves these
-/// lists, and the move is the thing worth seeing.
+/// Other suites state a rule and pick the sizes that show it; this one states the
+/// outcome, the whole curated list each measured panel produces. A constant nudged
+/// by a point rarely breaks a rule, but it moves these lists.
 @Suite("Density calibration ledger")
 struct DensityCalibrationTests {
   private static func sizes(_ rows: [DisplayModeRow]) -> [String] {
     rows.map { "\($0.mode.logicalWidth)x\($0.mode.logicalHeight)" }
   }
 
-  /// Revelation's three mid-ladder rungs are merged in deliberately: they are
-  /// the sizes the flat 720 floor cut and the density floor brings back, so a
-  /// ledger of the published ladder alone would not notice losing them again.
-  /// They interleave by area rather than sitting at the end, which is the
-  /// curated sort doing its job across two sources.
+  /// The revealed mid-ladder rungs are merged in because the flat 720 floor cut
+  /// them and the density floor brings them back, which a ledger of the published
+  /// ladder alone would not notice losing again. They interleave by area.
   @Test func magCuratedSetWithGeometry() {
     let rows = DisplayModeCatalog.curated(
       DisplayModeFixtures.mag + DisplayModeFixtures.magRevealedMidLadder,
@@ -57,13 +51,10 @@ struct DensityCalibrationTests {
     ])
   }
 
-  /// The three densities the band edges were chosen around, each with its
-  /// placement. Two must be inside or the model shouts at desktops that already
-  /// look right; one must be outside or it never speaks at all.
-  ///
-  /// The 27-inch 5K is not a panel on the rig, so its geometry is built here:
-  /// 5120x2880 in the same 27-inch shell the Dell declares, which is what makes
-  /// it the reference point for "what macOS considers normal".
+  /// The densities the band edges were chosen around. Two must be inside or the
+  /// model shouts at desktops that already look right; one must be outside or it
+  /// never speaks at all. The 27-inch 5K is not on the rig, so its geometry is
+  /// built from the Dell's shell: it is the reference for what macOS calls normal.
   @Test func theBandAnchorsSitWhereTheConstantsClaim() throws {
     let fiveK = PanelGeometry(
       nativePixelWidth: 5120, nativePixelHeight: 2880,
@@ -84,14 +75,10 @@ struct DensityCalibrationTests {
     }
   }
 
-  /// The three anchors above sit deep inside the band (108.4 and 128.0) or far
-  /// outside it (162.6), so either edge could move several points before any of
-  /// them noticed. These four straddle the edges instead: two just inside, two
-  /// just outside, close enough that a one-point retune shows up here first.
-  ///
-  /// They are edge pins, not rungs anyone chooses. 1147x745 and 1800x3200 are
-  /// real fixture sizes and the other two are invented, but all four are here
-  /// for the density they produce on a real panel's geometry, nothing else.
+  /// The anchors above sit deep inside the band or far outside it, so an edge could
+  /// move several points unnoticed. These straddle the edges instead, close enough
+  /// that a one-point retune shows up here first. Edge pins, not rungs anyone
+  /// chooses: two are invented sizes, kept only for the density they produce.
   @Test func theBandEdgesRejectTheSizesJustOutsideThem() throws {
     for (label, width, height, geometry, expected, placement) in [
       ("just inside the low edge", 1147, 745, PanelDensityModelTests.builtIn,
@@ -113,7 +100,6 @@ struct DensityCalibrationTests {
   }
 }
 
-// These arrays ARE the calibration ledger. They are transcribed from a run, not
-// reasoned out, so a failure here is not a bug report: it says a constant moved
-// and these are the sizes it moved. A retune edits them deliberately, in the
-// same commit as the constant, and the diff is the review artifact.
+// These arrays are transcribed from a run, not reasoned out, so a failure here is
+// not a bug report: it says a constant moved and names the sizes it moved. A retune
+// edits them in the same commit as the constant.

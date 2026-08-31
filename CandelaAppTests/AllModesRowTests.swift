@@ -2,17 +2,15 @@ import CandelaKit
 import CoreGraphics
 import Testing
 
-// The rows All Sizes & Refresh Rates puts on screen, derived from a catalog
-// and asserted without a window (AT4 layer 1, AT5).
+// Rows for All Sizes & Refresh Rates, derived from a catalog and asserted
+// without a window (AT4 layer 1, AT5).
 //
-// The defect this exists to catch: enumeration and apply both worked, the Kit
-// suite was green, and the picker still showed 15 rows with 0 of them revealed.
-// Every revealed mode shares a logical size with a CoreGraphics 1x mode,
-// CoreGraphics ids are always the lower ones, and a representative chosen on
-// lowest id therefore handed every size group to the blurry twin. Nothing
-// between the catalog and the pixels could see it, which is what these tests
-// change: the fixtures below carry that exact collision, so a regression that
-// drops the revealed modes out of the rows fails here.
+// The defect this exists to catch: enumeration and apply both worked and the
+// Kit suite was green, yet not one row in the picker was a revealed mode. Every
+// revealed mode shares a logical size with a CoreGraphics 1x mode and the
+// CoreGraphics id is always the lower one, so a representative chosen on lowest
+// id handed every size group to the blurry twin. The fixtures below carry that
+// collision.
 @Suite("All modes rows") @MainActor
 struct AllModesRowTests {
   // MARK: - The revelation shape
@@ -21,8 +19,8 @@ struct AllModesRowTests {
     let rows = AllModesPage.rows(
       in: ModeFixtures.catalog(), listMode: .recommended, rateFilter: nil, expandedSizes: [])
 
-    // One row per size, largest first: the collision size is present exactly
-    // once, and the row is the REVEALED mode rather than its 1x twin.
+    // One row per size, largest first, and the collision size resolves to the
+    // revealed mode rather than its 1x twin.
     #expect(rows.map(\.id) == ["mode-5", "mode-30", "mode-101"])
 
     let collision = try #require(rows.first { $0.title == "1920 × 804" })
@@ -31,9 +29,8 @@ struct AllModesRowTests {
     #expect(collision.detail == "175 Hz · Scaled")
   }
 
-  /// Provenance has to survive the derivation twice over: into the mark the row
-  /// wears, and into the mode a press would apply. A row that looks right and
-  /// applies the 1x twin is the same defect one layer down.
+  /// Provenance has to reach both the row's mark and the mode a press applies.
+  /// A row that looks right and applies the 1x twin is the defect one layer down.
   @Test func provenanceReachesBothTheMarkAndTheAppliedMode() throws {
     let rows = AllModesPage.rows(
       in: ModeFixtures.catalog(), listMode: .recommended, rateFilter: nil, expandedSizes: [])
@@ -49,11 +46,8 @@ struct AllModesRowTests {
     #expect(applied.isRevealed)
   }
 
-  /// The control for the two tests above: it shows what they would see if
-  /// curation regressed to a lowest-id tie-break, which is the state the picker
-  /// was actually shipped in. Nothing here asserts desired behavior; it asserts
-  /// that the assertions above can fail, by feeding the derivation the rows the
-  /// broken curation produced.
+  /// Control for the two tests above: feed the derivation the rows a lowest-id
+  /// tie-break produced, the state the picker shipped in, and they flip.
   @Test func aSizeGroupLostToItsBlurryTwinLosesTheMarkAndTheMode() throws {
     let regressed = ModeFixtures.catalog(
       curating: [DisplayModeRow(mode: ModeFixtures.blurry1920, isScaled: true)])
@@ -155,9 +149,8 @@ struct AllModesRowTests {
     #expect(current.isCurrent)
   }
 
-  /// The id-only derivation the arrow keys, the rotor and the scroll heuristic
-  /// walk is a second implementation of this ordering, kept for the cost of the
-  /// strings it skips. It has to agree with the rows the list draws.
+  /// The arrow keys, the rotor and the scroll heuristic walk a second, id-only
+  /// derivation of this ordering. It has to agree with the rows the list draws.
   @Test func theIdOnlyOrderMatchesTheRowsTheListDraws() {
     let catalog = ModeFixtures.catalog()
     let states: [(AllModesPage.ListMode, Double?, Set<String>)] = [
@@ -178,13 +171,10 @@ struct AllModesRowTests {
 
   // MARK: - Duplicates
 
-  /// PINNED AS-IS, imperfections included. Two modes with the same logical
-  /// size, the same framebuffer and the same rate produce two full-list rows
-  /// that differ in nothing a reader can see: same title, same detail, same
-  /// marks. Only the row id and the mode a press applies tell them apart.
-  ///
-  /// The curated list collapses them to one, and the survivor is the lower
-  /// `ioModeID` because every earlier tie-break has already tied.
+  /// PINNED AS-IS, imperfections included. Two modes with the same size,
+  /// framebuffer and rate draw two full-list rows a reader cannot tell apart;
+  /// only the row id and the mode a press applies differ. The curated list keeps
+  /// the lower `ioModeID` because every earlier tie-break has already tied.
   @Test func duplicateGeometryAndRateRowsAreNotDeduplicated() throws {
     let catalog = ModeFixtures.duplicateCatalog()
     let size = AllModesPage.RowID.size(width: 1280, height: 536)
@@ -207,8 +197,8 @@ struct AllModesRowTests {
 }
 
 /// A MAG-shaped panel carrying the collision the revelation defect turned on:
-/// one logical size offered by CoreGraphics at 1x and by our own enumeration at
-/// 2x, with the CoreGraphics id the lower of the two.
+/// one logical size at 1x from CoreGraphics and at 2x from our own enumeration,
+/// with the CoreGraphics id the lower.
 @MainActor
 private enum ModeFixtures {
   static let native = mode(5, 3440, 1440, 3440, 1440, hz: 175, isNative: true)
@@ -237,9 +227,9 @@ private enum ModeFixtures {
     catalog(modes: [native, duplicateLower, duplicateHigher], recommending: nil, rows: nil)
   }
 
-  /// The curated rows come from the real `DisplayModeCatalog` unless a test
-  /// supplies its own: the representative choice IS what the defect was in, so
-  /// a fixture that always supplied its own rows would assert on nothing.
+  /// Curated rows come from the real `DisplayModeCatalog` unless a test supplies
+  /// its own: the representative choice is where the defect was, so a fixture
+  /// that always supplied rows would assert on nothing.
   private static func catalog(
     modes: [DisplayMode], recommending: (width: Int, height: Int)?, rows: [DisplayModeRow]?
   ) -> DisplayModeCoordinator.Catalog {

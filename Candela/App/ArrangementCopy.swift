@@ -8,20 +8,15 @@ enum ArrangementCopy {
   static var question: LocalizedStringKey { "Keep this arrangement?" }
   static var keep: LocalizedStringKey { "Keep" }
   static var revert: LocalizedStringKey { "Revert Now" }
-  /// The report card's title, from what the card is actually reporting.
-  ///
-  /// It used to be the fixed string "Arrangement not changed", which two of the
-  /// card's branches contradict outright — it sat directly above "The displays
-  /// did not end up where they were asked to go". A surface built to report a
-  /// success that was not achieved must not itself report a state the machine is
-  /// not in.
+  /// Derived, not a fixed string: a card reporting a change that was not
+  /// achieved must not name a state the machine is not in.
   static func reportTitle(_ subject: ArrangementReportSubject) -> LocalizedStringKey {
     switch subject {
     case .nothingChanged:
       "Arrangement not changed"
     case .restoreFailed:
-      // Says only what is known. Whether the displays moved is precisely what
-      // this case cannot tell — see `ArrangementReportSubject.restoreFailed`.
+      // Says only what is known: whether the displays moved is exactly what
+      // this case cannot tell.
       "Saved arrangement not restored"
     case .diverged:
       "Arrangement changed unexpectedly"
@@ -32,13 +27,11 @@ enum ArrangementCopy {
     seconds == 1 ? "Reverting in 1 second" : "Reverting in \(seconds) seconds"
   }
 
-  /// The subtitle under the question. It names the display the menu bar is on,
-  /// because that is the single most consequential thing an arrangement change
-  /// does — the menu bar and the Dock follow whichever display sits at the
-  /// origin, and moving it is how someone loses track of where their screen is.
+  /// Names the display the menu bar is on, the most consequential thing an
+  /// arrangement change does: the menu bar and the Dock follow whichever display
+  /// sits at the origin.
   ///
-  /// Falls back to a count when the display cannot be named: `displayName`
-  /// returns "" for a display no surface has a name for, and "The menu bar is
+  /// Falls back to a count when `displayName` returns "", since "The menu bar is
   /// now on ." is worse than not saying it.
   static func previewSubtitle(displayCount: Int, mainDisplayName: String) -> String {
     let layout = displayCount == 1
@@ -51,20 +44,15 @@ enum ArrangementCopy {
   /// AR7. Says what has to move rather than "invalid", which tells the user
   /// nothing they can act on.
   ///
-  /// `Text`, not `LocalizedStringKey`, for `MirroringCopy.refusal`'s reason: the
-  /// named variants are built from a display's own name, and routing a runtime
-  /// value through a lookup key would translate the user's hardware. `Text` is
-  /// the type both spellings have in common.
-  ///
-  /// Takes the naming closure because friendly-name resolution belongs to the
-  /// surface, not here — and falls back to an unnamed sentence when the surface
-  /// cannot name a display, rather than emitting a gap where a name should be.
+  /// `Text`, not `LocalizedStringKey`: the named variants interpolate a display's
+  /// own name, and routing a runtime value through a lookup key would translate
+  /// the user's hardware. Friendly-name resolution belongs to the surface, so the
+  /// closure comes in; an unnamed sentence is the fallback when it has no name.
   static func invalidLayout(
     _ problems: [ArrangementProblem], name: (CGDirectDisplayID) -> String
   ) -> Text {
-    // `ArrangementRules.problems` never mixes the two kinds — an overlap makes
-    // every reachability answer meaningless, so it reports overlaps alone — and
-    // one sentence is enough to act on either way.
+    // `ArrangementRules.problems` never mixes the two kinds: an overlap makes
+    // every reachability answer meaningless, so it reports overlaps alone.
     let overlap = problems.lazy.compactMap { problem -> (CGDirectDisplayID, CGDirectDisplayID)? in
       if case let .overlap(first, second) = problem { return (first, second) }
       return nil
@@ -104,9 +92,8 @@ enum ArrangementCopy {
     "The countdown has already run, so nothing will undo this on its own."
   }
 
-  /// The #53 case, held open by the coordinator. macOS accepted the request,
-  /// reported success, and produced a different layout — so "it failed" is the
-  /// wrong shape of statement, and the useful thing to offer is the way back.
+  /// macOS accepted the request, reported success, and produced a different
+  /// layout, so "it failed" is the wrong statement to make. Offer the way back.
   static var divergedOffer: LocalizedStringKey {
     "The displays did not end up where they were asked to go. \(AppInfo.productName) can put them back the way they were."
   }
@@ -116,45 +103,39 @@ enum ArrangementCopy {
   /// Why a saved layout did not come back.
   ///
   /// Restore runs with nobody watching, so this is the only account the user
-  /// ever gets — and every sentence names something they can act on, because
-  /// "could not restore your arrangement" on its own is a statement nobody can
-  /// do anything with.
+  /// gets. Every sentence names something they can act on.
   ///
-  /// `Text` rather than `LocalizedStringKey` for `invalidLayout`'s reason: the
-  /// named variants are built from the user's own hardware, and routing a
-  /// runtime value through a lookup key would translate it.
+  /// `Text` rather than `LocalizedStringKey` for `invalidLayout`'s reason: a
+  /// runtime value routed through a lookup key would translate the user's
+  /// hardware.
   static func restoreNotice(
     _ notice: ArrangementReapplyNotice, name: (CGDirectDisplayID) -> String
   ) -> Text {
     switch notice {
     case .ambiguousIdentity:
-      // AR11. Deliberately does NOT name the displays: the whole reason for the
-      // refusal is that two of them are indistinguishable, so naming one would
-      // be the guess this refuses to make.
+      // AR11. Deliberately does NOT name the displays: the refusal exists
+      // because two of them are indistinguishable, so naming one would be the
+      // guess this refuses to make.
       Text("Two of your displays report the same identity, so \(AppInfo.productName) cannot tell which saved position belongs to which. The arrangement was left as it is.")
     case .setDiffers:
       Text("The saved arrangement is for a different set of displays, so it was not restored.")
     case .savedForDifferentGeometry:
-      // Says what changed and what ends it. A display that has resized since the
-      // layout was saved is the ordinary cause, and the origins recorded for the
-      // old size cannot be put back on the new one, so the only way out is a new
-      // arrangement. Deliberately does NOT name the display: the sentence is
-      // about the saved layout being spent, and naming one screen reads as an
-      // accusation about that screen.
+      // A display that resized since the layout was saved is the ordinary cause,
+      // and origins recorded for the old size cannot go back on the new one.
+      // Deliberately unnamed: naming one screen reads as an accusation about it.
       Text("Your displays are not the size they were when this arrangement was saved, so it was not restored. Arrange them again to save a new one.")
     case let .layoutNoLongerFits(problems):
-      // The same sentence the interactive refusal uses, because it is the same
-      // fact about the same layout: origins that do not tile at the sizes they
-      // were recorded at.
+      // The same sentence the interactive refusal uses, for the same fact:
+      // origins that do not tile at the sizes they were recorded at.
       invalidLayout(problems, name: name)
     case .failed:
       Text("\(AppInfo.productName) could not restore the saved arrangement.")
     }
   }
 
-  /// §6.3. macOS adjusts a requested layout silently, so the only trustworthy
-  /// account of a change is the one read back — and a notice about it is only
-  /// worth showing because a pure translation is deliberately NOT reported.
+  /// macOS adjusts a requested layout silently, so the only trustworthy account
+  /// of a change is the one read back. A pure translation is deliberately not
+  /// reported.
   static func notice(_ notice: ArrangementApplyNotice, name: (CGDirectDisplayID) -> String) -> Text {
     switch notice {
     case .adjusted:

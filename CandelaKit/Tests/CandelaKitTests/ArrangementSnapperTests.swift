@@ -10,11 +10,8 @@ struct ArrangementSnapperTests {
   }
 
   @Test func abutBeatsAlignAtEqualDistance() {
-    // S sits at 100…200. The moved display is 100 wide at x = 50, which is
-    // exactly 50 from the abut target (0, landing it edge-to-edge against S's
-    // left side) and exactly 50 from the align target (100, its left edge lined
-    // up with S's).
-    // Stated directly as well as through the geometry: the ranking key carries
+    // S sits at 100…200. The moved display is 100 wide at x = 50: exactly 50 from the
+    // abut target (0) and 50 from the align target (100). The ranking key carries
     // `SnapKind`, whose order is its declaration order and nothing else.
     #expect(SnapKind.abut < SnapKind.align)
 
@@ -30,9 +27,8 @@ struct ArrangementSnapperTests {
     #expect(line(result, .x)?.position == 100)
     #expect(line(result, .x)?.otherDisplayID == 2)
 
-    // The same tie from the other side, where the abut target (200) is the
-    // LARGER number. Without this the ranking's `target` term would decide the
-    // case above on its own and dropping `kind` from the key would go unnoticed.
+    // The same tie from the other side, where the abut target is the larger number.
+    // Without it the ranking's `target` term decides alone and dropping `kind` is invisible.
     let fromTheRight = ArrangementSnapper.snap(
       ArrangementFixtures.rect(150, 0, 100, 100), id: 1, against: [source], threshold: 60
     )
@@ -49,10 +45,8 @@ struct ArrangementSnapperTests {
   }
 
   @Test func aDisplayThatDoesNotCrossOnTheOtherAxisOffersNoAbutCandidate() {
-    // Same X geometry as the tie above, but the moved display is 500 points
-    // below S, so their Y spans do not overlap and the two cannot abut on X at
-    // all. The abut target (0) disappears and the align target (100) — the same
-    // distance away, and the loser of the tie above — is what is left.
+    // Same X geometry as the tie above, but 500 points below S, so the Y spans do not
+    // overlap and no abut is possible. Only the align target is left.
     let source = ArrangementFixtures.tile(2, ArrangementFixtures.rect(100, 0, 100, 100))
 
     let result = ArrangementSnapper.snap(
@@ -87,10 +81,8 @@ struct ArrangementSnapperTests {
   }
 
   @Test func theResultIsIndependentOfTileArrayOrder() {
-    // Two neighbours offer an abut at exactly 50 on X — display 2 from the
-    // right, display 3 from the left — so the winner is decided by the display
-    // id and by nothing else. On Y all three offer an align at distance 0, which
-    // exercises the same tie-break a second time.
+    // Two neighbours offer an abut at exactly 50 on X, so the display id is the only
+    // tie-break left. On Y all three align at distance 0, exercising it a second time.
     let tiles = [
       ArrangementFixtures.tile(1, ArrangementFixtures.rect(0, 0, 100, 100)),
       ArrangementFixtures.tile(2, ArrangementFixtures.rect(400, 0, 100, 100)),
@@ -123,10 +115,9 @@ struct ArrangementSnapperTests {
     // The guide runs through the OTHER display's centre, which is the stable one.
     #expect(line(narrowResult, .x)?.position == 50)
 
-    // The mirror image: 51 − 100 = −49, exact centre −24.5, and it still rounds
-    // DOWN, to −25. Swift's `/` truncates toward zero and would give −24 here,
-    // which would make the direction of the one-point bias depend on which of
-    // the two displays the user happened to grab.
+    // The mirror image: exact centre −24.5 still rounds down, to −25. Swift's `/`
+    // truncates toward zero and gives −24, which makes the direction of the one-point
+    // bias depend on which display the user happened to grab.
     let narrower = ArrangementFixtures.tile(2, ArrangementFixtures.rect(0, 0, 51, 100))
     let wideResult = ArrangementSnapper.snap(
       ArrangementFixtures.rect(-23, 0, 100, 100), id: 1, against: [narrower], threshold: 8
@@ -140,13 +131,9 @@ struct ArrangementSnapperTests {
   }
 
   @Test func theCrossingPreconditionIsReadAtThePreSnapPosition() {
-    // §3.4: reading it after an X snap would make the two axes circular — which
-    // one was evaluated first would change the answer.
-    //
-    // Pre-snap the moved display shares neither span with S. Its X aligns to S's
-    // right edge (50), which brings its X span to 50…100, overlapping S's. An
-    // implementation that re-read the precondition would then find a Y abut at
-    // 100, only 5 away, and drag the tile up with it.
+    // Reading the precondition after an X snap makes the axes circular. Pre-snap this
+    // display shares neither span with S; the X snap brings its span over S's, so a
+    // re-read would find a Y abut 5 away and drag the tile up with it.
     let source = ArrangementFixtures.tile(2, ArrangementFixtures.rect(0, 0, 100, 100))
 
     let result = ArrangementSnapper.snap(
@@ -158,10 +145,8 @@ struct ArrangementSnapperTests {
   }
 
   @Test func equalWidthsCollapseThreeAlignmentsOntoOneTargetAndTheGuideNamesTheLeadingEdge() {
-    // Leading edge, trailing edge and centre all ask for the same x when the two
-    // displays are the same width, so only the guide can differ. Which one gets
-    // drawn is decided by the ranking key's last term, not by which candidate
-    // happened to be built first.
+    // Leading edge, trailing edge and centre ask for the same x at equal widths, so only
+    // the guide can differ, and the ranking key's last term decides which is drawn.
     let source = ArrangementFixtures.tile(2, ArrangementFixtures.rect(0, 0, 100, 100))
 
     let result = ArrangementSnapper.snap(
@@ -174,9 +159,8 @@ struct ArrangementSnapperTests {
   }
 
   @Test func theMovedDisplayIsNeverACandidateAgainstItself() {
-    // The canvas passes the whole tile list, which includes the tile being
-    // dragged. Its own starting edges sit 40 away — inside the threshold — so
-    // failing to filter it would drag every display back toward where it began.
+    // The canvas passes the whole tile list, including the dragged tile. Its own starting
+    // edges sit 40 away, inside the threshold, so failing to filter it drags it back.
     let tiles = [
       ArrangementFixtures.tile(1, ArrangementFixtures.rect(0, 0, 100, 100)),
       ArrangementFixtures.tile(2, ArrangementFixtures.rect(500, 700, 100, 100)),
@@ -208,9 +192,8 @@ struct ArrangementSnapperTests {
   }
 
   @Test func aSnapThatProducesAnOverlapIsStillApplied() {
-    // §3.4's last paragraph: the snapper does not judge. Undoing a snap because
-    // it overlaps would be the silent auto-correction AR7 forbids — the rules
-    // report it, the tile renders red, and the drop is refused instead.
+    // The snapper does not judge: undoing a snap because it overlaps is the silent
+    // auto-correction AR7 forbids. The rules report it and the drop is refused instead.
     let source = ArrangementFixtures.tile(2, ArrangementFixtures.rect(0, 0, 100, 100))
     let result = ArrangementSnapper.snap(
       ArrangementFixtures.rect(28, 28, 50, 50), id: 1, against: [source], threshold: 8

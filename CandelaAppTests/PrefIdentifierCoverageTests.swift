@@ -18,15 +18,11 @@ struct PrefIdentifierCoverageTests {
     .virtualSlotRefreshHz,  // no writer anywhere today
   ]
 
-  /// Cases whose only controls are ACTION buttons in `VirtualDisplaysPane`.
-  /// Neither name is ever written by a control of its own: both come out of an
-  /// action button's batch. Add writes `defined` and `configured` together,
-  /// Remove clears both together, and Create/Apply write `configured` alone
-  /// (plus `virtualSlotUUID` on the first configure). The buttons carry
-  /// `action.slotAdd.<slot>` / `action.slotApply.<slot>` /
-  /// `action.slotRemove.<slot>`, which name the act rather than one of its
-  /// writes. Separate from `noControl` because the reason is different: these
-  /// are reachable, just not by pref name.
+  /// Cases whose only controls are ACTION buttons in `VirtualDisplaysPane`:
+  /// neither name is written by a control of its own, both come out of a
+  /// button's batch. The buttons carry `action.slotAdd.<slot>` and its
+  /// siblings, which name the act rather than one of its writes. Separate from
+  /// `noControl` because these are reachable, just not by pref name.
   static let actionButtonOwned: Set<PrefName> = [
     .virtualSlotDefined,
     .virtualSlotConfigured,

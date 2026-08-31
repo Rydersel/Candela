@@ -3,22 +3,20 @@ import CoreGraphics
 import Foundation
 import Testing
 
-/// #51, at the level the Kit test cannot reach: not "does the rule classify
-/// correctly" but "does a refresh pass actually rebuild the controllers".
+/// Reconciliation at the level the Kit test cannot reach: not "does the rule
+/// classify correctly" but "does a refresh pass rebuild the controllers".
 ///
 /// This case cannot be produced by hand. Every physical unplug fires its own
 /// reconfiguration, so a same-port swap always splits into a departure pass and
 /// an arrival pass, and the branch under test is never entered. Measured on the
-/// rig 2026-08-17: a sleep, cable swap and wake produced "DELL departed" and
-/// "MAG arrived" in that order, which is two passes, and the display therefore
-/// arrived as an ordinary new one. The scripted topology below is the only way
-/// in.
+/// rig 2026-08-17: a sleep, cable swap and wake produced "DELL departed" then
+/// "MAG arrived", two passes, so the display arrived as an ordinary new one.
+/// The scripted topology below is the only way in.
 @Suite("Panel swap reconciliation (#51)")
 @MainActor
 struct PanelSwapReconciliationTests {
-  // The seam driver lives in `Fakes` now: the panel's render and row-model
-  // suites drive the same one, and two copies would be free to disagree about
-  // what a scripted topology means.
+  // The seam driver lives in `Fakes`: several suites drive the same one, and
+  // two copies would be free to disagree on what a scripted topology means.
   private func model(_ discovery: ScriptedDiscovery) -> AppModel {
     TestFixtures.appModel(discovery: discovery)
   }

@@ -3,12 +3,11 @@ import Foundation
 
 /// Polls native brightness for displays whose controller is HDR-native,
 /// discards echoes of our own writes, and reports real external deltas to the
-/// controller (dossier §10 — the fork's `refreshBrightness` poll job).
+/// controller (dossier §10, the fork's `refreshBrightness` poll job).
 ///
-/// Deliberately dumb: it never smooths, never writes hardware, and never
-/// decides staleness. `BrightnessController.adoptExternal` owns the asymptotic
-/// easing and the generation discard; this actor only answers "is this read
-/// ours?" and "how fast should I look again?".
+/// It never smooths, never writes hardware and never decides staleness:
+/// `BrightnessController.adoptExternal` owns the easing and the generation
+/// discard.
 public actor BrightnessPoller {
   public struct Target: Sendable {
     public let displayID: CGDirectDisplayID
@@ -16,14 +15,13 @@ public actor BrightnessPoller {
     /// value and the generation to hand back to `adopt`.
     public let expected: @Sendable () -> (value: Double?, generation: UInt64)
     /// False while the display is mid-HDR-transition or off the native path,
-    /// so the poller never reads a blanking/re-moding panel (reviews I5/I15).
+    /// so the poller never reads a blanking or re-moding panel.
     public let isNativeActive: @Sendable () -> Bool
-    /// (value, generation snapshotted before the read) — hops to the main
-    /// actor inside.
+    /// Hops to the main actor inside. The generation was snapshotted before
+    /// the read.
     public let adopt: @Sendable (Double, UInt64) -> Void
     /// True while an earlier adoption is still easing toward its target: the
-    /// echo discard must be bypassed or the asymptotic chase never terminates
-    /// (review M33).
+    /// echo discard must be bypassed or the chase never terminates.
     public let isConverging: @Sendable () -> Bool
 
     public init(
@@ -48,9 +46,8 @@ public actor BrightnessPoller {
   private let idleInterval: Duration
   private let tolerance: Double
 
-  /// `tolerance` covers Control Center's own slider quantization plus the
-  /// float round-trip through DisplayServices; anything larger would swallow
-  /// small real external moves.
+  /// `tolerance` covers Control Center's slider quantization plus the float
+  /// round-trip through DisplayServices; larger swallows real external moves.
   public init(
     targets: [Target],
     read: @escaping @Sendable (CGDirectDisplayID) -> Double?,
@@ -81,16 +78,15 @@ public actor BrightnessPoller {
 
   /// Returns true when any target moved this tick (drives the fast cadence).
   private func tick() -> Bool {
-    // Skipped wholesale mid-reconfigure or asleep (review I15): display state
-    // is being rebuilt, so every read is suspect — matching the fork's poll
-    // job bailing on `reconfigureID != 0`.
+    // Skipped wholesale mid-reconfigure or asleep: display state is being
+    // rebuilt, so every read is suspect.
     guard isEpochCurrent() else { return false }
     var moved = false
     for target in targets {
       guard target.isNativeActive() else { continue }
       // Snapshotted BEFORE the read: a local write landing during the read
       // bumps the controller's generation, so the adoption we hand back is
-      // discarded as stale rather than clobbering the fresh write (review I9).
+      // discarded as stale rather than clobbering the fresh write.
       let slot = target.expected()
       guard let value = read(target.displayID) else { continue }
       if !target.isConverging(), let expected = slot.value,

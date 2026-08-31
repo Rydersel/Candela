@@ -1,15 +1,14 @@
 import CoreGraphics
 import SwiftUI
 
-/// THE one open disclosure in the panel — which display, and which of that
+/// THE one open disclosure in the panel: which display, and which of that
 /// display's sections.
 ///
-/// A `CGDirectDisplayID?` is NOT enough, and the difference is not theoretical:
-/// both of a display's disclosures compare the shared binding against that
-/// display's own id, so opening either one makes the other's test true as well
-/// and the panel opens two lists on the same display at once. The pair is what
-/// makes "at most one disclosure is open anywhere in the panel" actually hold,
-/// in both directions — across displays AND across sections of one display.
+/// A `CGDirectDisplayID?` is NOT enough. Both of a display's disclosures compare
+/// the shared binding against that display's own id, so opening either makes the
+/// other's test true and the panel opens two lists on one display at once. The
+/// pair is what makes "at most one disclosure is open anywhere in the panel"
+/// hold across displays AND across sections of one display.
 struct PanelDisclosureID: Hashable {
   enum Section: Hashable { case resolution, mirroring }
 
@@ -23,21 +22,15 @@ struct PanelDisclosureID: Hashable {
 }
 
 /// The row vocabulary shared by every disclosure the menu-bar panel offers.
+/// Shared rather than copied per section: the two sections sit directly on top
+/// of each other in one display's block, so any drift in height, inset or hover
+/// fill reads as a rendering bug.
 ///
-/// Lifted out of `PanelResolutionSection`, where these were private, when
-/// mirroring needed the same shapes. A second copy was the alternative and it is
-/// the wrong one twice over: the two sections sit directly on top of each other
-/// in the same display's block, so any drift in height, inset or hover fill
-/// reads as a rendering bug rather than as a difference; and the phantom-hover
-/// fix below is the kind of correction that gets made once and forgotten in the
-/// copy.
-///
-/// Nothing here knows what a display or a topology is. These are the panel's
-/// button shapes and nothing more — which is what lets both sections use them
-/// without either one owning the other.
+/// Nothing here knows what a display or a topology is, which is what lets both
+/// sections use these shapes without either one owning the other.
 
-/// Hover plus — required for any custom button (`buttons.md`) — a distinct
-/// pressed state, in the same visual language as the panel's footer buttons.
+/// Hover plus a distinct pressed state, required for any custom button
+/// (`buttons.md`), in the same visual language as the panel's footer buttons.
 struct PanelRowButtonStyle: ButtonStyle {
   let isHovering: Bool
   @Environment(\.isEnabled) private var isEnabled
@@ -58,27 +51,26 @@ struct PanelRowButtonStyle: ButtonStyle {
   }
 }
 
-/// The collapsed header of a panel disclosure: a title, the current value, and a
-/// chevron — the shape Control Center uses for a module that opens.
+/// The collapsed header of a panel disclosure: a title, the current value and a
+/// chevron, the shape Control Center uses for a module that opens.
 struct PanelDisclosureRow: View {
   let title: LocalizedStringKey
   let detail: String?
-  /// The spoken form of `detail`, when the written one is not sayable — a mode
+  /// The spoken form of `detail`, when the written one is not sayable: a mode
   /// summary is "2,560 by 1,440 at 60 hertz", never "2560 × 1440 · 60 Hz".
   /// Defaults to `detail`, so a row whose value is already words says nothing
   /// twice.
   var spokenDetail: String?
   /// Owns the row for VoiceOver. Every other row in the panel announces itself
-  /// as "<display> brightness" / "<display> volume"; without the same prefix a
-  /// four-display rig reads out "Resolution" — or "Mirroring" — four times with
-  /// no way to tell which display is being described.
+  /// as "<display> brightness" or "<display> volume"; without the same prefix a
+  /// multi-display rig reads out "Resolution" once per display with no way to
+  /// tell them apart.
   let accessibilityName: String
   /// The noun that follows the display name: "resolution", "mirroring". A
-  /// parameter rather than the title, because the title is a
-  /// `LocalizedStringKey` and there is no supported way to read the words back
-  /// out of one. (`String(describing:)` yields the key's *structure* —
-  /// `LocalizedStringKey(key: "Mirroring", …)` — which VoiceOver would then read
-  /// aloud verbatim.)
+  /// parameter rather than the title, because the title is a `LocalizedStringKey`
+  /// and there is no supported way to read the words back out of one:
+  /// `String(describing:)` yields the key's structure, which VoiceOver would then
+  /// read aloud verbatim.
   let accessibilityRole: String
   let isExpanded: Bool
   let action: () -> Void
@@ -121,10 +113,10 @@ struct PanelDisclosureRow: View {
 /// A sentence about something that did not happen, with the OK that dismisses
 /// it on the same baseline.
 ///
-/// Takes a built `Text` because the three reports differ in how their words are
-/// made — two from a `LocalizedStringKey`, one from an interpolated `String` —
-/// and in nothing else. Padding and any `.help(…)` stay at the call site: the
-/// row sits inside a list on one surface and under a status line on another.
+/// Takes a built `Text` because the reports differ only in how their words are
+/// made, some from a `LocalizedStringKey` and some from an interpolated `String`.
+/// Padding and any `.help(…)` stay at the call site: the row sits inside a list
+/// on one surface and under a status line on another.
 struct PanelReportRow: View {
   let text: Text
   let dismiss: () -> Void
@@ -166,9 +158,9 @@ struct PanelCaption: View {
 
 /// One action inside an open disclosure. A row-shaped button: the whole row is
 /// the hit region (a bare `.plain` button is only as clickable as its text is
-/// wide), with hover and pressed states, without which it reads as static text —
-/// and on a control that reconfigures the screen, a click that feels
-/// unregistered invites a second one.
+/// wide), with hover and pressed states, without which it reads as static text.
+/// On a control that reconfigures the screen, a click that feels unregistered
+/// invites a second.
 ///
 /// Distinct from `PanelModeRow` in that it carries no checkmark: these are
 /// verbs ("Start Mirroring"), not a list of states one of which is current.

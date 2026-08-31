@@ -191,10 +191,8 @@ struct OnboardingOledCarePage: View {
     .padding(.horizontal, 40)
   }
 
-  /// Three states, keyed on what actually happened, never on the click alone:
-  /// the pitch before the ask, the enabled line only once the preflight
-  /// confirms the grant, and an honest pointer to System Settings while the
-  /// grant has not landed.
+  /// Keyed on what actually happened, never on the click alone: the enabled line
+  /// appears only once the preflight confirms the grant.
   private var measuredCardText: String {
     guard model.screenRecordingRequested && model.measuredTelemetry else {
       return "Uses Screen Recording to see exactly what your display shows, so wear tracking reflects reality."

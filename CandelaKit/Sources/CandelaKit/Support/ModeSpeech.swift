@@ -10,15 +10,12 @@ public enum ModeSpeech {
     return "\(size) at \(spokenRate(hz))"
   }
 
-  /// A rate on its own, for the callers that speak one without a size — the
-  /// hero's "(max 175 Hz)" annotation is the first. Same rules as the clause
-  /// inside `spoken`, because it IS that clause: "Hz" is read inconsistently
-  /// at most verbosities, so the unit is spelled out.
+  /// A rate on its own, for callers that speak one without a size. Same rules as
+  /// the clause inside `spoken`: "Hz" is read inconsistently, so it is spelled out.
   public static func spokenRate(_ hz: Double) -> String {
-    // Belt and braces. Live modes are already quantized at the construction
-    // boundary (`CoreGraphicsDisplayConfigurator`, `CGSModeRevelation`), but
-    // this is a public entry point taking a bare `Double` — a caller with a raw
-    // CoreGraphics rate would otherwise have 59.9998 spoken digit by digit.
+    // Live modes are already quantized at construction, but this is a public entry
+    // point taking a bare `Double`: a raw CoreGraphics rate would otherwise have
+    // 59.9998 spoken digit by digit.
     let q = DisplayMode.quantizedRefresh(hz)
     return "\(q == q.rounded() ? String(Int(q)) : String(q)) hertz"
   }

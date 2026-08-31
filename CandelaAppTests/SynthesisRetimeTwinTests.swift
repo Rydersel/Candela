@@ -3,18 +3,12 @@ import CoreGraphics
 import Foundation
 import Testing
 
-/// The engage tail's re-time target and the disengage restore that pairs with
-/// it.
+/// The engage's re-time target, and the disengage restore that pairs with it.
 ///
-/// The defect both halves answer is a pointer, not a picture: the hardware
-/// cursor is sized by the SLAVE's own mode scale while the content comes from
-/// the 2x master, so a panel re-timed onto its 1x native mode draws a tiny
-/// cursor over an enlarged UI. Re-timing onto the HiDPI twin instead keeps the
-/// identical framebuffer and refresh, so the wire timing does not move, and
-/// sizes the cursor to the desktop the user is looking at.
-///
-/// The twin costs a restore, which is the other half: the panel spends the
-/// engagement on a mode this feature applied, and a mirror break can leave a
+/// The hardware cursor is sized by the SLAVE's own mode scale while content comes
+/// from the 2x master, so re-timing onto 1x native draws a tiny cursor over an
+/// enlarged UI. The HiDPI twin has the same framebuffer and refresh, so the wire
+/// timing does not move. The twin costs a restore: a mirror break can leave a
 /// slave on whichever mode it last held.
 @Suite("Synthesized sizes: the re-time target and its restore") @MainActor
 struct SynthesisRetimeTwinTests {
@@ -27,10 +21,6 @@ struct SynthesisRetimeTwinTests {
 
   // MARK: - Which mode the engage re-times onto
 
-  /// The fix, end to end through the real engine: with the HiDPI twin published,
-  /// the re-time lands on it rather than on the 1x mode the user chose. Same
-  /// framebuffer, same refresh, half the logical size, which is what makes the
-  /// cursor match without touching the timing.
   @Test func theRetimeLandsOnTheHiDPITwinWhenThePanelPublishesOne() async throws {
     let fixture = SynthesisFixture(nativeRidesTheHiDPITwin: true)
     defer { fixture.forgetPrefs() }
@@ -49,10 +39,7 @@ struct SynthesisRetimeTwinTests {
     #expect(retimed.mode.isHiDPI)
   }
 
-  /// And the fallback, which is the shape this tail shipped in: a panel that
-  /// publishes no twin at its own framebuffer and refresh is re-timed onto its
-  /// own mode. The cursor mismatch comes back and nothing else changes, so the
-  /// re-time must still run.
+  /// No twin means the cursor mismatch stays, but the re-time still has to run.
   @Test func aPanelWithNoTwinIsRetimedOntoItsOwnMode() async throws {
     let fixture = SynthesisFixture()
     defer { fixture.forgetPrefs() }
@@ -69,9 +56,7 @@ struct SynthesisRetimeTwinTests {
 
   // MARK: - What the disengage puts back
 
-  /// A panel left on the twin by the mirror break is put back on the mode the
-  /// user chose. The world resurrects the twin here, which is the case
-  /// `restoreOwnMode` exists for.
+  /// The world resurrects the twin here, which is the case `restoreOwnMode` exists for.
   @Test func aDisengageRestoresTheModeTheUserChose() async throws {
     let rig = Rig()
     _ = await rig.driver.engage(rig.stop, onPhysical: Self.panelID, identityKey: Self.identityKey)
@@ -86,9 +71,8 @@ struct SynthesisRetimeTwinTests {
     #expect(!restored.mode.isHiDPI)
   }
 
-  /// The control. A mirror break that already left the panel on its own scale
-  /// gets no apply at all: a reconfiguration for nothing is not free, and an
-  /// unconditional reapply would hide a restore that never had to run.
+  /// A reconfiguration for nothing is not free, and an unconditional reapply would
+  /// hide a restore that never had to run.
   @Test func aDisengageThatCameBackOnItsOwnScaleAppliesNothing() async throws {
     let rig = Rig()
     _ = await rig.driver.engage(rig.stop, onPhysical: Self.panelID, identityKey: Self.identityKey)
@@ -99,15 +83,13 @@ struct SynthesisRetimeTwinTests {
     #expect(rig.configurator.applies.count == afterEngage)
   }
 
-  /// The ledger's rule, and the reason it is first-write-wins. Switching from
-  /// one stop to another re-enters the engage while the previous re-time still
-  /// stands, so the panel's current mode reads as the twin: recording that would
-  /// make the twin the thing this restores, which is the defect inverted.
+  /// Why the ledger is first-write-wins. Switching stops re-enters the engage while
+  /// the previous re-time still stands, so the panel's current mode reads as the
+  /// twin, and recording that would make the twin the thing this restores.
   @Test func switchingStopsStillRestoresTheOriginalMode() async throws {
     let rig = Rig()
     _ = await rig.driver.engage(rig.stop, onPhysical: Self.panelID, identityKey: Self.identityKey)
-    // What the panel reads as its own mode for the rest of the sequence: the
-    // first engage's re-time, standing.
+    // The first engage's re-time, still standing.
     rig.configurator.panelCurrentOverride = rig.twin
     _ = await rig.driver.engage(
       rig.secondStop, onPhysical: Self.panelID, identityKey: Self.identityKey)
@@ -120,8 +102,8 @@ struct SynthesisRetimeTwinTests {
     #expect(!restored.mode.isHiDPI)
   }
 
-  /// A failed engage owes no restore: nothing of this feature's stands, and a
-  /// record kept past it would reassert a mode the user may have changed since.
+  /// A record kept past a failed engage would reassert a mode the user may have
+  /// changed since.
   @Test func aFailedEngageLeavesNothingToRestore() async throws {
     let rig = Rig()
     rig.configurator.base.refusesMirroring = true
@@ -135,9 +117,9 @@ struct SynthesisRetimeTwinTests {
 
   // MARK: - The rig
 
-  /// A driver over the shared fakes, built directly rather than through
-  /// `SynthesisFixture`: the coordinator's own disengage paths go to the engine,
-  /// so the driver's disengage is only reachable from here.
+  /// Built directly rather than through `SynthesisFixture`: the coordinator's
+  /// disengage paths go to the engine, so the driver's disengage is only reachable
+  /// this way.
   @MainActor
   private struct Rig {
     let world = FakeDisplayWorld()
@@ -182,18 +164,15 @@ struct SynthesisRetimeTwinTests {
     }
   }
 
-  /// The shared fake configurator with two scripted answers the world cannot
-  /// model on its own: a mirror break that resurrects the mode the slave last
-  /// held, and a panel whose current mode is a previous re-time still standing.
-  ///
-  /// File-local, so the shared fakes stay the shape every other suite reads.
+  /// Two answers the fake world cannot model on its own: a mirror break that
+  /// resurrects the mode the slave last held, and a panel whose current mode is a
+  /// previous re-time still standing. File-local, so the shared fakes keep the
+  /// shape every other suite reads.
   private final class ScriptedConfigurator: DisplayConfiguring, @unchecked Sendable {
     let base: FakeSynthesisDisplayConfigurator
     let panel: CGDirectDisplayID
-    /// What the panel reports as its current mode, overriding the world.
     var panelCurrentOverride: DisplayMode?
-    /// Installed as the override the moment the panel leaves a mirror set, which
-    /// is what a mirror break resurrecting the slave's last mode looks like.
+    /// Becomes the override the moment the panel leaves a mirror set.
     var resurrectsOnUnmirror: DisplayMode?
 
     init(_ base: FakeSynthesisDisplayConfigurator, panel: CGDirectDisplayID) {
@@ -215,18 +194,16 @@ struct SynthesisRetimeTwinTests {
       base.nativePixels(for: displayID)
     }
 
-    /// Recorded, and it clears the override: the fake world does not move on an
-    /// apply, so without this the restore's own achieved-state check could never
-    /// pass and the test would pin a landed restore it never proved.
+    /// Clears the override: the fake world does not move on an apply, so otherwise
+    /// the restore's achieved-state check could never pass.
     func apply(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope) throws {
       try base.apply(mode, to: displayID, scope: scope)
       if displayID == panel { panelCurrentOverride = nil }
     }
 
     /// A mirror that STANDS clears the override, because a slave reports its
-    /// master's geometry and the engine's own achieved-state check reads that.
-    /// A mirror that BREAKS installs the resurrection, which is the scripted
-    /// half.
+    /// master's geometry and the achieved-state check reads that. A mirror that
+    /// BREAKS installs the resurrection.
     func applyMirroring(_ changes: [MirrorChange], scope: DisplayConfigScope) throws {
       try base.applyMirroring(changes, scope: scope)
       for change in changes where change.display == panel {
@@ -252,9 +229,7 @@ struct SynthesisRetimeTwinTests {
   }
 }
 
-/// File-private, like the sibling suite's copy: at file scope `private` is
-/// `fileprivate`, so each suite keeps its own and neither has to import the
-/// other's helpers.
+/// At file scope `private` is `fileprivate`, so each suite keeps its own copy.
 private extension Result {
   var isSuccess: Bool {
     if case .success = self { return true }

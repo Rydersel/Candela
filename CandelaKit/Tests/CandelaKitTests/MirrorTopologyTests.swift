@@ -30,9 +30,8 @@ enum MirrorFixtures {
     MirrorTopology([display(1, builtIn: true), display(2)])
   }
 
-  /// External 2 is the master; the built-in 1 and external 3 mirror it. This is
-  /// what the fork's toggle produces — it picks the first non-built-in as
-  /// master and makes the built-in a slave, deliberately.
+  /// External 2 is the master; built-in 1 and external 3 mirror it. This is what
+  /// the fork's toggle produces: first non-built-in as master, built-in as slave.
   static var mirroredTrio: MirrorTopology {
     MirrorTopology([
       display(1, mirrors: 2, builtIn: true),
@@ -42,12 +41,11 @@ enum MirrorFixtures {
   }
 
   /// What a synthesis engage leaves behind: physical panel 2 showing virtual
-  /// display 5's framebuffer, with the engine's pairing naming 5 as a synthesis
-  /// master.
+  /// display 5's framebuffer, with the pairing naming 5 as a synthesis master.
   ///
-  /// `masterReportsFlags` is the Phase 0 (c) measurement: the rig's VD master
-  /// DOES report `CGDisplayIsInMirrorSet`. SS1 requires the pairing to be the
-  /// authority anyway, so `false` is the case that has to work too.
+  /// `masterReportsFlags` is measured: the rig's VD master DOES report
+  /// `CGDisplayIsInMirrorSet`. SS1 makes the pairing the authority anyway, so
+  /// `false` is the case that has to work too.
   static func synthesisPair(masterReportsFlags: Bool = true) -> MirrorTopology {
     MirrorTopology(
       [display(1, builtIn: true), display(2, mirrors: 5), display(5, inSet: masterReportsFlags)],
@@ -56,16 +54,13 @@ enum MirrorFixtures {
   }
 }
 
-/// `Result<Void, _>` is not `Equatable` — `Void` isn't — so the failures of the
-/// preview sessions' `begin` are compared through their error rather than as
-/// whole results. Unconstrained in its success type because
-/// `ArrangementPreviewSession.begin` returns the value it staged, and a failure
-/// is read the same way whatever the success would have carried.
+/// `Result<Void, _>` is not `Equatable`, since `Void` isn't, so a `begin` failure
+/// is compared through its error rather than as a whole result. Unconstrained in
+/// its success type because `ArrangementPreviewSession.begin` returns the value
+/// it staged, and a failure reads the same way whatever the success carried.
 ///
-/// File-internal rather than `private`, and living here rather than in any one
-/// session's suite, because all THREE preview-session suites need it. `private`
-/// at file scope is invisible to the other files, and a second copy is a second
-/// thing to get wrong.
+/// File-internal rather than `private`, and here rather than in one session's
+/// suite, because every preview-session suite needs it.
 extension Result where Failure == DisplayConfigError {
   var failureError: DisplayConfigError? {
     if case let .failure(error) = self { return error }
@@ -102,8 +97,8 @@ struct MirrorTopologyTests {
   }
 
   /// THE ENGINE BOUNDARY. A slave's pixels live on its master, so anything that
-  /// needs a drawable display — an `NSScreen`, a window origin, the gamma
-  /// activity enforcer — asks for this and gets an ID that has one.
+  /// needs a drawable display (an `NSScreen`, a window origin, the gamma activity
+  /// enforcer) asks for this and gets an ID that has one.
   @Test func aSlaveResolvesToItsMasterAndEverythingElseResolvesToItself() {
     let topology = MirrorFixtures.mirroredTrio
     #expect(topology.drawableDisplayID(for: 1) == 2)
@@ -149,12 +144,11 @@ struct MirrorTopologyTests {
     #expect(MirrorFixtures.mirroredTrio.slaves(of: kCGNullDirectDisplay).isEmpty)
   }
 
-  /// A slave can name a master this sample does not contain — a stale read, or
-  /// any consumer building a topology from a filtered list (externals only,
-  /// dropping the built-in master). Membership is intersected with the sample,
-  /// so it never names a display nobody can act on and `disengage` cannot stage
-  /// a change for a phantom. `master(of:)` still reports what the slave names,
-  /// because that is a fact about the slave rather than a target.
+  /// A slave can name a master this sample does not contain: a stale read, or a
+  /// topology built from a filtered list (externals only, dropping the built-in
+  /// master). Membership is intersected with the sample, so `disengage` cannot
+  /// stage a change for a phantom. `master(of:)` still reports what the slave
+  /// names, a fact about the slave rather than a target.
   @Test func aSetNeverNamesAMasterThisSampleDoesNotContain() {
     let topology = MirrorTopology([MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2, mirrors: 9)])
     #expect(topology.setMembers(containing: 2) == [2])
@@ -162,13 +156,12 @@ struct MirrorTopologyTests {
     #expect(topology.masters.isEmpty)
   }
 
-  /// The same intersection, on the one accessor whose result is ACTED ON. A
-  /// phantom master can never have an `NSScreen`, so returning it would refuse
-  /// gamma dimming for that panel forever — and since the software leg clears
-  /// its dedupe memo on failure (DT17), forever means once per drag event, with
-  /// a log line each. The raw ID at least resolves whenever the sample was
-  /// merely stale about mirroring. `master(of:)` above still reports the
-  /// phantom, because that is a fact about the slave rather than a target.
+  /// The same intersection on the one accessor whose result is ACTED ON. A phantom
+  /// master can never have an `NSScreen`, so returning it would refuse gamma
+  /// dimming for that panel forever, and since the software leg clears its dedupe
+  /// memo on failure (DT17), forever means once per drag event with a log line
+  /// each. The raw ID at least resolves when the sample was merely stale about
+  /// mirroring.
   @Test func aDrawableTargetIsNeverADisplayThisSampleDoesNotContain() {
     let topology = MirrorTopology([MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2, mirrors: 9)])
     #expect(topology.drawableDisplayID(for: 2) == 2)
@@ -177,10 +170,9 @@ struct MirrorTopologyTests {
     #expect(MirrorFixtures.mirroredTrio.drawableDisplayID(for: 1) == 2)
   }
 
-  /// The type promises `id`-ascending everywhere, and `displays` is part of
-  /// "everywhere". Two samples of one unchanged machine that differ only in
-  /// `CGGetOnlineDisplayList` order are the same topology, and `Equatable` —
-  /// which compares the stored array — has to agree.
+  /// The type promises `id`-ascending everywhere, `displays` included. Two samples
+  /// of one unchanged machine that differ only in `CGGetOnlineDisplayList` order
+  /// are the same topology, and `Equatable` compares the stored array.
   @Test func theSampleItselfIsSortedSoEnumerationOrderCannotLeakIntoEquality() {
     let scrambled = MirrorTopology([MirrorFixtures.display(7), MirrorFixtures.display(2), MirrorFixtures.display(4)])
     #expect(scrambled.displays.map(\.id) == [2, 4, 7])
@@ -189,14 +181,12 @@ struct MirrorTopologyTests {
     ]))
   }
 
-  /// The "one HUD per set" property, stated purely. A stepped mirror set has to
-  /// show ONE pill on the master: without this, every member resolves to the
-  /// same screen origin and a four-panel set stacks four HUD windows at one
-  /// point with the last write winning.
+  /// The "one HUD per set" property. A stepped mirror set shows ONE pill on the
+  /// master: without this, every member resolves to the same screen origin and a
+  /// four-panel set stacks four HUD windows at one point, last write winning.
   ///
-  /// It is a property of `expand` and `drawableDisplayID` together, not of new
-  /// code — which is exactly why it is worth pinning. It fails the moment
-  /// someone "simplifies" `expand` to return raw members, or teaches
+  /// It belongs to `expand` and `drawableDisplayID` together, so it fails the
+  /// moment someone "simplifies" `expand` to return raw members, or teaches
   /// `drawableDisplayID` to hand a slave back unresolved.
   @Test func everyMemberOfASetResolvesToTheSameDrawableDisplay() {
     let topology = MirrorFixtures.mirroredTrio
@@ -243,10 +233,9 @@ struct MirrorTopologyTests {
     #expect(!mixed.isSynthesisSet(containing: 1))
   }
 
-  /// SS1, stated as an assertion: the injected pairing is consulted BEFORE the
-  /// CG flags, so the pair expands together whether or not the VD master
-  /// reports `CGDisplayIsInMirrorSet`. Phase 0 measured that it does; nothing
-  /// here depends on that measurement holding.
+  /// SS1: the injected pairing is consulted BEFORE the CG flags, so the pair
+  /// expands together whether or not the VD master reports `CGDisplayIsInMirrorSet`.
+  /// It was measured to, and nothing here depends on that holding.
   @Test func eitherMemberOfASynthesisSetExpandsToThePairWithoutTheCGMirrorFlags() {
     for reported in [true, false] {
       let topology = MirrorFixtures.synthesisPair(masterReportsFlags: reported)
@@ -274,8 +263,8 @@ struct MirrorTopologyTests {
   /// The pairing names displays by runtime ID and IDs are reassigned across a
   /// replug, so a pairing can name a display this sample does not contain.
   /// `expand` never invents a target from it (the same intersection
-  /// `setMembers(containing:)` follows), while the predicate still refuses to
-  /// call the VD user mirroring.
+  /// `setMembers(containing:)` follows), and the predicate still refuses to call
+  /// the VD user mirroring.
   @Test func aPairingNamingADisplayThisSampleDoesNotContainInventsNoTarget() {
     let topology = MirrorTopology([MirrorFixtures.display(2)], synthesisMasters: [5])
     #expect(topology.expand(2) == [2])
@@ -285,11 +274,11 @@ struct MirrorTopologyTests {
     #expect(topology.userVisibleMirrorSets.isEmpty)
   }
 
-  /// Garbage in, and the one shape of it that would be catastrophic: every
-  /// standalone display names `kCGNullDirectDisplay` as its master, so a pairing
-  /// set that contained it would make the whole rig read as synthesis slaves and
-  /// take every mirroring surface off screen. The pairing table never produces
-  /// it; the guard is `slaves(of:)`'s, held here too.
+  /// Garbage in, in the one shape that would be catastrophic: every standalone
+  /// display names `kCGNullDirectDisplay` as its master, so a pairing set holding
+  /// it would read the whole rig as synthesis slaves and take every mirroring
+  /// surface off screen. The pairing table never produces it; the guard is
+  /// `slaves(of:)`'s, held here too.
   @Test func aNullMasterInThePairingMakesNothingASynthesisSet() {
     let topology = MirrorTopology(
       [MirrorFixtures.display(1), MirrorFixtures.display(2)],

@@ -236,13 +236,11 @@ struct PanelRowModelTests {
 
   /// Everything above hands the derivation an array the test built. These drive
   /// a real refresh instead, so the states carry controllers the model itself
-  /// constructed and reconciled, and they can state properties an array cannot
-  /// reach.
+  /// constructed and reconciled.
   ///
   /// This one is the production call: `visibleDisplays(model)` reads the app's
-  /// own prefs domain, so the keys are deliberately ones no real display has
-  /// and no test writes to, and the assertion is about membership and order
-  /// rather than about any pref.
+  /// own prefs domain, so the keys are ones no real display has and no test
+  /// writes to, and the assertion is about membership and order.
   @Test func theModelsOwnDisplayListIsWhatThePanelOrders() async {
     let discovery = ScriptedDiscovery([
       (id: 2, key: "row-model-zed", name: "Zed"),
@@ -255,12 +253,10 @@ struct PanelRowModelTests {
     #expect(visible.map(\.display.name) == ["Alpha", "Zed"])
   }
 
-  /// The built-in occupies its own slot on the model and must never arrive in
-  /// the external list the panel orders. Stated as an absence rather than a
-  /// count, because whether this machine HAS a built-in is not something the
-  /// suite controls: `refreshBuiltIn` reads `BuiltInDisplayDiscovery` directly,
-  /// so a count would pass on a laptop and fail on a headless runner, or the
-  /// reverse.
+  /// The built-in occupies its own slot and must never arrive in the external
+  /// list the panel orders. Stated as an absence rather than a count, because
+  /// `refreshBuiltIn` reads `BuiltInDisplayDiscovery` directly: a count would
+  /// pass on a laptop and fail on a headless runner, or the reverse.
   @Test func theBuiltInSlotNeverLeaksIntoThePanelsExternalRows() async {
     let discovery = ScriptedDiscovery([(id: 2, key: "row-model-only", name: "Only External")])
     let model = TestFixtures.appModel(discovery: discovery)
@@ -314,7 +310,7 @@ struct PanelRowModelTests {
     #expect(visible.map(\.display.persistenceKey) == ["row-model-shown"])
   }
 
-  // MARK: - The HDR button's refusal (SS9's missing half, #194)
+  // MARK: - The HDR button's refusal (SS9's missing half)
 
   @Test func theHDRButtonExplainsItselfWhileASynthesizedSizeIsShowing() {
     let reason = PanelView.hdrRefusalReason(

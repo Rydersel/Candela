@@ -4,33 +4,27 @@ import os
 /// Drives a preview session's clock: one tick a second until the session
 /// returns an outcome, then stops.
 ///
-/// This is the expiry that rescues a display nobody meant to reconfigure, and it
-/// existed four times over (mode, mirror, rotation, arrangement) in bodies that
-/// differed by one comment. The safety-critical part is the SHAPE, and the shape
-/// should exist once.
-///
-/// Two details that are the whole reason it is written this way, both carried
-/// over verbatim:
+/// This is the expiry that rescues a display nobody meant to reconfigure. Two
+/// details are the whole reason it is written this way:
 ///
 /// - **Detached.** A main thread wedged inside a synchronous reconfiguration
 ///   callback must not be able to stop the expiry. `Task.detached` does not
-///   inherit the caller's actor, so the clock keeps running while the main actor
-///   is blocked.
+///   inherit the caller's actor, so the clock keeps running while the main
+///   actor is blocked.
 /// - **A fire-and-forget hop back.** The tick does NOT await the main-actor work
 ///   it schedules. Awaiting it would put the wedged main thread back on the
 ///   clock's critical path, which is what being detached is for.
 ///
 /// `interval` is injectable so the behaviour is testable in milliseconds rather
-/// than by waiting out real seconds; nothing in the app passes anything but the
-/// default.
+/// than by waiting out real seconds; nothing in the app passes anything else.
 ///
-/// In CandelaKit and not the app target, for `PreviewQueue`'s reason: with no app
-/// test target, an app-target copy could only be checked by watching a countdown
-/// run on hardware.
+/// In CandelaKit and not the app target, for `PreviewQueue`'s reason: with no
+/// app test target, an app-target copy could only be checked by watching a
+/// countdown run on hardware.
 public final class PreviewCountdownDriver: Sendable {
   /// Behind a lock, not a main-actor property, so `stop()` is `nonisolated`:
-  /// every coordinator cancels its clock from a nonisolated `deinit`, and a
-  /// main-actor-only stop would have silently dropped that.
+  /// every coordinator cancels its clock from a nonisolated `deinit`, which a
+  /// main-actor-only stop would silently drop.
   private let task = OSAllocatedUnfairLock<Task<Void, Never>?>(initialState: nil)
   private let interval: Duration
 

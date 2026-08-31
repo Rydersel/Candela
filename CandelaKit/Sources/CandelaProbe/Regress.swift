@@ -5,38 +5,32 @@ import Foundation
 
 /// `candela-probe regress`: the app-behaviour regression pass.
 ///
-/// `conform` asks whether the PLATFORM still behaves as this app assumes.
+/// `conform` asks whether the PLATFORM still behaves as this app assumes;
 /// `regress` asks whether the APP still behaves as its rulings say it must,
-/// against the build that is actually running, with nobody at the keyboard.
-/// The two share one report type and one exit-code rule and stay separate
-/// commands: their failures mean different things and their baselines are
-/// different files.
+/// against the running build, with nobody at the keyboard. Separate commands
+/// because their failures mean different things and their baselines differ.
 ///
-/// This file is the driver half. It shells out to the unified log, the
-/// defaults domain and the media-key poster, and it drives the accessibility
-/// layer through the C API in process, so none of it is unit-testable; the
-/// judgement it feeds lives in `AppRegression`, where every verdict is
-/// red-tested including its inconclusive third state.
+/// The driver half, and none of it is unit-testable: it shells out to the
+/// unified log, the defaults domain and the media-key poster, and drives the
+/// accessibility layer through the C API in process. The judgement lives in
+/// `AppRegression`, red-tested including its inconclusive third state.
 ///
-/// The one rule the whole command encodes: a check whose failure mode is
-/// silence is not a check. Every branch that cannot run reports a named skip
-/// or a named inconclusive, and nothing here is allowed to pass quietly.
+/// The rule the whole command encodes: a check whose failure mode is silence
+/// is not a check. Every branch that cannot run reports a named skip or a
+/// named inconclusive.
 enum Regress {
   // MARK: - Inputs
 
-  /// One online display, with the persistence key its prefs are stored under
-  /// when it has one (the built-in and any panel that is not DDC-capable does
-  /// not appear in the DDC pool, so the key is optional).
+  /// One online display, with the persistence key its prefs are stored under.
+  /// Optional: the built-in and any non-DDC panel are not in the DDC pool.
   struct Display {
     let id: CGDirectDisplayID
-    /// The probe's own label, which carries the display id (`MAG 341C OLED
-    /// [2]`). Good prose for a detail string, and never an accessibility
-    /// description: nothing in the app publishes it.
+    /// The probe's own label, carrying the display id (`MAG 341C OLED [2]`).
+    /// Never an accessibility description: nothing in the app publishes it.
     let name: String
-    /// The bare title the APP publishes: its sidebar row's accessibility
-    /// description and its window title. Threaded from the DDC pool rather than
-    /// stripped back out of the label, because a decorated string is a display
-    /// name plus a decoration nobody can reliably take off again.
+    /// The bare title the APP publishes: sidebar row accessibility description
+    /// and window title. Threaded from the DDC pool rather than stripped out of
+    /// the label, since a decoration nobody can reliably remove is not a name.
     let title: String
     let persistenceKey: String?
     let isBuiltIn: Bool
@@ -57,9 +51,8 @@ enum Regress {
     let message: String
   }
 
-  /// A setup step that did not hold, carrying the sentence the record prints.
-  /// A setup miss never fails the app: it leaves the check inconclusive with
-  /// the step that missed named.
+  /// A setup step that did not hold. A setup miss never fails the app: it
+  /// leaves the check inconclusive with the step that missed named.
   struct SetupFailure: Error {
     let reason: String
   }
@@ -100,8 +93,7 @@ enum Regress {
       index += 1
     }
     // A record is a verdict about ONE build. Without the commit under test it
-    // is a verdict that outlives its build, which is exactly how a fixed bug
-    // gets rediscovered weeks later.
+    // outlives its build, which is how a fixed bug gets rediscovered.
     if options.recordDir != nil, options.commit == nil {
       return .failure(UsageError(message: "regress: --record needs --commit <sha>; a run record without the commit under test is not a record of anything"))
     }
@@ -118,11 +110,10 @@ enum Regress {
   }
 
   /// The ONE builder for a driven check, adapting this file's `Control` enum
-  /// onto `AppRegression.controlledCheck`, where the rule itself lives and is
-  /// red-tested. The rule used to live here, which is exactly why it could
-  /// drift unobserved: it was demoting a FIRED control to failed whenever the
-  /// verdict came back inconclusive, so a caveated measurement recorded as a
-  /// dead instrument and lost the control's evidence sentence.
+  /// onto `AppRegression.controlledCheck`, where the rule is red-tested. Kept
+  /// out of this file because an untested copy drifted here: it demoted a FIRED
+  /// control to failed on an inconclusive verdict, so a caveated measurement
+  /// recorded as a dead instrument.
   static func controlledCheck(
     name: String, control: Control, verdict: () -> PlatformConformance.Outcome
   ) -> PlatformConformance.Check {
@@ -136,9 +127,8 @@ enum Regress {
     }
   }
 
-  /// A check that IS its own control: the instrument checks below assert that
-  /// an instrument answers at all, so there is no second measurement to
-  /// control them with.
+  /// A check that IS its own control: the instrument checks assert that an
+  /// instrument answers at all, so there is no second measurement to use.
   static func plainCheck(name: String, outcome: PlatformConformance.Outcome)
     -> PlatformConformance.Check
   {
@@ -151,16 +141,14 @@ enum Regress {
 
   // MARK: - The run
 
-  /// What the preflights established, for the driven checks that come after
-  /// them. A driven check whose instrument is unproven reports
-  /// `.inconclusive`, never `.fail`: an unproven instrument cannot convict the
-  /// app of anything.
+  /// What the preflights established, for the driven checks after them. A check
+  /// whose instrument is unproven reports `.inconclusive`, never `.fail`: an
+  /// unproven instrument cannot convict the app of anything.
   struct Preflight {
     let checks: [PlatformConformance.Check]
-    /// Exactly one Candela was running and every instrument addressed it. Not
-    /// "the app is running": two instances is a refused rig, not a healthy one,
-    /// and a field that read true for both would invite a driven check to
-    /// proceed against whichever instance the process table listed first.
+    /// Exactly one Candela was running and every instrument addressed it. Two
+    /// instances is a refused rig, and a field true for both would invite a
+    /// driven check to proceed against whichever the process table listed first.
     let soleInstanceBound: Bool
     let logProven: Bool
     let gammaProven: Bool
@@ -179,35 +167,29 @@ enum Regress {
     report.checks += preflight.checks
     // FIRST, and only under --apply: the wake check refuses to sleep anything
     // until its 30 s pre-sleep window is free of DDC writes, and the three
-    // brightness drives below park coalescer state the wake refresh releases
-    // as a ramp of writes. Anywhere after them, a full run's wake check is
-    // inconclusive by construction and only a standalone run could ever pass
-    // it. It depends on nothing they leave behind, and leaves nothing they
-    // need: its only effect is the sleep and wake itself, and each drive below
-    // measures its own precondition rather than inheriting one.
+    // brightness drives below park coalescer state the wake refresh releases as
+    // a ramp of writes. Anywhere after them a full run's wake check is
+    // inconclusive by construction. It depends on nothing they leave behind.
     report.checks.append(
       wakeCheck(instruments: instruments, preflight: preflight, options: options))
-    // Then the drives. The order among them is deliberate too: each leaves the
-    // panel at the floor brightness the next one needs, so the run walks the
-    // rig forward instead of dragging it back three times. Every check still
-    // MEASURES that precondition rather than inheriting it, because a check
-    // that assumes where it started reports its predecessor's state as its own.
+    // Then the drives, in a deliberate order: each leaves the panel at the floor
+    // brightness the next one needs. Every check still MEASURES that
+    // precondition, because a check that assumes where it started reports its
+    // predecessor's state as its own.
     report.checks.append(
       combinedDimmingCheck(instruments: instruments, preflight: preflight, displays: displays))
     report.checks.append(
       crossoverCheck(instruments: instruments, preflight: preflight, displays: displays))
     report.checks.append(
       fanOutCheck(instruments: instruments, preflight: preflight, displays: displays))
-    // The mute check touches no brightness at all, so it neither needs nor
-    // disturbs the floor point the three above hand each other; it needs a
-    // QUIET window instead, which is why nothing else posts a key while it
-    // runs.
+    // The mute check touches no brightness, so it neither needs nor disturbs the
+    // floor point above. It needs a QUIET window, which is why nothing else
+    // posts a key while it runs.
     report.checks.append(
       muteStrandCheck(instruments: instruments, preflight: preflight, displays: displays))
-    // Last: it quits the deployed app and runs another build in its
-    // place, so every check that measures the deployed build has to be behind
-    // it, and the preflight that bound one instance describes a rig this check
-    // deliberately changes.
+    // Last: it quits the deployed app and runs another build in its place, so
+    // every check measuring the deployed build has to be ahead of it, and the
+    // preflight that bound one instance describes a rig this check changes.
     report.checks.append(
       panelDumpCheck(instruments: instruments, preflight: preflight, options: options))
     return report
@@ -215,19 +197,18 @@ enum Regress {
 
   // MARK: - The run record
 
-  /// The commit a `--json` record names when the run did not carry one. Spelled
-  /// out rather than left empty: a reader has to be able to tell an unnamed
-  /// build from a sha, and the ledger's own leg refuses `--record` without
-  /// `--commit` precisely so this can never reach it quietly.
+  /// The commit a `--json` record names when the run carried none. Spelled out
+  /// rather than left empty so a reader can tell an unnamed build from a sha;
+  /// the ledger leg refuses `--record` without `--commit` for the same reason.
   static let unnamedCommit = "unspecified"
 
-  /// Writes the run record wherever the flags asked for it, and hands back the
-  /// paths so the run says out loud where its verdict landed.
+  /// Writes the run record wherever the flags asked, and hands back the paths so
+  /// the run says out loud where its verdict landed.
   ///
   /// Both destinations carry the SAME bytes, from the same `Report` the printed
-  /// lines come from, so a ledger record and an ad-hoc dump can never disagree
-  /// about what a run found. A write that cannot happen is a hard failure with
-  /// its reason, never a flag that accepts a path and quietly does nothing.
+  /// lines come from, so a ledger record and an ad-hoc dump cannot disagree. A
+  /// write that cannot happen is a hard failure with its reason, never a flag
+  /// that accepts a path and quietly does nothing.
   static func writeRecords(
     report: PlatformConformance.Report, options: Options, timestamp: Date
   ) -> Result<[String], UsageError> {
@@ -281,18 +262,16 @@ enum Regress {
 
   // MARK: Preflight
 
-  /// Six instrument checks, each a REPORTED check rather than a silent
-  /// precondition. Every later check consumes them, and a suite whose
-  /// instruments were never asserted is a suite whose green means nothing.
+  /// The instrument checks, each REPORTED rather than a silent precondition.
+  /// Every later check consumes them, and a suite whose instruments were never
+  /// asserted is a suite whose green means nothing.
   static func preflight(instruments: RegressInstruments, displays: [Display]) -> Preflight {
     var checks: [PlatformConformance.Check] = []
 
-    // 1. Is EXACTLY ONE app running? Everything else asks questions about a
-    //    process, so this one gates the rest, and "a process" has to mean one
-    //    nameable binary. Two instances is refused rather than resolved: the
-    //    accessibility layer would walk whichever the process table listed
-    //    first, `open -b` would reach LaunchServices' choice, and the log
-    //    predicate merges both instances' records under one process name, so
+    // 1. Is EXACTLY ONE app running? Two instances is refused rather than
+    //    resolved: the accessibility layer would walk whichever the process
+    //    table listed first, `open -b` would reach LaunchServices' choice, and
+    //    the log predicate merges both instances under one process name, so
     //    every reading downstream would be of a build nobody named.
     let instances = instruments.runningInstances()
     let runningOutcome: PlatformConformance.Outcome
@@ -321,17 +300,14 @@ enum Regress {
         keysProven: false, identifiersProven: false, prefsProven: false, keyTarget: nil)
     }
 
-    // 2. Can the log window see the app at all? Everything downstream reads
-    //    the window, and a query that cannot match looks exactly like a quiet
-    //    app: same zero lines, same exit code 0.
+    // 2. Can the log window see the app at all? A query that cannot match looks
+    //    exactly like a quiet app: same zero lines, same exit code 0.
     //
-    //    Widening rather than one fixed window, measured on the rig: an app
-    //    nobody has touched for five minutes really does log nothing, and a
-    //    fixed five-minute window turns that into a broken-instrument verdict.
-    //    Any non-empty window proves the predicate matches this app's records,
-    //    which is the whole claim, so the first one that answers wins and the
-    //    detail says which it was. Twelve hours of this predicate costs about
-    //    four seconds [MEASURED].
+    //    Widening rather than one fixed window: an app nobody has touched for
+    //    five minutes really does log nothing, and a fixed five-minute window
+    //    turns that into a broken-instrument verdict. Any non-empty window
+    //    proves the predicate matches, so the first one that answers wins and
+    //    the detail says which. Twelve hours costs about four seconds [MEASURED].
     var answeredCount = 0
     var answeredSpan = ""
     var queryFailure: String?
@@ -375,10 +351,9 @@ enum Regress {
         : .fail("no gamma table from \(unreadable.joined(separator: ", "))"))
     checks.append(plainCheck(name: "regress.instrument.gamma", outcome: gammaOutcome))
 
-    // 4. The one live check that proves four things at once: the posting
-    //    host's Accessibility grant, the app's event tap, the DDC path, and
-    //    the log query. When it does not pass, every driven check reports
-    //    inconclusive rather than fail.
+    // 4. The one live check that proves four things at once: the posting host's
+    //    Accessibility grant, the app's event tap, the DDC path, and the log
+    //    query. When it does not pass, every driven check is inconclusive.
     let target = keyDriveTarget(instruments: instruments, displays: displays)
     let keysCheck = keysInstrumentCheck(
       instruments: instruments, target: target, logProven: logProven,
@@ -387,10 +362,10 @@ enum Regress {
     let keysProven = isPass(keysCheck.outcome)
 
     // 5. Are the controls addressable by identifier? Layer B is built on this,
-    //    and the accessibility layer has answered confidently and wrongly
-    //    about a different attribute twice already, so the reader is asked to
-    //    show both answers on every run: present on a control that must carry
-    //    one, absent on the window's own close button.
+    //    and the accessibility layer has answered confidently and wrongly about
+    //    a different attribute twice, so the reader shows both answers every
+    //    run: present on a control that must carry one, absent on the close
+    //    button.
     let identifiersCheck = identifierInstrumentCheck(instruments: instruments)
     checks.append(identifiersCheck)
 
@@ -416,15 +391,13 @@ enum Regress {
   /// half of its range where a press must reach the DDC register.
   ///
   /// Not simply the first external. A brightness key inside a panel's SOFTWARE
-  /// zone computes the DDC value the register already holds, the coalescer
-  /// drops the repeat, and the window carries no write at all [MEASURED:
-  /// `coalescer.target ddc(raw: 0)` and no `ddc.write.end`, on a panel at
-  /// stored 0.375 with a switching value of 0.5]. Aimed there, an instrument
-  /// that asserts writes reports a healthy app as a dead drive path, and every
-  /// check gated on it goes inconclusive for a reason that is not true. So it
-  /// prefers a panel that is above its switching value, and when none is, it
-  /// still returns one so the check can say WHY it cannot be exercised rather
-  /// than reporting nothing at all.
+  /// zone computes the DDC value the register already holds, the coalescer drops
+  /// the repeat, and the window carries no write at all [MEASURED:
+  /// `coalescer.target ddc(raw: 0)` and no `ddc.write.end`, on a panel at stored
+  /// 0.375 with a switching value of 0.5]. Aimed there, an instrument that
+  /// asserts writes reports a healthy app as a dead drive path. So it prefers a
+  /// panel above its switching value, and when none is, it still returns one so
+  /// the check can say WHY it cannot be exercised.
   private static func keyDriveTarget(
     instruments: RegressInstruments, displays: [Display]
   ) -> (display: Display, inHardwareZone: Bool)? {
@@ -440,20 +413,17 @@ enum Regress {
   /// reaches the DDC register. The verdict is `AppRegression.survivesDownStep`,
   /// red-tested there; this reads the two prefs it needs.
   ///
-  /// One predicate, two consumers, and both of them step DOWN, which is why the
-  /// stricter question is the right one for each:
+  /// Both consumers step DOWN, which is why the stricter question fits each:
   ///
-  /// - **The key drive** presses down first. Aimed at a panel sitting exactly
-  ///   on its switching value, that press crosses into the software zone and
-  ///   the press back up is dropped as a repeat, so the instrument reads zero
-  ///   writes and blames the grant, the tap and the transport. Measured on the
-  ///   rig at stored 0.5 with the default switching value.
-  /// - **The fan-out**, whose zero-write branch this softens, drives its source
-  ///   DOWN by one grid step and fans that lower value out, so a target within
+  /// - The key drive presses down first. Aimed at a panel sitting exactly on
+  ///   its switching value, that press crosses into the software zone and the
+  ///   press back up is dropped as a repeat, so the instrument reads zero writes
+  ///   and blames the grant, the tap and the transport. Measured on the rig at
+  ///   stored 0.5 with the default switching value.
+  /// - The fan-out drives its source DOWN by one grid step, so a target within
   ///   one step of its switching value produces no write for the same reason.
-  ///   Softening is the safe direction there in any case: it can only turn a
-  ///   verdict inconclusive, never turn a real failure into a pass, since a
-  ///   pass needs writes that a contaminated reading does not have.
+  ///   Softening can only turn a verdict inconclusive, never turn a real failure
+  ///   into a pass, since a pass needs writes a contaminated reading lacks.
   private static func survivesADownStep(
     _ instruments: RegressInstruments, _ display: Display
   ) -> Bool {
@@ -466,21 +436,18 @@ enum Regress {
       stored: stored, switchingValue: DimmingMath.switchingValue(fromPoint: point))
   }
 
-  /// `targetingCaveat` is what the key-targeting gate found when the pointer
-  /// is not what a brightness key follows. This check is NOT gated on it, and
-  /// deliberately: in the every-display mode the writes really are the posted
-  /// keys', which is the whole of what this instrument claims, so refusing to
-  /// run would withhold a true answer. What is no longer true is the word
-  /// "aimed", so the claim says so instead. The driven checks that DO depend
-  /// on the aim are gated on the same finding.
+  /// `targetingCaveat` is what the key-targeting gate found when the pointer is
+  /// not what a brightness key follows. This check is deliberately NOT gated on
+  /// it: in the every-display mode the writes really are the posted keys',
+  /// which is the whole claim, so refusing to run would withhold a true answer.
+  /// Only the word "aimed" stops being true, and the claim says so. The driven
+  /// checks that DO depend on the aim are gated on the same finding.
   ///
-  /// It reaches exactly two places, and the split matters. Every outcome gains
-  /// the caveat as a note. Only ONE branch changes its verdict under it, the
-  /// zero-write shortfall, and that softening happens inside the verdict
-  /// closure where the branch and the mode are both known: a poster that never
-  /// ran and a log query that failed are faults of the instrument itself, and
-  /// rewriting either under a zero-write rationale would file an explanation
-  /// that does not describe what happened.
+  /// Every outcome gains the caveat as a note. Only the zero-write shortfall
+  /// changes its verdict under it, inside the verdict closure where the branch
+  /// and the mode are both known: a poster that never ran and a log query that
+  /// failed are faults of the instrument, and rewriting either under a
+  /// zero-write rationale would file an explanation of something else.
   private static func keysInstrumentCheck(
     instruments: RegressInstruments, target: (display: Display, inHardwareZone: Bool)?,
     logProven: Bool, targetingCaveat: KeyTargetingCaveat?
@@ -497,11 +464,10 @@ enum Regress {
       ))
     }
 
-    // The control is a QUIET pre-window, and a quiet window only means
-    // anything once the query has been shown able to return a line at all.
-    // Brightness sync amplifies the built-in's ambient auto-brightness into
-    // DDC traffic on every external, and those writes would be read as the
-    // ones this check drove.
+    // The control is a QUIET pre-window, which only means anything once the
+    // query has been shown able to return a line. Brightness sync amplifies the
+    // built-in's ambient auto-brightness into DDC traffic on every external, and
+    // those writes would read as the ones this check drove.
     let control: Control
     if !logProven {
       control = .didNotFire(
@@ -546,11 +512,10 @@ enum Regress {
           "the media-key poster failed to run (brightnessDown ran: \(down), brightnessUp ran: \(up)): \(instruments.posterFailureSummary ?? "no reason reported")"
         )
       }
-      // Flush-tolerant: this window was measured coming back holding two
-      // records of a three-record write, two seconds after the press that made
-      // them, where the same query moments later carried all six. A drive path
-      // reported dead because the store had not caught up is exactly the
-      // false conviction this whole command is built against.
+      // Flush-tolerant: this window was measured coming back with two records
+      // of a three-record write two seconds after the press, where the same
+      // query moments later carried all six. A drive path reported dead because
+      // the store had not caught up is the false conviction to avoid.
       let window = instruments.logWindowAllowingForFlush(since: start)
       guard !window.queryFailed else {
         return .fail("the drive window's log query failed: \(window.failureReason)")
@@ -560,11 +525,8 @@ enum Regress {
         let shortfall =
           "brightnessDown then brightnessUp aimed at \(target.name) produced \(writes.count) DDC writes in a \(window.count)-line window"
         // Only THIS branch softens under a targeting caveat, and only with the
-        // sentence that is true of the mode actually in effect. The poster
-        // failing to run and the log query failing are failures of the
-        // instrument itself; rewriting either as inconclusive under a
-        // zero-write rationale would put an explanation in the record that
-        // does not describe what happened.
+        // sentence true of the mode in effect. A poster or query failure is the
+        // instrument's own fault and keeps its own reason.
         guard let targetingCaveat else {
           // Re-read rather than inherited from the target selection: sync, the
           // ambient sensor or a person's own key can move the panel between
@@ -584,10 +546,8 @@ enum Regress {
       )
     }
     guard let targetingCaveat else { return check }
-    // The caveat is a note on every outcome and a downgrade on none: a pass
-    // keeps its pass, because the writes really are the posted keys' whatever
-    // they landed on, and the one branch that had to soften did so inside the
-    // verdict where the branch is known.
+    // A note on every outcome and a downgrade on none: the writes really are
+    // the posted keys' whatever they landed on.
     return note(
       check,
       "the word aimed does not hold on this rig and these writes may belong to panels this check never pointed at: \(targetingCaveat.reason)")
@@ -618,11 +578,10 @@ enum Regress {
         "the accessibility walk failed: \(instruments.lastAXError ?? "no error reported")"))
     }
 
-    // The control is the READER, not the app: it has to be shown answering
-    // both ways in the same walk before either answer is believed. Present is
-    // demonstrated by any element carrying a present identifier, absent by the
-    // window's own close button, which carries none. An unreadable answer
-    // counts as neither.
+    // The control is the READER, not the app: it must answer both ways in the
+    // same walk before either answer is believed. Present comes from any element
+    // carrying an identifier, absent from the window's close button, which
+    // carries none. An unreadable answer counts as neither.
     let control: Control
     switch audit.closeButtonIdentifier {
     case _ where audit.walked == 0:
@@ -690,16 +649,15 @@ enum Regress {
   /// monitor, not to a port.
   static let dellNameFragment = "U2725QE"
 
-  /// The General pane's two app-level switches, addressed by the accessibility
+  /// The General pane's app-level switches, addressed by the accessibility
   /// identifier the pref composer emits.
   ///
-  /// Read the combined one carefully. `disableCombinedBrightness` is the
-  /// identifier, because identifiers are composed from on-disk pref names, but
-  /// the control it names is "Dim past the display's minimum", whose value is
-  /// the POSITIVE accessor over that inverted key (D1). So an accessibility
-  /// value of 1 means combined dimming is ON, and driving it to 0 is what
-  /// turns combined dimming off. Getting that backwards would drive every leg
-  /// of this check into the opposite state while every call reported success.
+  /// Read the combined one carefully. The identifier is the on-disk pref name
+  /// `disableCombinedBrightness`, but the control it names is "Dim past the
+  /// display's minimum", the POSITIVE accessor over that inverted key (D1). So
+  /// value 1 means combined dimming is ON, and driving it to 0 turns it off.
+  /// Backwards, every leg drives the opposite state and every call reports
+  /// success.
   static let combinedDimmingIdentifier = "disableCombinedBrightness"
   static let syncIdentifier = "enableBrightnessSync"
   /// "Allow a fully dark display", direct polarity: 1 lets the software leg
@@ -712,12 +670,10 @@ enum Regress {
   /// of it: a drive step and the headroom a drive needs must be one constant.
   static let keyGridStep = AppRegression.keyGridStep
 
-  /// Which preflight instruments a driven check consumes.
-  ///
-  /// Stated per check rather than assumed, because gating a check on an
-  /// instrument it never touches reports a check that could have run as one
-  /// that could not: the fan-out drive goes through DisplayServices, and the
-  /// wake check reads nothing but the log.
+  /// Which preflight instruments a driven check consumes. Stated per check:
+  /// gating on an instrument a check never touches reports a check that could
+  /// have run as one that could not. The fan-out drive goes through
+  /// DisplayServices, and the wake check reads nothing but the log.
   struct InstrumentNeed: OptionSet {
     let rawValue: Int
     static let log = InstrumentNeed(rawValue: 1 << 0)
@@ -725,7 +681,7 @@ enum Regress {
     static let keys = InstrumentNeed(rawValue: 1 << 2)
     static let identifiers = InstrumentNeed(rawValue: 1 << 3)
     static let prefs = InstrumentNeed(rawValue: 1 << 4)
-    /// What the three combined-dimming checks consume: all five.
+    /// What the combined-dimming checks consume: every instrument.
     static let all: InstrumentNeed = [.log, .gamma, .keys, .identifiers, .prefs]
   }
 
@@ -772,13 +728,12 @@ enum Regress {
   }
 
   /// Reads a switch's state, drives it, and hands back what it read BEFORE the
-  /// drive, so the teardown restores what was actually there rather than what
-  /// the check would prefer.
+  /// drive, so the teardown restores what was there.
   ///
-  /// The pre-state is read three-state on purpose. The toggle instrument
-  /// presses whenever the pre-read is not the wanted value, and an unreadable
-  /// pre-read is not the wanted value: gating here is what stops a press
-  /// against a control whose state nobody established.
+  /// The pre-state is three-state on purpose: the toggle instrument presses
+  /// whenever the pre-read is not the wanted value, and an unreadable pre-read
+  /// is not the wanted value. Gating here stops a press against a control whose
+  /// state nobody established.
   private static func recordAndSet(
     _ instruments: RegressInstruments, identifier: String, to desired: Bool
   ) -> Result<Bool, SetupFailure> {
@@ -796,17 +751,13 @@ enum Regress {
     return .success(text == "1")
   }
 
-  /// Puts the General switches back to what they read before a check drove
-  /// them, and says so in the record when it cannot.
+  /// Puts the General switches back to what they read before a check drove them,
+  /// and says so in the record when it cannot.
   ///
-  /// A failed restore downgrades a PASS to inconclusive. The check itself
-  /// measured what it measured, but the run then leaves the rig in a state
-  /// nobody recorded and every later check inherits it; printing that green
-  /// next to a rig it silently changed is the shape this command exists to
-  /// refuse.
-  /// Restored in the reverse of the order they were driven, so a pref whose
-  /// propagation depends on another's is put back under the same conditions it
-  /// was changed under.
+  /// A failed restore downgrades a PASS to inconclusive: the run leaves the rig
+  /// in a state nobody recorded and every later check inherits it. Restored in
+  /// the reverse of the order they were driven, so a pref whose propagation
+  /// depends on another's goes back under the conditions it changed under.
   private static func restore(
     _ instruments: RegressInstruments, check: PlatformConformance.Check,
     switches: [(identifier: String, initial: Bool)]
@@ -822,12 +773,9 @@ enum Regress {
     return note(check, notes.joined(separator: "; "), downgradingPass: true)
   }
 
-  /// Drives one General switch, recording what it was so the teardown can put
-  /// it back. On a miss the check is already finished: it reports inconclusive
-  /// naming the step, and the switches driven so far are restored.
-  ///
-  /// A setup miss is never the app's fault, which is why every one of these
-  /// lands as inconclusive rather than as a failure.
+  /// Drives one General switch, recording what it was so the teardown can put it
+  /// back. On a miss the check reports inconclusive naming the step and the
+  /// switches driven so far are restored: a setup miss is never the app's fault.
   private static func stage(
     _ instruments: RegressInstruments, name: String, identifier: String, to desired: Bool,
     recording switches: inout [(identifier: String, initial: Bool)]
@@ -844,19 +792,17 @@ enum Regress {
     }
   }
 
-  /// The three General switches every combined-dimming check needs held, in
-  /// the order they are driven.
+  /// The General switches every combined-dimming check needs held, in the order
+  /// they are driven.
   ///
-  /// - sync OFF: it fans the built-in's ambient hunting out to every external
-  ///   as DDC writes, and those would be read as the check's own.
+  /// - sync OFF: it fans the built-in's ambient hunting out to every external as
+  ///   DDC writes, and those would read as the check's own.
   /// - combined dimming ON: the floor these checks measure does not exist
   ///   without it. Note the inversion at `combinedDimmingIdentifier`.
-  /// - a fully dark display OFF: the software leg is transformed onto
-  ///   `[0.15, 1]` with it off and onto `[0, 1]` with it on, which moves the
-  ///   floor gamma from 0.7875 to 0.7500 at the same stored brightness. The
-  ///   constants describe the first configuration, so the check establishes it
-  ///   rather than convicting the app of the operator's preference. Measured
-  ///   on the rig, where this pref was on.
+  /// - a fully dark display OFF: the software leg is transformed onto `[0.15, 1]`
+  ///   with it off and onto `[0, 1]` with it on, moving the floor gamma from
+  ///   0.7875 to 0.7500 at the same stored brightness. The constants describe
+  ///   the first configuration, measured on the rig where this pref was on.
   private static func stageCombinedPreconditions(
     _ instruments: RegressInstruments, name: String,
     recording switches: inout [(identifier: String, initial: Bool)]
@@ -872,11 +818,9 @@ enum Regress {
     return nil
   }
 
-  /// Appends a sentence to a check's detail, whichever outcome it carries.
-  /// `AppRegression.annotating` leaves exactly one outcome alone, the skip,
-  /// whose reason names why the check never ran at all; a teardown note
-  /// belongs on all four, because it is about the rig and not about the
-  /// reading.
+  /// Appends a sentence to a check's detail, whatever the outcome.
+  /// `AppRegression.annotating` leaves only the skip alone, whose reason names
+  /// why the check never ran; a teardown note is about the rig, not the reading.
   private static func note(
     _ check: PlatformConformance.Check, _ text: String, downgradingPass: Bool = false
   ) -> PlatformConformance.Check {
@@ -912,24 +856,21 @@ enum Regress {
   /// Walks a panel's stored brightness onto `target` with posted media keys,
   /// re-reading the stored value after every press.
   ///
-  /// By measurement, never by arithmetic. The key grid snaps a press onto the
+  /// By measurement, never by arithmetic: the key grid snaps a press onto the
   /// nearest sixteenth rather than adding to where the panel was, and the sync
   /// deadband clamp discards remainders, so counting presses describes a panel
   /// that is not there.
   ///
-  /// Two rules the loop is built around, both of them incidents:
+  /// Two rules, both of them incidents:
   ///
-  /// - **Re-aim before every press, not once per drive.** A brightness key
-  ///   goes to the display under the pointer, so an aim taken once is an
-  ///   assumption that nothing moved the pointer for the twenty seconds that
-  ///   follow. On the rig a drive was measured landing on the built-in
-  ///   instead, which walked THAT panel most of the way to black while the
-  ///   panel under test barely moved.
-  /// - **Stop when the panel stops moving.** Three presses with no change in
-  ///   the stored value means the keys are not reaching this display, and
-  ///   pressing on to the limit does not discover that, it just drives
-  ///   whatever IS receiving them further. The reason says so, so the record
-  ///   names the real fault rather than a count.
+  /// - Re-aim before every press. A brightness key goes to the display under the
+  ///   pointer, and a drive was measured on the rig landing on the built-in,
+  ///   walking THAT panel most of the way to black while the panel under test
+  ///   barely moved.
+  /// - Stop when the panel stops moving. Three presses with no change means the
+  ///   keys are not reaching this display, and pressing on only drives whatever
+  ///   IS receiving them further. The reason says so, so the record names the
+  ///   fault rather than a count.
   private static func converge(
     instruments: RegressInstruments, display: Display, persistenceKey: String,
     to target: Double, limit: Int
@@ -968,9 +909,8 @@ enum Regress {
         break
       }
       let name = step == .pressUp ? "brightnessUp" : "brightnessDown"
-      // Re-aimed every time and CHECKED every time: a key press is addressed
-      // by pointer position, an aim taken once is an aim nobody re-checked,
-      // and an aim nobody read back is not an aim at all.
+      // Re-aimed every time and CHECKED every time: a key press is addressed by
+      // pointer position, and an aim nobody read back is not an aim.
       let aim = instruments.warpPointer(toCenterOf: display.id)
       guard aim.landed else {
         failure =
@@ -1001,13 +941,12 @@ enum Regress {
   /// hands back the descent, whose window is where the floor write lives.
   ///
   /// The floor write exists only on a CROSSING [MEASURED]. Inside the software
-  /// zone every press computes the same DDC value the register already holds,
-  /// the coalescer drops the repeat, and the window carries no write at all.
-  /// A drive that started below the switching point would therefore produce a
-  /// floor gamma with no floor write beside it, and the checks whose positive
-  /// control is that write would report a healthy app as a dead drive path.
-  /// Going up first and coming down makes both the crossing and the write
-  /// unconditional, whatever the panel was at when the run began.
+  /// zone every press computes the DDC value the register already holds, the
+  /// coalescer drops the repeat, and no write reaches the window. A drive
+  /// starting below the switching point would produce a floor gamma with no
+  /// floor write beside it, so the checks controlled on that write would report
+  /// a healthy app as a dead drive path. Going up first makes both the crossing
+  /// and the write unconditional.
   private static func convergeToFloorFromAbove(
     instruments: RegressInstruments, display: Display, persistenceKey: String
   ) -> Convergence {
@@ -1020,11 +959,10 @@ enum Regress {
       to: AppRegression.combinedFloorBrightness, limit: 24)
   }
 
-  /// The floor gamma these checks assert is `swTransform(v / s)`, so it is a
-  /// reading of the panel's switching point as much as of its brightness. The
-  /// constants were measured at the default point (pref 0, s = 0.5); at any
-  /// other the same healthy app produces a different number, and asserting the
-  /// constant anyway would convict it of the operator's setting.
+  /// The floor gamma these checks assert is `swTransform(v / s)`, a reading of
+  /// the panel's switching point as much as of its brightness. The constants
+  /// were measured at the default point (pref 0, s = 0.5); at any other the same
+  /// healthy app produces a different number.
   ///
   /// Absent means default, so an unreadable key is the pass here, not a miss.
   private static func switchingPointGate(
@@ -1036,26 +974,23 @@ enum Regress {
     return "\(key) reads \(text) rather than the default 0; the floor gamma \(AppRegression.combinedFloorGamma) is that default's number, so this panel's software leg divides by a different switching point and the constant does not describe it"
   }
 
-  /// Walks the panel back to the floor point whatever the check did with it,
-  /// so an abort halfway through a drive does not leave it parked wherever it
-  /// stopped. Both combined-dimming checks pass THROUGH the hardware zone on
-  /// their way to the floor, so an abort can strand the panel at 0.75 as
-  /// easily as anywhere else; before this, only the fan-out check walked home.
+  /// Walks the panel back to the floor point whatever the check did with it, so
+  /// an abort mid-drive does not leave it parked wherever it stopped. Both
+  /// combined-dimming checks pass THROUGH the hardware zone on their way to the
+  /// floor, so an abort can strand the panel at 0.75.
   ///
-  /// By measurement, like every other drive here, and a walk that cannot
-  /// finish is noted rather than assumed.
-  /// `syncEnabledDuringWalk` is named in the failure note rather than acted
-  /// on. With sync on, the built-in's ambient hunting fans out onto this panel
-  /// and can push it back as fast as the keys walk it, so a walk that stalls
-  /// with sync on and a walk that stalls with sync off are two different
-  /// faults wearing one message. The note says which.
+  /// By measurement, like every other drive here, and a walk that cannot finish
+  /// is noted rather than assumed.
   ///
-  /// It is a three-state on purpose, and callers are expected to READ it back
-  /// rather than pass what they asked for. Reporting the value a restore was
-  /// asked to write lets one detail say sync could not be put back and then
-  /// say the walk ran with sync in the state it failed to reach, which are
-  /// contradictory sentences in one line. Unreadable is its own answer and
-  /// says so.
+  /// `syncEnabledDuringWalk` is named in the failure note rather than acted on.
+  /// With sync on, the built-in's ambient hunting fans out onto this panel and
+  /// can push it back as fast as the keys walk it, so a stall with sync on and a
+  /// stall with sync off are two faults wearing one message.
+  ///
+  /// It is three-state on purpose, and callers READ it back rather than pass
+  /// what they asked for: reporting the value a restore was asked to write lets
+  /// one detail say sync could not be put back and then describe the walk as
+  /// having run with sync in the state it never reached.
   private static func walkHome(
     _ instruments: RegressInstruments, check: PlatformConformance.Check,
     display: Display, persistenceKey: String, syncEnabledDuringWalk: Bool?
@@ -1090,24 +1025,22 @@ enum Regress {
       persistenceKey: persistenceKey)
   }
 
-  /// The register values these checks assert (37 released, 50 at the
-  /// crossover) are the untuned mapping's answers: `valueToDDC` over a 0 to
-  /// 100 range, linear, not inverted. Every one of those is an operator
-  /// setting with a documented escape hatch, and a panel carrying a tuned one
-  /// writes a different value for the same brightness while behaving perfectly.
+  /// The register values these checks assert (37 released, 50 at the crossover)
+  /// are the untuned mapping's answers: `valueToDDC` over a 0 to 100 range,
+  /// linear, not inverted. Each is an operator setting with a documented escape
+  /// hatch, and a panel carrying a tuned one writes a different value for the
+  /// same brightness while behaving perfectly.
   ///
   /// So this reads the tuning rather than asserting through it. A non-default
-  /// row is inconclusive naming the key, never a fail: convicting the app of
-  /// the operator's own tuning is the one reachable false failure both
-  /// constants still had. Absent means default, so unreadable keys are the
-  /// pass here.
+  /// row is inconclusive naming the key, never a fail: convicting the app of the
+  /// operator's own tuning is the one reachable false failure both constants
+  /// still had. Absent means default, so unreadable keys pass.
   ///
   /// It CALLS the app's own resolution rather than restating it. `CommandTuning`
   /// decides what an override means (one at or below the minimum is not an
-  /// override) and what a curve index means (0 and 5 are both linear), and a
-  /// copy of those rules living here would agree with them until the day it
-  /// quietly did not. A second definition of "default" is exactly the drift
-  /// that turns a gate into a false verdict.
+  /// override) and what a curve index means (0 and 5 are both linear); a second
+  /// definition of "default" here is the drift that turns a gate into a false
+  /// verdict.
   private static func ddcTuningGate(
     _ instruments: RegressInstruments, _ persistenceKey: String
   ) -> String? {
@@ -1122,10 +1055,9 @@ enum Regress {
       invert: integer("invertDDC") != 0,
       remapCodes: []
     )
-    // readMax nil is this panel's own situation stated honestly: it answers no
-    // capabilities read, so there is no read maximum and the resolution falls
-    // back to the assumed one, which is the number the constants were derived
-    // against.
+    // readMax nil is this panel's own situation: it answers no capabilities
+    // read, so resolution falls back to the assumed maximum, which is what the
+    // constants were derived against.
     let maximum = tuning.effectiveMaxDDC(readMax: nil)
 
     var tuned: [String] = []
@@ -1166,10 +1098,8 @@ enum Regress {
   /// What a non-default brightness-key targeting mode costs this run.
   ///
   /// The mode is carried, not just the reason, because the two consumers need
-  /// different sentences out of it: the driven checks refuse outright, while
-  /// the key instrument softens ONE of its branches and has to say which mode
-  /// produced the softening. A single reason string was making the record
-  /// claim the focused-display story under every mode.
+  /// different sentences: the driven checks refuse outright, while the key
+  /// instrument softens ONE branch and has to say which mode produced it.
   struct KeyTargetingCaveat {
     let mode: String
     let reason: String
@@ -1181,17 +1111,15 @@ enum Regress {
   /// The pointer aim only decides anything in the pointer-targeted mode.
   ///
   /// `multiKeyboardBrightness` redirects a brightness key to every display, or
-  /// to the display holding the active window. In either of those the aim is
-  /// inert: the drive lands on panels the check never names, and the aim
-  /// readback reports success while it happens, so the readback cannot catch
-  /// this one.
+  /// to the display holding the active window. In either the aim is inert: the
+  /// drive lands on panels the check never names while the aim readback reports
+  /// success, so the readback cannot catch this one.
   ///
-  /// Read from the pref rather than driven through its control, deliberately.
-  /// That control is a pop-up on the Keyboard pane, not a switch on General,
-  /// and its accessibility value is an item title rather than the 0 or 1 every
-  /// drive here handles; staging it blind would be a setup step that compiles,
-  /// reports success and does something else. Absent means the default, which
-  /// is the mode these checks need.
+  /// Read from the pref rather than driven through its control: that control is
+  /// a Keyboard-pane pop-up whose accessibility value is an item title rather
+  /// than the 0 or 1 every drive here handles, so staging it blind would
+  /// compile, report success and do something else. Absent means the default,
+  /// which is the mode these checks need.
   private static func keyTargetingGate(_ instruments: RegressInstruments)
     -> KeyTargetingCaveat?
   {
@@ -1224,17 +1152,16 @@ enum Regress {
   /// What stops a posted MUTE key from reaching the aimed panel, or nil.
   ///
   /// Two prefs decide it and neither is the app misbehaving, which is why this
-  /// is a setup gate rather than a verdict. `keyboardVolume` decides whether
-  /// the app watches the media mute key at all: on the custom-shortcut mode
-  /// and on disabled it does not, and the press goes to macOS. Then
-  /// `multiKeyboardVolume` decides which display the press lands on, and only
-  /// its pointer-targeted default makes the aim decide anything.
+  /// is a setup gate rather than a verdict. `keyboardVolume` decides whether the
+  /// app watches the media mute key at all: on custom-shortcut and on disabled
+  /// it does not, and the press goes to macOS. Then `multiKeyboardVolume`
+  /// decides which display the press lands on, and only its pointer-targeted
+  /// default makes the aim decide anything.
   ///
   /// Read from the prefs rather than driven through their controls, for the
-  /// brightness gate's reason: both are pop-ups on the Keyboard pane whose
-  /// accessibility value is an item title rather than the 0 or 1 every drive
-  /// here handles. Absent means the default, and both defaults are what this
-  /// check needs.
+  /// brightness gate's reason: both are Keyboard-pane pop-ups whose
+  /// accessibility value is an item title. Absent means the default, and both
+  /// defaults are what this check needs.
   private static func muteKeyGate(
     _ instruments: RegressInstruments, persistenceKey: String
   ) -> String? {
@@ -1248,10 +1175,8 @@ enum Regress {
     // The override that demotes the mute strategy also disarms the key:
     // `VolumeSliderPolicy.acceptsMuteKey` refuses on `.forceNone`, so the press
     // reaches the app and is dropped there rather than reaching the panel. The
-    // mute check refuses earlier, and for the more specific reason (a mute that
-    // lands on the volume register is not the wire it reads); this clause is
-    // what keeps the sentence true for any other volume-key drive built on
-    // this gate.
+    // mute check refuses earlier and more specifically; this clause keeps the
+    // sentence true for any other volume-key drive built on this gate.
     if instruments.defaultsRead("audioSinkOverride.\(persistenceKey)")?
       .trimmingCharacters(in: .whitespaces) == "1" {
       return "audioSinkOverride.\(persistenceKey) reads 1, the always-off override, which refuses the mute key on this display as well as greying its volume control: a posted mute key would reach the app and be dropped there rather than reaching the panel"
@@ -1266,12 +1191,11 @@ enum Regress {
       }
       return "multiKeyboardVolume reads \(text) (\(mode)) rather than the pointer-targeted default; a posted mute key would not go to the panel this check aims at, so the mute would land on displays the record does not name. The Keyboard pane's volume-key target has to be back on the display under the pointer before this check can measure anything"
     }
-    // Reaching here means the pointer-targeted default, which is NOT the
-    // name-matching mode, so the app's tap rule releases both key families to
-    // macOS whenever the default output can set its own volume. Measured on
-    // this rig: with the laptop speakers as the output, a posted mute key never
-    // reached the app and the window carried no write at all, which the check
-    // could only report as a dead instrument.
+    // Reaching here means the pointer-targeted default, not the name-matching
+    // mode, so the app's tap rule releases both key families to macOS whenever
+    // the default output can set its own volume. Measured on this rig: with the
+    // laptop speakers as output, a posted mute key never reached the app and the
+    // window carried no write at all.
     return audioRoutingGate()
   }
 
@@ -1279,22 +1203,16 @@ enum Regress {
   /// would not.
   ///
   /// It CALLS the app's own rule rather than restating it. `shouldWatchVolumeKeys`
-  /// is what arms the tap, mute included (the app asks it once per family, with
-  /// that family's actionable count), and a second copy of the routing policy
-  /// living here would agree with it until the day it did not.
+  /// arms the tap, mute included, and a second copy of the routing policy here
+  /// would agree with it until the day it did not.
   ///
-  /// Two of the four inputs are hardcoded optimistically, and for one reason:
-  /// the rule consults `actionableDisplayCount` only as `> 0`, so 1 stands for
-  /// any count of at least one, and `ddcDisplaysExist` is true wherever this
-  /// runs (the caller has a DDC panel it is about to drive). Both push the rule
-  /// towards WATCHING, so a refusal from here is one the real tap would also
-  /// have made: this gate can report a released key that is not released, never
-  /// invent a reason the app would not have had.
+  /// Two of the four inputs are hardcoded optimistically: the rule consults
+  /// `actionableDisplayCount` only as `> 0`, and `ddcDisplaysExist` is true
+  /// wherever this runs. Both push the rule towards WATCHING, so a refusal here
+  /// is one the real tap would also have made.
   ///
   /// The mode is `.mouse` by construction rather than by parameter: the caller
-  /// has already returned for every non-default `multiKeyboardVolume`, so the
-  /// only mode that reaches here is the pointer-targeted one, which is not the
-  /// name-matching mode this rule treats differently.
+  /// has already returned for every non-default `multiKeyboardVolume`.
   private static func audioRoutingGate() -> String? {
     guard let device = CoreAudioDeviceProvider().defaultOutputDevice() else { return nil }
     guard !AudioRoutingPolicy.shouldWatchVolumeKeys(
@@ -1629,18 +1547,15 @@ enum Regress {
       instruments: instruments, builtIn: builtIn, preWindowFanOuts: preFanOuts,
       anyTargetInHardwareZone: anyTargetInHardwareZone)
 
-    // Sync goes back BEFORE the walk home, which is the opposite of the other
-    // two checks and for a reason particular to this one: the switch it staged
-    // is sync itself, not a pref the floor point is defined under, so nothing
-    // about the walk needs sync held on.
+    // Sync goes back BEFORE the walk home, the opposite of the other two checks:
+    // the switch it staged is sync itself, not a pref the floor point is defined
+    // under, so nothing about the walk needs sync held on.
     //
-    // What the order buys is bounded, and worth stating exactly. `restore`
-    // returns sync to the RECORDED initial state, not to off, so this only
-    // guarantees a walk free of interference the CHECK introduced: when sync
-    // was found off, the walk now runs with it off instead of with the staged
-    // on. When sync was found ON, the walk still runs with it on and can still
-    // be fought by the built-in's ambient hunting. That case is diagnosable
-    // rather than fixed: the walk's failure note names sync's state.
+    // What the order buys is bounded. `restore` returns sync to the RECORDED
+    // initial state, not to off, so this only guarantees a walk free of
+    // interference the CHECK introduced. When sync was found ON, the walk still
+    // runs with it on and can still be fought by the built-in's ambient hunting;
+    // that case is diagnosable, since the walk's failure note names sync's state.
     var check = restore(instruments, check: driven, switches: switches)
     // Read back, never the value the restore was ASKED to write: a restore
     // that failed and a walk that stalled would otherwise print one detail
@@ -1672,10 +1587,9 @@ enum Regress {
     }
 
     // One key step, comfortably past the 0.03 deadband from any residual and
-    // small enough that no external lands anywhere near its floor. Away from
-    // whichever end the panel is nearer: a step DOWN from a panel already at
-    // the bottom clamps to where it already was, and a source that did not
-    // move cannot be fanned out.
+    // small enough that no external lands near its floor. Away from whichever
+    // end the panel is nearer: a step DOWN from a panel already at the bottom
+    // clamps to where it was, and a source that did not move cannot fan out.
     let target = before >= keyGridStep ? before - keyGridStep : min(1, before + keyGridStep)
     let start = Date()
     instruments.setNativeBrightness(target, for: builtIn.id)
@@ -1686,8 +1600,7 @@ enum Regress {
     // inferred from the setter's return, and moved far enough to leave the
     // deadband. Both halves are needed: a write that returned success and
     // achieved nothing is this project's most repeated defect, and a move
-    // smaller than the band is one sync is designed to swallow. Either would
-    // otherwise present as the app failing to fan out.
+    // smaller than the band is one sync is designed to swallow.
     let control: Control
     let landed = observed
       .map { abs($0 - target) <= AppRegression.nativeBrightnessLandingTolerance } ?? false
@@ -1802,18 +1715,17 @@ enum Regress {
 
   /// D29 rule 1, proven by OUTCOME rather than by log order.
   ///
-  /// The write record carries a value and no command byte, and pref
-  /// persistence is not logged at all, so which happened first inside the
-  /// operation cannot be read from the log. It does not have to be: in the
-  /// wrong order the availability pref is already false when the unmute runs,
-  /// `toggleMute` refuses, and NO write fires. The presence of the unmute
-  /// write is therefore the discriminator, and the muted pref reading 0
-  /// afterwards is its other half.
+  /// The write record carries a value and no command byte, and pref persistence
+  /// is not logged, so the order inside the operation cannot be read from the
+  /// log. It does not have to be: in the wrong order the availability pref is
+  /// already false when the unmute runs, `toggleMute` refuses, and NO write
+  /// fires. The presence of the unmute write is the discriminator, and the muted
+  /// pref reading 0 afterwards is its other half.
   ///
   /// What this cannot reach, said plainly because the pass says it too: the
   /// achieved mute state. Nothing is connected to this panel's aux jack, it
-  /// answers no DDC read, and the one panel here that does answer reads
-  /// carries no volume command at all.
+  /// answers no DDC read, and the one panel here that does answer reads carries
+  /// no volume command at all.
   static func muteStrandCheck(
     instruments: RegressInstruments, preflight: Preflight, displays: [Display]
   ) -> PlatformConformance.Check {
@@ -1825,11 +1737,10 @@ enum Regress {
     case let .success(panel): (mag, key) = panel
     }
 
-    // The mute STRATEGY is this check's whole subject. Where it is not in
-    // force a mute is a volume-register write of zero rather than the
-    // display's own mute command, so there is no value=1 to control anything
-    // with and no value=2 to look for. Both prefs behind it go into the record
-    // either way.
+    // The mute STRATEGY is this check's whole subject. Where it is not in force
+    // a mute is a volume-register write of zero rather than the display's own
+    // mute command, so there is no value=1 to control anything with and no
+    // value=2 to look for. Both prefs behind it go into the record either way.
     let strategy = muteStrategy(instruments, persistenceKey: key)
     guard strategy.dedicated else {
       return skippedCheck(
@@ -1901,10 +1812,9 @@ enum Regress {
     let mark = instruments.posterFailureMark
     // Every return from here down runs the unmute teardown first. The press is
     // what can leave this panel silent over 0x8D, and a return that reports why
-    // it could not finish while leaving the panel muted is the exact state D29
-    // exists to prevent. `knownMuted: false` on both: nothing here established
-    // a mute, so the teardown posts only where the pref says the panel is
-    // muted and says so where it cannot tell.
+    // it could not finish while leaving the panel muted is the state D29 exists
+    // to prevent. `knownMuted: false` on both: nothing here established a mute,
+    // so the teardown posts only where the pref says the panel is muted.
     guard instruments.postMediaKey("mute", count: 1) else {
       // A poster failure is not proof the press did not land: the script can
       // fail after posting as easily as before it.
@@ -1944,19 +1854,17 @@ enum Regress {
       // availability pref is already false, `toggleMute` refuses, and the
       // window carries no write at all.
       //
-      // What the record cannot separate, stated rather than papered over: a
-      // volume-register write carrying 2 in this same window would read
-      // identically, because the line names no command byte. The window is
-      // kept to one action, the pre-window is quiet, and the muted pref
-      // readback carries the half a value alone cannot.
+      // What the record cannot separate: a volume-register write carrying 2 in
+      // this window reads identically, since the line names no command byte. The
+      // window is kept to one action, the pre-window is quiet, and the muted
+      // pref readback carries the half a value alone cannot.
       let unmuteStart = Date()
-      // Read the polarity carefully before touching this line. The identifier
-      // is the on-disk pref name `unavailableDDC`, and the control it names is
-      // the grid's "On" switch, whose value is the POSITIVE accessor over that
-      // inverted key. So 0 is the command DISABLED, and `to: false` is what
-      // makes the volume command unavailable. "Correcting" this to `to: true`
-      // would drive the opposite state while every call reported success, and
-      // the check would measure nothing while passing.
+      // Read the polarity carefully. The identifier is the on-disk pref name
+      // `unavailableDDC`, and the control it names is the grid's "On" switch,
+      // the POSITIVE accessor over that inverted key. So 0 is the command
+      // DISABLED, and `to: false` is what makes the volume command unavailable.
+      // "Correcting" this to `to: true` drives the opposite state while every
+      // call reports success, and the check measures nothing while passing.
       guard instruments.axToggle(identifier: identifier, to: false) else {
         return .inconclusive(
           "setup: the volume command's switch could not be turned off (\(identifier)): \(instruments.lastAXError ?? "no reason reported")"
@@ -1999,8 +1907,8 @@ enum Regress {
   /// The readback is the switch, not the window title: a display's title names
   /// the display on its hub and on every page pushed from it, so the title
   /// cannot say which of the two is on screen. Reading the switch first also
-  /// makes the window's retained sub-page path a non-issue, since a window
-  /// that came back already on Advanced needs no press at all.
+  /// makes the retained sub-page path a non-issue: a window already on Advanced
+  /// needs no press.
   private static func advancedPage(
     _ instruments: RegressInstruments, display: Display, showing identifier: String
   ) -> String? {
@@ -2046,11 +1954,10 @@ enum Regress {
 
   /// This check ends with the panel unmuted, or the record says so.
   ///
-  /// The mute key toggles rather than sets, so the state is READ before the
-  /// key is posted and read again after it. A pref that does not answer is not
-  /// treated as unmuted: pressing on a state nobody established could mute a
-  /// panel this check found quiet, so it posts only where the mute is known,
-  /// either from the pref or from having driven it.
+  /// The mute key toggles rather than sets, so the state is READ before the key
+  /// is posted and read again after. A pref that does not answer is not treated
+  /// as unmuted: pressing on a state nobody established could mute a panel this
+  /// check found quiet, so it posts only where the mute is known.
   private static func leaveUnmuted(
     _ instruments: RegressInstruments, check: PlatformConformance.Check,
     display: Display, persistenceKey: String, knownMuted: Bool
@@ -2105,24 +2012,22 @@ enum Regress {
   /// the display" (`StartupAction.write`). It is the ONE value whose wake
   /// behaviour is a burst of writes by design: `RestoreCoordinator.noteWake`
   /// returns immediately unless the action is that one, and under it runs the
-  /// restore pass ten times after a three-second sober delay. A run under it
-  /// would be measuring that feature working rather than the regression this
-  /// check looks for.
+  /// restore pass ten times after a three-second delay. A run under it would
+  /// measure that feature working rather than the regression this check hunts.
   static let startupActionResendRaw = "1"
 
   /// Wake restores values by read resync, not by a burst of writes.
   ///
-  /// Measured on both kinds of wake, which matters because they are different
-  /// paths into the same restore: on a panel sleep and wake when the wake
-  /// behaviour was first recorded, and again on 2026-08-19 through
-  /// `pmset displaysleepnow`, the route this check drives, where a quiet rig
-  /// carried zero writes across the cycle. That second run is also this
-  /// check's contamination control: the same cycle straight after the driven
-  /// checks produced seven, so the pre-sleep window is read before anything is
-  /// slept.
+  /// Measured on both kinds of wake, which are different paths into the same
+  /// restore: on a panel sleep and wake when the behaviour was first recorded,
+  /// and again on 2026-08-19 through `pmset displaysleepnow`, the route this
+  /// check drives, where a quiet rig carried zero writes across the cycle. That
+  /// second run is also the contamination control: the same cycle straight after
+  /// the driven checks produced seven, so the pre-sleep window is read before
+  /// anything is slept.
   ///
-  /// Destructive: it sleeps every display for about ten seconds, so it runs
-  /// only under `--apply`.
+  /// Destructive: it sleeps every display for about ten seconds, so it needs
+  /// `--apply`.
   static func wakeCheck(
     instruments: RegressInstruments, preflight: Preflight, options: Options
   ) -> PlatformConformance.Check {
@@ -2156,18 +2061,16 @@ enum Regress {
       ))
     }
     // The pre-sleep window, read BEFORE anything is slept: the driven checks
-    // that ran a moment ago leave coalescer state parked on the panel, and the
-    // wake refresh releases it as a ramp of writes that looks exactly like the
-    // restore burst this check exists to catch. Refused here rather than at the
-    // verdict so a contaminated run does not blank the rig to learn nothing.
+    // leave coalescer state parked on the panel, and the wake refresh releases it
+    // as a ramp of writes that looks exactly like the restore burst this check
+    // exists to catch. Refused here rather than at the verdict so a contaminated
+    // run does not blank the rig to learn nothing.
     //
-    // Waited out rather than read once. This check runs first for exactly this
-    // reason, but first is not the same as quiet: the preflight's own key
-    // instrument posts two media keys by design, a few seconds earlier, and
-    // they land inside the same window. Polled at 5 s up to a minute, which is
-    // long enough for a 30 s window to clear whatever the preflight put in it
-    // and short enough that a genuinely busy rig is refused rather than waited
-    // on forever.
+    // Waited out rather than read once. Running first is not the same as quiet:
+    // the preflight's own key instrument posts two media keys by design a few
+    // seconds earlier, inside the same window. Polled at 5 s up to a minute,
+    // long enough for a 30 s window to clear and short enough that a genuinely
+    // busy rig is refused rather than waited on forever.
     var preWindow = instruments.logWindow(since: Date().addingTimeInterval(-30))
     var preSleepWrites = AppRegression.ddcWriteValues(fromLogLines: preWindow.lines).count
     let quietBy = Date().addingTimeInterval(60)
@@ -2228,12 +2131,11 @@ enum Regress {
       // pass. A window that stopped at the quiet line would report a burst
       // that had not started yet as a quiet wake.
       Thread.sleep(forTimeInterval: 5)
-      // Flush-tolerant, and this is the ONE window in the command where an
-      // empty result is the PASS: `log show` reads the persisted store, and a
-      // burst that had not been persisted yet would read as a quiet wake and
-      // be recorded as one. The polling reads above are self-flushing by
-      // repetition; this final read is taken once, so it re-reads when it
-      // finds no write.
+      // Flush-tolerant, and the ONE window in the command where an empty result
+      // is the PASS: `log show` reads the persisted store, and a burst not yet
+      // persisted would read as a quiet wake. The polling reads above are
+      // self-flushing by repetition; this final read is taken once, so it
+      // re-reads when it finds no write.
       let settled = instruments.logWindowAllowingForFlush(since: started)
       if !settled.queryFailed {
         window = settled
@@ -2244,9 +2146,8 @@ enum Regress {
     // The control triple IS this check's positive control: without it the app
     // never observably saw the sleep or the wake, and an absence of writes
     // afterwards is an absence of everything. `wakeVerdict` guards the same
-    // condition, so the two agree by construction; the control is what puts
-    // the finding in the record's control column rather than only in its
-    // detail.
+    // condition, so the two agree by construction; the control is what puts the
+    // finding in the record's control column.
     let control: Control = measured.sleepIntakeSeen && measured.wakeIntakeSeen
       && measured.quietWindowSeen
       ? .fired(
@@ -2277,24 +2178,20 @@ enum Regress {
   /// The panel is the least observable surface in the app: an `NSMenu`-hosted
   /// hosting view publishes nothing to Accessibility and `screencapture` cannot
   /// reach the menu's tracking window. The dump is the only route to its
-  /// content, and it is compiled out of Release entirely, so asserting D24 live
-  /// means running a Debug build in the deployed one's place for a moment.
+  /// content, and it is compiled out of Release, so asserting D24 live means
+  /// running a Debug build in the deployed one's place for a moment.
   ///
   /// Destructive twice over, which is why it needs `--apply` AND a Debug bundle
   /// named: it quits the deployed app, runs another build, and puts the first
-  /// one back. It runs LAST for the same reason: every check before it measures
-  /// the deployed build, and nothing should follow a swap.
+  /// one back. It runs LAST because every check before it measures the deployed
+  /// build.
   ///
-  /// **Why the sole-instance preflight gate does not apply mid-check.** That
-  /// gate refuses a rig where two builds are running because every instrument
-  /// downstream would be reading a build nobody named. This check IS the writer
-  /// swap, so it cannot hold that condition still: instead it holds the
-  /// stronger one, that exactly one build is running at any INSTANT. It never
-  /// proceeds past a failed quit, it confirms zero instances before launching
-  /// anything, it confirms each launch is the only instance, and it stops each
-  /// child before starting the next. Every window it reads is therefore taken
-  /// while exactly one build is running, and every boundary is re-verified
-  /// rather than assumed.
+  /// Why the sole-instance preflight gate does not apply mid-check: this check
+  /// IS the writer swap, so it cannot hold that condition still. It holds the
+  /// stronger one instead, that exactly one build is running at any INSTANT. It
+  /// never proceeds past a failed quit, confirms zero instances before launching
+  /// anything, confirms each launch is the only instance, and stops each child
+  /// before starting the next.
   static func panelDumpCheck(
     instruments: RegressInstruments, preflight: Preflight, options: Options
   ) -> PlatformConformance.Check {
@@ -2488,9 +2385,8 @@ enum Regress {
   ///
   /// The count and the identity are different questions. A child that exited on
   /// launch while another instance was coming up satisfies "exactly one" and
-  /// none of what the count was asked for, and every line read afterwards would
-  /// be attributed to a build this check never started. So the sole instance's
-  /// pid is compared to the child's rather than assumed to be it.
+  /// none of what the count was asked for, so the sole instance's pid is
+  /// compared to the child's rather than assumed to be it.
   private static func settled(
     _ instruments: RegressInstruments, _ process: Process, describedAs role: String
   ) -> Result<RegressInstruments.RunningInstance, SetupFailure> {
@@ -2508,15 +2404,14 @@ enum Regress {
   }
 
   /// Puts the deployed build back and says so in the record: the rig leaves as
-  /// it arrived, or the record says exactly how it does not. A relaunch that
-  /// did not put back what it aimed at downgrades a pass for the same reason a
-  /// failed teardown does, and more sharply here: the alternative is a green
-  /// line printed beside a rig running a build nobody named.
+  /// it arrived, or the record says how it does not. A relaunch that did not put
+  /// back what it aimed at downgrades a pass, and more sharply here: the
+  /// alternative is a green line printed beside a rig running a build nobody
+  /// named.
   ///
   /// The path is compared rather than trusted. `open -a` goes through
-  /// LaunchServices, which this file already records resolving a bundle to the
-  /// REGISTERED copy rather than to the path handed to it, so "the app at X was
-  /// relaunched" is a sentence that has to be checked before it is written.
+  /// LaunchServices, which resolves a bundle to the REGISTERED copy rather than
+  /// to the path handed to it.
   private static func relaunchDeployed(
     _ instruments: RegressInstruments, check: PlatformConformance.Check, bundle: String?
   ) -> PlatformConformance.Check {
@@ -2570,10 +2465,8 @@ enum Regress {
 // MARK: - The instruments
 
 /// Everything the regress checks measure the world with. Each one is a shell
-/// out, a CoreGraphics call or a direct accessibility read, and each one
-/// reports its own failure rather than returning a plausible default: an
-/// instrument that answers with something else is the failure mode this whole
-/// command is built against.
+/// out, a CoreGraphics call or a direct accessibility read, and each reports its
+/// own failure rather than returning a plausible default.
 ///
 /// `ApplicationServices` is a C framework, so the accessibility layer lives in
 /// process without breaking the rule that keeps AppKit and SwiftUI out of the
@@ -2584,9 +2477,8 @@ final class RegressInstruments {
   /// name the cause instead of reporting a control as merely missing.
   private(set) var lastAXError: String?
   /// Why each failed media-key post did not run, carrying the script's own
-  /// stderr: "the poster failed" on its own is the silence this command
-  /// refuses everywhere else. One entry per failed post, kept for the life of
-  /// the run.
+  /// stderr: "the poster failed" alone is the silence this command refuses. One
+  /// entry per failed post, kept for the life of the run.
   private(set) var posterFailures: [String] = []
 
   /// Every poster failure so far on one line, or nil when every post worked.
@@ -2667,10 +2559,9 @@ final class RegressInstruments {
   private static let recordTag = "[com.rydersel.Candela:"
 
   /// One window read, with the query's own outcome attached. An empty `lines`
-  /// from a query that FAILED and an empty `lines` from a quiet app are the
-  /// same value and mean opposite things, so the caller is handed both halves
-  /// and every caller here checks `queryFailed` before reading anything into
-  /// the emptiness.
+  /// from a FAILED query and an empty `lines` from a quiet app are the same
+  /// value and mean opposite things, so every caller checks `queryFailed` before
+  /// reading anything into the emptiness.
   struct LogWindow {
     let lines: [String]
     let status: Int32
@@ -2717,11 +2608,9 @@ final class RegressInstruments {
   /// result is believed.
   ///
   /// `log show` reads the PERSISTED store, and persistence is not instant: a
-  /// window read a couple of seconds after a write has been measured on this
-  /// rig coming back without it, where the same query moments later carried it.
-  /// Re-reading once when the first result has no DDC write in it can only
-  /// turn a false empty into a true reading, never the other way: if there
-  /// really was no write, both reads agree and the extra wait costs seconds.
+  /// window read seconds after a write has been measured on this rig coming back
+  /// without it, where the same query moments later carried it. Re-reading once
+  /// can only turn a false empty into a true reading, never the other way.
   func logWindowAllowingForFlush(since: Date) -> LogWindow {
     let first = logWindow(since: since)
     guard !first.queryFailed,
@@ -2829,13 +2718,11 @@ final class RegressInstruments {
   /// Brightness keys target the display under the pointer, so aiming is how a
   /// key press is addressed to one panel.
   ///
-  /// **The aim is read back**, which every other instrument here already does
-  /// and this one did not. `CGWarpMouseCursorPosition` returns nothing, so an
-  /// aim that did not take was indistinguishable from one that did, and a
-  /// drive would then walk a panel the record never names. Roughly half the
-  /// runs of one pass were measured delivering their key pair to the built-in
-  /// while reporting an aim at an external, which is the shape that hides
-  /// behind a missing readback.
+  /// The aim is READ BACK. `CGWarpMouseCursorPosition` returns nothing, so an
+  /// aim that did not take is indistinguishable from one that did, and a drive
+  /// would then walk a panel the record never names. Roughly half the runs of
+  /// one pass were measured delivering their key pair to the built-in while
+  /// reporting an aim at an external.
   ///
   /// Up to three attempts, because a warp lands asynchronously and the window
   /// server can still be reporting the old position on the first read.
@@ -2899,10 +2786,8 @@ final class RegressInstruments {
   }
 
   /// The ONE instance every other instrument addresses, or nil with the reason
-  /// recorded. Two instances is refused rather than resolved: it is the same
-  /// non-unique hazard this file already refuses loudly for windows and for
-  /// identifiers, and picking the first would bind whichever the process table
-  /// happened to list first.
+  /// recorded. Two instances is refused rather than resolved: picking the first
+  /// would bind whichever the process table happened to list first.
   func soleRunningInstance() -> RunningInstance? {
     let instances = runningInstances()
     guard instances.count == 1 else {
@@ -2914,10 +2799,9 @@ final class RegressInstruments {
     return instances[0]
   }
 
-  // There is deliberately no `runningPIDs()` and no `appIsRunning()`. Both
-  // answered the any-instance question, and every honest caller here needs the
-  // one-instance question instead: `runningInstances()` to report what is
-  // running, `soleRunningInstance()` to address it.
+  // There is deliberately no `runningPIDs()` and no `appIsRunning()`: both
+  // answered the any-instance question, and every caller here needs the
+  // one-instance question instead.
 
   // MARK: Swapping which build is running
 
@@ -2979,9 +2863,9 @@ final class RegressInstruments {
   /// would never reach it.
   ///
   /// The variable is SET or REMOVED explicitly rather than left to whatever the
-  /// probe inherited. A probe run that happened to carry it would otherwise
-  /// instrument its own control launch, and the control whose entire job is to
-  /// prove the grep can come back empty would be the one thing contaminated.
+  /// probe inherited: a probe run carrying it would instrument its own control
+  /// launch, contaminating the one thing whose job is to prove the grep can come
+  /// back empty.
   func launchDetached(executable: String, panelDump: Bool) -> Process? {
     var environment = ProcessInfo.processInfo.environment
     if panelDump {
@@ -3051,16 +2935,14 @@ final class RegressInstruments {
   /// One attribute read, with absent kept distinct from present-but-empty and
   /// from unreadable.
   ///
-  /// This layer went through System Events first and had to be rebuilt on the
-  /// C API, because AppleScript answers accessibility questions with something
-  /// else: its `description` is the ROLE description rather than
-  /// `AXDescription`, and its attribute lookup resolves against the attribute
-  /// NAMES list, which omits `AXDescription` on elements that have a value. A
-  /// System Events walk of this app's sidebar therefore reports every row as
-  /// carrying no description, while a direct read returns all of them. One
-  /// route says a label exists where none does and the other says none exists
-  /// where one does; only `AXUIElementCopyAttributeValue` by name separates
-  /// absent from present-but-empty, which is the whole question here.
+  /// Built on the C API rather than System Events, which answers accessibility
+  /// questions with something else: its `description` is the ROLE description
+  /// rather than `AXDescription`, and its attribute lookup resolves against the
+  /// attribute NAMES list, which omits `AXDescription` on elements that have a
+  /// value. A System Events walk of this app's sidebar reports every row as
+  /// carrying no description while a direct read returns all of them. Only
+  /// `AXUIElementCopyAttributeValue` by name separates absent from
+  /// present-but-empty, which is the whole question here.
   enum Reading: Equatable {
     case absent
     case empty
@@ -3114,22 +2996,21 @@ final class RegressInstruments {
     "Candela Gamma Activity Enforcer", "Candela OLED Care Overlay",
   ]
 
-  /// Binding the settings window, and the three separate traps it has to
-  /// survive.
+  /// Binding the settings window, and the three traps it has to survive.
   ///
   /// Filter on the ROLE first: the windows attribute has been measured holding
   /// elements whose role is AXApplication, and binding one of those walks the
-  /// entire application tree while every call reports success. Then exclude
-  /// the two decoy windows BY THEIR OWN NAMES, never by a shared prefix: the
+  /// entire application tree while every call reports success. Then exclude the
+  /// two decoy windows BY THEIR OWN NAMES, never by a shared prefix: the
   /// settings window is normally named for its pane but has been measured
-  /// reporting "Candela Settings", and a prefix rule throws the real window
-  /// away exactly then. Never by size, which AppKit autosaves and restores, and
-  /// never by index, which the decoys shift as they come and go.
+  /// reporting "Candela Settings", and a prefix rule throws the real window away
+  /// exactly then. Never by size, which AppKit autosaves and restores, and never
+  /// by index, which the decoys shift as they come and go.
   ///
   /// Failing loudly on a non-unique match is the point of the count check: a
   /// selector that matches nothing reports every control missing, which reads
-  /// exactly like a real defect in the app and has already cost one issue
-  /// filed against a defect that did not exist.
+  /// exactly like a real defect and has already cost one issue filed against a
+  /// defect that did not exist.
   func settingsWindow() -> AXUIElement? {
     guard AXIsProcessTrusted() else {
       lastAXError = "this shell has no Accessibility grant, so every accessibility read would come back empty"
@@ -3190,22 +3071,19 @@ final class RegressInstruments {
 
   /// Binds the settings window, opening it only when there is not one already.
   ///
-  /// Three rules, each of them a failure measured live on the rig:
+  /// Three rules, each a failure measured live on the rig:
   ///
-  /// - **Bind first, open second.** A call that opens before it looks re-issues
-  ///   an activation against a window that is already there, which raises and
-  ///   re-lays-out the window under a walk that is about to read it.
-  /// - **Issue the open ONCE, then poll.** An `open` per poll iteration is a
+  /// - Bind first, open second. A call that opens before it looks re-issues an
+  ///   activation against a window that is already there, raising and
+  ///   re-laying-out the window under a walk about to read it.
+  /// - Issue the open ONCE, then poll. An `open` per poll iteration is a
   ///   LaunchServices relaunch storm; the ten-second bound is measured off a
-  ///   deadline rather than counted in sleeps, because the per-poll cost is not
-  ///   a constant.
-  /// - **Never `open -b` when the running instance is not the registered
-  ///   copy.** LaunchServices resolves the bundle identifier to /Applications
-  ///   and launches a SECOND instance from there rather than reaching the one
-  ///   that is running, which the multi-instance gate then refuses: the run
-  ///   ends having measured nothing and changed the rig. There is no way to
-  ///   open that instance's settings window from here, so this says so and
-  ///   fails rather than spawning a sibling.
+  ///   deadline rather than counted in sleeps.
+  /// - Never `open -b` when the running instance is not the registered copy.
+  ///   LaunchServices resolves the bundle identifier to /Applications and
+  ///   launches a SECOND instance rather than reaching the one that is running,
+  ///   which the multi-instance gate then refuses. There is no way to open that
+  ///   instance's settings window from here, so this fails instead.
   func openSettingsWindow() -> Bool {
     if settingsWindow() != nil { return true }
     guard let instance = soleRunningInstance() else { return false }
@@ -3311,12 +3189,10 @@ final class RegressInstruments {
   /// be reworded, and a selector written against one silently matches nothing
   /// the day it is.
   ///
-  /// Absent, present-but-empty and unreadable stay apart, and the two-state
-  /// reader that collapsed them was deleted rather than kept beside this one.
-  /// "What does this control say" tolerates one nil; "may I press it" does
-  /// not, because a drive gated on nil-ness presses a control whose state
-  /// before the press was never established, and the readback afterwards then
-  /// has nothing to be a change FROM.
+  /// Absent, present-but-empty and unreadable stay apart. "What does this
+  /// control say" tolerates one nil; "may I press it" does not, because a drive
+  /// gated on nil-ness presses a control whose state before the press was never
+  /// established, and the readback then has nothing to be a change FROM.
   func axReading(identifier: String) -> Reading {
     guard let element = element(carrying: identifier) else {
       return .unreadable(lastAXError ?? "the control could not be located")
@@ -3357,12 +3233,12 @@ final class RegressInstruments {
   /// two rows answering to one description means the walk cannot say which
   /// destination it opened.
   ///
-  /// It reads nothing back on its own, deliberately. A sidebar row's readback
-  /// is the window title; a chevron row inside a display's page pushes without
-  /// changing that title at all, so the caller supplies whichever readback is
-  /// true of the row it pressed. `AXUIElementPerformAction` has been measured
-  /// returning `.success` while pushing nothing, so no caller may treat this
-  /// return as evidence of arrival.
+  /// It reads nothing back on its own, deliberately. A sidebar row's readback is
+  /// the window title; a chevron row inside a display's page pushes without
+  /// changing that title, so the caller supplies whichever readback is true of
+  /// the row it pressed. `AXUIElementPerformAction` has been measured returning
+  /// `.success` while pushing nothing, so no caller may treat this return as
+  /// evidence of arrival.
   func axPress(describedAs description: String) -> Bool {
     guard isAddressable(description), let window = settingsWindow() else { return false }
     // Sidebar rows append their state to the description ("<name>, enrolled in

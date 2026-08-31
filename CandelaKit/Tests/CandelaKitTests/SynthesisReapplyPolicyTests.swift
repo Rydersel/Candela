@@ -61,11 +61,9 @@ struct SynthesisReapplyPolicyTests {
     #expect(decision == .skip(.nothingStored))
   }
 
-  /// The combination the doc comment rules on and no test reached:
   /// `SyntheticSizeCatalog.size(matching:)` cannot answer a size for a
-  /// descriptor nobody stored, so nil-stored with a non-nil `resolved` means a
-  /// caller skipped the lookup and handed this a size out of thin air. The
-  /// stored intent wins, and nothing unattended engages on it.
+  /// descriptor nobody stored, so nil-stored with a non-nil `resolved` means the
+  /// caller skipped the lookup. The stored intent wins.
   @Test func aResolvedSizeWithNothingStoredIsStillNothingToEngage() {
     let decision = SynthesisReapplyPolicy.decide(
       optedIn: true, stored: nil, resolved: resolved,
@@ -94,11 +92,10 @@ struct SynthesisReapplyPolicyTests {
     #expect(decide(alreadyEngaged: true) == .skip(.alreadyEngaged))
   }
 
-  /// SS7 in the direction nothing consulted before. A display already showing
-  /// another display's framebuffer cannot also mirror onto a virtual one, and
-  /// the unattended path must never take apart a mirror set the person built:
-  /// the same predicate that hides synthesis sets from the mirroring surfaces
-  /// answers this, so a display carrying a synthesis set is not caught by it.
+  /// SS7: a display already showing another's framebuffer cannot also mirror
+  /// onto a virtual one, and the unattended path must never take apart a mirror
+  /// set the person built. Answered by the same predicate that hides synthesis
+  /// sets from the mirroring surfaces, so a synthesis set is not caught here.
   @Test func aUserMirrorSetRefusesTheEngage() {
     #expect(decide(alreadyMirrored: true) == .skip(.alreadyMirrored))
   }
@@ -122,11 +119,9 @@ struct SynthesisReapplyPolicyTests {
     #expect(decide(freeSlots: -1) == .skip(.noFreeSlot))
   }
 
-  /// The precedence itself, peeled one refusal at a time. Every flag is set
-  /// against an engage at the start; each step fixes the reason the previous
-  /// step reported and expects the next one down the order, ending on the
-  /// engage. This is the test that fails if a guard is ever reordered, which no
-  /// single-refusal test above can catch.
+  /// The precedence, peeled one refusal at a time: each step fixes the reason
+  /// the last one reported and expects the next down the order. Fails if a guard
+  /// is reordered, which no single-refusal test above can catch.
   @Test func refusalsAreReportedInAFixedOrder() {
     var optedIn = false
     var storedDescriptor: SyntheticSizeDescriptor? = nil

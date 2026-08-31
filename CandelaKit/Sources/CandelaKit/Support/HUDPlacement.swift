@@ -2,11 +2,9 @@ import CoreGraphics
 
 /// Where a HUD pill sits on the display it is drawn on.
 ///
-/// Raw values are shipped on-disk schema: `topRight` is 0 because it is what the
-/// app placed the pill at before there was a preference, so an absent or
-/// unreadable stored value resolves to exactly the old behaviour. Raw order is
-/// therefore not reading order, and pickers list `HUDPlacement.pickerOrder`
-/// rather than `allCases` (same rule as `MenuIcon`).
+/// Raw values are shipped on-disk schema. `topRight` is 0 because that is where the
+/// pill sat before the preference existed, so an unreadable stored value resolves to
+/// the old behaviour. Raw order is not reading order: pickers use `pickerOrder`.
 public enum HUDPosition: Int, Sendable, CaseIterable {
   case topRight = 0
   case topLeft = 1
@@ -15,48 +13,31 @@ public enum HUDPosition: Int, Sendable, CaseIterable {
 
 /// The pill's origin on one display: screen geometry in, a point out.
 ///
-/// Pure and in the Kit, like `HUDGrouping` and for the same reason: the AppKit
-/// island holds no judgement (DT16), and there is no app test target (D21), so
-/// anything living in the app cannot be pinned by a test. Rotation is the case
-/// that needs pinning most. `CGDisplayBounds` swaps width and height when a
-/// display is rotated, and the Dell in this setup is mounted at 270°, so a pill
-/// placed against the manufactured landscape geometry lands off the side of the
+/// Pure and in the Kit like `HUDGrouping` (DT16, D21), because rotation needs
+/// pinning most: `CGDisplayBounds` swaps width and height on a rotated display, so a
+/// pill placed against the manufactured landscape geometry lands off the side of the
 /// screen while every log line reports success.
 public enum HUDPlacement {
   /// Reading order, left to right. Never `HUDPosition.allCases`: raw 0 is the
   /// RIGHT-hand position.
   public static let pickerOrder: [HUDPosition] = [.topLeft, .topCenter, .topRight]
 
-  /// The pill's origin in AppKit's y-up global coordinates.
+  /// The pill's origin in AppKit's y-up global coordinates. `topInset` is the
+  /// caller's menu-bar allowance, measured per screen.
   ///
-  /// `frame` is the display's full frame and `visibleFrame` the same frame less
-  /// the menu bar and the Dock; `topInset` is the caller's menu-bar allowance,
-  /// measured per screen.
-  ///
-  /// The height comes from the FULL frame. With the menu bar auto-hidden,
+  /// The height comes from the FULL frame: with the menu bar auto-hidden,
   /// `visibleFrame` reaches the top of the screen and the pill would sit exactly
-  /// where the bar reveals itself, so `topInset` reserves that strip whether the
-  /// bar is showing or not.
+  /// where the bar reveals itself, so `topInset` reserves that strip either way.
   ///
-  /// The horizontal anchors come from the VISIBLE frame, the centred one
-  /// included. Nothing forces that: the panel is ordered at `.screenSaver`
-  /// level, so it would happily draw on top of a pinned side Dock, and
-  /// anchoring to the visible frame is a choice to sit clear of one instead. It
-  /// has a visible cost, which is the honest reason to record it here: while a
-  /// side Dock is pinned, "Top center" sits half that Dock's width off the true
-  /// centre of the display. Centring on `frame.midX` is the other defensible
-  /// answer and is one line away.
+  /// The horizontal anchors come from the VISIBLE frame, centre included. That is a
+  /// choice, not a constraint: the panel draws at `.screenSaver` level and would
+  /// happily cover a pinned side Dock. The cost is that "Top center" sits half a
+  /// pinned Dock's width off true centre. The courtesy is not symmetrical with the
+  /// menu bar's, since an auto-hidden side Dock leaves `visibleFrame` full width and
+  /// a revealed Dock comes up under the pill.
   ///
-  /// The courtesy is also NOT symmetrical with the menu bar's. An auto-hidden
-  /// side Dock leaves `visibleFrame` spanning the full width, so nothing
-  /// reserves the strip it reveals into and a revealed Dock comes up under the
-  /// pill: the top edge is protected unconditionally, the side edges only while
-  /// the Dock is pinned.
-  ///
-  /// The result is clamped into the visible frame horizontally and the full
-  /// frame vertically, so a pill larger than the space it is going into lands at
-  /// the edge rather than off it, and rounded AFTER that clamp, so the whole
-  /// point the caller places the window at is always a point the clamp allowed.
+  /// Clamped into the visible frame horizontally and the full frame vertically, then
+  /// rounded, so the caller always gets a point the clamp allowed.
   public static func origin(
     _ position: HUDPosition,
     size: CGSize,
@@ -79,9 +60,8 @@ public enum HUDPlacement {
     )
   }
 
-  /// The inner `max` matters for a pill larger than its screen: without it the
-  /// upper bound falls below the lower one and the clamp reports a position off
-  /// the top or left (the same trap `ConfirmationPlacement.clamp` documents).
+  /// The inner `max` matters for a pill larger than its screen: without it the upper
+  /// bound falls below the lower one and the clamp reports a position off-screen.
   private static func clamp(
     _ value: CGFloat, length: CGFloat, lower: CGFloat, upper: CGFloat
   ) -> CGFloat {

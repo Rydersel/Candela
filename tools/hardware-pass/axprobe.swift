@@ -32,9 +32,8 @@
 // identifier, so it must print (absent) or (empty), either of which counts as
 // identifier-absent here. SwiftUI may legitimately publish an empty identifier,
 // and the reader tells those two answers apart on purpose. Anything else on
-// either attribute means the reader is wrong and every other line is
-// worthless. What the window buttons themselves print for AXIdentifier is
-// unmeasured; the pass records it at Task 10 rather than assuming it.
+// either attribute means the reader is wrong and every other line is worthless.
+// What the window buttons print for AXIdentifier is unmeasured.
 import AppKit
 import ApplicationServices
 import Foundation

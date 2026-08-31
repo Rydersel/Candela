@@ -1,12 +1,10 @@
 import Foundation
 import Testing
 
-// The About page's one derived sentence (AT10), which is the update section's:
-// the two panes merged on 2026-08-20 and this suite came with the copy. The
-// words are pinned verbatim: the never-checked line is the first thing a fresh
-// install shows, and the relative line is asserted against a fixed clock so the
-// formatter's locale fix (en_US, D25) is itself under test; a machine-locale
-// run would fail here, not on a user's screen.
+// The About page's one derived sentence (AT10). Pinned verbatim because the
+// never-checked line is the first thing a fresh install shows, and asserted
+// against a fixed clock so the formatter's en_US pin (D25) is under test: a
+// machine-locale run fails here rather than on a user's screen.
 @Suite("About pane copy") @MainActor
 struct AboutPaneTests {
   private let now = Date(timeIntervalSince1970: 1_755_600_000)

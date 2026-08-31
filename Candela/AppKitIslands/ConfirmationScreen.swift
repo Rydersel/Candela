@@ -4,12 +4,10 @@ import CoreGraphics
 
 /// What a confirmation window is ABOUT, which is what decides where it goes.
 ///
-/// #136 (split from #68) starts from a different question than that issue did.
-/// It described the shared code as a switch over preview-versus-report, and on
-/// that reading `ModeConfirmationContent` does not fit: both of its cases carry
-/// a display. Asked as "which display is this content about", all four fit,
-/// because that is the question the placement actually answers, and the
-/// preview/report split was only ever how three of them happened to spell it.
+/// The question is "which display is this content about", not
+/// preview-versus-report: `ModeConfirmationContent` carries a display in both of
+/// its cases, and the preview/report split was only ever how the others happened
+/// to spell it.
 protocol ConfirmationContent {
   /// The display this content is about, or nil when it concerns no display in
   /// particular and belongs on the main one.
@@ -53,10 +51,9 @@ extension ModeConfirmationContent: ConfirmationContent {
 
 /// WHICH screen a confirmation window belongs on.
 ///
-/// Not to be confused with `ConfirmationPlacement` in `ConfirmationPanel.swift`,
-/// which answers where on that screen it sits without overlapping its siblings
-/// (#126). Two different questions; the name collision between them is what
-/// prompted this one to say `Screen`.
+/// Not `ConfirmationPlacement` in `ConfirmationPanel.swift`, which answers where
+/// on that screen it sits without overlapping its siblings. The name collision
+/// is why this one says `Screen`.
 @MainActor
 enum ConfirmationScreen {
   /// The screen the window belongs on, or nil to dismiss instead.
@@ -64,23 +61,18 @@ enum ConfirmationScreen {
   /// **The window goes where there are PIXELS.** For a preview on a display that
   /// has since become a mirror slave, resolving through `drawable` is a rescue.
   ///
-  /// Resolution is one-directional in its safety, and the unsafe direction
-  /// reaches here. A sample lagging a mirror ENGAGING self-heals: the lookup
-  /// fails, the caller dismisses, the panel's identity goes back to nil, and the
-  /// next countdown tick (otherwise a no-op) re-runs this against a caught-up
-  /// sample and puts the window up. A sample lagging a mirror BREAKING does NOT:
-  /// the ex-master is a real screen, so the window appears on the WRONG display,
-  /// the identity records it, and no later tick re-positions it. The window is
-  /// answerable where it lands and the countdown still reverts, so the cost is a
-  /// confirmation on the wrong panel for the life of one preview, not an
-  /// unanswerable one.
+  /// Resolution is one-directional in its safety. A sample lagging a mirror
+  /// ENGAGING self-heals: the lookup fails, the caller dismisses, and the next
+  /// countdown tick re-runs this against a caught-up sample. A sample lagging a
+  /// mirror BREAKING does NOT: the ex-master is a real screen, so the window
+  /// appears on the WRONG display and no later tick re-positions it. It is still
+  /// answerable there and the countdown still reverts, so the cost is one
+  /// preview on the wrong panel.
   ///
-  /// Nil means no screen even after resolving: either the display departed (the
-  /// coordinator discards the preview on the next screen-parameters
-  /// notification) or the list has not caught up with the reconfiguration.
-  /// Callers hide rather than leave a window naming the previous display up; a
-  /// preview retries this on every countdown tick, so a momentarily stale screen
-  /// list self-heals a second later.
+  /// Nil means no screen even after resolving: the display departed, or the list
+  /// has not caught up with the reconfiguration. Callers hide rather than leave a
+  /// window naming the previous display up; a preview retries on every countdown
+  /// tick, so a momentarily stale screen list self-heals a second later.
   static func resolve(
     for content: some ConfirmationContent,
     drawable: (CGDirectDisplayID) -> CGDirectDisplayID

@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// `SyntheticSizeCatalogTests`' idiom: the id is derived from the geometry
-/// rather than handed out by a counter.
+/// The id is derived from the geometry: a mutable `static var` counter is a
+/// concurrency error under Swift 6 strict checking.
 private func publishedRow(_ lw: Int, _ lh: Int, hidpi: Bool = true) -> DisplayModeRow {
   DisplayModeRow(
     mode: DisplayMode(
@@ -42,10 +42,8 @@ private func publishedRow(_ lw: Int, _ lh: Int, hidpi: Bool = true) -> DisplayMo
     #expect(areas == areas.sorted(by: >))
   }
 
-  /// The reason this function exists rather than a bare `+` and the catalog's
-  /// own comparator: a synthesized row's sentinel id is negative, so an
-  /// id-ascending tie-break would put it in FRONT of the published row it
-  /// doubles.
+  /// Why this function exists rather than a bare `+`: a synthesized row's
+  /// sentinel id is negative, so an id-ascending tie-break puts it in FRONT.
   @Test func aSynthesizedRowSortsAfterAPublishedRowOfTheSameSize() {
     let published = [publishedRow(2580, 1080)]
     let stops = [SyntheticSize(logicalWidth: 2580, logicalHeight: 1080, percentOfNative: 75)]

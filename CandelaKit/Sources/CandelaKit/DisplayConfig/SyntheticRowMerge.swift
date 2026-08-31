@@ -4,22 +4,17 @@ extension SyntheticSizeCatalog {
   /// The panel's curated rows plus the synthesized stops, as ONE picker list
   /// (SS4: same picker, no separate control surface).
   ///
-  /// The ordering is `DisplayModeCatalog.curated`'s and stays it: logical area
-  /// descending, with a tie-break that here has to say something that one does
-  /// not. A synthesized row's `ioModeID` is a NEGATIVE sentinel, so the plain
-  /// id tie-break would sort it in FRONT of a published row at the same size.
-  /// A synthesized size is an addition to what the panel offers, so it sorts
-  /// after the row it doubles.
+  /// Ordering follows `DisplayModeCatalog.curated`, logical area descending,
+  /// with one extra tie-break: a synthesized row's `ioModeID` is a NEGATIVE
+  /// sentinel, so the plain id tie-break would sort it in FRONT of a published
+  /// row at the same size. A synthesized size sorts after the row it doubles.
   ///
-  /// A separate file from the catalog itself because that type answers "what
-  /// may this panel synthesize"; this answers "what does the picker show", and
-  /// the second question is the one that has to agree with
-  /// `DisplayModeCatalog`.
+  /// Separate from the catalog because that type answers "what may this panel
+  /// synthesize" and this answers "what does the picker show".
   ///
   /// - Parameter nativePixels: the panel's own framebuffer, for the row's
-  ///   `isScaled`. nil suppresses the answer rather than guessing it, the same
-  ///   rule the badge follows: comparing against a zero-sized panel would mark
-  ///   every row scaled.
+  ///   `isScaled`. nil suppresses the answer rather than guessing it: comparing
+  ///   against a zero-sized panel would mark every row scaled.
   public static func merged(
     published: [DisplayModeRow],
     stops: [SyntheticSize],

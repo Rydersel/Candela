@@ -3,10 +3,10 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// #51: a display ID is not a panel. macOS reassigns IDs across a replug
-/// (measured: the MAG went 3 to 2 and the Dell 2 to 3 across one dock cycle), so
-/// an ID that is still present can be a DIFFERENT monitor, and per-display state
-/// reconciled on the ID alone follows the wire rather than the panel.
+/// A display ID is not a panel. macOS reassigns IDs across a replug (measured: the
+/// MAG went 3 to 2 and the Dell 2 to 3 across one dock cycle), so an ID that is
+/// still present can be a different monitor, and state reconciled on the ID alone
+/// follows the wire rather than the panel.
 @Suite("Display reconciliation (#51)")
 struct DisplayReconciliationTests {
   private let mag = "mag-edid-uuid"

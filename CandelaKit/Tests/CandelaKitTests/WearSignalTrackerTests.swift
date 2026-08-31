@@ -217,10 +217,9 @@ struct WearSignalTrackerTests {
 
   // MARK: - The on-disk shape
 
-  /// **The array is indexed by position in `stateOrder`.** Reordering it, or
+  /// The array is indexed by position in `stateOrder`. Reordering it, or
   /// deriving it from `CaseIterable`, reinterprets every user's accumulated
-  /// history as different states. This pins the order so that change fails a
-  /// test rather than silently rewriting months of a soak.
+  /// history as different states.
   @Test func theStateOrderIsOnDiskSchema() {
     #expect(
       WearSignalTracker.stateOrder == [

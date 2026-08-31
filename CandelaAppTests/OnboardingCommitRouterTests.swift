@@ -1,14 +1,13 @@
 import Testing
 
 // The guided setup flow's commit routing (OB6): each recorded decision lands on
-// exactly one existing write path, the launch-at-login write is differs-only
-// (OB13), and a kept size is acknowledged rather than applied a second time.
+// exactly one existing write path, launch at login is written only when it
+// differs (OB13), and a kept size is acknowledged rather than applied twice.
 // Every leg is a recorder here, so these pin the rules and nothing else.
 @Suite("Onboarding commit router") @MainActor
 struct OnboardingCommitRouterTests {
-  /// One backing for every leg, so a test can assert what was called AND in
-  /// what order. A class for the reason `LoginItemTests`' box is one: the
-  /// closures and the test share it.
+  /// One backing for every leg, so a test can assert what was called AND in what
+  /// order. A class so the closures and the test share it.
   @MainActor final class Recorder {
     enum Call: Equatable {
       case rename(String, String)

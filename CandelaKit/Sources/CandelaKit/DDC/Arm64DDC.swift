@@ -67,11 +67,11 @@ public class Arm64DDC: NSObject {
     var send: [UInt8] = [command]
     var reply = [UInt8](repeating: 0, count: 11)
     if Self.performDDCCommunication(service: service, send: &send, reply: &reply, writeSleepTime: writeSleepTime, numOfWriteCycles: numOfWriteCycles, readSleepTime: readSleepTime, numOfRetryAttemps: numOfRetryAttemps, retrySleepTime: retrySleepTime) {
-      // The checksum alone is a 1-in-256 guard, and until now it was the ONLY
-      // guard on this path. The Intel transport has always checked the op code
-      // and result code; this one did not — so a display answering with stale
-      // bytes, or answering a DIFFERENT VCP code than the one asked for,
-      // produced a plausible `max` that silently compressed the whole range.
+      // The checksum alone is a 1-in-256 guard. Without the op-code and
+      // result-code check the Intel transport has always made, a display
+      // answering with stale bytes, or answering a DIFFERENT VCP code than the
+      // one asked for, produces a plausible `max` that silently compresses the
+      // whole range.
       if DDCReplyFrame.rejection(for: reply, command: command) != nil {
         return nil
       }
@@ -150,14 +150,12 @@ public class Arm64DDC: NSObject {
     var packet: [UInt8] = [UInt8(0x80 | (send.count + 1)), UInt8(send.count)] + send + [0] // Note: the last byte is the place of the checksum, see next line!
     packet[packet.count - 1] = self.checksum(chk: send.count == 1 ? ARM64_DDC_7BIT_ADDRESS << 1 : ARM64_DDC_7BIT_ADDRESS << 1 ^ dataAddress, data: &packet, start: 0, end: packet.count - 2)
     for _ in 1 ... (numOfRetryAttemps ?? 4) + 1 {
-      // ONE packet per logical write (#71). The inherited default was 2, which
-      // put two identical packets on the bus for every write and cost 20 ms of
-      // sleep before the caller could proceed. Duplicate writes saturate I2C
-      // and delay the apply, which is our own note in ENGINEERING-NOTES and was
-      // then measured: halving the traffic halved the on-wire time, and the
-      // Dell's readback confirms the value ACHIEVED on every write at 1 cycle.
-      // Retries above are the reliability mechanism, and they are unchanged; a
-      // blind second copy of a packet that already worked was never one.
+      // ONE packet per logical write. The inherited default of 2 put two
+      // identical packets on the bus for every write and cost 20 ms of sleep
+      // before the caller could proceed. Duplicate writes saturate I2C and delay
+      // the apply; measured, halving the traffic halved the on-wire time, and
+      // the Dell's readback confirms the value ACHIEVED at 1 cycle. Retries
+      // above are the reliability mechanism, not a blind second copy.
       for _ in 1 ... max(numOfWriteCycles ?? 1, 1) {
         usleep(writeSleepTime ?? 10000)
         success = IOAVServiceWriteI2C(service, UInt32(ARM64_DDC_7BIT_ADDRESS), UInt32(dataAddress), &packet, UInt32(packet.count)) == 0
@@ -227,22 +225,15 @@ public class Arm64DDC: NSObject {
   /// `CoreDisplay_DisplayCreateInfoDictionary`'s image-size fields (which are
   /// in millimetres).
   ///
-  /// `ioregMatchScore` already reads exactly these two fields on every
-  /// discovery pass and uses them only to score an EDID-UUID substring match,
-  /// then drops them. Read separately here rather than threaded out of the
-  /// scorer: the scorer's job is scoring — it runs once per (displayID ×
-  /// ioreg service) candidate pair and returns a single Int, so widening its
-  /// return to carry a by-product would change a hot inner loop's shape for
-  /// the benefit of a read-only pane. One extra
-  /// `CoreDisplay_DisplayCreateInfoDictionary` per MATCHED display per
-  /// discovery pass (strictly fewer calls than the scorer already makes, since
-  /// matches are a subset of candidate pairs) is cheaper than entangling the
-  /// two, and it is a CoreDisplay dictionary read — no I2C, so no DDC
-  /// transaction, timing, retry or written value is touched.
+  /// `ioregMatchScore` reads the same two fields on every discovery pass and
+  /// then drops them, but widening a hot scoring loop's return to carry a
+  /// by-product for a read-only pane is not worth it. This costs one extra
+  /// `CoreDisplay_DisplayCreateInfoDictionary` per matched display per pass, and
+  /// it is a dictionary read: no I2C, so no DDC transaction, timing, retry or
+  /// written value is touched.
   ///
-  /// Guards `> 0` deliberately: a panel that declares 0 mm has declared
-  /// nothing, and reporting "0 × 0 cm" would be a row stating a fabricated
-  /// number rather than admitting it has none.
+  /// Guards `> 0` deliberately: a panel that declares 0 mm has declared nothing,
+  /// and "0 x 0 cm" would be a fabricated number rather than an admission.
   static func physicalSizeCm(displayID: CGDirectDisplayID) -> (width: Int, height: Int)? {
     guard let dictionary = CoreDisplay_DisplayCreateInfoDictionary(displayID)?
       .takeRetainedValue() as NSDictionary?,

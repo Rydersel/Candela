@@ -27,7 +27,6 @@ struct ArrangementDragPolicyTests {
       dragging: 99, by: CanvasPoint(x: 50, y: 0), from: pair, transform: tenToOne
     ) == nil)
 
-    // And for any display when the layout is empty — there is nothing to drag.
     #expect(ArrangementDragPolicy.propose(
       dragging: 1, by: .zero, from: DisplayArrangement(tiles: []), transform: tenToOne
     ) == nil)
@@ -49,10 +48,8 @@ struct ArrangementDragPolicyTests {
     #expect(first?.movedID == 2)
     #expect(first?.baseline == baseline)
 
-    // Positive control: the assertion above has teeth only because feeding the
-    // policy its OWN output moves the display a second time. `.onChanged` fires
-    // every frame with a translation measured from the drag's start, so a policy
-    // that folded its result back in would run away from the pointer.
+    // `.onChanged` reports a translation measured from the drag's start, so a
+    // policy that folded its own output back in would run away from the pointer.
     let folded = ArrangementDragPolicy.propose(
       dragging: 2, by: translation, from: first!.arrangement, transform: tenToOne
     )
@@ -60,22 +57,19 @@ struct ArrangementDragPolicyTests {
   }
 
   @Test func oneRoundingNotTwo() {
-    // Far enough apart that nothing is within the snap threshold, so the origin
-    // reported is the translation arithmetic and nothing else.
+    // Far enough apart that nothing snaps, so the origin below is pure
+    // translation arithmetic.
     let baseline = ArrangementFixtures.arrangement([
       (1, ArrangementFixtures.rect(0, 0, 1_000, 1_000)),
       (2, ArrangementFixtures.rect(5_000, 0, 1_000, 1_000)),
     ])
-    // A non-integral offset in display points, which is what makes the two
-    // routes disagree. `fitting` produces one of these for almost every real
-    // arrangement.
+    // A non-integral offset is what makes the two routes disagree, and `fitting`
+    // produces one for almost every real arrangement.
     let transform = CanvasTransform(scale: 0.1, offsetX: 0.05, offsetY: 0)
     let translation = CanvasPoint(x: 0.5, y: 0)
 
-    // Positive control for §1.5: converting the gesture's start point and its
-    // current point separately and subtracting really does land a point away
-    // from converting the translation once. The drag has moved 5 display
-    // points; the two-rounding route claims 6.
+    // Converting start and current separately, then subtracting, lands a point
+    // away from converting the translation once: 6 instead of the true 5.
     let start = CanvasPoint(x: 0, y: 0)
     let twoRoundings = transform.displayPoint(CanvasPoint(x: start.x + translation.x, y: start.y)).x
       - transform.displayPoint(start).x
@@ -87,9 +81,8 @@ struct ArrangementDragPolicyTests {
     )
     #expect(originOf(proposal, 2) == DisplayPoint(x: 5_005, y: 0))
 
-    // And the same total reached in ten increments against the FROZEN baseline
-    // lands where one large translation does. A per-call rounding would drift,
-    // and the drift never self-corrects over a session.
+    // Ten increments against the frozen baseline land where one big translation
+    // does. Per-call rounding would drift, and the drift never self-corrects.
     var cumulative = 0.0
     var incremental: ArrangementProposal?
     for _ in 0 ..< 10 {
@@ -115,9 +108,8 @@ struct ArrangementDragPolicyTests {
       dragging: 2, by: CanvasPoint(x: -50, y: 0), from: pair, transform: tenToOne
     )
 
-    // Returned, and carrying the overlapping position: the tile has to render
-    // where the pointer is, or the user finds out only on release. AR7 springs
-    // it back at the canvas, not here.
+    // Returned with the overlapping position: the tile has to render where the
+    // pointer is. AR7 springs it back at the canvas, not here.
     #expect(proposal != nil)
     #expect(originOf(proposal, 2) == DisplayPoint(x: 500, y: 0))
     #expect(proposal?.problems == [.overlap(1, 2)])
@@ -134,9 +126,8 @@ struct ArrangementDragPolicyTests {
     #expect(originOf(proposal, 2) == DisplayPoint(x: 1_500, y: 500))
     #expect(proposal?.lines.isEmpty == true)
 
-    // Positive control: the same drag stopped inside the threshold does produce
-    // a guide, so the emptiness above is about distance and not about the guides
-    // never being built.
+    // The same drag stopped inside the threshold does produce a guide, so the
+    // emptiness above is about distance, not about guides never being built.
     let near = ArrangementDragPolicy.propose(
       dragging: 2, by: CanvasPoint(x: 7, y: 0), from: pair, transform: tenToOne
     )
@@ -145,10 +136,8 @@ struct ArrangementDragPolicyTests {
   }
 
   @Test func theSnapThresholdIsConvertedThroughTheTransform() {
-    // §3.3. The same 100-display-point gap snaps on a zoomed-out map and does
-    // not on a zoomed-in one, because 8 canvas points is worth 160 display
-    // points at one scale and 40 at the other. A hardcoded display-point
-    // threshold would answer identically in both.
+    // 8 canvas points is 160 display points zoomed out and 40 zoomed in, so the
+    // same gap snaps on one map and not the other. A hardcoded threshold cannot.
     let zoomedOut = CanvasTransform(scale: 0.05, offsetX: 0, offsetY: 0)
     let zoomedIn = CanvasTransform(scale: 0.2, offsetX: 0, offsetY: 0)
     #expect(zoomedOut.displayDistance(ArrangementDragPolicy.snapThresholdCanvasPoints) == 160)
@@ -166,10 +155,8 @@ struct ArrangementDragPolicyTests {
   }
 
   @Test func theConvertedThresholdNeverFallsBelowOnePoint() {
-    // Zoomed in past 16 canvas points per display point, 8 canvas points
-    // converts to 0 — a threshold that admits an exact hit and nothing either
-    // side of it. The floor keeps the single point of tolerance display space
-    // has to give.
+    // Past 16 canvas points per display point the threshold converts to 0, which
+    // admits only an exact hit. The floor keeps display space's one point of slack.
     let zoomed = CanvasTransform(scale: 20, offsetX: 0, offsetY: 0)
     #expect(zoomed.displayDistance(ArrangementDragPolicy.snapThresholdCanvasPoints) == 0)
 
@@ -179,8 +166,7 @@ struct ArrangementDragPolicyTests {
     #expect(zoomed.displayDistance(20) == 1) // the drag moved exactly one point
     #expect(originOf(oneOff, 2) == DisplayPoint(x: 1_000, y: 0))
 
-    // And a negative threshold, which would otherwise admit nothing at all, is
-    // held to the same floor rather than silently disabling snapping.
+    // A negative threshold hits the same floor rather than silently disabling snapping.
     let negative = ArrangementDragPolicy.propose(
       dragging: 2, by: CanvasPoint(x: 0.1, y: 0), from: pair,
       transform: tenToOne, snapThreshold: -100
@@ -189,10 +175,8 @@ struct ArrangementDragPolicyTests {
   }
 
   @Test func theTransformIsUsedAsGivenAndNeverRefitted() {
-    // AR2. Refitting to the arrangement's bounds mid-drag rescales the whole map
-    // under the pointer every frame. The scale below is deliberately not the one
-    // `fitting` would produce for this arrangement, so a refit changes the
-    // answer.
+    // AR2: refitting mid-drag rescales the map under the pointer every frame. This
+    // scale is not the one `fitting` produces here, so a refit changes the answer.
     let canvas = CanvasSize(width: 560, height: 320)
     let refitted = CanvasTransform.fitting(pair.bounds, in: canvas, margin: 14)
     #expect(refitted.scale != tenToOne.scale)
@@ -215,14 +199,11 @@ struct ArrangementDragPolicyTests {
     #expect(proposal?.changesArrangement == false)
     #expect(proposal?.isCommittable == false)
 
-    // The seam this exists for: `ArrangementPreviewSession.begin` refuses a
-    // no-op with `.illegalArgument`, because `ArrangementPlan` cannot be built
-    // from one. A caller that asked only `isValid` would send it anyway and read
-    // the refusal as a failure.
+    // `ArrangementPreviewSession.begin` refuses a no-op with `.illegalArgument`,
+    // and a caller that asked only `isValid` would read that refusal as a failure.
     #expect(ArrangementPlan(applying: proposal!.arrangement, to: proposal!.baseline) == nil)
 
-    // Display 2 lifted to sit on top of display 1 instead of beside it: a real
-    // change, and a legal one.
+    // Lifted on top of display 1 instead of beside it: a real change, and a legal one.
     let moved = ArrangementDragPolicy.propose(
       dragging: 2, by: CanvasPoint(x: -100, y: -100), from: pair, transform: tenToOne
     )
@@ -232,9 +213,8 @@ struct ArrangementDragPolicyTests {
   }
 
   @Test func aDragThatStrandsADisplayItNeverTouchedNamesThatDisplayToo() {
-    // §3.5: connectivity is judged on the WHOLE proposed arrangement. Pulling
-    // the middle display out of a row of three disconnects the far one, which
-    // the user never touched and has to be shown.
+    // Connectivity is judged on the whole proposed arrangement: pulling the middle
+    // display out of a row strands the far one, which the user never touched.
     let row = ArrangementFixtures.arrangement([
       (1, ArrangementFixtures.rect(0, 0, 1_000, 1_000)),
       (2, ArrangementFixtures.rect(1_000, 0, 1_000, 1_000)),

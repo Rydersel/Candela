@@ -81,9 +81,8 @@ struct OnboardingAccessibilityPage: View {
     }
   }
 
-  /// The keyboard's own glyphs, drawn as keycaps: this row is the keys on
-  /// the user's keyboard, so it uses the symbols the keys themselves carry,
-  /// never decorative icons.
+  /// The symbols the keys themselves carry, never decorative icons: this row is
+  /// the keyboard the user is looking at.
   private var keycaps: some View {
     HStack(spacing: 14) {
       keycap("sun.max.fill")

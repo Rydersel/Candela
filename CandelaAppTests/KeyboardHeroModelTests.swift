@@ -28,9 +28,8 @@ struct KeyboardHeroModelTests {
 
   // MARK: - Annotations say what the lighting shows (colour is never alone)
 
-  // Sentences with a verb (Ryder, 2026-08-17): the line states what the keys
-  // are doing right now, so a noun-phrase reading like a feature caption is
-  // the defect these strings replaced.
+  // Sentences with a verb: the line states what the keys are doing right now,
+  // and a noun phrase reading like a feature caption is the defect it replaced.
   @Test func brightnessLineNamesModeAndTarget() {
     #expect(
       KeyboardHeroModel.brightnessLine(mode: .media, target: .mouse)
@@ -51,8 +50,7 @@ struct KeyboardHeroModelTests {
 
   @Test func volumeLineNamesModeAndTarget() {
     // The audio-matching target carries its own verb: keys FOLLOW the output
-    // device rather than acting on it, which the old dot template got wrong
-    // ("keys · follows").
+    // device rather than acting on it.
     #expect(
       KeyboardHeroModel.volumeLine(mode: .media, target: .audioDeviceNameMatching)
         == "Media keys follow the audio output device")

@@ -3,16 +3,10 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// Mirrors `ModePreviewSessionTests` case for case, because the safety argument
-/// is the same one: an arrangement can put the menu bar on a display that is off
-/// or leave a display the pointer cannot reach, and at that point the user
-/// cannot click "Keep". The countdown must therefore default to revert (AR8).
-///
-/// The cases this suite adds beyond the mode session's are all about the SECOND
-/// interaction — what the session holds after a failed apply, after a departure,
-/// after being superseded, and what the next attempt then does. That is where
-/// the mirroring work's worst defect lived: a partial result reported `.success`
-/// and every later press emitted a no-op that reported success too, forever.
+/// Mirrors `ModePreviewSessionTests` case for case: an arrangement can put the menu bar
+/// on a dark display or strand the pointer, and then nobody can click Keep, so the
+/// countdown defaults to revert (AR8). What this suite adds is the second interaction,
+/// where the mirroring work's worst defect lived: a no-op that reported success forever.
 @Suite("Arrangement preview session (AR8)")
 struct ArrangementPreviewSessionTests {
   private var pair: DisplayArrangement { ArrangementFixtures.pair }
@@ -53,9 +47,8 @@ struct ArrangementPreviewSessionTests {
     #expect(previewed.achieved == stacked)
   }
 
-  /// `.permanent`, not `.session` (§6.1): the arrangement is what macOS itself
-  /// persists per display-set, so a session-scoped commit is lost at logout and
-  /// reads as the feature not working.
+  /// `.permanent`, not `.session`: macOS persists the arrangement per display-set, so a
+  /// session-scoped commit is lost at logout and reads as the feature not working.
   @Test func confirmingReappliesTheApprovedPlanAtPermanentScope() async throws {
     let fake = loaded(pair)
     let session = ArrangementPreviewSession(configurator: fake)
@@ -66,9 +59,8 @@ struct ArrangementPreviewSessionTests {
     #expect(fake.currentArrangement() == stacked)
   }
 
-  /// The safety property. If this inverts, a layout that strands the pointer or
-  /// the menu bar becomes permanent and the user cannot undo it from inside the
-  /// app.
+  /// The safety property: if it inverts, a layout that strands the pointer or the menu
+  /// bar becomes permanent with no undo from inside the app.
   @Test func expiryReverts() async throws {
     let fake = loaded(pair)
     let session = ArrangementPreviewSession(configurator: fake, countdownSeconds: 2)
@@ -100,9 +92,8 @@ struct ArrangementPreviewSessionTests {
     #expect(fake.currentArrangement() == pair)
   }
 
-  /// Never start a preview that cannot be undone. With no readable layout there
-  /// is nothing to restore, so the countdown would expire into a no-op and leave
-  /// the machine in an arrangement nobody approved.
+  /// Never start a preview that cannot be undone: with no readable layout the countdown
+  /// expires into a no-op and leaves the machine in an arrangement nobody approved.
   @Test func aPreviewIsRefusedWhenTheLiveLayoutCannotBeRead() async {
     let session = ArrangementPreviewSession(
       configurator: FakeArrangementConfigurator(), countdownSeconds: 1
@@ -111,9 +102,8 @@ struct ArrangementPreviewSessionTests {
     #expect(await session.tick() == nil)
   }
 
-  /// A preview that changes nothing has nothing to confirm, and arming a
-  /// countdown over one would produce exactly the shape the mirroring defect
-  /// took: a no-op that later reports success.
+  /// A preview that changes nothing has nothing to confirm, and a countdown over one is
+  /// the mirroring defect's shape: a no-op that later reports success.
   @Test func aPreviewIsRefusedWhenThereIsNothingToChange() async {
     let fake = loaded(pair)
     let session = ArrangementPreviewSession(configurator: fake)
@@ -147,11 +137,9 @@ struct ArrangementPreviewSessionTests {
     #expect(fake.applied == afterConfirm)
   }
 
-  /// A `begin()` that fails establishes nothing, so it must not erase what the
-  /// session already reported — otherwise a commit followed by a failed begin
-  /// leaves the session claiming a reversion, telling the UI the opposite of
-  /// what happened. Both failure exits are exercised: the unreadable layout and
-  /// the throwing apply.
+  /// A failed `begin` establishes nothing, so it must not erase what the session already
+  /// reported: a commit then a failed begin would leave it claiming a reversion. Both
+  /// failure exits are exercised, the unreadable layout and the throwing apply.
   @Test func aFailedBeginDoesNotEraseTheOutcomeAlreadyReported() async throws {
     let fake = loaded(pair)
     let session = ArrangementPreviewSession(configurator: fake)
@@ -170,9 +158,8 @@ struct ArrangementPreviewSessionTests {
     #expect(await session.confirm(previewed) == .committed)
   }
 
-  /// The shipped countdown, pinned. Every other test passes an explicit value,
-  /// so the default the app actually gets would otherwise be covered by nothing
-  /// — and it is a product decision (thirty seconds, matching both siblings).
+  /// The shipped default, which every other test overrides with an explicit value.
+  /// Thirty seconds is a product decision, matching both siblings.
   @Test func theDefaultCountdownIsThirtySeconds() async throws {
     let fake = loaded(pair)
     let session = ArrangementPreviewSession(configurator: fake)
@@ -208,9 +195,8 @@ struct ArrangementPreviewSessionTests {
     #expect(await session.isCountingDown == false)
   }
 
-  /// macOS adjusts a requested layout silently (§6.3), so what the session
-  /// reports as previewed is what it READ BACK, never what it asked for. A UI
-  /// rendering the request would show a map that disagrees with the screens.
+  /// macOS adjusts a requested layout silently, so the session reports what it read
+  /// back, never what it asked for. A UI rendering the request disagrees with the screens.
   @Test func anAdjustedLayoutIsReportedAsAchievedRatherThanAssumed() async throws {
     let fake = loaded(pair)
     // A layout with a gap — one macOS is documented to correct, so the
@@ -225,10 +211,8 @@ struct ArrangementPreviewSessionTests {
     #expect(previewed.achieved != previewed.requested)
   }
 
-  /// §6.2: the confirmation goes where the menu bar actually is while the
-  /// preview stands, which is the origin of the ACHIEVED layout. A request macOS
-  /// adjusted did not necessarily move the menu bar where it was asked to, and a
-  /// panel on the wrong screen is a countdown the user never sees.
+  /// The confirmation goes where the menu bar actually is while the preview stands, the
+  /// achieved layout's origin: a panel on the wrong screen is a countdown nobody sees.
   @Test func theConfirmationTargetsTheDisplayTheMenuBarLandedOn() async throws {
     let honoured = loaded(pair)
     let session = ArrangementPreviewSession(configurator: honoured)
@@ -282,9 +266,8 @@ struct ArrangementPreviewSessionTests {
     #expect(fake.currentArrangement() == pair)
   }
 
-  /// A failed EXPIRY disarms the countdown; a failed COMMIT does not. A UI that
-  /// inferred either would show a countdown that never fires, or hide one that
-  /// will.
+  /// A failed expiry disarms the countdown; a failed commit does not. Inferring either
+  /// shows a countdown that never fires, or hides one that will.
   @Test func aFailedExpiryStopsCountingDownWhileAFailedCommitKeepsCounting() async throws {
     let expiry = loaded(pair)
     let expirySession = ArrangementPreviewSession(configurator: expiry, countdownSeconds: 1)
@@ -302,9 +285,8 @@ struct ArrangementPreviewSessionTests {
     #expect(await commitSession.isCountingDown)
   }
 
-  /// A stale answer must not be mistaken for the retry path: after a failed
-  /// commit the confirmation is still showing the SAME preview, so its answer
-  /// still matches and recovery keeps working.
+  /// After a failed commit the confirmation still shows the same preview, so its answer
+  /// keeps matching and recovery keeps working.
   @Test func theRetryPathStillMatchesAfterAFailedResolution() async throws {
     let fake = loaded(pair)
     let session = ArrangementPreviewSession(configurator: fake)
@@ -316,10 +298,8 @@ struct ArrangementPreviewSessionTests {
     #expect(await session.confirm(previewed) == .committed)
   }
 
-  /// An empty sweep is every display unreadable at once, not every display
-  /// departing (§4.4). Reading it as a departure would throw away a perfectly
-  /// good fallback over one bad instant, so the preview stays outstanding and
-  /// the retry lands when the layout can be read again.
+  /// An empty sweep is every display unreadable at once, not every display departing:
+  /// reading it as a departure throws away a good fallback over one bad instant.
   @Test func anUnreadableLayoutLeavesTheRevertRetryableRatherThanDropped() async throws {
     let fake = loaded(pair)
     let session = ArrangementPreviewSession(configurator: fake, countdownSeconds: 15)
@@ -351,11 +331,9 @@ struct ArrangementPreviewSessionTests {
 
   // MARK: - An answer only resolves the preview it was given for
 
-  /// The worst failure this type can produce: the user clicks Keep on a
-  /// confirmation naming one layout, a second drop lands in between, and the
-  /// layout they never saw becomes permanent while the UI reports success.
-  /// Ordering alone cannot prevent it — the click runs one turn before the call
-  /// — so the answer carries what it was about and the session refuses it.
+  /// The worst failure this type can produce: Keep is clicked on one layout, a second
+  /// drop lands in between, and the layout nobody saw becomes permanent. Ordering cannot
+  /// prevent it, the click runs a turn before the call, so the answer carries its subject.
   @Test func aStaleAnswerResolvesNothing() async throws {
     let fake = loaded(pair)
     let session = ArrangementPreviewSession(configurator: fake, countdownSeconds: 15)
@@ -375,14 +353,11 @@ struct ArrangementPreviewSessionTests {
 
   // MARK: - The second interaction
 
-  /// One outstanding preview, never two. The second `begin` takes the slot, and
-  /// the first is neither stranded (still holding a countdown of its own) nor
-  /// allowed to take its fallback with it: reverting the SECOND preview restores
-  /// the layout the FIRST one started from.
-  ///
-  /// Mutation that breaks it: give `begin` the live layout as its fallback
-  /// unconditionally instead of keeping `outstanding?.captured`. The revert then
-  /// restores `stacked` — the unapproved first preview — rather than `pair`.
+  /// One outstanding preview, never two: the second `begin` takes the slot, and the
+  /// first is neither stranded with a countdown of its own nor allowed to take its
+  /// fallback with it. Mutation that breaks it: give `begin` the live layout as its
+  /// fallback instead of keeping `outstanding?.captured`, and the revert restores the
+  /// unapproved first preview.
   @Test func aSecondBeginWhileOneIsOutstandingSupersedesRatherThanStrandingIt() async throws {
     let fake = loaded(pair)
     let session = ArrangementPreviewSession(configurator: fake, countdownSeconds: 15)
@@ -399,16 +374,10 @@ struct ArrangementPreviewSessionTests {
     #expect(fake.applied.map(\.scope) == [.preview, .preview, .permanent])
   }
 
-  /// #53's shape: the platform commits, returns success, and puts a display
-  /// somewhere the plan never named — so the apply throws over a machine that
-  /// DID move. The next attempt must therefore sample the machine again.
-  ///
-  /// `begin` takes the wanted layout rather than a plan for exactly this reason,
-  /// which makes "computed from live" a property of the type. The observable is
-  /// the FALLBACK: a plan is a total target layout, so replaying the stale one
-  /// would look identical, but a session that kept the failed attempt's capture
-  /// would revert to `pair` here instead of to the layout that was actually on
-  /// screen when the retry began.
+  /// The platform commits, returns success, and puts a display somewhere the plan never
+  /// named, so the apply throws over a machine that did move and the next attempt has to
+  /// sample it again. The observable is the fallback: a session that kept the failed
+  /// attempt's capture would revert to `pair` rather than to what was on screen.
   @Test func theRetryAfterAFailedApplyIsComputedFromLiveStateNotTheStalePlan() async throws {
     let fake = loaded(pair)
     let session = ArrangementPreviewSession(configurator: fake)
@@ -428,10 +397,9 @@ struct ArrangementPreviewSessionTests {
     #expect(fake.currentArrangement() == diverged)
   }
 
-  /// AR4 through the session: `stacked` names displays 1 and 2 only, and a third
-  /// display has arrived since it was computed. Applying it would leave the
-  /// newcomer's origin unset and hand it to CoreGraphics' "as close as possible"
-  /// heuristic — a display the user never touched, moved.
+  /// AR4 through the session: `stacked` names displays 1 and 2 only, so applying it
+  /// after a third arrives hands the newcomer's origin to CoreGraphics and moves a
+  /// display nobody touched.
   @Test func aLayoutForADisplaySetThatHasSinceChangedIsRefused() async {
     let fake = loaded(triple)
     let session = ArrangementPreviewSession(configurator: fake)
@@ -440,12 +408,9 @@ struct ArrangementPreviewSessionTests {
     #expect(await session.hasOutstandingPreview == false)
   }
 
-  /// Without this, one unplug wedges the feature: every later revert would build
-  /// a plan for a display set that no longer exists, fail identically forever,
-  /// and keep the preview outstanding with a fallback nothing can apply.
-  ///
-  /// It takes no display argument — a preview about a SET is invalidated by any
-  /// display arriving or leaving — so it cannot be asked the wrong question.
+  /// Without this, one unplug wedges the feature: every later revert builds a plan for a
+  /// display set that no longer exists and fails identically forever. It takes no display
+  /// argument, since any arrival or departure invalidates a preview about a set.
   @Test func discardOnADepartedDisplayFreesTheSession() async throws {
     let fake = loaded(triple)
     let session = ArrangementPreviewSession(configurator: fake, countdownSeconds: 15)
@@ -470,11 +435,9 @@ struct ArrangementPreviewSessionTests {
     #expect(await session.previewedArrangement == next)
   }
 
-  /// The proactive call has to make the same distinction the revert paths do: an
-  /// empty sweep is every display unreadable at once (§4.4), not every display
-  /// departing. A coordinator that calls this on every reconfiguration
-  /// notification would otherwise throw away a good fallback the first time a
-  /// sweep landed mid-reconfiguration.
+  /// The proactive call makes the same distinction the revert paths do: an empty sweep
+  /// is every display unreadable at once, not every display departing. A coordinator
+  /// calling it on every reconfiguration would otherwise drop a good fallback.
   @Test func discardDoesNotReadAnUnreadableSweepAsADeparture() async throws {
     let fake = loaded(pair)
     let session = ArrangementPreviewSession(configurator: fake, countdownSeconds: 15)
@@ -490,14 +453,10 @@ struct ArrangementPreviewSessionTests {
     #expect(fake.currentArrangement() == pair)
   }
 
-  /// Dragging a display back to where it started while a preview is outstanding.
-  /// The plan is computed against LIVE — which is the unconfirmed preview — so
-  /// this is a real change and is allowed; computed against the captured
-  /// fallback it would read as "nothing to change" and be refused, leaving the
-  /// user told there is nothing to do while the screens show otherwise.
-  ///
-  /// Keeping it also keeps the fallback honest: the capture is still `pair`, so
-  /// nothing about the original layout was lost by passing through it.
+  /// Dragging a display back to where it started while a preview is outstanding. The
+  /// plan is computed against live, which is the unconfirmed preview, so this is a real
+  /// change; against the captured fallback it would read as nothing to change and be
+  /// refused while the screens said otherwise. The capture is still `pair`.
   @Test func aSecondBeginBackToTheStartingLayoutIsAChangeBecauseLiveIsThePreview() async throws {
     let fake = loaded(pair)
     let session = ArrangementPreviewSession(configurator: fake, countdownSeconds: 15)
@@ -511,10 +470,8 @@ struct ArrangementPreviewSessionTests {
     #expect(fake.currentArrangement() == pair)
   }
 
-  /// The same rule reached through the COUNTDOWN rather than through a caller
-  /// noticing the departure. The two share one predicate, so an expiry that
-  /// lands before the reconfiguration notification does cannot wedge the session
-  /// on a plan for a machine that no longer exists.
+  /// The same rule reached through the countdown rather than a caller noticing the
+  /// departure. One shared predicate, so an early expiry cannot wedge the session.
   @Test func anExpiryAfterADepartureDropsThePreviewInsteadOfWedging() async throws {
     let fake = loaded(triple)
     let session = ArrangementPreviewSession(configurator: fake, countdownSeconds: 1)
@@ -531,11 +488,9 @@ struct ArrangementPreviewSessionTests {
     #expect(await session.isCountingDown == false)
   }
 
-  /// The layout is already back — something outside the app restored it, or a
-  /// reconfiguration dropped the app-scoped config. There is nothing to apply,
-  /// and that IS the restoration. `ArrangementPlan` refuses a no-op, so this
-  /// case has to be decided before the plan is built: read off a nil plan it
-  /// would be indistinguishable from the refusals that are genuinely failures.
+  /// The layout is already back, restored from outside the app or by a dropped
+  /// app-scoped config, and that is the restoration. `ArrangementPlan` refuses a no-op,
+  /// so this is decided before the plan is built; off a nil plan it looks like a failure.
   @Test func aRevertOntoTheLayoutAlreadyRestoredAppliesNothingAndStillResolves() async throws {
     let fake = loaded(pair)
     let session = ArrangementPreviewSession(configurator: fake, countdownSeconds: 15)
@@ -549,14 +504,10 @@ struct ArrangementPreviewSessionTests {
     #expect(await session.isCountingDown == false)
   }
 
-  /// The residual refusal: the display set still matches, but the CAPTURE is a
-  /// layout `ArrangementPlan` will not express — here display 2 both mirrors
-  /// display 1 and holds a tile of its own (AR6). No retry can fix a fallback
-  /// that cannot be turned into a request, so it is dropped and reported failed
-  /// rather than held for a revert that would fail identically forever.
-  ///
-  /// Reported `.failed` and never `.reverted`: the previewed layout is still on
-  /// screen, held at `.preview` scope until the process exits.
+  /// The display set still matches, but the capture is a layout `ArrangementPlan` will
+  /// not express: display 2 mirrors display 1 and holds a tile of its own (AR6). No retry
+  /// fixes a fallback that cannot become a request, so it is dropped and reported
+  /// `.failed`, never `.reverted`: the previewed layout is still on screen at `.preview`.
   @Test func aFallbackThatCannotBeExpressedAsAPlanIsReportedFailedNotReverted() async throws {
     let fake = loaded(DisplayArrangement(tiles: [
       ArrangementFixtures.tile(

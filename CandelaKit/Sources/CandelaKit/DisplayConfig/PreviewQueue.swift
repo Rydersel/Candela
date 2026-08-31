@@ -4,33 +4,23 @@ import os
 /// The serial chain a display-configuration coordinator runs its work through,
 /// so that no two reconfigurations of the same kind are ever in flight at once.
 ///
-/// Four coordinators (mode, mirror, rotation, arrangement) each held their own
-/// byte-identical copy of this. #64 is why it is only extractable now: rotation's
-/// copy folded `isApplying` INTO the primitive, and consolidating before that was
-/// fixed would have frozen the divergent shape into the shared abstraction and
-/// spread the defect to the other three.
-///
-/// **Ordering only.** It deliberately knows nothing about `isApplying`, which is
-/// raised at the command site by whoever is applying something. Everything else
-/// that queues work here (a countdown tick, a departure discard, an answer)
+/// **Ordering only.** It deliberately knows nothing about `isApplying`, which
+/// is raised at the command site by whoever is applying something. Everything
+/// else that queues work here (a countdown tick, a departure discard, an answer)
 /// reconfigures nothing on its own, and a queue that greyed out controls for
-/// those is exactly the defect #64 fixed.
+/// those was a real defect.
 ///
-/// A reference type rather than the value type the consolidation issue sketched:
-/// `enqueueReturning` both mutates `pending` and suspends, and a `mutating async`
-/// method on a struct stored in a class property holds exclusive access across
-/// the suspension.
+/// A reference type rather than a value type: `enqueueReturning` both mutates
+/// `pending` and suspends, and a `mutating async` method on a struct stored in a
+/// class property holds exclusive access across the suspension.
 ///
-/// In CandelaKit rather than the app target, which is a deliberate departure from
-/// #68's plan. There is no app test target (D21, #80), so an app-target copy of
-/// this would be verifiable only by running the UI; here it is pure plumbing with
-/// no AppKit or SwiftUI in it, and it has tests.
+/// In CandelaKit rather than the app target: there is no app test target (D21),
+/// so an app-target copy would be verifiable only by running the UI, while here
+/// it is pure plumbing with tests.
 public final class PreviewQueue: Sendable {
   /// Behind a lock rather than a main-actor stored property so `cancel()` can be
-  /// `nonisolated`. Every coordinator cancels from its `deinit`, which is
-  /// nonisolated and cannot hop; a main-actor-only tail would have quietly
-  /// dropped that cancellation, and losing teardown as a side effect of a
-  /// consolidation is exactly what "behaviour-preserving" rules out.
+  /// `nonisolated`. Every coordinator cancels from its `deinit`, which cannot
+  /// hop, so a main-actor-only tail would quietly drop that cancellation.
   private let pending = OSAllocatedUnfairLock<Task<Void, Never>?>(initialState: nil)
 
   public init() {}

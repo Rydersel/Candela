@@ -56,10 +56,9 @@ actor FakeHDR: HDRToggling {
   /// state being modelled, and it is not reachable through `setHDR`, which this
   /// backend can see.
   func stubEnabled(_ value: Bool) { enabled = value }
-  /// The #65 panel: the write is ACCEPTED and the display does not switch.
-  /// A different fact from `stubSetResult(false)`, which is a write that was
-  /// never issued, and before #65 the two were indistinguishable to the
-  /// controller because it read only the return value.
+  /// The panel that ACCEPTS the write and does not switch. A different fact from
+  /// `stubSetResult(false)`, a write that was never issued, and the two were once
+  /// indistinguishable to a controller that read only the return value.
   func stubAchieves(_ value: Bool) { achieves = value }
   func recordedSetCalls() -> [Bool] { setCalls }
   func recordedMeasuredReads() -> Int { measuredReads }
@@ -67,8 +66,8 @@ actor FakeHDR: HDRToggling {
 
 /// HDR backend whose MEASURED read suspends until released, and whose writes
 /// never change the panel: it holds the physical answer at "HDR is off" while a
-/// transition starts underneath the call that is waiting on it. From the review
-/// probe that reproduced the door's two race defects.
+/// transition starts underneath the call waiting on it. Reproduces the door's two
+/// race defects.
 actor GatedMeasureHDR: HDRToggling {
   private var waiters: [CheckedContinuation<Void, Never>] = []
   private var released = false
@@ -233,8 +232,8 @@ final class Harness {
   let prefs: DisplayPrefs
   let controller: BrightnessController
   private(set) var submitted: [HardwareTarget] = []
-  /// Each submit with the applier that carried it (#148): `submitted` alone
-  /// cannot see a target handed to the wrong endpoint.
+  /// Each submit with the applier that carried it: `submitted` alone cannot see a
+  /// target handed to the wrong endpoint.
   private(set) var submittedPairs: [(target: HardwareTarget, applier: any BrightnessApplying)] = []
 
   init(
@@ -326,8 +325,8 @@ struct PathSelectionTests {
     let h = Harness(hdrEnabled: true) { prefs, _ in prefs.hdrMode = .alwaysOn }
     await h.prime()
     h.controller.setBrightness(0.75)
-    // `prime()` is itself a native entry (HDR already live at init), so it
-    // asserts the restored value first — hardware round 1's H3.
+    // `prime()` is itself a native entry (HDR already live at init), so it asserts
+    // the restored value first.
     #expect(h.submitted == [.native(1.0), .native(0.75)])
     await h.controller.waitForPendingWrites()
     // Landed targets: the coalescer may drop the entry assert (latest-wins),
@@ -373,10 +372,10 @@ struct PathSelectionTests {
     #expect(h.shade.alphaCalls[0].id == Harness.displayID)
   }
 
-  /// Submit-level walk across the boundary (before the coalescer's own
-  /// dedupe): every call produces a DDC submit; the sw leg dedupes on the
-  /// last-applied value. The memo starts EMPTY on a fresh controller
-  /// (in-memory, deliberately not pref-persisted — review M35).
+  /// Submit-level walk across the boundary, before the coalescer's own dedupe:
+  /// every call produces a DDC submit, and the sw leg dedupes on the last-applied
+  /// value. The memo starts EMPTY on a fresh controller, in memory and deliberately
+  /// not pref-persisted.
   @Test func combinedBoundaryWalk() async {
     let h = Harness()
     for value in [1.0, 0.75, 0.5, 0.25, 0.0] {
@@ -445,7 +444,7 @@ struct PathSelectionTests {
     #expect(h.shade.removed.contains(Harness.displayID))
   }
 
-  // MARK: SS9's missing half (#194)
+  // MARK: SS9's missing half
 
   /// A synthesized size is a mirror set standing on this display, and HDR takes
   /// the data cable away. SS9 refuses the engage in one direction; this is the
@@ -505,12 +504,10 @@ struct PathSelectionTests {
     #expect(h.controller.isHDREngaged)
   }
 
-  /// #83. `.off` must DISENGAGE HDR that Candela never engaged. The engage arm
-  /// already handles the mirror case (an externally live HDR with mode `.off`);
-  /// the exit assumed Candela set it, so `mode != previous` returned early and
-  /// nothing could drop HDR from inside the app. Ruling: Candela and System
-  /// Settings stay in sync, so `.off` means the display leaves HDR whoever put
-  /// it there.
+  /// `.off` must DISENGAGE HDR that Candela never engaged. The exit assumed
+  /// Candela set it, so `mode != previous` returned early and nothing could drop
+  /// HDR from inside the app. Ruling: Candela and System Settings stay in sync, so
+  /// `.off` means the display leaves HDR whoever put it there.
   @Test func offDisengagesHDRThatWasEngagedOutsideCandela() async {
     let h = Harness(settle: .milliseconds(5))
     await h.prime()
@@ -525,10 +522,10 @@ struct PathSelectionTests {
     #expect(!h.controller.isHDREngaged)
   }
 
-  /// The mirror of the case above, and the one the panel's state-sourced HDR
-  /// button (#84) makes reachable: HDR switched off in System Settings leaves a
-  /// stale `.alwaysOn`, the button then reads "HDR Off" and offers `.alwaysOn`,
-  /// and a mode-only guard would return early and leave that click dead.
+  /// The mirror of the case above, reachable through the panel's state-sourced HDR
+  /// button: HDR switched off in System Settings leaves a stale `.alwaysOn`, the
+  /// button then reads "HDR Off" and offers `.alwaysOn`, and a mode-only guard
+  /// would return early and leave that click dead.
   @Test func alwaysOnReEngagesHDRSwitchedOffOutsideCandela() async {
     let h = Harness(hdrEnabled: true, settle: .milliseconds(5)) { prefs, _ in
       prefs.hdrMode = .alwaysOn
@@ -555,12 +552,12 @@ struct PathSelectionTests {
     #expect(await h.hdr!.recordedSetCalls().isEmpty)
   }
 
-  // MARK: Native-entry brightness assert (hardware round 1)
+  // MARK: Native-entry brightness assert
 
-  /// Entering the native path by an EXTERNAL toggle must re-assert the
-  /// published value on the native leg. Hardware round 1: with HDR toggled on
-  /// outside the app the MAG came up at the DisplayServices register's leftover
-  /// value (0.5 from an earlier probe run) because no entry door pushed.
+  /// Entering the native path by an EXTERNAL toggle must re-assert the published
+  /// value on the native leg. Measured: with HDR toggled on outside the app the MAG
+  /// came up at the DisplayServices register's leftover value because no entry door
+  /// pushed.
   @Test func externallyToggledHDREntryReassertsBrightnessOnNativeLeg() async {
     let h = Harness { prefs, _ in prefs.hdrMode = .alwaysOn }
     await h.prime() // HDR off: combined path
@@ -584,12 +581,11 @@ struct PathSelectionTests {
     #expect(h.controller.isNativeActive())
   }
 
-  // MARK: #65, committing an engage on the achieved state and not the write
+  // MARK: Committing an engage on the achieved state and not the write
 
-  /// The class CLAUDE.md §2 names, now reachable in the HDR path: the panel
-  /// accepts the write, reports success, and does not switch. Before this the
-  /// arm was chosen from `setHDR`'s return, so `.alwaysOn` persisted across
-  /// launches on a display that was never in HDR.
+  /// The class CLAUDE.md §2 names, in the HDR path: the panel accepts the write,
+  /// reports success, and does not switch. Choosing the arm from `setHDR`'s return
+  /// persisted `.alwaysOn` across launches on a display that was never in HDR.
   @Test func anEngageThatIsAcceptedAndDoesNotSwitchRollsTheModeBack() async {
     let h = Harness(settle: .milliseconds(5))
     await h.prime()
@@ -616,7 +612,7 @@ struct PathSelectionTests {
     #expect(h.controller.isHDREngaged)
   }
 
-  // MARK: #83, putting back HDR a reset dropped and Candela never owned
+  // MARK: Putting back HDR a reset dropped and Candela never owned
 
   /// The ruling: a reset clears Candela's settings, and HDR the user engaged in
   /// System Settings was never one of them. It goes back, and no mode is
@@ -1378,7 +1374,7 @@ struct PathSelectionTests {
     #expect(h.gamma.scales.count == scalesBefore) // no re-apply under native (C1)
   }
 
-  // MARK: separateCombinedScale stepping (M39)
+  // MARK: separateCombinedScale stepping
 
   @Test func separateCombinedScaleUsesCombinedChicletMath() async {
     let h = Harness { _, defaults in defaults.set(true, forKey: "separateCombinedScale") }
@@ -1392,8 +1388,8 @@ struct PathSelectionTests {
     #expect(h.controller.step(isUp: false, isFine: false) == 0.6875) // M2 16-chiclet math
   }
 
-  /// HDR Boost removed (Ryder, 2026-07-30): a fresh press at either end of the
-  /// range is now just a step. No key path may touch a display's HDR state.
+  /// HDR Boost is cut: a fresh press at either end of the range is just a step, and
+  /// no key path may touch a display's HDR state.
   @Test func stepAtRangeEndsNeverTogglesHDR() async {
     let top = Harness()
     await top.prime()
@@ -1510,11 +1506,10 @@ struct ReapplyAfterPrefChangeTests {
 
   @Test func aDisabledBrightnessCommandWritesNoDDCButStillFixesTheSoftwareLeg() async {
     // `unavailableDDC.brightness` routes to `BrightnessPath.softwareOnly`: no
-    // register write, software leg only — and on the COMBINED SPLIT value, not
-    // the raw one, which is what the 0.83 below pins. (It used to route through
-    // an `if !tuning.unavailableDDC` guard inside the combined branch; ruling
-    // R-A gave the state its own case. The BEHAVIOUR asserted here is
-    // unchanged — that is the point of the row.)
+    // register write, software leg only, and on the COMBINED SPLIT value rather
+    // than the raw one, which is what the 0.83 below pins. Ruling R-A gave the
+    // state its own case instead of a guard inside the combined branch; the
+    // behaviour is unchanged, which is the point of the row.
     let h = Harness()
     h.controller.setBrightness(0.4)
     #expect(h.submitted == [.ddc(raw: 0)])
@@ -1524,14 +1519,13 @@ struct ReapplyAfterPrefChangeTests {
     h.prefs.setTuning(tuning, for: .brightness)
     h.controller.reapplyAfterPrefChange()
 
-    // Nothing new on the wire, and after #143 that silence is deliberate rather
-    // than incidental: `handBackDDCLegIfAbandoned` skips a command the display
-    // has declared unsupported or the user has switched off, exactly as
-    // `restoreFullRangeDDC` does. The register therefore stays at the combined
-    // floor here. That is the same stranding #143 fixed for the hardware-control
-    // toggle, and undoing it belongs in the tuning grid's own Off switch (D29
-    // rule 1's shape: undo the disabling effect before persisting the value that
-    // disables it), not in a write to a command just declared unavailable.
+    // Nothing new on the wire, and the silence is deliberate:
+    // `handBackDDCLegIfAbandoned` skips a command the display has declared
+    // unsupported or the user has switched off, exactly as `restoreFullRangeDDC`
+    // does, so the register stays at the combined floor. Undoing that belongs in
+    // the tuning grid's own Off switch (D29 rule 1's shape: undo the disabling
+    // effect before persisting the value that disables it), not in a write to a
+    // command just declared unavailable.
     #expect(h.submitted == [.ddc(raw: 0)])
     #expect(h.gamma.scales.count == 2 && approx(h.gamma.scales[1], 0.83)) // re-asserted
   }
@@ -1541,14 +1535,12 @@ struct ReapplyAfterPrefChangeTests {
   /// `combinedSplit`'s hardware branch always wins and the software band has
   /// zero width. Nothing moves the display at all.
   ///
-  /// This is state (B) of the collapse recorded on
-  /// `BrightnessController.softwareBackendChoice`. Before path selection moved
-  /// into `BrightnessPathPolicy` it answered `.gamma` here and re-applied
-  /// `sw == 1`; it now answers `.none` and tears the backend down instead.
-  /// Pinned because the two are equivalent only by arithmetic —
-  /// `swTransform(1, allowZero: false) == 1` — and an arithmetic coincidence
-  /// nobody asserts is a regression waiting for the next reader who
-  /// "simplifies" one side of it.
+  /// State (B) of the collapse recorded on
+  /// `BrightnessController.softwareBackendChoice`. Answering `.gamma` and
+  /// re-applying `sw == 1` and answering `.none` with the backend torn down are
+  /// equivalent only by arithmetic, `swTransform(1, allowZero: false) == 1`, and an
+  /// arithmetic coincidence nobody asserts is a regression waiting for the next
+  /// reader who "simplifies" one side of it.
   @Test func combinedWithDDCOffAndAZeroWidthBandLeavesNoDimmingBehind() {
     let h = Harness { prefs, _ in
       prefs.combinedSwitchingPoint = -8 // s == 0: the software band has no width
@@ -1569,7 +1561,7 @@ struct ReapplyAfterPrefChangeTests {
   }
 }
 
-// MARK: - Handing the DDC leg back when a pref abandons it (#143)
+// MARK: - Handing the DDC leg back when a pref abandons it
 
 /// Achieved output for a register value under a gamma scale, on a panel that
 /// still emits `floor` of its maximum at register 0. Everything below is
@@ -1589,7 +1581,7 @@ private extension HardwareTarget {
 @MainActor
 @Suite("Handing the DDC leg back (#143)")
 struct DDCLegHandBackTests {
-  /// The measurement in the issue, as an engine test: MAG at 40% combined is
+  /// The hardware measurement as an engine test: the MAG at 40% combined is
   /// register 0 with the table at 0.83, and turning hardware control off used to
   /// write no register value at all, leaving software dimming to run on top of a
   /// panel already at its hardware minimum.
@@ -1616,9 +1608,8 @@ struct DDCLegHandBackTests {
   }
 
   /// The invariant the ordering exists for, at both sides of the switching
-  /// point: the transient never overshoots the brighter of the two endpoints,
-  /// and the reversed ordering always would. 0.9 is the case hardware checklist
-  /// item 54 names, where reversing it is a flash to 100%.
+  /// point: the transient never overshoots the brighter of the two endpoints, and
+  /// the reversed ordering always would. At 0.9 reversing it is a flash to 100%.
   @Test func theTransientNeverOvershootsEitherEndpoint() async {
     for (value, ddcBefore, gammaBefore, gammaAfter) in [
       (0.4, UInt16(0), 0.83, 0.49), // software zone: register already at the floor
@@ -1662,9 +1653,8 @@ struct DDCLegHandBackTests {
   /// Turning hardware control back ON puts exactly one register write on the
   /// wire, at the combined value, with no full-range write on the way through.
   ///
-  /// The WIRE is what this pins, and #146 left it alone: what that fix changed
-  /// is only when the table moves relative to the write (its own suite below).
-  /// So the await is load-bearing here rather than decorative.
+  /// The WIRE is what this pins. The ordering suite below owns when the table moves
+  /// relative to the write, so the await here is load-bearing rather than decorative.
   @Test func turningHardwareControlBackOnWritesOneRegisterValue() async {
     let h = Harness { prefs, _ in prefs.forceSoftware = true }
     h.controller.setBrightness(0.4)
@@ -1743,9 +1733,9 @@ struct DDCLegHandBackTests {
   }
 }
 
-// MARK: - Ordering a pref change that DROPS the register (#146)
+// MARK: - Ordering a pref change that DROPS the register
 
-/// The other direction of #143's ordering rule, and the flash it left behind.
+/// The other direction of the hand-back ordering rule, and the flash it left behind.
 ///
 /// Turning hardware control back ON at a value the combined split puts at the
 /// register's floor lowers the register (100 to 0 on the MAG at 0.375) while
@@ -1760,8 +1750,8 @@ struct DDCLegHandBackTests {
 @MainActor
 @Suite("Ordering a pref change that drops the register (#146)")
 struct RegisterDropOrderingTests {
-  /// Puts a display into the state the issue measured: software-only at `value`
-  /// with the register handed back at full range by #143.
+  /// The measured state: software-only at `value`, with the register handed back at
+  /// full range.
   private func softwareOnlyAfterHandBack(at value: Double) async -> Harness {
     let h = Harness()
     h.controller.setBrightness(value)
@@ -1771,7 +1761,7 @@ struct RegisterDropOrderingTests {
     return h
   }
 
-  /// The measurement in the issue, as an engine test.
+  /// The hardware measurement as an engine test.
   @Test func turningHardwareControlBackOnHoldsTheTableUntilTheRegisterLands() async {
     let h = await softwareOnlyAfterHandBack(at: 0.375)
     // Software-only at 0.375: register handed back at full range, table at
@@ -1845,10 +1835,9 @@ struct RegisterDropOrderingTests {
     }
   }
 
-  /// #143's direction is untouched: when the register RISES the software side
+  /// The other direction is untouched: when the register RISES the software side
   /// still runs inline, because it is the leg going down and therefore already
-  /// first. Nothing is held, so nothing waits on a DDC round trip for a change
-  /// that did not need one.
+  /// first. Nothing is held, so nothing waits on a DDC round trip it did not need.
   @Test func aPrefChangeThatRaisesTheRegisterKeepsTheSoftwareLegInline() async {
     let h = Harness()
     h.controller.setBrightness(0.4)
@@ -1932,7 +1921,7 @@ struct RegisterDropOrderingTests {
   }
 }
 
-// MARK: - External adoption (echo slot, Task 7 contract)
+// MARK: - External adoption (echo slot)
 
 @MainActor
 @Suite("External adoption")
@@ -2008,7 +1997,7 @@ struct ExternalAdoptionTests {
   }
 }
 
-// MARK: - Cross-display sync fan-out (Task 11; fork AppDelegate.swift:238-253)
+// MARK: - Cross-display sync fan-out (fork parity: AppDelegate's fan-out)
 
 @MainActor
 @Suite("Brightness sync fan-out")
@@ -2127,7 +2116,7 @@ struct BrightnessSyncTests {
   }
 }
 
-// MARK: - Migration + first run (scope decision 4; I12/I13)
+// MARK: - Migration + first run (I12/I13)
 
 @MainActor
 @Suite("Migration and first run")
@@ -2169,7 +2158,7 @@ struct MigrationTests {
   }
 }
 
-// MARK: - Built-in display role (Task 10)
+// MARK: - Built-in display role
 
 @MainActor
 @Suite("Built-in role")
@@ -2194,10 +2183,9 @@ struct BuiltInRoleTests {
     #expect(await pureDDC.ddc.recordedWrites().isEmpty)
   }
 
-  /// Re-review T10-C: the migration/first-run/park-at-s block is bypassed
-  /// entirely. A native read of 0.3 publishes 0.3 (an external role would
-  /// park it at s = 0.5), the seeded store value is ignored, and nothing is
-  /// ever written to the store.
+  /// The migration/first-run/park-at-s block is bypassed entirely. A native read of
+  /// 0.3 publishes 0.3 (an external role would park it at s = 0.5), the seeded
+  /// store value is ignored, and nothing is ever written to the store.
   @Test func builtInSeedsFromNativeReadWithoutParkOrStoreWrite() async {
     let h = Harness(seed: [Harness.storageKey: 0.25], role: .builtIn, readNative: { _ in 0.3 })
     #expect(approx(h.controller.brightness, 0.3, tolerance: 1e-6))
@@ -2227,24 +2215,24 @@ struct BuiltInRoleTests {
     #expect(h.store.values.isEmpty)
   }
 
-  /// The poller gate is constitutively true for the built-in role — no HDR
-  /// settle machinery ever runs, and the native path is always active.
+  /// The poller gate is constitutively true for the built-in role: no HDR settle
+  /// machinery ever runs, and the native path is always active.
   @Test func builtInIsNativeActiveConstitutively() async {
     let h = Harness(withHDR: false, role: .builtIn)
     #expect(h.controller.isNativeActive())
   }
 
-  /// Re-review T10-D: the public stub writer always fails, so any DDC path
-  /// reached by mistake degrades instead of touching hardware.
+  /// The public stub writer always fails, so any DDC path reached by mistake
+  /// degrades instead of touching hardware.
   @Test func noopDDCWriterAlwaysFails() async {
     let writer = NoopDDCWriter()
     #expect(await writer.write(command: VCP.brightness, value: 50) == false)
     #expect(await writer.read(command: VCP.brightness) == nil)
   }
 
-  /// T10 fix round 1 (minor): `setHDRMode` is role-fenced — a public-API call
-  /// on a built-in controller is a full no-op: no pref write under the builtIn
-  /// key, no published-mode change, no HDR toggling.
+  /// `setHDRMode` is role-fenced: a public-API call on a built-in controller is a
+  /// full no-op, with no pref write under the builtIn key, no published-mode
+  /// change, and no HDR toggling.
   @Test func setHDRModeOnBuiltInIsNoOp() async {
     let h = Harness(role: .builtIn)
     await h.prime()
@@ -2255,16 +2243,16 @@ struct BuiltInRoleTests {
   }
 }
 
-// MARK: - alwaysOn engage failure (T8 carry-over, fixed in T10 round 1)
+// MARK: - alwaysOn engage failure
 
 @MainActor
 @Suite("HDR mode engage failure")
 struct HDRModeEngageFailureTests {
-  /// The `.alwaysOn` arm commits the mode optimistically before engaging; on
-  /// `engaged == false` it must roll `hdrMode`/`prefs.hdrMode` back to the
-  /// previous mode and re-apply the current value through the normal path —
-  /// otherwise a display that can't engage HDR is stranded un-dimmed (the C1
-  /// clearing already ran) with a lying `.alwaysOn` persisted across launches.
+  /// The `.alwaysOn` arm commits the mode optimistically before engaging. On
+  /// `engaged == false` it must roll `hdrMode`/`prefs.hdrMode` back and re-apply the
+  /// current value through the normal path, or a display that cannot engage HDR is
+  /// stranded un-dimmed (the C1 clearing already ran) with a lying `.alwaysOn`
+  /// persisted across launches.
   @Test func alwaysOnEngageFailureRollsBackModeAndReappliesSoftwareLeg() async {
     let h = Harness(settle: .milliseconds(5))
     await h.prime()
@@ -2296,9 +2284,9 @@ struct HDRModeEngageFailureTests {
     #expect(unsupported.controller.supportsHDR == false)
   }
 
-  /// The panel's badge reports LIVE HDR, not the mode pref (hardware round 1:
-  /// an externally toggled HDR read as "HDR Off" with no badge), so
-  /// `isHDREngaged` must follow the cache even while the mode is `.off`.
+  /// The panel's badge reports LIVE HDR, not the mode pref: an externally toggled
+  /// HDR once read as "HDR Off" with no badge, so `isHDREngaged` must follow the
+  /// cache even while the mode is `.off`.
   @Test func isHDREngagedReflectsLiveHDRRegardlessOfMode() async {
     let live = Harness(hdrEnabled: true) // externally toggled; mode stays .off
     await live.prime()
@@ -2309,13 +2297,12 @@ struct HDRModeEngageFailureTests {
     #expect(dark.controller.isHDREngaged == false)
   }
 
-  /// Fix round 2 (Important): `setHDRMode`'s body is a bare async func and the
-  /// panel spawns one unserialized Task per mode change, so nothing serializes
-  /// overlapping calls but the generation token.
-  /// A first `.alwaysOn` call parked on its engage await must NOT, when the
-  /// engage finally fails, roll `hdrMode`/`prefs.hdrMode` back to its stale
-  /// `previous` or fire `applyPaths` after a second call has retargeted — the
-  /// newer transition owns the state.
+  /// `setHDRMode`'s body is a bare async func and the panel spawns one unserialized
+  /// Task per mode change, so nothing serializes overlapping calls but the
+  /// generation token. A first `.alwaysOn` call parked on its engage await must NOT,
+  /// when the engage finally fails, roll `hdrMode`/`prefs.hdrMode` back to its stale
+  /// `previous` or fire `applyPaths` after a second call has retargeted: the newer
+  /// transition owns the state.
   ///
   /// With only two modes left, A's `previous` and B's committed mode are both
   /// `.off`, so the submit count carries the assertion: a stale rollback's
@@ -2361,12 +2348,11 @@ struct HDRModeEngageFailureTests {
     #expect(submitted.count == submittedBeforeRelease)
   }
 
-  /// Final wave: the supersession token must be a MONOTONIC GENERATION, not
-  /// the mode. `hdrMode` is ABA-prone — a parked `.alwaysOn` call resumes to
-  /// find the mode back at `.alwaysOn` after an `.off` → `.alwaysOn` round
-  /// trip, so a `hdrMode == mode` comparison waves its stale rollback through
-  /// and the THIRD transition's committed mode/prefs are clobbered by the
-  /// first's `previous`.
+  /// The supersession token must be a MONOTONIC GENERATION, not the mode. `hdrMode`
+  /// is ABA-prone: a parked `.alwaysOn` call resumes to find the mode back at
+  /// `.alwaysOn` after an `.off` to `.alwaysOn` round trip, so a `hdrMode == mode`
+  /// comparison waves its stale rollback through and the THIRD transition's
+  /// committed mode and prefs are clobbered by the first's `previous`.
   @Test func overlappingSetHDRModeABADoesNotClobberThirdTransition() async {
     let defaults = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "t")
@@ -2411,11 +2397,10 @@ struct HDRModeEngageFailureTests {
     #expect(submitted.count == submittedBeforeRelease)
   }
 
-  /// Final wave: the EXIT arm has the same bare-async-func exposure as the
-  /// engage arm (T10 round 2 flagged it and left it out of scope). A `.off`
-  /// transition parked on its disengage must not, once it resumes, clear the
-  /// settle flag of the transition that retargeted past it or fire its
-  /// `applyPaths` against state that transition owns.
+  /// The EXIT arm has the same bare-async-func exposure as the engage arm. A `.off`
+  /// transition parked on its disengage must not, once it resumes, clear the settle
+  /// flag of the transition that retargeted past it, or fire its `applyPaths`
+  /// against state that transition owns.
   @Test func overlappingSetHDRModeExitArmDoesNotClobberNewerTransition() async {
     let defaults = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "t")
@@ -2469,9 +2454,9 @@ struct HDRModeEngageFailureTests {
 /// test park one `setHDRMode(.alwaysOn)` mid-engage while another call
 /// retargets the controller.
 ///
-/// With `gateFirstEngageOnly`, only the FIRST engage is gated; later engages
-/// succeed immediately — that lets a test park one call while two further
-/// transitions run to completion (the ABA case).
+/// With `gateFirstEngageOnly`, only the FIRST engage is gated and later engages
+/// succeed immediately, so a test can park one call while two further transitions
+/// run to completion (the ABA case).
 actor GatedEngageHDR: HDRToggling {
   private var engageWaiters: [CheckedContinuation<Void, Never>] = []
   private var released = false
@@ -2517,11 +2502,11 @@ actor GatedEngageHDR: HDRToggling {
   }
 }
 
-// MARK: - M4 backlog trio (#1, #4, #8)
+// MARK: - Backlog trio
 
-/// Backlog #1 fixture: fails the first engage, then parks the rollback's
-/// `refreshHDRCaches` inside `supportsHDR` so a newer transition can start
-/// while the failure arm is suspended.
+/// Fails the first engage, then parks the rollback's `refreshHDRCaches` inside
+/// `supportsHDR` so a newer transition can start while the failure arm is
+/// suspended.
 actor GatedRollbackHDR: HDRToggling {
   private var failNextSet = true
   private var enabled = false
@@ -2632,15 +2617,14 @@ struct AlreadyLiveEngageTests {
   }
 
   @Test func alwaysOnWithAStaleLiveCacheFallsThroughToTheRealEngage() async {
-    // Concurrency F3 / review R3: the door trusts cachedHDRActive, but the
-    // user can toggle HDR off in System Settings and click Always On before
-    // the reconfigure-driven cache refresh lands. Committing `.alwaysOn`
-    // without engaging (and with no rollback) would persist a lying mode —
-    // the door must re-check after refreshHDRCaches and fall through to the
-    // normal engage arm.
+    // The door trusts cachedHDRActive, but the user can toggle HDR off in System
+    // Settings and click Always On before the reconfigure-driven cache refresh
+    // lands. Committing `.alwaysOn` without engaging, and with no rollback, would
+    // persist a lying mode, so the door re-checks after refreshHDRCaches and falls
+    // through to the normal engage arm.
     let h = Harness(hdrEnabled: true, settle: .milliseconds(10))
     await h.prime() // cache: HDR live
-    // External toggle the controller has NOT observed — the cache is now stale.
+    // External toggle the controller has NOT observed: the cache is now stale.
     await h.hdr?.setHDR(displayID: Harness.displayID, enabled: false)
     await h.controller.setHDRMode(.alwaysOn)
     #expect(h.controller.hdrMode == .alwaysOn)

@@ -90,8 +90,7 @@ struct ProvenanceEnvelopeTests {
     #expect(try decodeStoredEnvelope(edited).validate() == false)
   }
 
-  /// A run lifted back out of an exported record still validates as a checkup file.
-  /// Nesting must not re-encode it, which would move its bytes and break its digest.
+  /// Nesting must not re-encode the run: that moves its bytes and breaks its digest.
   @Test func aRunLiftedOutOfAnExportedRecordIsStillAValidCheckupFile() throws {
     let base = ProvenanceRecordTests.sampleRecord()
     let run = try CheckupReportEnvelope(

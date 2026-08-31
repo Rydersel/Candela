@@ -3,27 +3,24 @@ import Foundation
 /// Accumulated panel-on time for one display, split by dim state and by how
 /// bright the panel was left (OC20).
 ///
-/// Ships before the two features that consume it, because both are blocked on
-/// data nothing collects and neither can start accumulating until this exists:
-/// OC17's effect-size gate (what fraction of panel-on time is spent in a
-/// wear-weightable dim state) and #120's modelled-vs-measured comparison (what
-/// drive level the panel actually ran at). `PanelHoursTracker` answers neither
-/// — it persists two scalars and records nothing about either axis.
+/// Ships before the two features that consume it, because neither can start
+/// accumulating until this exists: OC17's effect-size gate (what fraction of
+/// panel-on time is spent in a wear-weightable dim state) and the
+/// modelled-vs-measured comparison (what drive level the panel actually ran at).
+/// `PanelHoursTracker` answers neither.
 ///
-/// **Both axes are load-bearing and neither derives from the other.** The dim
-/// state axis answers OC17's gate as a count of seconds, with no model in it
-/// and nothing that can be wrong. The level axis is what a wear model
-/// integrates, and it carries a proxy caveat the state axis does not (see
-/// `noteTick`).
+/// **Both axes are load-bearing and neither derives from the other.** The state
+/// axis answers OC17's gate as a count of seconds, with nothing in it that can
+/// be wrong. The level axis is what a wear model integrates, and it carries a
+/// proxy caveat the state axis does not (see `noteTick`).
 ///
 /// **A histogram rather than an integral, deliberately.** `sum(level * dt)` is
-/// smaller and is exactly what a linear wear model wants, which is the
-/// objection to it: it bakes linearity into the *storage*. The mapping from a
-/// panel brightness setting to OLED drive current is not linear, is
-/// panel-dependent, and is not something we know. A histogram lets any monotone
-/// function of level be recovered from the same soak afterwards; an integral
-/// commits to one and cannot be un-committed without re-soaking for weeks. The
-/// difference is 60 doubles against 12.
+/// smaller and is exactly what a linear wear model wants, which is the objection
+/// to it: it bakes linearity into the *storage*. Brightness setting to OLED
+/// drive current is not linear, is panel-dependent, and is not something we
+/// know. A histogram lets any monotone function of level be recovered from the
+/// same soak afterwards; an integral commits to one and cannot be un-committed
+/// without re-soaking for weeks.
 ///
 /// Deliberately not `Sendable`, matching `PanelHoursTracker`: confined to
 /// whichever actor owns the display's controllers (the main actor today).
@@ -33,12 +30,10 @@ public final class WearSignalTracker {
   /// occupied bucket with a meaningful count.
   public static let bucketCount = 10
 
-  /// **On-disk schema: append only, never reorder.** The stored array is
-  /// indexed by position in this table, so deriving it from `CaseIterable`
-  /// would let a new `OledDimState` case silently renumber every user's
-  /// history and reinterpret months of accumulation as a different state. §4's
-  /// "add keys, never renumber" applies to array positions exactly as it
-  /// applies to enum raw values.
+  /// **On-disk schema: append only, never reorder.** The stored array is indexed
+  /// by position in this table, so deriving it from `CaseIterable` would let a
+  /// new `OledDimState` case silently renumber every user's history. "Add keys,
+  /// never renumber" applies to array positions as much as to enum raw values.
   static let stateOrder: [OledDimState] = [
     .active, .idleDim, .blackout, .lockDim, .unfocusedDim, .suspended,
   ]
@@ -71,18 +66,15 @@ public final class WearSignalTracker {
     self.secondsKey = "oledWearSeconds.\(persistenceKey)"
     self.versionKey = "oledWearSchema.\(persistenceKey)"
 
-    // A stored version we do not understand, or an array of the wrong shape,
-    // is discarded rather than reinterpreted. Unlike the exposure map this is
-    // NOT quarantined: it is a derived timing histogram with no per-cell
-    // meaning, so a wrong reading of it is worse than a fresh start, and there
-    // is nothing here a later build could migrate that re-soaking would not
-    // also produce.
+    // A stored version we do not understand, or an array of the wrong shape, is
+    // discarded rather than reinterpreted. Unlike the exposure map this is NOT
+    // quarantined: it is a derived timing histogram with no per-cell meaning, so
+    // there is nothing here a later build could migrate that re-soaking would
+    // not also produce.
     let storedVersion = defaults.object(forKey: versionKey) as? Int ?? OledStoreSchema.currentVersion
     // `object(forKey:)`, not `array(forKey:)`: the latter is not among the
     // primitives the test double overrides, so it falls through to the real
-    // defaults domain — the exact silent fall-through that double exists to
-    // prevent, and invisible until a test starts reading a developer's own
-    // preferences.
+    // defaults domain and a test starts reading a developer's own preferences.
     let stored = defaults.object(forKey: secondsKey) as? [Double]
     if storedVersion <= OledStoreSchema.currentVersion, let stored,
       stored.count == Self.slotCount, stored.allSatisfy({ $0.isFinite && $0 >= 0 }) {
@@ -97,28 +89,24 @@ public final class WearSignalTracker {
   /// Books one tick's elapsed seconds against a state and a level.
   ///
   /// `effectiveLevel` is the fraction of full output the panel is left at:
-  /// `brightness` for `.active`, `brightness * idleDimBrightness` for
-  /// `.idleDim`, `brightness * lockDimFactor` for `.lockDim`, and 0 for
-  /// `.blackout`. The caller computes it because only the caller has the
-  /// display's config; `lockDim` in particular must use the factor explicitly,
-  /// since the wire-level lock dim never writes `controller.brightness` and the
-  /// controller reports the user's setting throughout a locked span.
+  /// `brightness` for `.active`, `brightness * idleDimBrightness` for `.idleDim`,
+  /// `brightness * lockDimFactor` for `.lockDim`, 0 for `.blackout`. The caller
+  /// computes it because only the caller has the display's config; `lockDim` in
+  /// particular must use the factor explicitly, since the wire-level lock dim
+  /// never writes `controller.brightness`.
   ///
-  /// **It is a proxy for drive level, never a measured luminance.** The
-  /// composition it assumes — that a black overlay at alpha a leaves `1 - a` of
-  /// the light, and that this multiplies the brightness setting — ignores the
-  /// display's own EOTF and any local dimming. That is acceptable for the
-  /// relative comparisons both consumers ask for, and it is exactly why the
-  /// state axis exists as an independent answer to OC17's gate. Nothing derived
-  /// from the level axis may be described as measured.
+  /// **It is a proxy for drive level, never a measured luminance.** It assumes a
+  /// black overlay at alpha a leaves `1 - a` of the light and that this
+  /// multiplies the brightness setting, ignoring the display's own EOTF and any
+  /// local dimming. Nothing derived from the level axis may be called measured,
+  /// which is why the state axis exists as an independent answer.
   public func noteTick(
     dimState: OledDimState, effectiveLevel: Double, secondsSinceLastTick: Double
   ) {
     // The caller derives the delta from wall-clock timestamps, so a clock step
-    // backwards yields a negative one. `isFinite` is explicit rather than
-    // relying on NaN failing `> 0` incidentally: a NaN in a slot is
-    // unrecoverable once persisted, since every later comparison against it
-    // reads false and the counter silently stops meaning anything.
+    // backwards yields a negative one. `isFinite` is explicit: a NaN in a slot is
+    // unrecoverable once persisted, because every later comparison against it
+    // reads false and the counter stops meaning anything.
     guard secondsSinceLastTick.isFinite, secondsSinceLastTick > 0 else { return }
     guard effectiveLevel.isFinite else { return }
     guard let slot = Self.slot(for: dimState, level: effectiveLevel) else { return }
@@ -176,25 +164,19 @@ public final class WearSignalTracker {
   /// **OC17's effect-size gate, as one number.** The share of
   /// MASK-COULD-APPLY time spent in a state the wear mask would apply to.
   ///
-  /// That denominator is the RULED definition (2026-08-18), not an artifact of
-  /// the arithmetic: suspended seconds are excluded because the mask cannot
-  /// apply during them, so counting them would be measuring the gate against
-  /// time it was never eligible to act in. The behaviour is exactly as
-  /// shipped; what changed is that the exclusion is now the semantics rather
-  /// than a defensive subtraction.
+  /// The denominator is a ruling, not an artifact of the arithmetic: suspended
+  /// seconds are excluded because the mask cannot apply during them, so counting
+  /// them measures the gate against time it was never eligible to act in.
   ///
   /// Suspended time is real, and under synthesis it is common (SS8): a
   /// synthesized size mirrors the panel onto a virtual display, and OLED care
   /// keeps booking that panel's time as `.suspended` rather than stopping the
-  /// clock. It belongs in the histogram, which covers every state, and not in
-  /// this ratio, which is about the states the mask can reach. The two surfaces
-  /// say so out loud rather than being reconciled.
+  /// clock. It belongs in the histogram, not in this ratio.
   ///
-  /// Nil rather than zero when nothing has accumulated, because "0% of no time"
-  /// is not an answer and reads as a verdict.
+  /// Nil rather than zero when nothing has accumulated: "0% of no time" is not
+  /// an answer and reads as a verdict.
   ///
-  /// This is a count of seconds. It carries none of the level axis's proxy
-  /// caveat, which is the reason both axes are stored.
+  /// A count of seconds, carrying none of the level axis's proxy caveat.
   public var wearWeightableFraction: Double? {
     let denominator = totalSeconds - seconds(inState: .suspended)
     guard denominator > 0 else { return nil }

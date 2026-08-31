@@ -2,10 +2,9 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// #95: the pickers rendered rows a person cannot tell apart. Measured on the
-/// rig 2026-08-17, three panels, and the numbers are what these tests encode:
-/// the Dell published 26 pairs whose CGS descriptors are byte-identical apart
-/// from the mode number, and the built-in published NONE, its apparent pairs
+/// The pickers rendered rows a person cannot tell apart. Measured on the rig
+/// 2026-08-17: the Dell published pairs whose CGS descriptors are byte-identical
+/// apart from the mode number, and the built-in published none, its apparent pairs
 /// being the NTSC rates (59.9 against 60.0) that must stay apart.
 @Suite("Duplicate mode rows (#95)")
 struct DisplayModeListTests {
@@ -56,10 +55,9 @@ struct DisplayModeListTests {
     #expect(DisplayModeList.deduplicated(list).count == 4)
   }
 
-  /// Both members of the Dell's 2160x3840 pair carry `kDisplayModeNativeFlag`,
-  /// but a pair where only one does must keep that one: `isNative` is what the
-  /// revelation pass and the scaled-size model read to find the panel's own
-  /// timing, and dropping it would strand both.
+  /// Where only one member of a pair carries `kDisplayModeNativeFlag`, that one has
+  /// to survive: the revelation pass and the scaled-size model read `isNative` to
+  /// find the panel's own timing.
   @Test("the native row wins a collapse regardless of id order")
   func nativeRowWins() {
     let lowIDNotNative = [mode(10, 3440, 1440, hz: 175), mode(11, 3440, 1440, hz: 175, native: true)]
@@ -68,10 +66,8 @@ struct DisplayModeListTests {
     #expect(survivor?.isNative == true)
   }
 
-  /// A revealed row duplicating a published one cannot happen today (revelation
-  /// dedupes on ID and admits HiDPI only, while every measured duplicate is 1x),
-  /// but if it ever did, the published row is the one to keep: it applies
-  /// through public API.
+  /// Revelation dedupes on ID and admits HiDPI only, so this collision cannot happen
+  /// today. If it ever does, the published row wins: it applies through public API.
   @Test("a published row outranks a revealed row of the same geometry")
   func publishedOutranksRevealed() {
     let list = [

@@ -1,12 +1,11 @@
 import CandelaKit
 import SwiftUI
 
-/// Accessibility identifiers for pref-writing controls. The composition
-/// mirrors DisplayPrefs' on-disk key composition: app-level prefs are the
-/// bare raw value, per-display prefs append the persistence key, per-command
-/// prefs put the command between name and key, and virtual-display slot
-/// prefs append the slot number. Not user-visible copy and not what
-/// VoiceOver speaks (D25 does not bear on it); coexists with the labels.
+/// Accessibility identifiers for pref-writing controls, composed the way
+/// `DisplayPrefs` composes its on-disk keys: app-level prefs are the bare raw
+/// value, per-display prefs append the persistence key, per-command prefs put the
+/// command between name and key, and slot prefs append the slot number. Not
+/// user-visible copy and not what VoiceOver speaks (D25 does not bear on it).
 enum PrefIdentifierComposer {
   static func compose(
     _ name: PrefName, command: DDCCommand? = nil,

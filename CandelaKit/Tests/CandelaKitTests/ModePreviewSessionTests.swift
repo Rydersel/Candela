@@ -90,11 +90,11 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
   /// the parent each listed display ends up with, overriding what was
   /// requested. Anything absent from the map follows the request.
   ///
-  /// This is #53 reproduced — CoreGraphics returning `.success` from every
-  /// stage and from the complete while achieving a different topology, measured
-  /// for a cyclic change list. It is ONE-SHOT, consumed by the batch it
-  /// diverts, because the point of the second-call tests is that the RETRY
-  /// lands: a permanently diverting fake would prove a loop, not a recovery.
+  /// The measured platform behaviour: CoreGraphics returns `.success` from every
+  /// stage and from the complete while achieving a different topology, for a
+  /// cyclic change list. ONE-SHOT, consumed by the batch it diverts, because the
+  /// second-call tests are about the RETRY landing, and a permanently diverting
+  /// fake would prove a loop rather than a recovery.
   ///
   /// The other measured case needs no injection at all: a display named twice
   /// is diverted by the `first`-wins rule in `applyMirroring` below, which is
@@ -123,49 +123,39 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
   func applyMirroring(_ changes: [MirrorChange], scope: DisplayConfigScope) throws {
     try lock.withLock {
       // ORDER IS LOAD-BEARING: the empty-batch guard runs BEFORE the injection
-      // point, because `CoreGraphicsDisplayConfigurator.applyMirroring` returns
-      // on its own empty guard before it can reach anything that fails. A fake
-      // that checked `failMirroringWith` first would throw for an empty batch —
-      // a failure production cannot produce.
-      //
-      // Not hypothetical. `MirrorTopologyPolicy.changes(from:to:)` returns `[]`
-      // whenever the live topology already matches the capture, which is the
-      // COMMON case on a revert. A session test that set `failMirroringWith`
-      // and drove a revert would otherwise exercise, and then enshrine, a
-      // "revert failed" branch that is unreachable in shipped code.
+      // point, because `CoreGraphicsDisplayConfigurator.applyMirroring` returns on
+      // its own empty guard before it can reach anything that fails. A fake that
+      // checked `failMirroringWith` first would throw for an empty batch, a failure
+      // production cannot produce. Not hypothetical: `changes(from:to:)` returns
+      // `[]` whenever the live topology already matches the capture, the common
+      // case on a revert.
       guard !changes.isEmpty else { return }
       if let _failMirroringWith { throw _failMirroringWith }
       _appliedMirroring.append(AppliedMirroring(changes: changes, scope: scope))
       // The fake's topology follows the change, so a session that re-reads
-      // `displays()` after applying sees what it asked for — which is what
-      // makes the revert-path tests real rather than tautological.
+      // `displays()` after applying sees what it asked for. That is what makes the
+      // revert-path tests real rather than tautological.
       //
-      // MASTER membership is RECOMPUTED over the whole post-state rather than
-      // read off the batch, and that distinction is load-bearing. A master is
-      // usually not named in `changes` at all (engaging names only the slaves),
-      // so deriving its membership from the batch leaves it
-      // `isInMirrorSet == false` — and `isMirrorMaster` requires the flag, so
-      // `MirrorTopology.masters` would come back EMPTY from a topology that
-      // plainly has a master. The mirror that a test then "breaks" would be one
-      // no policy could see. CoreGraphics reports the master as a set member;
-      // so does this.
+      // MASTER membership is RECOMPUTED over the whole post-state rather than read
+      // off the batch. A master is usually not named in `changes` at all, so
+      // deriving its membership from the batch leaves it `isInMirrorSet == false`,
+      // and `MirrorTopology.masters` then comes back EMPTY from a topology that
+      // plainly has a master. CoreGraphics reports the master as a set member; so
+      // does this.
       //
       // SLAVE membership is NOT computed here. The expression below asks only
-      // "does anyone mirror me", which is true of masters and false of slaves;
-      // a slave arrives at `isInMirrorSet == true` solely because
-      // `ConfiguredDisplay.init` ORs in `mirrorsDisplay != kCGNullDirectDisplay`
-      // (`DisplayConfiguring.swift:96`). That is a real dependency on another
-      // type's derivation, not an accident, and
+      // "does anyone mirror me", and a slave reads `isInMirrorSet == true` solely
+      // because `ConfiguredDisplay.init` ORs in
+      // `mirrorsDisplay != kCGNullDirectDisplay`.
       // `theFakeReportsSlaveMembershipAndSetMembersLikeCoreGraphicsDoes` asserts
-      // it — otherwise deleting that OR would leave the fake lying about every
-      // slave with this suite still green.
+      // that dependency: deleting the OR would otherwise leave the fake lying
+      // about every slave with this suite still green.
 
-      // What CoreGraphics ACHIEVES for this batch, which is not always what it
-      // was asked for. `first` rather than `last` is not a shrug: it is the
-      // measured accept-and-ignore rule for a display named twice —
-      // `[166→167, 166→168]` applied the FIRST change and silently discarded
-      // the second (#53) — so this fake diverges from the request exactly where
-      // the platform does, without being told to.
+      // What CoreGraphics ACHIEVES for this batch, which is not always what it was
+      // asked for. `first` rather than `last` is the measured accept-and-ignore
+      // rule for a display named twice: `[166→167, 166→168]` applied the FIRST
+      // change and silently discarded the second. The fake diverges from the
+      // request exactly where the platform does, without being told to.
       let diverted = _divergeNextMirroringTo
       _divergeNextMirroringTo = nil
       func achieved(
@@ -193,16 +183,16 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
         )
       }
 
-      // THE SAME post-commit check production runs, on the same rule, and
-      // deliberately LAST: CoreGraphics committed, so the batch is recorded and
-      // the topology has moved before this throws. A fake that unwound here
-      // would let a session test "prove" that a divergent apply changed
-      // nothing — which is the one thing #53 established it does not.
+      // THE SAME post-commit check production runs, and deliberately LAST:
+      // CoreGraphics committed, so the batch is recorded and the topology has moved
+      // before this throws. A fake that unwound here would let a session test
+      // "prove" that a divergent apply changed nothing, which is the one thing the
+      // measurement established it does not.
       //
-      // A display named in `changes` but absent from `_configuredDisplays` has
-      // no modelled parentage, so it reads back as whatever the batch asked
-      // for. That keeps the fixtures that set no display list at all (most of
-      // this file) honest rather than divergent by accident.
+      // A display named in `changes` but absent from `_configuredDisplays` has no
+      // modelled parentage, so it reads back as whatever the batch asked for. That
+      // keeps the fixtures that set no display list honest rather than divergent by
+      // accident.
       if MirrorVerification.unhonoured(in: changes, achievedParent: { id in
         achieved(id, currently: kCGNullDirectDisplay)
       }) != nil {
@@ -218,9 +208,9 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
     set { lock.withLock { _revealsHiddenModes = newValue } }
   }
 
-  /// This fake serves modes from a canned list rather than running revelation,
-  /// so no gate — including #110's — ever runs here. Guarded-and-nothing-
-  /// withheld is the honest answer, not a stub.
+  /// This fake serves modes from a canned list rather than running revelation, so
+  /// no gate ever runs here. Guarded-and-nothing-withheld is the honest answer,
+  /// not a stub.
   var guardsWireTiming: Bool { true }
 
   func modesWithheldByWireTimingGuard(for displayID: CGDirectDisplayID) -> Int { 0 }
@@ -288,10 +278,9 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
 struct UntypedSeamError: Error {}
 
 // `Result<Void, _>` is not `Equatable`, so `begin`'s failures are compared
-// through their error. The extension that does it lives beside `MirrorFixtures`
-// in `MirrorTopologyTests.swift`: `MirrorPreviewSessionTests` needs the same
-// helper, and `private` at file scope would have forced a second copy — a
-// second thing to get wrong.
+// through their error. The extension that does it lives beside `MirrorFixtures`,
+// because the other preview-session suites need the same helper and `private` at
+// file scope would force a second copy.
 
 @Suite("Mode preview session")
 struct ModePreviewSessionTests {
@@ -371,11 +360,10 @@ struct ModePreviewSessionTests {
     #expect(fake.applied.count == countAfterConfirm)
   }
 
-  /// Commit what the USER approved, not whatever the display happens to be
-  /// showing when they answer. A replug or a sleep/wake drops the app-only
-  /// preview config, so `currentMode` at confirm time can be the old mode
-  /// again — committing that would report success while silently discarding
-  /// the user's choice.
+  /// Commit what the USER approved, not whatever the display happens to be showing
+  /// when they answer. A replug or a sleep/wake drops the app-only preview config,
+  /// so `currentMode` at confirm time can be the old mode again: committing that
+  /// reports success while silently discarding the user's choice.
   @Test func confirmingCommitsTheApprovedModeNotWhateverIsCurrentNow() async {
     let fake = FakeConfigurator()
     fake.current = mode(1)
@@ -412,8 +400,8 @@ struct ModePreviewSessionTests {
     #expect(fake.applied.last == .init(modeID: 1, scope: .session))
   }
 
-  /// A double-click on "Keep" must not report a reversion that never happened —
-  /// the UI would tell the user the opposite of what the display is doing.
+  /// A double-click on "Keep" must not report a reversion that never happened, or
+  /// the UI tells the user the opposite of what the display is doing.
   @Test func answeringTwiceRepeatsTheOutcomeItAlreadyProduced() async {
     let fake = FakeConfigurator()
     fake.current = mode(1)
@@ -467,9 +455,8 @@ struct ModePreviewSessionTests {
     #expect(await session.hasOutstandingPreview == false)
   }
 
-  /// The state that used to be unescapable: after the expiry revert throws, a
-  /// fresh preview must still fall back to the mode the user started on — not
-  /// to the unapproved preview that is currently on screen.
+  /// After the expiry revert throws, a fresh preview must still fall back to the
+  /// mode the user started on, not to the unapproved preview on screen.
   @Test func aFailedResolutionDoesNotLoseTheOriginalMode() async {
     let fake = FakeConfigurator()
     fake.current = mode(1)
@@ -537,10 +524,9 @@ struct ModePreviewSessionTests {
   }
 
   /// A `begin()` that fails establishes nothing, so it must not erase what the
-  /// session already reported. Otherwise a commit followed by a failed begin
-  /// leaves the session claiming a reversion — telling the UI the opposite of
-  /// what happened to the screen. Both of `begin()`'s failure exits are
-  /// exercised: the unreadable fallback and the throwing apply.
+  /// session already reported: a commit followed by a failed begin would leave the
+  /// session claiming a reversion, the opposite of what happened to the screen.
+  /// Both of `begin()`'s failure exits are exercised.
   @Test func aFailedBeginDoesNotEraseTheOutcomeAlreadyReported() async {
     let fake = FakeConfigurator()
     fake.current = mode(1)
@@ -561,10 +547,9 @@ struct ModePreviewSessionTests {
     #expect(await session.confirm(answer(3)) == .committed)
   }
 
-  /// The shipped countdown, pinned. Every other test here passes an explicit
-  /// `countdownSeconds`, so the default the app actually gets was covered by
-  /// nothing — and it is a product decision (thirty seconds, matching
-  /// `MirrorPreviewSession`), not an implementation detail.
+  /// The shipped countdown, pinned: every other test passes an explicit
+  /// `countdownSeconds`. Thirty seconds is a product decision, matching
+  /// `MirrorPreviewSession`.
   @Test func theDefaultCountdownIsThirtySeconds() async {
     let fake = FakeConfigurator()
     fake.current = mode(1)
@@ -585,7 +570,7 @@ struct ModePreviewSessionTests {
     #expect(await session.secondsRemaining == 0)
   }
 
-  // MARK: - State a UI rebuilds itself from (Task 8)
+  // MARK: - State a UI rebuilds itself from
 
   @Test func theSessionReportsWhatIsPreviewedSoAUINeverHasToRemember() async {
     let fake = FakeConfigurator()
@@ -650,10 +635,10 @@ struct ModePreviewSessionTests {
   // MARK: - An answer only resolves the preview it was given for
 
   /// The worst failure this type can produce: the user clicks Keep on a banner
-  /// naming one mode, a second selection lands in between, and the mode they
-  /// never saw becomes permanent at session scope while the UI reports success.
-  /// Ordering alone cannot prevent it — the click runs one turn before the call
-  /// — so the answer carries what it was about and the session refuses it.
+  /// naming one mode, a second selection lands in between, and the mode they never
+  /// saw becomes permanent at session scope while the UI reports success. Ordering
+  /// cannot prevent it, since the click runs one turn before the call, so the
+  /// answer carries what it was about and the session refuses it.
   @Test func anAnswerForASupersededPreviewCommitsNothing() async {
     let fake = FakeConfigurator()
     fake.current = mode(1)
@@ -671,7 +656,7 @@ struct ModePreviewSessionTests {
     #expect(fake.applied.last == .init(modeID: 3, scope: .session))
   }
 
-  /// Same rule for the other answer, across displays — a revert aimed at the
+  /// Same rule for the other answer, across displays: a revert aimed at the
   /// display the banner named must not restore a different display.
   @Test func aRevertForAnotherDisplaysPreviewRestoresNothing() async {
     let fake = FakeConfigurator()

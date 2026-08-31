@@ -4,66 +4,52 @@ import SwiftUI
 
 /// Where the displays are, and where they should be.
 ///
-/// A top-level destination rather than a section in `DisplayDetailView`, because
-/// an arrangement is a property of the display **set**, not of one display:
-/// there is no display whose pane it belongs in. That is one `PaneID` case, one
-/// `SettingsRegistry` row and one view file — the shape the settings redesign was
-/// built for.
+/// A top-level destination rather than a section in `DisplayDetailView`: an
+/// arrangement is a property of the display SET, so there is no display whose
+/// pane it belongs in.
 ///
-/// The pane **exists with one display too**, showing the single tile and a
-/// caption. A pane that appeared and disappeared as hardware came and went is
-/// the failure R16 already ruled against for the built-in row.
+/// The pane exists with one display too, showing the single tile and a caption.
+/// A pane that came and went with the hardware is the failure R16 ruled against.
 ///
-/// `@MainActor` because a `View`'s stored and computed properties other than
-/// `body` are nonisolated under complete concurrency checking, and this one
-/// stores main-actor types.
+/// `@MainActor` because a `View`'s properties other than `body` are nonisolated
+/// under complete concurrency checking, and this one stores main-actor types.
 @MainActor
 struct ArrangementPane: View {
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-  /// Reconciled against the live layout on every read rather than seeded once —
-  /// displays come and go while this pane is open, and a selection naming a
-  /// display that has departed would leave "Use as Main Display" live over a
-  /// display that is not there.
+  /// Reconciled against the live layout on every read: displays come and go
+  /// while this pane is open, and a selection naming a departed display would
+  /// leave "Use as Main Display" live over nothing.
   @State private var selection: CGDirectDisplayID?
 
-  /// AR7: why the last drop was refused. Held here rather than in the canvas
-  /// because it is the SECTION that says it — a red border communicates "no"
-  /// and nothing else, and colour is never allowed to be the only signal.
+  /// AR7: why the last drop was refused. Held here because it is the SECTION
+  /// that says it in words; colour is never allowed to be the only signal.
   @State private var refusal: [ArrangementProblem] = []
   /// Bumped on every refusal so an identical second refusal restarts the timer
   /// rather than inheriting the tail of the first one's.
   @State private var refusalToken = 0
 
-  /// The restore notice as RENDERED, mirroring `coordinator.restoreNotice` one
-  /// update behind. The coordinator writes that property from an unattended
-  /// restore pass, outside any transaction of ours, so a `.animation` hung on
-  /// the notice's container has nothing to travel with: the mirror is what puts
-  /// the arrival AND the dismissal inside one. Kept in agreement by the two
-  /// hooks in `savedLayoutSection` and by nothing else.
+  /// The restore notice as RENDERED, one update behind
+  /// `coordinator.restoreNotice`. The coordinator writes that from an unattended
+  /// restore pass, outside any transaction of ours, so the mirror is what puts
+  /// the arrival AND the dismissal inside one. Synced by the two hooks in
+  /// `savedLayoutSection` and by nothing else.
   @State private var shownRestoreNotice: ArrangementReapplyNotice?
 
-  /// The layout a requested change is animating INTO, held while the apply is
-  /// in flight.
-  ///
-  /// Without it, the map goes on drawing `coordinator.arrangement`, which is
-  /// still the layout the change started FROM: a dropped tile slides back to
-  /// where it was picked up and only then jumps forward when the apply lands,
-  /// and a move has to travel toward its result rather than away from it.
+  /// The layout a requested change is animating INTO, held while the apply is in
+  /// flight. Without it the map keeps drawing `coordinator.arrangement`, the
+  /// layout the change started FROM, so a dropped tile slides back to where it
+  /// was picked up and only then jumps forward.
   ///
   /// It lives HERE rather than in the canvas because it is a fact about the
-  /// coordinator, not about a map: "a layout has been asked for and the apply is
-  /// outstanding". While the canvas owned it, the routes that went through the
-  /// canvas animated and this pane's own "Use as Main Display" button did not,
-  /// because it had no way to reach the state. Every route now goes through
-  /// `propose`.
+  /// coordinator. While the canvas owned it, "Use as Main Display" could not
+  /// reach the state and stepped to its result instead of animating into it.
   ///
-  /// Showing the requested layout while the request is outstanding is the same
-  /// thing the countdown does, so it is not a claim about achieved state, and an
-  /// apply that fails corrects the map as it finishes rather than leaving it
-  /// lying.
+  /// Showing a requested layout is what the countdown already does, so it is no
+  /// claim about achieved state, and a failed apply corrects the map as it
+  /// finishes.
   @State private var settling: DisplayArrangement?
 
   private var coordinator: ArrangementCoordinator { model.arrangement }
@@ -85,9 +71,9 @@ struct ArrangementPane: View {
   }
 
   /// What every surface in this pane calls a display: its own name, or (while a
-  /// synthesized size is engaged) the name of the panel whose picture the tile
-  /// is (SS12). ONE closure for the map, the refusal sentence and the
-  /// restore notice, so they cannot disagree about what a display is called.
+  /// synthesized size is engaged) the name of the panel whose picture the tile is
+  /// (SS12). ONE closure for the map, the refusal sentence and the restore
+  /// notice, so they cannot disagree.
   private var displayName: (CGDirectDisplayID) -> String {
     let panels = Self.panels(standingBehind: model.synthesis.pairings)
     return { id in
@@ -100,15 +86,12 @@ struct ArrangementPane: View {
     }
   }
 
-  /// The resolution itself, pure so the fallback can be pinned without a window
-  /// (AT10).
+  /// The resolution itself, pure so the fallback can be pinned without a window.
   ///
-  /// NEVER "" for a pair, which is why the last resort is spelled out rather
-  /// than left to the caller: the canvas answers an empty name with the name the
-  /// TILE carries, and for a pair that is the virtual display's, the one string
-  /// that must not appear on this map. So the panel's friendly name, then the
-  /// panel's own name from the topology, and behind those the wording the app
-  /// already uses for a display nothing can name.
+  /// NEVER "" for a pair: the canvas answers an empty name with the name the TILE
+  /// carries, which for a pair is the virtual display's, the one string that must
+  /// not appear on this map. So the panel's friendly name, then its topology
+  /// name, then the app's last-resort wording.
   static func name(
     of id: CGDirectDisplayID, standingBehind panels: [CGDirectDisplayID: CGDirectDisplayID],
     friendly: (CGDirectDisplayID) -> String,
@@ -126,10 +109,8 @@ struct ArrangementPane: View {
 
   var body: some View {
     // `DisplayPrefs` is plain UserDefaults and not observable, and every tile is
-    // NAMED through it (`PanelView.title(for:)` resolves `friendlyName`). Without
-    // this read, renaming a display elsewhere in the window would leave the old
-    // name standing on the map. The coordinator itself is `@Observable` and
-    // needs no help.
+    // NAMED through it, so without this read a rename elsewhere in the window
+    // would leave the old name standing on the map.
     let _ = model.prefsRevision
     SettingsPageScaffold {
       SettingsPageHeader(title: "Arrangement", subtitle: Self.pageSubtitle)
@@ -137,20 +118,15 @@ struct ArrangementPane: View {
       mainDisplaySection
       savedLayoutSection
     }
-    // ONE signal ends the settle, and it is positive: the coordinator has
-    // finished the work it was given. No timer, because a deadline long enough
-    // for a slow reconfiguration is also long enough to show a failed one as
-    // though it worked.
+    // ONE signal ends the settle, and it is positive: the coordinator finished
+    // the work it was given. No timer, because a deadline long enough for a slow
+    // reconfiguration is also long enough to show a failed one as though it
+    // worked.
     //
-    // `coordinator.arrangement` changing is deliberately NOT watched, because it
-    // is not evidence about THIS settle. `performApply` re-reads the layout
-    // before its queue task decrements the in-flight count, so the arrangement
-    // is already current by the time this fires and a second hook would buy
-    // nothing; and with two changes outstanding the count keeps `isApplying`
-    // true, so the first apply's re-read would clear the second's settle and
-    // snap the map back to a layout one change stale. The refusal paths (a
-    // no-op, an invalid layout, the four-way gate of AR12) return before that
-    // re-read and still arrive here, so a refused proposal correctly drops the
+    // `coordinator.arrangement` changing is deliberately NOT watched: it is not
+    // evidence about THIS settle. With two changes outstanding the first apply's
+    // re-read would clear the second's settle and snap the map back one change
+    // stale. The refusal paths still arrive here, so a refused proposal drops the
     // map back to achieved state.
     .onChange(of: coordinator.isApplying) { _, applying in
       guard !applying else { return }
@@ -158,9 +134,8 @@ struct ArrangementPane: View {
     }
     .task(id: refusalToken) {
       guard !refusal.isEmpty else { return }
-      // Long enough to read a sentence, short enough that it does not outlive
-      // the state it describes. Cancelled and restarted by `id:` on the next
-      // refusal, and cancelled outright when the pane goes away.
+      // Long enough to read a sentence, short enough not to outlive the state it
+      // describes. Restarted by `id:` on the next refusal.
       try? await Task.sleep(for: .seconds(4))
       guard !Task.isCancelled else { return }
       // Inside a transaction, like the write in `onRefuse`, so both directions
@@ -171,46 +146,38 @@ struct ArrangementPane: View {
 
   // MARK: - The map
 
-  /// Says the map is draggable at all, and names the arrow keys, which are the
-  /// only way to move a display without a pointer.
+  /// Says the map is draggable at all, and names the arrow keys, the only way to
+  /// move a display without a pointer.
   ///
-  /// It is the page's subtitle rather than a caption inside the card for the
-  /// reason it stopped being the button's caption: that caption shows only
-  /// while nothing is selected, so the instructions explaining the whole
-  /// control disappeared as soon as anyone used it. The arrow keys were then
-  /// carried for a while by a per-tile accessibility hint alone, which a
-  /// sighted keyboard-only user never hears: that user is the gap the keyboard
-  /// route exists to close, so the instruction is visible copy that nothing
-  /// takes away.
+  /// The page's subtitle rather than a caption inside the card: a caption that
+  /// hides once something is selected takes the instructions with it, and an
+  /// accessibility hint alone never reaches a sighted keyboard-only user.
   static let pageSubtitle =
     "Where the displays are, and where they should be. Drag a display to move it, or tab to one and move it with the arrow keys."
 
-  /// Headerless on purpose. The page's own title already reads "Arrangement",
-  /// and a card kicker repeating it word for word is the duplicated-title
-  /// defect the settings redesign shipped once and had to be looked at to
-  /// catch: a structural check cannot see two identical words at two
-  /// altitudes.
+  /// Headerless on purpose: the page title already reads "Arrangement", and a
+  /// card kicker repeating it word for word is a duplicated title no structural
+  /// check can see.
   private var mapCard: some View {
     // Ours by ownership, everyone else's by the optional-returning predicate
-    // (nil reads as an ordinary panel). Snapshotted ONCE per render rather
-    // than asked per tile: the canvas calls its closure per tile per drag
-    // frame, and the predicate behind it fetches a CoreDisplay dictionary.
+    // (nil reads as an ordinary panel). Snapshotted ONCE per render: the canvas
+    // calls its closure per tile per drag frame, and the predicate behind it
+    // fetches a CoreDisplay dictionary.
     let virtualIDs = Set(coordinator.arrangement.tiles.map(\.id).filter { id in
       model.virtualDisplays.ownedDisplayIDs.contains(id)
         || VirtualDisplayDetection.isVirtual(id) == true
     })
-    // SS12. Snapshotted here for `virtualIDs`' reason, and read from the pairing
-    // rather than from the mirror flags: the pairing is what says a mirror set
-    // is a size this app engaged rather than one the user asked for.
+    // SS12. Snapshotted for `virtualIDs`' reason, and read from the pairing
+    // rather than from the mirror flags: the pairing is what says a mirror set is
+    // a size this app engaged rather than one the user asked for.
     //
     // The pair keeps ONE tile, the virtual display's, and it stays movable: that
     // display owns the desktop, so it is the member of the pair a layout can
-    // place (AR6). The panel is its slave and has no tile of its own, which is
-    // why the tile has to speak for it.
+    // place (AR6). The panel has no tile, so the tile speaks for it.
     let panels = Self.panels(standingBehind: model.synthesis.pairings)
-    // Drawn as a laptop rather than as a monitor (SV9). One ID, snapshotted for
-    // `virtualIDs`' reason, and read from the model rather than from the tile:
-    // an arrangement tile knows a rect, not what kind of glass it is.
+    // Drawn as a laptop rather than as a monitor (SV9). Snapshotted for
+    // `virtualIDs`' reason, and read from the model rather than the tile: an
+    // arrangement tile knows a rect, not what kind of glass it is.
     let builtInID = model.builtIn?.id
     return SettingsCardSection {
       VStack(alignment: .leading, spacing: 10) {
@@ -224,19 +191,15 @@ struct ArrangementPane: View {
           isSynthesisPair: { panels[$0] != nil },
           isBuiltIn: { $0 == builtInID },
           // Not for the settle, which is this pane's: the canvas refuses to
-          // compose a new request from a layout that has only been requested,
-          // because a refused request is never achieved. That covers the drag,
-          // the arrow keys, the tile's context menu and its VoiceOver action.
+          // compose a new request from a layout only requested, because a refused
+          // request is never achieved.
           isApplying: coordinator.isApplying,
           selection: reconciledSelection,
           onPropose: { propose($0) },
           onRefuse: { problems in
             // The animation travels with the write. `refusal` is this view's own
             // state and needs no mirror: the mirror shape exists to get a
-            // coordinator's write inside a `withAnimation`, and this write is
-            // already inside the view. The whole value moves, so a second
-            // refusal with a longer sentence animates its height rather than
-            // snapping to it.
+            // coordinator's write inside a `withAnimation`.
             withAnimation(Motion.notice(reduceMotion: reduceMotion)) {
               refusal = problems
             }
@@ -261,21 +224,17 @@ struct ArrangementPane: View {
         )
 
         // Under the MAP, because arranging them is what the sentence is about.
-        // Under the Main Display kicker it answered a question that card is not
-        // asking.
         if coordinator.arrangement.tiles.count < 2 {
           SettingsCaption("Connect another display to arrange them.")
         }
 
         // AR7 in words. Built from the problems themselves, so it names the
-        // displays — and it is the SAME sentence the confirmation window uses
-        // for the same fact, because two spellings of one statement are two
-        // things to keep true.
+        // displays, and it is the SAME sentence the confirmation window uses:
+        // two spellings of one statement are two things to keep true.
         //
-        // The fade comes from the transaction the two writers of `refusal`
-        // carry. The refused-drop write also springs the tile home on the same
-        // values, so sentence and spring read as one gesture; the 4 s
-        // auto-clear has no drag left to spring.
+        // The fade comes from the transaction both writers of `refusal` carry.
+        // The refused-drop write also springs the tile home on the same values,
+        // so sentence and spring read as one gesture.
         if !refusal.isEmpty {
           ArrangementCopy.invalidLayout(refusal, name: displayName)
             .font(.callout)
@@ -290,20 +249,16 @@ struct ArrangementPane: View {
 
   // MARK: - Main display
 
-  /// AR9. Setting the main display is a **button**, not a drag on a 4 pt strip:
-  /// the strip affordance is undiscoverable enough to be a recurring support
-  /// question on Apple's own implementation, it is not operable by keyboard or
-  /// VoiceOver, and a second drag semantic on the tile is the most feel-dependent
-  /// interaction in the riskiest view here. The same action is on the tile's
-  /// context menu and is a VoiceOver custom action.
+  /// AR9. Setting the main display is a BUTTON, not a drag on a 4 pt strip: the
+  /// strip is undiscoverable enough to be a recurring support question on
+  /// Apple's own implementation, and it is not operable by keyboard or
+  /// VoiceOver. The same action is on the tile's context menu and as a VoiceOver
+  /// custom action.
   ///
-  /// The whole card, kicker included, waits for a second display. No button at
-  /// all rather than a permanently dead one: with one display there is nothing
-  /// to choose between, and a grey control with nothing to say is the shape R8
-  /// forbids. This is not the appearing-and-disappearing control R16 rules
-  /// against either, which is about a control whose SUBJECT is still there: a
-  /// heading over an empty card would be one, and the map above says what is
-  /// missing.
+  /// The whole card waits for a second display. No button rather than a
+  /// permanently dead one (R8): with one display there is nothing to choose
+  /// between. R16 is about a control whose SUBJECT is still there, so it does
+  /// not apply.
   @ViewBuilder private var mainDisplaySection: some View {
     if coordinator.arrangement.tiles.count > 1 {
       SettingsCardSection(title: "Main Display") {
@@ -315,10 +270,7 @@ struct ArrangementPane: View {
             // A pure translation of the whole layout, so relative geometry is
             // provably unchanged: "make main" cannot rearrange anything.
             //
-            // Through `propose`, like every other route: this button is the
-            // reason the settle was lifted out of the canvas, since it was the
-            // one way of asking for a layout that could not reach the state and
-            // so stepped to its result instead of animating into it.
+            // Through `propose`, like every other route.
             propose(displayedArrangement.makingMain(id))
           }
           .buttonStyle(SettingsSecondaryButtonStyle())
@@ -334,29 +286,21 @@ struct ArrangementPane: View {
   ///
   /// Composed against `displayedArrangement`, never against the coordinator's:
   /// during a settle the coordinator still holds the pre-change layout, so a
-  /// second change measured from it would be measured from a layout that is no
-  /// longer the one on screen.
+  /// second change would be measured from a layout no longer on screen.
   private func propose(_ next: DisplayArrangement) {
     coordinator.apply(next)
     // A proposal equal to what is already showing arms nothing.
     //
-    // `isApplying` DOES rise for one: `ArrangementCoordinator.apply` raises it
-    // synchronously and unconditionally before it enqueues anything. What makes
-    // the guard load-bearing is that it comes straight back down again.
-    // `performApply` reaches its no-op `return` with no `await` in front of it,
-    // so the whole true-then-false transition can complete before SwiftUI
-    // evaluates a body; `onChange` compares against the value captured at the
-    // last evaluation, so it may never fire, and a settle set here would then be
-    // held for the life of the pane. `displayedArrangement` would go on ignoring
-    // the coordinator, and connecting a second display would leave the map
-    // drawing one tile.
+    // `isApplying` DOES rise for one and comes straight back down: `performApply`
+    // reaches its no-op `return` with no `await` in front of it, so the whole
+    // true-then-false transition can complete before SwiftUI evaluates a body.
+    // `onChange` may then never fire, and a settle set here would be held for the
+    // life of the pane, leaving `displayedArrangement` ignoring the coordinator.
     //
-    // Compared on the ANCHORED form, which is the comparison the coordinator's
-    // own guard makes. Raw equality is narrower, and the gap is reachable with a
-    // single display attached: dragging the only tile anywhere produces a pure
-    // unanchored translation, which passes here and is dropped there, on that
-    // same no-await path. Two guards that disagree about what a no-op is are
-    // exactly one guard too many.
+    // Compared on the ANCHORED form, the comparison the coordinator's own guard
+    // makes. Raw equality is narrower, and the gap is reachable with one display:
+    // dragging the only tile is a pure unanchored translation, which passes here
+    // and is dropped there, on that same no-await path.
     guard (next.anchored(preservingMainOf: displayedArrangement) ?? next) != displayedArrangement
     else { return }
     withAnimation(Motion.settle(reduceMotion: reduceMotion)) { settling = next }
@@ -367,24 +311,18 @@ struct ArrangementPane: View {
     return id != coordinator.arrangement.mainDisplayID
   }
 
-  /// What the button will do, or why it will not — never a bare grey button.
+  /// What the button will do, or why it will not, never a bare grey button.
   /// Ordered by which fact outlives the others: `isApplying` is transient, so
   /// the structural reasons are stated first.
   ///
-  /// A consequence of that order worth naming, because it has been read the
-  /// other way: the waiting sentence is reached only with a display selected
-  /// that is not already main. It explains THIS button, and it is not a general
-  /// account of why the canvas refuses a gesture. Nothing in the canvas may lean
-  /// on it to put a refusal into words.
+  /// The waiting sentence is therefore reached only with a non-main display
+  /// selected. It explains THIS button; nothing in the canvas may lean on it to
+  /// put a refusal into words.
   private var mainDisplayCaption: SettingsCaption {
     guard let id = reconciledSelection.wrappedValue else {
-      // It said "click one to make it the main display", which is not what a
-      // click does: a click selects, and the button is the thing that moves the
-      // menu bar. Copy that promises the button's effect to a click is half of
-      // why a selected-looking tile beside a dead button reads as broken.
-      //
-      // The dragging half of this sentence now lives in the page's subtitle,
-      // where it stays visible once something is selected.
+      // A click selects; the button is what moves the menu bar. Copy that
+      // promises the button's effect to a click is half of why a selected-looking
+      // tile beside a dead button reads as broken.
       return SettingsCaption(
         "Select a display to move the menu bar to it. Click one, or tab to it and press Space."
       )
@@ -416,16 +354,13 @@ struct ArrangementPane: View {
   /// The unattended half of the feature: what happens to this layout when the
   /// displays come back.
   ///
-  /// Its OWN section rather than another row under the map, because it is a
-  /// different concern — the map is what the user is doing now, this is what the
-  /// app does when nobody is watching — and grouping is what tells two concerns
-  /// apart (layout.md, "group related items"). The kicker carries information
-  /// the page title does not, which is why this card has one and the map's does
-  /// not.
+  /// Its OWN section rather than another row under the map: the map is what the
+  /// user is doing now, this is what the app does when nobody is watching. Its
+  /// kicker carries information the page title does not, which is why the map's
+  /// card has none.
   ///
-  /// It is present with one display attached, for the reason the whole pane is:
-  /// a control that appears and disappears as hardware comes and goes is the
-  /// failure R16 ruled against. What changes is the caption, not the control.
+  /// Present with one display attached, for the reason the whole pane is (R16).
+  /// What changes is the caption, not the control.
   private var savedLayoutSection: some View {
     SettingsCardSection(title: "Saved Arrangements") {
       SettingRow(caption: rememberCaption) {
@@ -433,10 +368,9 @@ struct ArrangementPane: View {
           get: { coordinator.isRestoringLayout },
           set: { restoring in
             // Only the FLAG is announced here. Turning it on ALSO saves the
-            // layout on screen, and that write announces itself from inside the
-            // coordinator (`didSaveArrangement`) — naming `.savedArrangements`
-            // here as well would put the rule in two places, which is exactly
-            // how the stored-mode announcement was lost the first time.
+            // layout, and that write announces itself from inside the coordinator
+            // (`didSaveArrangement`); announcing it here too would put the rule
+            // in two places.
             coordinator.setRestoringLayout(restoring)
             actions.prefDidChange(.restoreArrangement)
           }
@@ -444,11 +378,11 @@ struct ArrangementPane: View {
         .themedSwitch()
         .prefIdentifier(.restoreArrangement)
       }
-      // The restore notice's mirror hooks hang HERE, on the one row of this
-      // section that is always present: hooks on the notice's own container would
-      // only exist while the notice does, so nothing would be watching for it to
-      // arrive. The appear sync is un-animated on purpose, or a notice left over
-      // from an unattended restore would fade in as though it had just happened.
+      // The mirror hooks hang HERE, on the one row of this section that is
+      // always present: on the notice's own container they would exist only while
+      // it does, so nothing would watch for it to arrive. The appear sync is
+      // un-animated, or a notice left over from an unattended restore would fade
+      // in as though it had just happened.
       .onAppear { shownRestoreNotice = coordinator.restoreNotice }
       .onChange(of: coordinator.restoreNotice) { _, notice in
         withAnimation(Motion.notice(reduceMotion: reduceMotion)) {
@@ -456,11 +390,9 @@ struct ArrangementPane: View {
         }
       }
 
-      // The restore pass is one of the things Safe Mode suppresses, so in a
-      // safe-mode session this control describes behavior that is not happening.
-      // D11: say so where it changes what the control means, rather than leaving
-      // the pane quietly claiming otherwise. Symbol AND text — never state by
-      // colour alone (color.md).
+      // Safe Mode suppresses the restore pass, so this control would otherwise
+      // describe behavior that is not happening (D11). Symbol AND text; never
+      // state by colour alone.
       if model.isSafeMode {
         notice {
           Text("Safe Mode is on for this session, so no arrangement will be restored.")
@@ -471,16 +403,14 @@ struct ArrangementPane: View {
         }
       }
 
-      // The only account an unattended restore ever gives, and it waits here
-      // until the user dismisses it or a later restore pass supersedes it —
-      // never taken away by a departure alone (SO8) — rendered in the
-      // section whose control made the promise, exactly as the stored-mode
-      // reapply banner sits under "Remember this resolution".
+      // The only account an unattended restore ever gives. It waits until the
+      // user dismisses it or a later restore pass supersedes it, never taken away
+      // by a departure alone (SO8), in the section whose control made the
+      // promise.
       //
-      // Rendered from the mirror, so arrival and dismissal fade the same way.
-      // `dismissReport()` clears five coordinator properties and the OK click
-      // is not the only thing that ends this notice, so the transaction belongs
-      // to the mirror write and not to the button.
+      // Rendered from the mirror, so arrival and dismissal fade the same way. The
+      // OK click is not the only thing that ends this notice, so the transaction
+      // belongs to the mirror write and not to the button.
       if let report = shownRestoreNotice {
         notice(symbol: "clock.arrow.circlepath") {
           ArrangementCopy.restoreNotice(report, name: displayName)
@@ -506,13 +436,12 @@ struct ArrangementPane: View {
       .padding(.bottom, 4)
   }
 
-  /// What the toggle will do — and, with one display attached, what there is to
-  /// do it to. Never a control whose effect the user has to guess.
+  /// What the toggle will do, and with one display attached, what there is to
+  /// do it to.
   private var rememberCaption: SettingsCaption {
-    // Built rather than written as one literal: the sentences are long enough
-    // that a single line is unreadable in source, and `SettingsCaption` has the
-    // `verbatim` initialiser precisely so a composed sentence still gets the
-    // pane's caption styling by construction.
+    // Composed rather than one literal, which would be unreadable in source.
+    // `SettingsCaption`'s `verbatim` initialiser keeps the pane's caption
+    // styling on a composed sentence.
     let restores = coordinator.arrangement.tiles.count > 1
       ? "Puts these displays back this way when they reconnect or \(AppInfo.productName) launches."
       : "Puts a set of displays back the way you left them when that set reconnects or \(AppInfo.productName) launches."

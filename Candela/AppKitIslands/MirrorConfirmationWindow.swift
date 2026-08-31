@@ -8,14 +8,14 @@ import SwiftUI
 ///
 /// Why it is a window at all, and why its buttons take the first click, are
 /// `ConfirmationPanel`'s to explain. What is specific here is where it goes: on
-/// the **master**, because the display the request named has no `NSScreen` from
-/// the instant the preview applies — that is not a rescue, it is the mechanism.
+/// the MASTER, because the display the request named has no `NSScreen` from the
+/// instant the preview applies. Not a rescue: the mechanism.
 @MainActor
 final class MirrorConfirmationWindow: MirrorConfirmationPresenting {
   private let coordinator: MirroringCoordinator
-  /// Resolves to a display that has a screen — see `ModeConfirmationWindow`.
-  /// The default is the IDENTITY function and not something obviously broken,
-  /// because identity is right for every unmirrored display; wired at launch.
+  /// Resolves to a display that has a screen (see `ModeConfirmationWindow`).
+  /// Identity by default, which is right for every unmirrored display; wired at
+  /// launch.
   var drawableDisplayID: (CGDirectDisplayID) -> CGDirectDisplayID = { $0 }
 
   private let window = ConfirmationPanel<MirrorConfirmationView>(
@@ -47,9 +47,9 @@ final class MirrorConfirmationWindow: MirrorConfirmationPresenting {
 }
 
 /// Reads the coordinator directly, so ticks and failures appear without the
-/// window controller knowing about either. Deliberately the same words as the
-/// settings section and the panel rows — two spellings of one statement are two
-/// things to keep true.
+/// window controller knowing about either. The same words as the settings
+/// section and the panel rows: two spellings of one statement are two things to
+/// keep true.
 struct MirrorConfirmationView: View {
   let coordinator: MirroringCoordinator
   let content: MirrorConfirmationContent
@@ -102,22 +102,21 @@ struct MirrorConfirmationView: View {
   @ViewBuilder private var reportBody: some View {
     ConfirmationCard {
       ConfirmationTitle(MirroringCopy.reportTitle)
-      // Every refusal states a reason, and there are EIGHT of them. There is no
-      // "it did not work", and no `default:` arm — `MirroringCopy.refusal`
-      // switches exhaustively so a new case is a compile error rather than a
-      // silently generic sentence.
+      // Every refusal states a reason. There is no "it did not work" and no
+      // `default:` arm: `MirroringCopy.refusal` switches exhaustively, so a new
+      // case is a compile error rather than a silently generic sentence.
       if let refusal = coordinator.lastRefusal {
-        // Named through the coordinator, because one of the eight refusals
-        // carries the displays it is about and says nothing true without them.
+        // Named through the coordinator, because one refusal carries the
+        // displays it is about and says nothing true without them.
         ConfirmationCaption(MirroringCopy.refusal(refusal, name: coordinator.displayName))
       }
       if let failure = coordinator.lastFailure {
         ConfirmationCaption(MirroringCopy.applyFailure)
           .help("CoreGraphics error \(failure.cgErrorCode)")
       }
-      // The four-way gate said no (AR12). Neither a refusal about the topology
-      // nor a failed apply — nothing was staged. Said out loud because a hotkey
-      // press has no other surface at all, and silence on it reads as a dead key.
+      // The gate said no (AR12): neither a refusal about the topology nor a
+      // failed apply, since nothing was staged. Said out loud because a hotkey
+      // press has no other surface, and silence on it reads as a dead key.
       if let blockedBy = coordinator.blockedBy {
         ConfirmationCaption(ReconfigurationCopy.blocked(by: blockedBy))
       }

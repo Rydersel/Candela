@@ -1,43 +1,33 @@
 import CandelaKit
 import SwiftUI
 
-/// The three settings SO15 allows two sentences, because each of them names a
-/// state a person may not be able to undo from inside the app: a blank display,
-/// a display muted over its own mute command, and a DDC control the monitor has
-/// locked under HDR.
+/// The settings SO15 grants a second sentence to, because each one names a
+/// state a person may not be able to undo from inside the app.
 ///
-/// Closed on purpose. The spec names exactly three, so the compiler carries the
-/// count: a fourth safety case cannot appear by someone writing a longer caption
-/// at a call site, only by adding a case here and deciding what it says and
-/// where it is spoken.
+/// Closed on purpose, so a new safety case cannot appear by someone writing a
+/// longer caption at a call site. It takes a case here, and a decision about
+/// what it says and where it is spoken.
 enum SafetySentence {
-  /// General: the brightness slider can reach 0% on a display dimming in
-  /// software.
+  /// The brightness slider can reach 0% on a display dimming in software.
   case blankDisplay
-  /// A display's Sound section, D29's mute strand. `isAvailable` is the
-  /// display's volume availability: SO5 gives the unavailable state a sentence
-  /// of its own rather than letting a recoverable state borrow this one.
+  /// A display's Sound section, D29's mute strand. SO5 gives the unavailable
+  /// state a sentence of its own rather than letting a recoverable state borrow
+  /// this one.
   ///
-  /// `dedicatedCommandInReach` is whether switching this ON would actually send
-  /// the display's own mute command: `VolumeSliderPolicy.usesDedicatedMuteCommand`
-  /// asked with the pref held on, so it answers the switch's promise rather than
-  /// its current position. A clean denial of that register, or the "always off"
-  /// volume-slider override, makes the promise false, and this sentence is the
-  /// UNSUPPRESSIBLE channel: it goes into the control's label, where a VoiceOver
-  /// user who has turned hints off hears it and nothing else. Stating the
-  /// dedicated command there while the engine writes the volume register put the
-  /// overclaim in the one place the reader cannot get past.
+  /// `dedicatedCommandInReach` asks `VolumeSliderPolicy.usesDedicatedMuteCommand`
+  /// with the pref held on, so it answers the switch's promise rather than its
+  /// current position. This sentence rides the control's LABEL, the channel a
+  /// VoiceOver user cannot suppress, so an overclaim here is one the reader
+  /// cannot get past.
   case hardwareMute(isAvailable: Bool, dedicatedCommandInReach: Bool)
   /// The Advanced page's hardware-control toggle. Takes the whole block rather
-  /// than a bool so the row can be a safety row unconditionally: only live HDR
-  /// is the safety case, and a row that changed shape when HDR engaged would
-  /// swap `_ConditionalContent` branches and rebuild the control underneath the
-  /// person using it.
+  /// than a bool so the row is a safety row unconditionally: a row that changed
+  /// shape when HDR engaged would swap `_ConditionalContent` branches and
+  /// rebuild the control underneath the person using it.
   case hdrBlock(DDCTrafficBlock?)
 
-  /// Appended to the control's accessibility label. Nil means there is nothing
-  /// to add in the current state, never that the row has stopped being a safety
-  /// row.
+  /// Appended to the control's accessibility label. Nil means nothing to add
+  /// in this state, never that the row stopped being a safety row.
   var spoken: String? {
     switch self {
     case .blankDisplay:
@@ -46,16 +36,15 @@ enum SafetySentence {
       if !isAvailable {
         "Volume control is off for this display, so mute is unavailable."
       } else if dedicatedCommandInReach {
-        // "All the way down" rather than "to zero": the degraded mute goes out
-        // through the volume command's own value path, so a floor set on that
-        // command sends the floor and Invert sends the top of the range.
+        // "All the way down" rather than "to zero": the degraded mute rides
+        // the volume command's value path, so a floor set there sends the floor
+        // and Invert sends the top of the range.
         "Off: muting turns the volume all the way down. On: sends the display's own mute command."
       } else {
-        // Says what the SWITCH does, and leaves the level and the cause to the
-        // row's status caption rather than saying either twice. Scoped to the
-        // mute direction on purpose: an unmute still sends the mute command's
-        // release on the pref alone, ungated by the verdict (D29 rule 3), so a
-        // sentence about the command in general would be false.
+        // Says what the SWITCH does; the level and the cause are the status
+        // caption's. Scoped to the mute direction on purpose: an unmute still
+        // sends the command's release on the pref alone, ungated by the verdict
+        // (D29 rule 3), so a sentence about the command in general is false.
         "Off or On, a mute here goes to the volume command instead."
       }
     case let .hdrBlock(block):
@@ -64,9 +53,8 @@ enum SafetySentence {
   }
 
   /// The same sentence shown under the control. Nil for the HDR block, which
-  /// SO12 states ONCE for the whole page at the foot of Control Method;
-  /// repeating it under the toggle is the duplication SO12 exists to remove, so
-  /// that case is promoted into the label and nowhere else.
+  /// SO12 states once for the whole page at the foot of Control Method, so that
+  /// case goes into the label and nowhere else.
   var visibleCaption: SettingsCaption? {
     switch self {
     case .blankDisplay, .hardwareMute: spoken.map { SettingsCaption(verbatim: $0) }
@@ -74,10 +62,9 @@ enum SafetySentence {
     }
   }
 
-  /// Why no DDC command is reaching this display, if none is. Lives here rather
-  /// than on `AdvancedPage` because the HDR half is spoken as part of a control
-  /// label as well as shown as the page's one caption, and two copies of the
-  /// sentence would drift.
+  /// Why no DDC command is reaching this display. Here rather than on
+  /// `AdvancedPage` because the HDR half is both spoken in a control label and
+  /// shown as the page's caption, and two copies would drift.
   static func trafficBlockExplanation(_ block: DDCTrafficBlock) -> String {
     switch block {
     case .macOSDrivesBrightness:
@@ -88,19 +75,15 @@ enum SafetySentence {
   }
 }
 
-/// A control and the caption explaining it, as ONE `Form` row.
+/// A control and the caption explaining it, as ONE row.
 ///
-/// A caption placed as its own row gets a divider above it and full row
-/// padding, so every piece of help text reads as a separate setting and the
-/// page grows to roughly twice the height it needs. `listRowSeparator` and
-/// `listRowInsets` do not fix that — neither applies inside a grouped `Form`
-/// on macOS (measured: no visible change). Putting both in one row is what
-/// actually binds the explanation to the thing it explains, which is how
-/// System Settings tucks its secondary text under a control.
+/// A caption standing as its own row reads as a separate setting and runs the
+/// page to roughly twice the height it needs. One row is what binds the
+/// explanation to the thing it explains.
 ///
-/// The caption is also published as the control's `accessibilityHint`
-/// (accessibility contract 3) from here rather than per call site, so it cannot
-/// be forgotten on a new row. Both initialisers go through the same seam.
+/// The caption is published as the control's `accessibilityHint` from here
+/// rather than per call site, so a new row cannot forget it. Both initialisers
+/// go through the same seam.
 struct SettingRow<Control: View>: View {
   @Environment(\.isEnabled) private var isEnabled
 
@@ -121,25 +104,20 @@ struct SettingRow<Control: View>: View {
   }
 
   /// A row whose consequence a person may not be able to undo from inside the
-  /// app (accessibility contract 3).
+  /// app.
   ///
-  /// The sentence goes into the control's LABEL, not its hint. A hint is the
-  /// suppressible channel: VoiceOver users routinely turn hints off, and a hint
-  /// is spoken last, after the label and the value, so the three sentences that
-  /// exist to prevent an unrecoverable state are exactly the three a VoiceOver
-  /// user is least likely to hear. `SafetySentence` is a type of its own for the
-  /// same reason: the two initialisers above take a `SettingsCaption` and cannot
-  /// be handed one, so a safety sentence has no route into the hint.
+  /// The sentence goes into the control's LABEL, not its hint. Hints are the
+  /// suppressible channel and are spoken last, so the sentences that exist to
+  /// prevent an unrecoverable state would be the ones least likely to be heard.
+  /// `SafetySentence` is its own type for that reason: the initialisers above
+  /// take a `SettingsCaption` and cannot be handed one, so a safety sentence
+  /// has no route into the hint.
   ///
-  /// `label` is handed BACK to the control builder rather than read off the
-  /// finished control, because SwiftUI has no append-to-a-label modifier and a
-  /// control's own label is not readable from here. One value used twice, so the
-  /// spoken and the visible label cannot drift.
+  /// `label` is handed BACK to the control builder because SwiftUI has no
+  /// append-to-a-label modifier and a control's own label is unreadable from
+  /// here. One value used twice, so spoken and visible cannot drift.
   ///
-  /// `caption` is the row's ordinary explanation, which still becomes the hint.
-  /// The blank-display case IS its caption and passes none; the HDR block and
-  /// the mute row both pass one, the mute row's being the status that names WHY
-  /// the strategy in force is not the one the switch asks for.
+  /// `caption` is the row's ordinary explanation and still becomes the hint.
   init(
     safety: SafetySentence,
     label: LocalizedStringKey,
@@ -154,14 +132,11 @@ struct SettingRow<Control: View>: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 3) {
-      // Which branch runs is fixed by the initialiser the call site chose and
-      // cannot flip while the row is on screen, so this `if` is safe where one
-      // on the caption would not be: that would swap `_ConditionalContent`
-      // branches whenever a caption appeared or disappeared
-      // (`MirroringSection`'s cannot-start reason does), rebuilding the control
+      // The initialiser fixes which branch runs, so it cannot flip on screen.
+      // An `if` on the caption would not be safe: an appearing or disappearing
+      // caption swaps `_ConditionalContent` branches, rebuilding the control
       // and losing its focus and in-progress edits. A safety sentence going
-      // empty, which the HDR block does when HDR turns off, changes the `Text`
-      // and not the branch.
+      // empty changes the `Text`, not the branch.
       if let spokenLabel {
         hinted(control).accessibilityLabel(spokenLabel)
       } else {
@@ -170,23 +145,19 @@ struct SettingRow<Control: View>: View {
       rowCaption(safety?.visibleCaption)
       rowCaption(caption)
     }
-    // The row's content takes the card's full width, not just its own ideal
-    // one: the dominant shape here is a labeled control, and a control given
-    // the whole row is what puts its label at the leading edge and its switch
-    // or pop-up at the trailing one.
+    // Full card width, not the content's ideal width: a labeled control given
+    // the whole row puts its label leading and its switch or pop-up trailing.
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.vertical, SettingsTheme.rowVerticalPadding)
     .foregroundStyle(SettingsTheme.titleColor)
-    // This row's rhythm is supplied here, so a row component nested inside it
-    // adds none of its own and the card keeps one rhythm.
+    // Supplied here, so a nested row component adds none of its own.
     .environment(\.settingsRowIsPadded, true)
   }
 
-  /// The row's own denser rendering of a caption: `SettingsCaption`'s sentence
-  /// at row weight rather than its standalone weight, which on a card would
-  /// compete with the control's label. The `Text` is taken rather than the
-  /// view, because a caption styles itself and an outer font cannot override
-  /// it.
+  /// A caption at row weight rather than its standalone weight, which on a
+  /// card would compete with the control's label. Takes the `Text` rather than
+  /// the view, because a caption styles itself and an outer font cannot
+  /// override it.
   @ViewBuilder
   private func rowCaption(_ caption: SettingsCaption?) -> some View {
     if let caption {
@@ -199,7 +170,7 @@ struct SettingRow<Control: View>: View {
   }
 
   /// Attached unconditionally, empty when there is no caption: the
-  /// `isEnabled:` overload that would say this directly is macOS 15+.
+  /// `isEnabled:` overload that would say this directly needs macOS 15.
   private func hinted(_ view: Control) -> some View {
     view.accessibilityHint(caption?.text ?? Text(verbatim: ""))
   }
@@ -211,19 +182,16 @@ struct SettingRow<Control: View>: View {
   }
 }
 
-/// Secondary explanatory text under a control — the pane-wide caption idiom
-/// (replaces the fork's three divergent sectionBox helpers with one component).
+/// Secondary explanatory text under a control, the one caption idiom.
 ///
 /// Two initialisers because a sentence with a display name or a count in it
-/// cannot be a `LocalizedStringKey` literal, and the alternative — the caller
-/// hand-rolling `Text` with the same three modifiers — is how the styling drifts
-/// one caption at a time.
+/// cannot be a `LocalizedStringKey` literal. The alternative, callers
+/// hand-rolling `Text` with the same three modifiers, is how styling drifts one
+/// caption at a time.
 struct SettingsCaption: View {
-  /// The unstyled sentence, so `SettingRow` can republish it as a hint.
-  /// Deliberately `Text` and not `String`: a `LocalizedStringKey` cannot be read
-  /// back as a string, and most callers hand one over — several through
-  /// `MirroringCopy`/`RotationCopy`/`DisplayModeCopy`, which are shared with the
-  /// confirmation panels and cannot become `String` for this alone.
+  /// The unstyled sentence, so `SettingRow` can republish it as a hint. `Text`
+  /// and not `String`: a `LocalizedStringKey` cannot be read back as a string,
+  /// and most callers hand one over.
   let text: Text
 
   @Environment(\.isEnabled) private var isEnabled
@@ -241,30 +209,27 @@ struct SettingsCaption: View {
       .font(.callout)
       .foregroundStyle(SettingsTheme.bodyColor)
       .fixedSize(horizontal: false, vertical: true)
-      // A caption explaining a disabled section is not the brightest thing on
-      // it: the theme paints an opaque color, so nothing else dims this.
+      // The theme paints an opaque colour, so nothing else dims this.
       .opacity(isEnabled ? 1 : SettingsTheme.disabledOpacity)
   }
 }
 
 extension View {
-  /// Every settings section header is a VoiceOver heading (accessibility
-  /// contract 4).
+  /// Every settings section header is a VoiceOver heading.
   func settingsHeading() -> some View { accessibilityAddTraits(.isHeader) }
 }
 
-/// A row whose control is an ACTION rather than a setting: the sentence at the
-/// leading edge, the button (or buttons) at the trailing one.
+/// A row whose control is an ACTION rather than a setting: sentence leading,
+/// buttons trailing.
 ///
-/// `SettingRow` cannot draw this shape, for the reason in its own comment: it
-/// hands the control the card's full width so the control places its own label,
-/// which is what puts a `Toggle`'s switch at the trailing edge. A `Button`
-/// carries no such label, so it collapses to its natural width at the leading
-/// edge and the rest of the card reads as dead space.
+/// `SettingRow` cannot draw this shape. It hands the control the card's full
+/// width so the control places its own label, and a `Button` carries no such
+/// label, so it collapses to its natural width and the rest of the card reads
+/// as dead space.
 ///
-/// The sentence is the row's visible explanation AND the actions'
-/// `accessibilityHint`, same seam and same reason as `SettingRow`: a new row
-/// cannot forget it.
+/// The sentence is both the visible explanation and the actions'
+/// `accessibilityHint`, same seam as `SettingRow`, so a new row cannot forget
+/// it.
 struct SettingsActionRow<Actions: View>: View {
   @Environment(\.isEnabled) private var isEnabled
 
@@ -286,7 +251,7 @@ struct SettingsActionRow<Actions: View>: View {
   }
 
   /// For a sentence carrying a name, a date or a count, which cannot be a
-  /// `LocalizedStringKey` literal.
+  /// `LocalizedStringKey`.
   init(
     verbatim sentence: String,
     caption: SettingsCaption? = nil,
@@ -321,12 +286,10 @@ struct SettingsActionRow<Actions: View>: View {
     .frame(maxWidth: .infinity)
     // No vertical padding of its own, unlike `SettingRow`: the trailing button
     // carries its own, and a row's worth on top stacked about twenty points of
-    // air over a one-line sentence at the head of a card.
-    // The card's padding then centres a lone row, but a row a divider follows
-    // gets that padding above and a bare hairline below, so it restates the
-    // card's value here.
+    // air over a one-line sentence. A row a divider follows gets the card's
+    // padding above and a bare hairline below, so it restates that value here.
     .padding(.bottom, dividerFollows ? SettingsTheme.cardVerticalPadding : 0)
-    // A row component nested inside this one adds no padding of its own.
+    // A nested row component adds no padding of its own.
     .environment(\.settingsRowIsPadded, true)
   }
 }

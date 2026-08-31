@@ -3,14 +3,14 @@ import Foundation
 
 /// The fixed grid every panel's exposure history is stored in.
 ///
-/// 24:10 is 2.4:1, which is the MAG's ultrawide aspect, so its cells come out
-/// almost square (143×144 px on 3440×1440): coarse enough that a one-shot
-/// capture stays cheap, fine enough to separate a menu bar from the content
-/// under it. **Cells are square only on that panel.** The grid is fixed rather
-/// than per-panel so one stored shape serves every display, which means a 16:9
-/// or 16:10 panel gets cells taller than they are wide (160×216 px on the Dell,
-/// 35% taller). Harmless for accumulation, which is area-weighted, but anything
-/// DRAWING the grid must use the display's own aspect and not 24:10.
+/// 24:10 is 2.4:1, the MAG's ultrawide aspect, so its cells come out almost
+/// square (143×144 px on 3440×1440): coarse enough to keep a capture cheap, fine
+/// enough to separate a menu bar from the content under it.
+///
+/// **Cells are square only on that panel.** One fixed shape serves every
+/// display, so a 16:9 or 16:10 panel gets cells taller than they are wide.
+/// Harmless for accumulation, which is area-weighted, but anything DRAWING the
+/// grid must use the display's own aspect and not 24:10.
 public struct PanelGrid: Equatable, Sendable {
   public static let cols = 24
   public static let rows = 10
@@ -24,28 +24,19 @@ public struct PanelGrid: Equatable, Sendable {
 /// us 2160×3840; everything accumulates into panel-native cells so that
 /// rotating a monitor does not scramble its wear history.
 ///
-/// **Rotation convention: `CGDisplayRotation` is degrees CLOCKWISE.** Apple's
-/// header says so outright (`CGDisplayConfiguration.h`, macOS 26 SDK): "Return
-/// the rotation angle of a display in degrees clockwise. A display rotation of
-/// 90° implies the display is rotated clockwise 90°, such that what was the
-/// physical bottom of the display is now the left side, and what was the
-/// physical top is now the right side."
+/// **Rotation convention: `CGDisplayRotation` is degrees CLOCKWISE**, per
+/// `CGDisplayConfiguration.h`: "A display rotation of 90° implies the display is
+/// rotated clockwise 90°, such that what was the physical bottom of the display
+/// is now the left side."
 ///
-/// At 270° the glass is therefore turned 90° anticlockwise in the world frame:
-/// the manufactured top edge faces left and the manufactured right edge faces
-/// up, so the display's top-left corner is the panel's **top-right**. That is
-/// what `panelPoint`/`displayPoint` below implement, and
-/// `ExposureAccumulatorTests.accumulationIsStableAcrossARotationChange` pins
-/// it with a value that differs between this convention and its inverse.
+/// At 270° the glass is therefore turned 90° anticlockwise in the world frame,
+/// so the display's top-left corner is the panel's **top-right**. That is what
+/// `panelPoint`/`displayPoint` implement, and a rotation test pins it with a
+/// value that differs between this convention and its inverse.
 ///
-/// This comment previously said the reading was taken as degrees
-/// *counterclockwise* and that the mapping was unverified. The mapping was
-/// always right; the stated premise was backwards, and the two errors cancelled
-/// because the sentence went on to describe the rotation of the image within
-/// the frame, which is the inverse of the glass's rotation in the world. Left
-/// as it was, the next reader to check it against Apple would have "fixed" a
-/// correct transform. Settled from documentation 2026-08-07, so this no longer
-/// needs the rotated Dell to confirm it.
+/// Do not "correct" this to counterclockwise. A previous comment stated the
+/// premise backwards while the mapping stayed right, and the next reader to
+/// check it against Apple would have "fixed" a correct transform.
 public struct PanelSpaceTransform: Equatable, Sendable {
   public let displaySize: CGSize
   public let rotation: DisplayRotation
@@ -65,12 +56,11 @@ public struct PanelSpaceTransform: Equatable, Sendable {
   private static let noCoverage = [Double](repeating: 0, count: PanelGrid.cellCount)
 
   /// `CGRect.intersection` treats NaN as "no constraint" rather than
-  /// propagating it, so a rect with a NaN origin intersects a 3440×1440 display
-  /// to a FULL-WIDTH strip and an all-NaN rect to the whole display. That
-  /// window would then out-cover every real one in `WindowObserver.observe`
-  /// (1.0 beats any fraction), take every cell, and book the whole interval to
-  /// its owner in a store that never washes out. `isNull` and `isInfinite` do
-  /// not catch it.
+  /// propagating it, so a NaN-origin rect intersects the display to a FULL-WIDTH
+  /// strip and an all-NaN rect to the whole display. That window then out-covers
+  /// every real one in `WindowObserver.observe`, takes every cell, and books the
+  /// whole interval to its owner in a store that never washes out. `isNull` and
+  /// `isInfinite` do not catch it.
   static func isUsable(_ rect: CGRect) -> Bool {
     rect.origin.x.isFinite && rect.origin.y.isFinite
       && rect.size.width.isFinite && rect.size.height.isFinite
@@ -89,14 +79,12 @@ public struct PanelSpaceTransform: Equatable, Sendable {
     }
   }
 
-  /// `panelPoint` for `OverlayMask`, which needs the same mapping to walk a
-  /// display-oriented grid back into panel cells, and for the window ghost
-  /// overlay, which maps display-local window corners onto the drawn surface.
+  /// `panelPoint` for `OverlayMask`, which walks a display-oriented grid back
+  /// into panel cells, and for the window ghost overlay.
   ///
-  /// Exposed rather than duplicated: the rotation convention is subtle enough
-  /// that it already shipped with a backwards doc comment, and two spellings of
-  /// it would be two places a correction has to find. This is the one place.
-  /// Public for the app-target overlay, same reasoning at one remove.
+  /// Exposed rather than duplicated: the rotation convention already shipped
+  /// with a backwards doc comment once, and two spellings of it would be two
+  /// places a correction has to find. Public for the app-target overlay.
   public func panelPointForDisplay(u: Double, v: Double) -> (p: Double, q: Double) {
     panelPoint(u: u, v: v)
   }
@@ -128,11 +116,10 @@ public struct PanelSpaceTransform: Equatable, Sendable {
 
   // MARK: - Rects
 
-  /// Fractional coverage of each grid cell by a rect in DISPLAY coordinates.
-  /// Returns 240 values in 0...1, indexed row-major in PANEL-NATIVE
-  /// orientation. Fractional rather than boolean: a window straddling a cell
-  /// boundary contributes in proportion, or attribution quantizes into visible
-  /// lies at 143 px granularity.
+  /// Fractional coverage of each grid cell by a rect in DISPLAY coordinates,
+  /// in 0...1, indexed row-major in PANEL-NATIVE orientation. Fractional rather
+  /// than boolean: a window straddling a cell boundary contributes in
+  /// proportion, or attribution quantizes into visible lies at 143 px.
   public func coverage(ofDisplayRect rect: CGRect) -> [Double] {
     guard hasUsableSize, !rect.isNull, !rect.isInfinite, Self.isUsable(rect) else {
       return Self.noCoverage
@@ -167,10 +154,10 @@ public struct PanelSpaceTransform: Equatable, Sendable {
   // MARK: - Grids
 
   /// Re-bin a luminance grid sampled in DISPLAY orientation into PANEL-NATIVE
-  /// cells. Input is row-major in display orientation, and its shape is not
-  /// contractual — ScreenCaptureKit reduces the requested capture size — so
-  /// each panel cell is the area-weighted mean of the source cells under it.
-  /// A malformed grid re-bins to zeros rather than trapping.
+  /// cells. The input is row-major and its shape is not contractual, since
+  /// ScreenCaptureKit reduces the requested capture size, so each panel cell is
+  /// the area-weighted mean of the source cells under it. A malformed grid
+  /// re-bins to zeros rather than trapping.
   public func panelNativeGrid(
     fromDisplayGrid grid: [Double], cols: Int, rows: Int
   ) -> [Double] {

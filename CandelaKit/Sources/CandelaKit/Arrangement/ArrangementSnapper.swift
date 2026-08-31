@@ -13,18 +13,17 @@ public enum SnapAxis: Sendable, Equatable, Hashable {
 
 /// Ordered: `abut` sorts before `align`, which is the tie-break in §3.4.
 public enum SnapKind: Sendable, Equatable, Hashable, Comparable {
-  /// Edge-to-edge contact. Abutting is what makes a layout legal at all
-  /// (`ArrangementRules` requires a shared edge of nonzero length), so it beats
+  /// Edge-to-edge contact. Abutting is what makes a layout legal at all, so it beats
   /// aligning whenever both are the same distance away.
   case abut
-  /// Edges or centres line up without touching. Cosmetic, and legal only if
-  /// something else already connects the two.
+  /// Edges or centres line up without touching. Legal only if something else already
+  /// connects the two.
   case align
 }
 
-/// One guide to draw. `position` is the display-space coordinate the snap makes
-/// the two rects share; `from`/`to` are its extent along the OTHER axis — the
-/// union of the two rects, so the line spans exactly what it relates.
+/// One guide to draw. `position` is the display-space coordinate the snap makes the
+/// two rects share; `from`/`to` are its extent along the OTHER axis, the union of the
+/// two rects, so the line spans exactly what it relates.
 public struct SnapLine: Sendable, Equatable {
   public let axis: SnapAxis
   public let position: Int
@@ -51,8 +50,7 @@ public struct SnapLine: Sendable, Equatable {
 }
 
 public struct SnapResult: Sendable, Equatable {
-  /// The moved rect with each axis's winning snap applied. Same size as the
-  /// input — snapping moves a display, it never resizes one.
+  /// Same size as the input: snapping moves a display, it never resizes one.
   public let rect: DisplayRect
   /// At most one line per axis, X before Y.
   public let lines: [SnapLine]
@@ -65,25 +63,22 @@ public struct SnapResult: Sendable, Equatable {
 
 /// drag-canvas §3.4.
 ///
-/// The two axes are decided **independently**, from candidates read at the
-/// pre-snap position. That is what keeps the rule non-circular: an X snap must
-/// not change which Y candidates exist, or the answer would depend on which axis
-/// was evaluated first.
+/// The two axes are decided **independently**, from candidates read at the pre-snap
+/// position. That keeps the rule non-circular: an X snap must not change which Y
+/// candidates exist, or the answer would depend on which axis ran first.
 ///
 /// Candidates are ranked by `(distance, kind, other display id, target, guide
-/// position)`, which is a strict total order whenever the tiles have distinct
-/// ids — as a `DisplayArrangement`'s do. Nothing here reads the order `tiles`
-/// arrives in; a snap decided by array order is not reproducible in a bug
-/// report.
+/// position)`, a strict total order over tiles with distinct ids. Nothing here reads
+/// the order `tiles` arrives in; a snap decided by array order is not reproducible in
+/// a bug report.
 ///
-/// A snap that *produces* an overlap is not undone here — undoing it silently
-/// would be the auto-correction AR7 exists to avoid. `ArrangementDragPolicy`
-/// reports it through the proposal's `problems` instead.
+/// A snap that *produces* an overlap is not undone here, because undoing it silently
+/// is the auto-correction AR7 avoids. `ArrangementDragPolicy` reports it through the
+/// proposal's `problems`.
 public enum ArrangementSnapper {
-  /// - Parameter threshold: in **display** points. The authored threshold is in
-  ///   canvas points and is converted through the drag's frozen transform
-  ///   (§3.3) — `ArrangementDragPolicy` owns that conversion. A threshold of 0
-  ///   admits only an exact hit; a negative one admits nothing at all.
+  /// - Parameter threshold: in **display** points. `ArrangementDragPolicy` owns the
+  ///   conversion from the authored canvas points (§3.3). A threshold of 0 admits only
+  ///   an exact hit; a negative one admits nothing.
   public static func snap(
     _ moving: DisplayRect,
     id: CGDirectDisplayID,
@@ -116,7 +111,7 @@ public enum ArrangementSnapper {
     let kind: SnapKind
     let otherID: CGDirectDisplayID
     let otherRect: DisplayRect
-    /// Where the guide is drawn — the coordinate the two rects come to share.
+    /// Where the guide is drawn: the coordinate the two rects come to share.
     let position: Int
   }
 
@@ -150,30 +145,25 @@ public enum ArrangementSnapper {
       )
     }
 
-    // Generated align-first, which is the REVERSE of the preference. The
-    // ranking key is then the only thing that can make an abut win a tie; with
-    // the abuts appended first, dropping `kind` from the key would leave the
-    // behaviour unchanged and no test could see the difference.
+    // Generated align-first, the REVERSE of the preference, so the ranking key is the
+    // only thing that can make an abut win a tie. Abuts first and dropping `kind` from
+    // the key would leave behaviour unchanged, with no test able to see it.
     var result: [Candidate] = [
       candidate(sourceOrigin, .align, at: sourceOrigin),
       candidate(sourceMax - movingExtent, .align, at: sourceMax),
       candidate(
         sourceOrigin + halved(source.length(on: axis) - movingExtent),
         .align,
-        // The guide is drawn through the OTHER display's centre. The moved
-        // tile's own centre can land one point off it, because both that centre
-        // and this target are halved integers; at canvas scale (≈12 display
-        // points to the canvas point) the difference is well under a pixel, and
-        // drawing through the rect that is not moving keeps the guide from
-        // jittering as the tile approaches.
+        // Drawn through the OTHER display's centre. The moved tile's own centre can
+        // land one point off, since both are halved integers, and drawing through the
+        // rect that is not moving keeps the guide from jittering.
         at: sourceOrigin + halved(source.length(on: axis))
       ),
     ]
 
-    // The crossing precondition, read at the PRE-SNAP position. Without it a
-    // tile dragged far above another still feels a magnet from it: the two
-    // cannot abut on X at all unless their Y spans overlap, so offering the
-    // candidate would snap them into a layout that shares no edge.
+    // The crossing precondition, read at the PRE-SNAP position. Two rects cannot abut
+    // on X unless their Y spans overlap, so without this a tile dragged far above
+    // another still feels a magnet and snaps into a layout sharing no edge.
     let crosses = moving.spansOverlap(with: source, on: axis.other)
     if crosses {
       result.append(candidate(sourceMax, .abut, at: sourceMax))
@@ -185,34 +175,28 @@ public enum ArrangementSnapper {
 
   /// Floor division by two.
   ///
-  /// Centre alignment on an **odd** difference cannot land on the exact centre,
-  /// so it lands one point below it — deliberate, and pinned by
-  /// `centreAlignmentOnAnOddDifferenceRoundsDownByOnePoint`.
+  /// Centre alignment on an **odd** difference lands one point below the exact
+  /// centre, deliberately.
   ///
-  /// Swift's `/` truncates toward zero, which would round *down* when the other
-  /// display is wider and *up* when the moved one is. The bias would then depend
-  /// on which of two displays the user happened to grab, and dragging A onto B
-  /// would not undo dragging B onto A. Flooring makes the one-point offset a
-  /// single stated rule in both directions.
+  /// Swift's `/` truncates toward zero, which rounds *down* when the other display is
+  /// wider and *up* when the moved one is. The bias would depend on which display the
+  /// user grabbed, so dragging A onto B would not undo dragging B onto A.
   ///
-  /// Internal rather than private so `ArrangementDockPolicy` can centre a
-  /// keyboard dock the same way. Two copies of this rule would let an arrow
-  /// press and a drag land one point apart on every odd difference.
+  /// Internal rather than private so `ArrangementDockPolicy` centres a keyboard dock
+  /// the same way. Two copies would land an arrow press and a drag one point apart on
+  /// every odd difference.
   static func halved(_ value: Int) -> Int {
     value >= 0 ? value / 2 : (value - 1) / 2
   }
 
-  /// `position` is the last term so the ranking is a strict total order over the
-  /// candidates of a tile list with distinct ids, rather than one that leaves
-  /// `min(by:)`'s first-minimal-wins behaviour to decide. It is reachable: two
-  /// displays of the same width offer leading-edge and trailing-edge aligns with
-  /// the same target, and this makes the leading edge the one the guide names.
+  /// `position` is last so the ranking is a strict total order rather than leaving
+  /// `min(by:)`'s first-minimal-wins to decide. Reachable: two displays of the same
+  /// width offer leading- and trailing-edge aligns with the same target, and this
+  /// makes the leading edge the one the guide names.
   ///
-  /// `target` is §3.4's, and cannot currently decide anything: two candidates of
-  /// one display share a kind and a distance only when the moved display sits at
-  /// their midpoint, which is where the centre-align candidate sits at distance
-  /// zero and wins outright. It stays because the ordering has to remain total
-  /// for whatever candidates are added next.
+  /// `target` is §3.4's and decides nothing today, since two candidates of one display
+  /// share a kind and a distance only where the centre-align candidate already wins at
+  /// distance zero. It stays so the order is total for whatever is added next.
   private static func key(
     _ candidate: Candidate,
     from origin: Int
@@ -226,8 +210,8 @@ public enum ArrangementSnapper {
   // MARK: - Lines
 
   private static func line(for candidate: Candidate, snapped: DisplayRect) -> SnapLine {
-    // The extent is taken along the other axis from the SNAPPED rect, so the
-    // guide spans where the tile actually is rather than where it was grabbed.
+    // Taken from the SNAPPED rect, so the guide spans where the tile is rather than
+    // where it was grabbed.
     let across = candidate.axis.other
     let from = min(snapped.start(on: across), candidate.otherRect.start(on: across))
     let to = max(snapped.end(on: across), candidate.otherRect.end(on: across))

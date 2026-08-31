@@ -41,9 +41,8 @@ struct AuxControlDecoderTests {
     #expect(press?.modifiers == [.option, .shift])
   }
 
-  /// Caps lock rides the same event subtype as the media keys. It is the key
-  /// whose HIToolbox handling made building an NSEvent on the tap thread
-  /// unsafe, so it had better still fall out as "not ours".
+  /// Caps lock rides the same event subtype as the media keys, and its HIToolbox
+  /// handling is what made building an NSEvent on the tap thread unsafe.
   @Test func capsLockIsNotRouted() {
     #expect(AuxControlDecoder.decode(data1: payload(keycode: 4, state: 0xB), modifiers: []) == nil)
   }
@@ -59,10 +58,9 @@ struct AuxControlDecoderTests {
     #expect(AuxControlDecoder.decode(data1: -1, modifiers: []) == nil)
   }
 
-  /// Zero is the dangerous one, and the reason the tap self-checks its field
-  /// indices before arming: `NX_KEYTYPE_SOUND_UP` is 0, so an all-zero read
-  /// decodes as a perfectly plausible volume-up release rather than as an
-  /// error. The decoder cannot tell the difference; only the self-check can.
+  /// Zero is the dangerous one, and the reason the tap self-checks its field indices
+  /// before arming: `NX_KEYTYPE_SOUND_UP` is 0, so an all-zero read decodes as a
+  /// plausible volume-up release. The decoder cannot tell; only the self-check can.
   @Test func zeroDecodesAsAVolumeUpRelease() {
     let press = AuxControlDecoder.decode(data1: 0, modifiers: [])
     #expect(press?.key == .volumeUp)

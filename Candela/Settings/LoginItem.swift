@@ -3,12 +3,9 @@ import Foundation
 import Observation
 import ServiceManagement
 
-/// The three SMAppService touchpoints behind one injectable value (the D21
-/// follow-up, built once its test-target precondition existed). The closures
+/// The SMAppService touchpoints behind one injectable value (D21). The closures
 /// are the seam, not a cache: `status` executes on every read, so D10's
-/// live-read invariant survives injection by construction. Production is
-/// `.live`; tests substitute a fake whose backing they mutate to prove the
-/// answer tracks the system, never a mirror.
+/// live-read invariant survives injection by construction.
 @MainActor
 struct LoginItemService {
   var status: () -> SMAppService.Status
@@ -21,23 +18,20 @@ struct LoginItemService {
     unregister: { try SMAppService.mainApp.unregister() })
 }
 
-/// Launch-at-login via SMAppService (D10). ONE source of truth: `isEnabled` is
-/// a LIVE read of the service status — never a mirrored bool — so a
-/// failed register() shows OFF plus an error instead of the fork's lying
-/// checkbox.
+/// Launch-at-login via SMAppService (D10). ONE source of truth: `isEnabled` is a
+/// LIVE read of the service status, never a mirrored bool, so a failed
+/// register() shows OFF plus an error instead of the fork's lying checkbox.
 @MainActor @Observable
 final class LoginItem {
   @ObservationIgnored private let service: LoginItemService
-  /// D10: ONE source of truth. Never a mirrored bool — the settings reset
-  /// unregisters the main app directly (`SMAppService.mainApp.unregister()`),
-  /// and System Settings → General → Login Items can disable it at any moment
-  /// with no notification to us. Both would leave a mirror reading ON forever,
-  /// which is exactly the fork defect D10 exists to fix.
+  /// D10: never mirror the status. The settings reset and System Settings >
+  /// Login Items both change the registration with no notification to us, and a
+  /// mirror would read ON forever.
   ///
-  /// `refreshToken` is the observation dependency: `@Observable` cannot track a
-  /// computed property backed by an external system, so mutating the token is
-  /// how a view is told to re-read. `refresh()` is safe to call on every window
-  /// appearance and on `didBecomeActive`.
+  /// The observation dependency: `@Observable` cannot track a computed property
+  /// backed by an external system, so mutating the token is how a view is told
+  /// to re-read. `refresh()` is safe on every appearance and on
+  /// `didBecomeActive`.
   private var refreshToken = 0
 
   var isEnabled: Bool {
@@ -56,13 +50,10 @@ final class LoginItem {
   // evaluated in a nonisolated context, and `.live` is main-actor state.
   init(service: LoginItemService? = nil) {
     self.service = service ?? .live
-    // Closes the last hole in D10: a live *read* is not a
-    // live *render*, and `.onAppear` only fires when a pane appears. Becoming
-    // active is the moment any already-open window showing this toggle is
-    // about to be looked at, and it is the only signal that covers a change
-    // made in System Settings → General → Login Items — or by `sfltool` —
-    // while Candela sat in the background. With it, the Setup window and the
-    // General pane both correct themselves on the way back.
+    // A live read is not a live render, and `.onAppear` only fires when a pane
+    // appears. Becoming active is the only signal that covers a change made in
+    // System Settings > Login Items, or by `sfltool`, while Candela sat in the
+    // background (D10).
     activationObserver = NotificationCenter.default.addObserver(
       forName: NSApplication.didBecomeActiveNotification,
       object: nil,

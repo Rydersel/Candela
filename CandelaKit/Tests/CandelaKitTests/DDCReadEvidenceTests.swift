@@ -4,10 +4,9 @@ import Testing
 
 @Suite("DDC read evidence (B3)")
 struct DDCReadEvidenceTests {
-  /// Worst evidence wins WITHIN a display: one `allZeros` is not cancelled by
-  /// a later `notAttempted`. Without this a display that answered zeros on
-  /// brightness and was never asked about contrast would report "not
-  /// attempted" and the write-only line would never appear.
+  /// Worst evidence wins within a display: one `allZeros` is not cancelled by a later
+  /// `notAttempted`. Otherwise a display that answered zeros on brightness and was never
+  /// asked about contrast reports "not attempted" and the write-only line never appears.
   @Test func worseNeverForgetsABadOutcome() {
     #expect(DDCReadEvidence.worse(.allZeros, .notAttempted) == .allZeros)
     #expect(DDCReadEvidence.worse(.notAttempted, .allZeros) == .allZeros)
@@ -32,29 +31,22 @@ struct DDCReadEvidenceTests {
     #expect(DDCReadEvidence.worst([.allZeros, .notAttempted, .notAttempted]) == .allZeros)
   }
 
-  /// A three-state collapse is the defect this enum exists to prevent: "no
-  /// reply" and "answered with zeros" are DIFFERENT facts about a panel, and
-  /// only the second is the write-only signature.
+  /// "No reply" and "answered with zeros" are different facts about a panel, and only
+  /// the second is the write-only signature.
   @Test func noReplyAndAllZerosAreNotTheSameFact() {
     #expect(DDCReadEvidence.noReply != DDCReadEvidence.allZeros)
   }
 }
 
-/// Everything above is the enum in isolation. These pin it where it is
-/// actually used, which is where the type can be defeated: replacing a
-/// call site's fold with a plain assignment — the precise defect
-/// `DDCReadEvidence` exists to prevent — left every enum test green.
-///
-/// They also pin the SCOPE of the fold, which is not a property of the enum
-/// at all. Evidence is the verdict of the most recent pass that asked the
-/// panel something: a pass that asks nothing must not erase it, a pass that
-/// asks supersedes it.
+/// The enum in isolation is above; these pin it where it can be defeated, since replacing
+/// a call site's fold with a plain assignment left every enum test green. They also pin the
+/// scope: evidence is the verdict of the most recent pass that asked the panel something,
+/// so a pass that asks nothing must not erase it and a pass that asks supersedes it.
 @Suite("Read evidence at the brightness call site (B3)")
 @MainActor
 struct BrightnessReadEvidenceCallSiteTests {
-  /// Mirrors `makeLegacyPathController`, but hands back the prefs — some of
-  /// these need to turn the read OFF mid-test, which is the only way to
-  /// produce a pass that attempts nothing.
+  /// Mirrors `makeLegacyPathController` but hands back the prefs: some of these turn the
+  /// read off mid-test, the only way to produce a pass that attempts nothing.
   private static func make(
     writer: any DDCWriting
   ) -> (controller: BrightnessController, prefs: DisplayPrefs) {
@@ -102,11 +94,9 @@ struct BrightnessReadEvidenceCallSiteTests {
     #expect(controller.readEvidence == .answered)
   }
 
-  /// The half of the scope rule that the fold protects: a later pass that
-  /// never reaches the wire (here `unavailableDDC`; equally the native path
-  /// or role `.builtIn`) attempts nothing and therefore proves nothing. It
-  /// must leave the write-only verdict standing rather than quietly restoring
-  /// the display to looking healthy.
+  /// The half of the scope rule the fold protects: a later pass that never reaches the
+  /// wire (here `unavailableDDC`, equally the native path or a built-in) proves nothing,
+  /// so it must leave the write-only verdict standing rather than restoring a healthy look.
   @Test func apassThatAsksNothingLeavesTheVerdictStanding() async {
     let (controller, prefs) = Self.make(writer: FakeDDC(readResult: (current: 0, max: 0)))
     await controller.refreshFromHardware()
@@ -117,10 +107,8 @@ struct BrightnessReadEvidenceCallSiteTests {
     #expect(controller.readEvidence == .allZeros)
   }
 
-  /// The other half, and the one a monotonic fold got wrong: a pass that DOES
-  /// ask supersedes. Anything else publishes "this display answers with zeros"
-  /// about a panel that has just answered properly — a false sentence from the
-  /// feature built to stop false sentences.
+  /// The other half, and the one a monotonic fold got wrong: a pass that does ask
+  /// supersedes, or the app says "answers with zeros" about a panel that just answered.
   @Test func apassThatAsksAgainSupersedesTheOldVerdict() async {
     let fake = FakeDDC(readResult: (current: 0, max: 0))
     let (controller, _) = Self.make(writer: fake)
@@ -133,12 +121,9 @@ struct BrightnessReadEvidenceCallSiteTests {
   }
 }
 
-/// `didReadMaxDDC` is the provenance of `maxDDCValue`: did the PANEL say 100,
-/// or did we assume 100 because it said nothing? The flag is only worth having
-/// if it can go back to "assumed" — a display that replugs into a read-failing
-/// state and keeps claiming "the maximum was read from the panel" on the
-/// strength of a read from a previous binding is exactly the class of untruth
-/// this feature exists to remove.
+/// `didReadMaxDDC` is the provenance of `maxDDCValue`: did the panel say 100, or did we
+/// assume 100 because it said nothing? The flag is only worth having if it can go back to
+/// assumed, or a panel that replugs into a read-failing state keeps a previous read's claim.
 @Suite("Max-DDC provenance (B5)")
 @MainActor
 struct MaxDDCProvenanceTests {
@@ -155,9 +140,8 @@ struct MaxDDCProvenanceTests {
     #expect(controller.didReadMaxDDC == true)
   }
 
-  /// The 100 standing in `maxDDCValue` on a write-only panel is an assumption,
-  /// and must keep saying so — it is indistinguishable from a real read of 100
-  /// by inspection, which is why the provenance is recorded beside it.
+  /// The 100 in `maxDDCValue` on a write-only panel is an assumption and must keep saying
+  /// so: it is indistinguishable from a real read of 100 by inspection.
   @Test func azeroAnswerLeavesTheMaximumAssumed() async {
     let controller = makeLegacyPathController(writer: FakeDDC(readResult: (current: 0, max: 0)))
     await controller.refreshFromHardware()
@@ -165,18 +149,11 @@ struct MaxDDCProvenanceTests {
     #expect(controller.didReadMaxDDC == false)
   }
 
-  /// A DIFFERENT panel is a different subject, and evidence is about a
-  /// subject. This matters more than it sounds: `AppModel.performRefresh`
-  /// REUSES the controller for any display whose `CGDirectDisplayID`
-  /// reappears, and macOS reassigns those IDs across a replug — so a different
-  /// physical monitor on the same port inherits this object and, without the
-  /// reset, the previous panel's claims about itself.
-  ///
-  /// All THREE facts reset, `maxDDCValue` included. An earlier ruling reset
-  /// only the two flags and left the number, which left the motivating
-  /// scenario alive on the write path: the new panel's writes would stay
-  /// scaled against the old panel's 120 indefinitely (a write-only panel never
-  /// reports, so nothing corrects it) while `didReadMaxDDC` said "assumed".
+  /// A different panel is a different subject. `AppModel.performRefresh` reuses the
+  /// controller for any display whose `CGDirectDisplayID` reappears, and macOS reassigns
+  /// those IDs across a replug, so a different monitor on the same port inherits this
+  /// object. All three facts reset, `maxDDCValue` included: resetting only the flags left
+  /// the new panel's writes scaled against the old panel's 120, with nothing to correct it.
   @Test func arebindToADifferentPanelReturnsTheMaximumToAssumed() async {
     let controller = makeLegacyPathController(
       writer: FakeDDC(readResult: (current: 30, max: 120)), panelIdentity: "panel-A"
@@ -192,14 +169,10 @@ struct MaxDDCProvenanceTests {
     #expect(controller.maxDDCValue == 100) // the assumed default, as for any fresh display
   }
 
-  /// The other half, and the one the first ruling got wrong.
-  /// `AppModel.performRefresh` rebinds every KEPT display on EVERY pass — a
-  /// wake, a resolution change, a menu open — not only after a replug. A reset
-  /// that fires on the call rather than on a change therefore drops a readable
-  /// panel's reported maximum back to the assumed 100 several times a session,
-  /// and the recovering re-read is gated (`startupAction == .read` for the
-  /// volume/contrast siblings) and useless on a write-only panel. The panel is
-  /// the same panel; what it reported is still what it reported.
+  /// `AppModel.performRefresh` rebinds every kept display on every pass (a wake, a
+  /// resolution change, a menu open), not only after a replug. A reset that fires on the
+  /// call rather than on a change drops a readable panel's reported maximum back to 100
+  /// several times a session, and the recovering re-read is gated and useless write-only.
   @Test func arebindToTheSamePanelKeepsWhatThatPanelReported() async {
     let controller = makeLegacyPathController(
       writer: FakeDDC(readResult: (current: 30, max: 120)), panelIdentity: "panel-A"

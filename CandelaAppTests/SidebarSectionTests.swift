@@ -4,7 +4,7 @@ import Testing
 // order: the sidebar draws from it, and ⌘1-⌘9 index the same flattened list
 // through `SettingsRegistry.panes`. Pinned here because the order is a product
 // decision that a screenshot cannot defend and a compiler cannot check:
-// `PaneID.allCases` deliberately no longer says anything about it.
+// `PaneID.allCases` says nothing about order.
 @Suite("Sidebar sections")
 @MainActor
 struct SidebarSectionTests {
