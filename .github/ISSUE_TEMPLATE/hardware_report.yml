@@ -1,0 +1,84 @@
+name: Hardware report
+description: Report how Candela behaves with a monitor, for the verified hardware table.
+title: "Hardware: "
+labels: ["hardware-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Monitors differ more than their spec sheets suggest, and the
+        development setup has two of them. A report on a panel we have never
+        seen is one of the most useful things you can send, whether or not
+        anything is broken.
+
+        Everything below is visible on the display's Diagnostics page:
+        Settings, the display in the sidebar, then Diagnostics.
+
+  - type: input
+    id: monitor
+    attributes:
+      label: Monitor
+      description: Make, model, and panel type if you know it.
+      placeholder: "MSI MAG 341C, 34 inch OLED ultrawide"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: connection
+    attributes:
+      label: Connection
+      options:
+        - HDMI
+        - DisplayPort
+        - USB-C / Thunderbolt (direct)
+        - USB-C / Thunderbolt (through a dock or hub)
+        - DisplayPort over USB-C adapter
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "26.1"
+    validations:
+      required: true
+
+  - type: input
+    id: mac
+    attributes:
+      label: Mac model
+      placeholder: "Mac mini (M4, 2024)"
+    validations:
+      required: true
+
+  - type: input
+    id: candela-version
+    attributes:
+      label: Candela version
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: works
+    attributes:
+      label: What works
+      description: Tick what actually changes the display. Leave a box clear if it does nothing, and say so below.
+      options:
+        - label: Brightness
+        - label: Volume
+        - label: Contrast
+        - label: HDR toggle
+        - label: The display answers DDC reads (Diagnostics, "Reading values back")
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: >
+        Anything that did not work, anything that needed a particular setting,
+        and the capabilities line from Diagnostics if the display reports one.
+    validations:
+      required: false
