@@ -1,10 +1,10 @@
 # Hardware-pass driver scripts
 
-Small tools that let an agent (or a person) drive a hardware pass from a shell.
-The first four were written during Checkpoint 1 §6 session 3 (2026-08-11) and
-committed so the next pass does not re-derive them; the synthesis set was added
-for #186 on 2026-08-18. **Placement is provisional**: if the reusable-playbook
-work lands, these are its seed and should move wherever it puts them.
+Small tools that let a person drive a hardware pass from a shell. The first
+four were written during the Checkpoint 1 §6 pass (2026-08-11) and committed so
+the next pass does not re-derive them; the synthesis set was added on
+2026-08-18. **Placement is provisional**: if the reusable-playbook work lands,
+these are its seed and should move wherever it puts them.
 
 What each one exists for, and the measured fact behind it:
 
@@ -39,19 +39,15 @@ outside the invariant core still starts here: a leg nobody has written a check
 for, a state a person has to see for themselves, and every pass where the
 question is not yet sharp enough to be an invariant.
 
-## The guidance for these scripts lives in a skill
+## Before driving the rig
 
-Everything that used to be in this file below this point (the traps the scripts
-encode, what they cannot reach, usage, and the measured rig facts) moved to
-**skill `candela-hardware-verification`** on 2026-08-11, so that it loads on
-demand and so that a subagent brief can name it. A README is not routed: nothing
-pushed anyone to read this one, and every brief written during the Checkpoint 1
-pass had to re-teach the same traps by hand.
+Each script's own header carries its usage, the traps it encodes, and what it
+cannot reach. Read the one you are about to run rather than inferring its
+arguments from this table.
 
-Load that skill before driving the rig. It also carries the positive-control
-discipline, which is the part that decides whether a measurement means anything.
-
-Deliberately not duplicated here. If you find yourself adding guidance to this
-file, put it in the skill instead: two copies of one fact drifting apart is the
-defect we filed as #147 against our own product, and it is no better in our
-tooling.
+The discipline that decides whether any of it means anything is the positive
+control: alongside the measurement, run something whose answer is already known.
+A check that reports a pass when its subject is absent, its path is wrong or its
+grep matches nothing is not a check, and every driver here has a way to fail
+that quietly. `docs/CHECKPOINT-1-HARDWARE.md` is the worked example, with the
+controls written out next to the measurements they qualify.

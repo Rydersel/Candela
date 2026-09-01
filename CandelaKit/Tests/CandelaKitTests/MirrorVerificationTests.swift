@@ -12,7 +12,7 @@ import Testing
 /// `MirrorTopologyPolicy` emits no duplicates and no cycles. The check exists
 /// because this is the one place in the app where the PLATFORM can hand back a
 /// success nothing challenges.
-@Suite("Mirror apply verification (#53)")
+@Suite("Mirror apply verification")
 struct MirrorVerificationTests {
   /// Reads like `CGDisplayMirrorsDisplay`: the parent a display ACTUALLY has
   /// now. Anything absent is standalone, which is what CoreGraphics reports.
@@ -249,7 +249,7 @@ struct MirrorVerificationTests {
 /// around: every `CGDisplayIsBuiltin` call in CandelaKit reads an ID it just took
 /// from `CGGetOnlineDisplayList`, so none can be handed an unknown one. This pins
 /// the hazard behind that rule.
-@Suite("CGDisplayIsBuiltin over an unknown display id (#53)")
+@Suite("CGDisplayIsBuiltin over an unknown display id")
 struct BuiltInDisplayProbeTests {
   /// Measured: `-1`, not `0`. Asserted as "not zero" rather than as `-1` because
   /// the hazard is the polarity: any non-zero return makes a `!= 0` test call an

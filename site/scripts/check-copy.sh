@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Copy gate for the site: no em dashes (CLAUDE.md section 6 binds site copy),
-# no placeholder markers left over from the build phase.
+# Copy gate for the site: no em dashes (the house rule binds site copy as well
+# as the app's), no placeholder markers left over from the build phase.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 fails=0

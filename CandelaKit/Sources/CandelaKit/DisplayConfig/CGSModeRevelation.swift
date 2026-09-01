@@ -4,7 +4,6 @@ import Foundation
 ///
 /// Foundation only by design: every decision here stays testable against
 /// captured fixtures, and the adapter reading the descriptors makes none (CR8).
-/// Spec: docs/superpowers/specs/2026-08-06-cgs-mode-revelation-design.md
 public enum CGSModeRevelation {
   // MARK: - Gate constants
   //

@@ -7,7 +7,7 @@ import Testing
 /// MAG went 3 to 2 and the Dell 2 to 3 across one dock cycle), so an ID that is
 /// still present can be a different monitor, and state reconciled on the ID alone
 /// follows the wire rather than the panel.
-@Suite("Display reconciliation (#51)")
+@Suite("Display reconciliation")
 struct DisplayReconciliationTests {
   private let mag = "mag-edid-uuid"
   private let dell = "dell-edid-uuid"

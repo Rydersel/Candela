@@ -5,7 +5,7 @@ import Testing
 
 /// Saved layouts, and the AR11 refusal for the twin case. Every rule here runs
 /// unattended, so each is pinned rather than left to its single call site.
-@Suite("Arrangement persistence (#13)")
+@Suite("Arrangement persistence")
 struct ArrangementPersistenceTests {
   /// Identity stated independently of the display ID, the distinction this suite is
   /// about: `ArrangementFixtures.tile` derives it from the id, so it cannot express

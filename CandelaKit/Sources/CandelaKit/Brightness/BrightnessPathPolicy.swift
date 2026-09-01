@@ -125,7 +125,7 @@ public enum BrightnessPathPolicy {
     }
   }
 
-  /// ORDER IS THE CONTRACT, and it is the fork's order (dossier §2/§10):
+  /// ORDER IS THE CONTRACT, and it is the MonitorControl fork's order:
   /// native, then force-software, then combined, then pure DDC.
   ///
   /// `unavailableDDC` is checked INSIDE the combined branch. Hoisting it above

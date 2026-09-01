@@ -1,6 +1,6 @@
 // Every user-visible string on candela.fyi. Components import from here and
-// hold no copy of their own, so the two gates run in one place: the NORTHSTAR
-// copy filter on every lead, and an unslop pass on all of it (SR15).
+// hold no copy of their own, so the two gates run in one place: the product's
+// copy filter on every lead, and an editing pass on all of it (SR15).
 //
 // Rules that bind edits to this file:
 // - No em dashes anywhere, site copy included. scripts/check-copy.sh enforces it.
@@ -73,7 +73,7 @@ export const glance: Array<{
   {
     id: "protection",
     title: "Protection",
-    line: "Dims static OLED regions and maps their exposure.",
+    line: "Dims an idle OLED and records where it gets lit.",
   },
   {
     id: "checkup",
@@ -88,7 +88,7 @@ export const glance: Array<{
   {
     id: "sizes",
     title: "Sizes",
-    line: "Every sharp HiDPI size macOS hides.",
+    line: "Every sharp HiDPI size macOS does not list.",
   },
   {
     id: "setup",
@@ -124,12 +124,12 @@ export const controls: { h2: string; lead: string; proofs: ProofItem[] } = {
 }
 
 export const sizes: { h2: string; lead: string; proofs: ProofItem[] } = {
-  h2: "The sizes macOS will not show you.",
-  lead: "A 4K panel can run at many scaled sizes. System Settings offers a handful per display and hides the rest.",
+  h2: "The sizes macOS does not list.",
+  lead: "A 4K panel can run at many scaled sizes. System Settings offers a handful per display, and Candela finds the rest.",
   proofs: [
     {
       title: "Sharper HiDPI",
-      body: "See every scaled size your panel can render, including crisp HiDPI modes System Settings hides.",
+      body: "See every scaled size your panel can render, including sharp HiDPI modes System Settings does not list.",
     },
     {
       title: "Safe rollback",
@@ -219,11 +219,11 @@ export const protection: {
   recordTitle: string
 } = {
   h2: "Protection that adapts while you work.",
-  lead: "Candela's Adaptive Pixel Dimming detects bright, unchanged regions and eases them down in place, while active content stays at full brightness.",
+  lead: "Candela dims an enrolled OLED when you step away, and records where it has been lit. Switch on automatic static-region dimming and it also eases down bright, unchanged regions in place while you work, leaving active content at full brightness.",
   actProofs: [
     {
       title: "Targets static hotspots",
-      body: "Toolbars, sidebars and other bright regions ease down after they stop changing, without dimming the rest of your display.",
+      body: "With that switch on, toolbars, sidebars and other bright regions ease down after they stop changing, without dimming the rest of your display.",
     },
     {
       title: "Responds as content moves",
@@ -233,7 +233,7 @@ export const protection: {
   watchProofs: [
     {
       title: "Maps cumulative exposure",
-      body: "A local exposure grid tracks where the panel has been lit, how brightly and for how long.",
+      body: "A local exposure grid tracks where the panel has been lit and for how long. Turn on measurement and it records how brightly, from real screen readings.",
     },
     {
       title: "Attributes display time by app",
@@ -340,7 +340,7 @@ export const faq: Array<{ q: string; a: string }> = [
   },
   {
     q: "What permissions does it ask for, and why?",
-    a: "Accessibility lets your keyboard's brightness and volume keys control external displays. Screen Recording is optional and makes the exposure map more precise. Without it, the map still builds from other inputs and Candela labels which reading you are seeing. Nothing is uploaded.",
+    a: "Accessibility lets your keyboard's brightness and volume keys control external displays. Screen Recording is optional and is what turns on measured exposure sampling. Without it, a display you enroll still records its hours and which app held which part of it, and the heat map waits for real readings rather than drawing an estimate. Nothing is uploaded.",
   },
   {
     q: "My monitor ignores every read. Does it still work?",

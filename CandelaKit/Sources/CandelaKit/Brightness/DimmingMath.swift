@@ -4,8 +4,8 @@ import Foundation
 
 /// The dimming contract, transplanted verbatim from the MonitorControl fork
 /// (`Model/OtherDisplay.swift`, `Model/Display.swift`, `Support/OSDUtils.swift`)
-/// and documented in `.superpowers/m3-dossier/dimming-math.md`. Pure functions
-/// only — no state, no I/O — so every later M3 stage (combined brightness,
+/// and pinned number by number in `DimmingMathTests`. Pure functions only:
+/// no state, no I/O, so every later M3 stage (combined brightness,
 /// gamma/shade dimming, HDR-native routing) computes from one source of truth.
 ///
 /// Three distinct value domains meet here; never store one in another's slot:

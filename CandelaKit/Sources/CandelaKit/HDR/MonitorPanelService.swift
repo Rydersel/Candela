@@ -26,7 +26,9 @@ public protocol HDRToggling: Sendable {
 }
 
 /// Programmatic control of the System Settings HDR toggle via the private
-/// MonitorPanel framework (the mechanism BetterDisplay and ToggleHDR use).
+/// MonitorPanel framework, the framework behind the System Settings Displays
+/// pane. Other display utilities reach the same toggle through it, which is the
+/// evidence that this route is workable at all.
 /// Actor isolation replaces the fork's serial DispatchQueue; MPDisplay and
 /// MPDisplayMgr existentials are non-Sendable and must never escape this actor,
 /// which the compiler enforces.

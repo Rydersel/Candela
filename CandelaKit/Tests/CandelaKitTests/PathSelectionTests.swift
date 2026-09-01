@@ -583,7 +583,7 @@ struct PathSelectionTests {
 
   // MARK: Committing an engage on the achieved state and not the write
 
-  /// The class CLAUDE.md §2 names, in the HDR path: the panel accepts the write,
+  /// The reported-success-versus-achieved-state class, in the HDR path: the panel accepts the write,
   /// reports success, and does not switch. Choosing the arm from `setHDR`'s return
   /// persisted `.alwaysOn` across launches on a display that was never in HDR.
   @Test func anEngageThatIsAcceptedAndDoesNotSwitchRollsTheModeBack() async {
@@ -1579,7 +1579,7 @@ private extension HardwareTarget {
 }
 
 @MainActor
-@Suite("Handing the DDC leg back (#143)")
+@Suite("Handing the DDC leg back")
 struct DDCLegHandBackTests {
   /// The hardware measurement as an engine test: the MAG at 40% combined is
   /// register 0 with the table at 0.83, and turning hardware control off used to
@@ -1696,7 +1696,8 @@ struct DDCLegHandBackTests {
     #expect(h.submitted == [.ddc(raw: 100)])
   }
 
-  /// Under live HDR the register is dead (CLAUDE.md §2), so a register left
+  /// Under live HDR the DDC register is dead (`docs/ENGINEERING-NOTES.md`, HDR
+  /// vs DDC), so a register left
   /// below full range stays there: the native path is not an abandonment this
   /// can repair, and reaching for the wire to prove otherwise is the write that
   /// cannot land.
@@ -1748,7 +1749,7 @@ struct DDCLegHandBackTests {
 /// register rises that costs nothing (the software side is inline and already
 /// first); when it drops, the software side has to WAIT for the write.
 @MainActor
-@Suite("Ordering a pref change that drops the register (#146)")
+@Suite("Ordering a pref change that drops the register")
 struct RegisterDropOrderingTests {
   /// The measured state: software-only at `value`, with the register handed back at
   /// full range.
@@ -2545,7 +2546,7 @@ actor GatedRollbackHDR: HDRToggling {
 }
 
 @MainActor
-@Suite("Backlog #1 — engage-failure re-guard")
+@Suite("Engage-failure re-guard")
 struct EngageFailureReguardTests {
   @Test func staleRollbackDoesNotReapplyAfterSupersession() async {
     let defaults = InMemoryDefaults()
@@ -2584,7 +2585,7 @@ struct EngageFailureReguardTests {
 }
 
 @MainActor
-@Suite("Backlog #4 — park-at-s exemption")
+@Suite("Park-at-s exemption")
 struct ParkExemptionTests {
   @Test func forceSoftwareDisplayIsExemptFromParkAtS() {
     // A forceSoftware display's whole [0,1] range is the software leg — the
@@ -2601,7 +2602,7 @@ struct ParkExemptionTests {
 }
 
 @MainActor
-@Suite("Backlog #8 — settle skipped when HDR already externally live")
+@Suite("Settle skipped when HDR already externally live")
 struct AlreadyLiveEngageTests {
   @Test func alwaysOnWithHDRAlreadyLiveSkipsSetHDRAndSettle() async {
     let h = Harness(hdrEnabled: true, settle: .milliseconds(50))

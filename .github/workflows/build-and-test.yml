@@ -1,20 +1,18 @@
-# The first workflow in this repository that compiles a line of Swift (#139).
-# The other three all check the CONTEXT layer (docs, skills, router, issue
-# tracker), so until now the engine's 1397 tests were guarded on the honour
-# system: green meant somebody remembered to run `swift test` locally and read
-# the output.
+# The pipeline that compiles Swift. Before it existed the engine's tests were
+# guarded on the honour system: green meant somebody remembered to run
+# `swift test` locally and read the output.
 #
 # Four jobs. Two of them run tests:
 #   test             CandelaKit's suite, the engine's automated coverage
 #   app-build        the app target compiles, which the Kit suite cannot tell
 #                    you, then CandelaAppTests runs over the app's own sources
 #   release-build    the configuration that ships compiles, and carries none of
-#                    the debug markers CLAUDE.md §3 requires be grepped for
+#                    the debug markers a Release build must not carry
 #   hardware-ledger  reports how stale the last hardware verification run is,
 #                    and gates nothing on the answer
 #
 # Why a hosted runner is a valid environment for the suite and not a degraded
-# one: CandelaKit is hardware-free by design (CLAUDE.md §5), imports no AppKit
+# one: CandelaKit is hardware-free by design, imports no AppKit
 # or SwiftUI, and needs no attached panel, no Accessibility grant and no signing
 # identity. Everything that touches a display sits behind a protocol and is
 # faked in the tests, so a machine with no monitors runs the whole suite rather
@@ -29,23 +27,21 @@ on:
   # push is restricted to main while pull_request carries everything else, and
   # the split is deliberate rather than copied. A workflow triggered by an
   # unrestricted push AND by pull_request runs twice on every commit to an open
-  # PR's branch. The three context workflows can absorb that on ubuntu; this one
-  # should not, because the repository is private and macOS runner minutes bill
-  # at 10x the Linux rate. The duplicate would be the most expensive thing in
-  # the pipeline and would buy no signal at all.
+  # PR's branch. macOS runner minutes are the expensive ones here, so a
+  # duplicate run would be the costliest thing in the pipeline and would buy no
+  # signal at all.
   push:
     branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
 
-# No `paths:` filter, and unlike context.yml that is a decision rather than an
-# oversight waiting to be tuned. context.yml documents at length how its path
-# lists had to be widened by hand once a check grew, and how six citations sat
-# unguarded until somebody noticed. The same maintenance here would fail worse:
-# the engine's tests cover types the app target consumes, so a filter that
-# misses a path lets a real break through as green. The suite is well under a
-# minute; always running it is both simpler and safer.
+# No `paths:` filter, and that is a decision rather than an oversight waiting to
+# be tuned. A hand-maintained path list goes stale the first time a check grows,
+# and it would fail worse here than elsewhere: the engine's tests cover types the
+# app target consumes, so a filter that misses a path lets a real break through
+# as green. The suite is well under a minute; always running it is both simpler
+# and safer.
 
 permissions:
   contents: read
@@ -103,14 +99,13 @@ jobs:
           # the exit status of its LAST command, so `swift test | tee` without it
           # reports tee's status, and tee succeeds whatever swift test did. Every
           # failing suite would be published as green. That is the same
-          # report-a-success-you-did-not-achieve defect CLAUDE.md §2 catalogues,
-          # one layer up from the hardware.
+          # report-a-success-you-did-not-achieve defect this project catalogues
+          # in docs/ENGINEERING-NOTES.md, one layer up from the hardware.
           swift test 2>&1 | tee "$RUNNER_TEMP/kit-tests.log"
 
-      # A gate nobody has seen fail is a gate nobody should trust, which is the
-      # discipline both context.yml and issue-hygiene.yml already apply to
-      # themselves. The failure mode worth guarding is not a red build; it is a
-      # GREEN one that exercised nothing, and reaching it takes no bug at all.
+      # A gate nobody has seen fail is a gate nobody should trust. The failure
+      # mode worth guarding is not a red build; it is a GREEN one that exercised
+      # nothing, and reaching it takes no bug at all.
       # A test target dropped from Package.swift, a filter matching no test, a
       # build that produced an empty bundle: each exits 0 having run zero tests,
       # and the step above cannot tell that apart from a pass.
@@ -161,8 +156,8 @@ jobs:
           fi
           echo "Positive control OK: $count tests discovered and run, above the floor of $floor."
 
-  # Added on evidence, not on principle. The open question in #139 was whether a
-  # hosted image can compile this app at all: the app target is macOS 14 at its
+  # Added on evidence, not on principle. The open question was whether a hosted
+  # image can compile this app at all: the app target is macOS 14 at its
   # deployment floor but calls at least one macOS 26 SDK symbol behind an
   # `#available` check (`sharedBackgroundVisibility`, SettingsRootView.swift),
   # which needs a macOS 26 SDK to compile even though it needs macOS 26 only to
@@ -215,8 +210,8 @@ jobs:
       # Unpinned, because Homebrew has no ergonomic way to pin a formula version
       # and the generator's output is checked by the build that follows it: if a
       # newer xcodegen emitted a broken project, this job goes red rather than
-      # quietly shipping one. The project file itself is generated and gitignored
-      # (CLAUDE.md §3), so there is nothing to compare against anyway.
+      # quietly shipping one. The project file itself is generated and
+      # gitignored, so there is nothing to compare against anyway.
       # This is the pipeline's only external fetch, so a Homebrew outage is the
       # one failure here that reddens a run for a reason the diff cannot
       # explain. Hence the skip and the retries.
@@ -243,8 +238,8 @@ jobs:
       - name: Generate the project
         run: xcodegen generate
 
-      # An explicit -derivedDataPath for the same reason CLAUDE.md §3 requires
-      # one in the deploy loop: it puts the product somewhere known, so the check
+      # An explicit -derivedDataPath for the same reason the deploy loop requires
+      # one: it puts the product somewhere known, so the check
       # below is looking at THIS build's output and not at whatever a shared
       # location happened to hold.
       # The signing override is deliberate and spelled out rather than defaulted.
@@ -267,9 +262,9 @@ jobs:
 
       # `** BUILD SUCCEEDED **` is a claim about the build, not about a product.
       # Treating it as proof that an app exists is the same mistake as treating a
-      # DDC write ACK as proof a monitor changed (CLAUDE.md §2): check the
-      # achieved state. A misconfigured scheme or a target that compiled to
-      # nothing can both exit 0, so the binary is looked for by name.
+      # DDC write ACK as proof a monitor changed: check the achieved state.
+      # A misconfigured scheme or a target that compiled to nothing can both
+      # exit 0, so the binary is looked for by name.
       # The digest is logged so the control's evidence outlives the test step
       # below, which writes into this same build directory.
       - name: Positive control (a product actually came out)
@@ -374,9 +369,9 @@ jobs:
           echo "Positive control OK: $count app tests discovered and run, above the floor of $floor."
 
   # Release is the configuration that ships, and Debug exercises neither its
-  # optimisation level nor the code `#if DEBUG` excludes. CLAUDE.md §3's rule
-  # about grepping the Release binary for debug markers also had nowhere to live
-  # but a person's memory, and a marker has already reached a Release build once.
+  # optimisation level nor the code `#if DEBUG` excludes. The rule about grepping
+  # the Release binary for debug markers also had nowhere to live but a person's
+  # memory, and a marker has already reached a Release build once.
   #
   # What this job does NOT establish: the runner has no keychain and no
   # certificate, so it builds with the same signing override app-build uses.
@@ -424,13 +419,13 @@ jobs:
             -configuration Release -derivedDataPath "$RUNNER_TEMP/dd-release" build \
             CODE_SIGN_IDENTITY="-" DEVELOPMENT_TEAM=""
 
-      # The grep CLAUDE.md §3 requires, plus a positive control, because as
-      # usually written this check cannot fail: a grep pointed at the wrong path
-      # returns zero and reads exactly like a clean build.
+      # The debug-marker grep, plus a positive control, because as usually
+      # written this check cannot fail: a grep pointed at the wrong path returns
+      # zero and reads exactly like a clean build.
       #
-      # Two traps the candela-deploy skill measured. `strings` without -a misses
-      # sections; it once found the bundle identifier and missed a SwiftUI
-      # literal in the same binary. And Swift stores literals of 15 UTF-8 bytes
+      # Two measured traps. `strings` without -a misses sections; it once found
+      # the bundle identifier and missed a SwiftUI literal in the same binary.
+      # And Swift stores literals of 15 UTF-8 bytes
       # or fewer inline in the code rather than in a string section, out of
       # reach, so keep the control literal and every marker longer than that.
       - name: Debug markers are absent from the Release build

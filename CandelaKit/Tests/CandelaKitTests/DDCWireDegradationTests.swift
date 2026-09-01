@@ -242,8 +242,8 @@ struct WireHealthEvidenceTests {
     coalescer.finishSubmissions()
   }
 
-  /// The HDR stamp drops the attempt. Crisp fires here, on a register that is
-  /// locked by design and unlocks itself.
+  /// The HDR stamp drops the attempt: the register is locked by design while
+  /// HDR is engaged and unlocks itself, so a failure there is not the wire's.
   @Test func aFailedApplyStampedHDRExcludedNeverReachesTheHealth() async {
     let applier = RecordingApplier(scriptedResults: [false, false, false, false, false])
     let coalescer = BrightnessWriteCoalescer()

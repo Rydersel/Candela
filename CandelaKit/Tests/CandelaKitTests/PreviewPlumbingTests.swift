@@ -3,7 +3,7 @@ import Testing
 @testable import CandelaKit
 
 @MainActor
-@Suite("Preview queue and countdown driver (#68)")
+@Suite("Preview queue and countdown driver")
 struct PreviewPlumbingTests {
   /// Main-actor confined, so no locking is needed and the order it records IS
   /// the order the operations ran.
@@ -145,7 +145,7 @@ struct PreviewPlumbingTests {
   }
 }
 
-@Suite("Preview countdown (#68)")
+@Suite("Preview countdown")
 struct PreviewCountdownTests {
   @Test func anArmedClockSpendsItselfExactlyOnce() {
     var clock = PreviewCountdown()
@@ -215,7 +215,7 @@ struct PreviewCountdownTests {
   }
 }
 
-@Suite("Mode geometry matching (#68)")
+@Suite("Mode geometry matching")
 struct ModeGeometryMatchTests {
   private func mode(
     id: Int32 = 1, logical: (Int, Int) = (2560, 1440), pixels: (Int, Int) = (5120, 2880),

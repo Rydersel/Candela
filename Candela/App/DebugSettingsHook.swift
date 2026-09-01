@@ -2,8 +2,8 @@
   import Foundation
 
   /// Opens the settings window on a named destination so screenshot validation
-  /// (DT6) can reach a pane nothing else can: Accessibility is not granted, so
-  /// no agent can click the sidebar, and Candela has no URL scheme.
+  /// (DT6) can reach a pane nothing else can: without an Accessibility grant
+  /// nothing can click the sidebar from a script, and Candela has no URL scheme.
   ///
   /// The file and both call sites are inside `#if DEBUG`, so Release keeps no
   /// residue by construction rather than by discipline.

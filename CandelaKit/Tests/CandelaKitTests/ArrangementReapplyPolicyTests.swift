@@ -5,7 +5,7 @@ import Testing
 
 /// The restore path has nobody watching it and moves the menu bar, so every rule
 /// it follows is pinned here rather than left to its one call site.
-@Suite("Arrangement reapply policy (#13/#14)")
+@Suite("Arrangement reapply policy")
 struct ArrangementReapplyPolicyTests {
   private static func identity(_ name: String) -> DisplayConfigIdentity {
     switch name {
