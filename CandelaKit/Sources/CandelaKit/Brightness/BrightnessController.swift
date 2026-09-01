@@ -358,8 +358,8 @@ public final class BrightnessController: PendingWireDraining {
 
   private nonisolated let echo = OSAllocatedUnfairLock(initialState: EchoState())
 
-  /// HDR settle window (ENGINEERING-NOTES: the display blanks and re-modes
-  /// for ~2 s after an HDR toggle). Internal so tests can shrink it.
+  /// HDR settle window: the display blanks and re-modes for ~2 s after an HDR
+  /// toggle. Internal so tests can shrink it.
   @ObservationIgnored var settleDelay: Duration = .seconds(2)
   /// Pause between the wire-settling rounds a restore runs before it re-engages
   /// HDR. Sized in `WireQuiescence` to outlast a reconfiguration's write gate;

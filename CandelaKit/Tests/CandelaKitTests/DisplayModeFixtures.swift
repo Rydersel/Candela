@@ -1,8 +1,8 @@
 import Foundation
 @testable import CandelaKit
 
-/// Real mode data captured 2026-08-03 from the development panels; raw dumps under
-/// `docs/spikes/s2-resolutions/fixtures/`. The two panel classes behave completely
+/// Real mode data captured 2026-08-03 from the development panels. The two panel
+/// classes behave completely
 /// differently: the Dell (~163 PPI) gets a full scaled-HiDPI ladder from macOS, the
 /// MAG (~110 PPI) gets nothing above its native framebuffer. Check both.
 enum DisplayModeFixtures {
@@ -63,8 +63,7 @@ enum DisplayModeFixtures {
     m(1920, 1080, 1920, 1080, hz: 60),
   ]
 
-  /// Built-in MacBook Pro panel, native 3024×1964. Captured 2026-08-17. Raw
-  /// dump: `docs/spikes/s2-resolutions/fixtures/builtin-modes-2026-08-17.txt`.
+  /// Built-in MacBook Pro panel, native 3024×1964. Captured 2026-08-17.
   static let builtInNativePixels = (3024, 1964)
 
   /// One entry per distinct pixel footprint, once refresh rates are dropped. Prefers

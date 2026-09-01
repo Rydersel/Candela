@@ -1483,8 +1483,8 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// and SPECIFIC apps that emitted nothing, and both are persisted.
   ///
   /// Bounded, not fixed, because a blanked panel is indistinguishable at every
-  /// layer we can observe and does not self-recover; the measurements are in
-  /// `docs/ENGINEERING-NOTES.md`, under DPMS power-off over DDC. HID idle
+  /// layer we can observe and does not self-recover, measured against a panel
+  /// held in DPMS power-off over DDC. HID idle
   /// time is the bound: with nobody typing, the engine leaves `.active` at the
   /// idle threshold and sampling stops. **The uncovered case is a second
   /// display**, where the user works on one panel while the other sits blanked,

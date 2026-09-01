@@ -7,11 +7,11 @@ import Testing
 /// to some real wire timing. When the panel advertises no native-width timing
 /// at that refresh it gets bound to an arbitrary same-refresh timing instead,
 /// and the desktop scans out pillarboxed and cropped while every software
-/// readout reports success. Measured on the MAG 341C, 2026-08-07:
-/// docs/spikes/2026-08-07-exact-2to1-camera-gate.md §1.
+/// readout reports success. Measured on the MAG 341C, 2026-08-07, with a camera
+/// pointed at the panel, which is the only thing that can see it.
 ///
-/// Ground truth for the whole suite:
-/// docs/spikes/exact-2to1-first-engagement/01-mag-modes.txt.
+/// Ground truth for the whole suite is that panel's own mode list, captured the
+/// same day and transcribed into the fixtures below.
 @Suite("Wire-timing guard")
 struct WireTimingGuardTests {
   private let magW = CGSModeFixtures.magNativePixels.0

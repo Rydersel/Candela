@@ -4,9 +4,8 @@ import Testing
 @testable import CandelaKit
 
 /// `CGCompleteDisplayConfiguration` can return `.success` without honouring the
-/// request, measured twice on the mirroring hardware pass with every stage AND
-/// the complete returning `.success`
-/// (`docs/spikes/2026-08-04-mirroring-hardware-pass.md` §6.2).
+/// request, measured twice on the mirroring hardware pass (2026-08-04) with
+/// every stage AND the complete returning `.success`.
 ///
 /// Neither list is reachable from the shipping policy today:
 /// `MirrorTopologyPolicy` emits no duplicates and no cycles. The check exists

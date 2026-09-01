@@ -191,7 +191,7 @@ public enum CGSModeRevelation {
       //    post-commit achieved-state check all read clean while broken, and no
       //    IORegistry property records the driven timing (searched live while
       //    broken). Prediction is the only defence, the keep/revert countdown
-      //    the only detector: docs/spikes/2026-08-07-exact-2to1-camera-gate.md §1.
+      //    the only detector. Measured with a camera on the MAG 341C, 2026-08-07.
       if guardsWireTiming, !nativeRefreshes.contains(refresh) {
         counts.noNativeParentTiming += 1
         continue

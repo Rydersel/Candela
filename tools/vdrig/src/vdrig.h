@@ -5,7 +5,6 @@
 // which disagree with the system in three places: `hiDPI` and `rotation` are
 // unsigned int rather than BOOL, `applySettings:` returns BOOL, and
 // `CGVirtualDisplay.hiDPI` reads back as 2 regardless of what was assigned.
-// See docs/spikes/2026-08-03-virtual-displays.md §8.
 
 #ifndef CANDELA_VDRIG_H
 #define CANDELA_VDRIG_H
