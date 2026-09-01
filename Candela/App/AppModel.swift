@@ -393,9 +393,11 @@ final class AppModel {
   }
 
   private func logOrphanedVirtualDisplays() {
-    var ids = [CGDirectDisplayID](repeating: 0, count: 16)
+    // 32 to match `DisplayDiscovery`: orphaned slot displays are exactly what
+    // this looks for, so a truncated list would hide the thing being counted.
+    var ids = [CGDirectDisplayID](repeating: 0, count: 32)
     var count: UInt32 = 0
-    guard CGGetOnlineDisplayList(16, &ids, &count) == .success else { return }
+    guard CGGetOnlineDisplayList(32, &ids, &count) == .success else { return }
     let owned = virtualDisplays.ownedDisplayIDs
     for id in ids.prefix(Int(count)) where !owned.contains(id) {
       let vendor = CGDisplayVendorNumber(id)
@@ -1215,9 +1217,17 @@ final class AppModel {
     pollerTask?.cancel()
   }
 
+  /// Broadcast once per pass that saw a departure, so cleanup does not depend on
+  /// which caller happened to start it. The return value of `refresh()` reaches
+  /// only the starter, and two of the three callers discard it, so a pass started
+  /// by a menu close and joined by the topology loop cleaned up nothing.
+  @ObservationIgnored var onDisplaysDeparted: ([CGDirectDisplayID]) -> Void = { _ in }
+
   /// Returns the IDs of displays that departed in this pass, for HUD cleanup. A
   /// caller that JOINED an already-running pass gets `[]`, not that pass's result:
-  /// only the caller that started the pass sees its departures.
+  /// only the caller that started the pass sees its departures. Cleanup rides
+  /// `onDisplaysDeparted` for that reason, and this stays the starter's own
+  /// answer, which is what the reconciliation tests assert on.
   @discardableResult
   func refresh() async -> [CGDirectDisplayID] {
     // Cleared HERE as well as inside `performRefresh`, and the piggyback is why: a
@@ -1469,7 +1479,11 @@ final class AppModel {
     // Includes an ID whose panel was REPLACED: the HUD this returns to clean up
     // belongs to the monitor that left, and the one now on that ID gets its own
     // on the next keypress.
-    return Array(plan.departed)
+    let departed = Array(plan.departed)
+    // Last, after every await: the pass is done reconciling, so a hook that ends
+    // a checkup or drops a HUD cannot observe a half-built display list.
+    if !departed.isEmpty { onDisplaysDeparted(departed) }
+    return departed
   }
 
   /// Reconciles the built-in slot against discovery. Same identity rule as
