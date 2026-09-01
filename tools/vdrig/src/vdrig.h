@@ -63,7 +63,7 @@
 // display identity it has ever seen and never removes it — not on teardown,
 // not on process death, not on reboot. A previous rig minted a fresh identity
 // per run and per case and left 143 orphaned profiles, which took the ColorSync
-// daemons to ~59% CPU (S1 §5B).
+// daemons to ~59% CPU.
 //
 // So every field below is a constant, reused by every run forever. The rig's
 // entire permanent footprint is one profile per row of this table — six files,

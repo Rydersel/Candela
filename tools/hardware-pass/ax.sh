@@ -1,5 +1,5 @@
 #!/bin/zsh
-# AX helpers for driving the Candela settings window during Checkpoint 1 §6.
+# AX helpers for driving the Candela settings window during a hardware pass.
 # The settings window must be found by exclusion: Candela also owns a 1x1
 # "Candela Gamma Activity Enforcer" window whose presence shifts window indices.
 

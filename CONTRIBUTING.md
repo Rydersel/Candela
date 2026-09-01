@@ -3,7 +3,6 @@
 Bug reports and hardware reports are the most useful things you can send, and
 the issue templates ask for what actually settles them. If you are reporting a
 security problem, do not open an issue: see [SECURITY.md](SECURITY.md).
-Participation is under the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Layout
 
@@ -12,12 +11,11 @@ Participation is under the [Code of Conduct](CODE_OF_CONDUCT.md).
   live here, along with the test suite that covers them without hardware.
 - `Candela/` is the app: SwiftUI, with a few AppKit islands (the HUD, the
   shade windows, the gamma enforcer) behind CandelaKit protocols.
-- `docs/` holds the user guides (`docs/guide/`), the advanced settings
-  reference, and the committed conformance baselines (`docs/conformance/`).
-- `ROADMAP.md` is the scope document. It says what is planned and what has been
-  ruled out, each with its reason. A change that contradicts it wants a
-  conversation in an issue first, because the roadmap changes by pull request
-  too.
+- `docs/` holds the user guides (`docs/guide/`) and the advanced settings
+  reference.
+- `tools/` holds the instruments for verifying the app against real displays:
+  a virtual-display rig for multi-display work on a one-panel Mac, and the
+  scripts that drive a hardware pass from a shell.
 
 ## Building
 

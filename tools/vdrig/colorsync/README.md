@@ -11,7 +11,7 @@ deletion **and reboots**, and dead registrations are not inert: with enough of
 them, `colorsync.useragent` / `colorsyncd` loop
 `ColorSyncIterateDeviceProfiles` → `findDevice` → sync XPC, burning ~150%
 aggregate CPU and freezing System Settings → Displays (which talks to
-`colorsync.displayservices` — the service from Candela#55's watchdog trace).
+`colorsync.displayservices`, the service named in the original incident's watchdog trace).
 
 [MEASURED 2026-08-05] 148 dead registrations — 5 from that day's rig run plus
 ~143 from the original orphan incident, whose profiles had been deleted but

@@ -27,7 +27,6 @@ object release, survived `SIGKILL`, and stood for **over two minutes with no
 owner process alive**. It vanished within a second of `caffeinate -u`.
 `caffeinate -dis` does **not** wake a sleeping panel. So the rig never assumes
 its displays die with it — it verifies, escalates, and shouts if it fails.
-(S1 §5A.)
 
 **2. A virtual display permanently leaks a colour profile per identity.** macOS
 writes an `.icc` per display identity into `/Library/ColorSync/Profiles/Displays/`
@@ -36,7 +35,7 @@ A previous rig minted a fresh identity per run and per case and left **143
 orphaned profiles**, which drove the ColorSync daemons to 59% CPU; removing the
 143 took the same daemon PIDs to 0.0% with no reboot. So this rig has a **fixed
 identity table** in `src/vdrig.h`, reused by every run forever, and it asserts
-the profile count is unchanged across every run. (S1 §5B.)
+the profile count is unchanged across every run.
 
 **3. One process can enumerate display modes for only the *first* virtual
 display it creates.** Later ones report zero modes; neither the run loop nor the
@@ -227,7 +226,7 @@ Leave it off when the asleep-panel behaviour is itself what you are testing.
 
 `rig.sh --twins` asks for two displays with a deliberately colliding
 `DisplayConfigIdentity` (`vendor-model-serial`), so the twin-identity question
-in the arrangement research (§6.3) can be settled without two identical physical
+in the arrangement design can be settled without two identical physical
 monitors, which this setup can never provide. Because they must be identical, it
 is the single deliberate exception to guard 3's one-identity rule, and it uses
 exactly **two** fixed identities — never one per run.
@@ -254,11 +253,11 @@ that refusal as exit 75 with the evidence inline.** Measured 2026-08-04:
 Two **real** identical monitors are unaffected by any of this — it is the
 virtual-display service's registry, not a rule about displays.
 
-Consequence for #13: the twin spike's premise is unavailable through this route,
-so **AR11 stands by default** — a layout is not restored when two attached
+Consequence: the twin experiment's premise is unavailable through this route,
+so **the arrangement rule stands by default** — a layout is not restored when two attached
 displays share an identity and nothing separates them. The rig keeps the mode so
 a future macOS can be re-tested in one command; if `--twins` ever starts
-succeeding, the spike becomes possible and AR11 can be revisited.
+succeeding, the experiment becomes possible and the rule can be revisited.
 
 ---
 

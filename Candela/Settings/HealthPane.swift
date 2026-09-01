@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 /// record says, and the controls that decide what goes into it. The cards are
 /// summaries; the Heat Map window is the reading surface.
 ///
-/// Measurement and record only, never a dimming behavior (Ryder, 2026-08-20):
+/// Measurement and record only, never a dimming behavior (settled 2026-08-20):
 /// anything that changes what the screen looks like belongs on the display's
 /// OLED Care page (OCR2). Every pref written here is per-display (SC10).
 ///

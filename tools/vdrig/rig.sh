@@ -207,7 +207,7 @@ cleanup() {
   # The holder being gone does NOT mean the displays are gone. With the
   # built-in panel asleep a virtual display becomes the only ACTIVE display and
   # WindowServer will not reclaim it: one survived object release, survived
-  # SIGKILL, and stood for over two minutes with no owner (S1 §5A). Verify.
+  # SIGKILL, and stood for over two minutes with no owner. Verify.
   if true; then
     local waited=0 surviving
     surviving="$(rig_displays_still_online)"
@@ -336,7 +336,7 @@ WATCHDOG_PID=$!
 
 if [ "$KEEP_AWAKE" -eq 1 ]; then
   # -u is the only assertion measured to actually wake a sleeping panel;
-  # -dis does not (S1 §5A). The wake is not instant — measured at ~2s — so
+  # -dis does not. The wake is not instant — measured at ~2s — so
   # confirm it rather than sleeping a guessed interval and assuming.
   # >/dev/null matters: a background child that inherits stdout holds the pipe
   # open, so `rig.sh | tail` would hang until the assertion expired.

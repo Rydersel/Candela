@@ -1,15 +1,15 @@
 .DS_Store
 /Candela.xcodeproj
+/Candela/Info.plist
 /DerivedData
+/build/
 .build/
 *.xcuserstate
 xcuserdata/
-/Candela/Info.plist
-/build/
 
-# per-worktree scratch DerivedData used by the deploy loop
+# Scratch DerivedData for a build that must not touch the warm cache:
+#   make release DD=dd
 dd/
 
 # Local secrets (Cloudflare token etc.); never commit
 .env
-

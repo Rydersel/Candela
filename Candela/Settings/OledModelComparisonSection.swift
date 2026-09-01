@@ -9,7 +9,7 @@ import SwiftUI
 /// score.
 ///
 /// TEMPORARY (OCR7): delete this file, its `HealthPane` call site and the
-/// `showModelComparison` key (D26) once Ryder records the comparison-gate verdict.
+/// `showModelComparison` key once the comparison-gate verdict is recorded.
 @MainActor
 struct OledModelComparisonSection: View {
   let persistenceKey: String

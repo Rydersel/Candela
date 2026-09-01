@@ -9,7 +9,7 @@ enum KeyboardHeroModel {
   // MARK: - Cluster annotations (KMR2)
 
   // Sentences with a verb, not noun phrases: the line says what the keys are
-  // doing right now rather than captioning the feature (Ryder, 2026-08-17).
+  // doing right now rather than captioning the feature (settled 2026-08-17).
   static func brightnessLine(mode: KeyMode, target: MultiKeyboardBrightness) -> String {
     switch mode {
     case .media: "Media keys act on \(phrase(for: target))"

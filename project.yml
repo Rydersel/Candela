@@ -110,8 +110,8 @@ targets:
           # `build` action and suppresses it only under `archive`, and the
           # deploy loop builds rather than archives, so the default would have
           # shipped a permanently un-notarizable binary. Measured 2026-08-17:
-          # the first signed Release build had it, and scripts/verify-signing.sh
-          # is the only thing that noticed. Nothing else fails: the app runs,
+          # the first signed Release build had it, and only a check of the
+          # achieved signing state noticed. Nothing else fails: the app runs,
           # codesign --verify passes, and the flaw surfaces only at submission.
           CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
           # A secure timestamp is required for notarization and cannot be added

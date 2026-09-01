@@ -3,11 +3,10 @@
 Candela's Settings window exposes the decisions a person can actually make.
 The knobs below exist for broken or unusual hardware: they still work, they
 still have engine tests, and they are set with `defaults write` instead of a
-control. (Cut from the UI by ruling D26, which also promised this page.)
+control.
 
-**Several of these now have controls.** Ruling A1 partly relitigated D26: a
-`defaults write` key that expresses a decision a person can make was promoted
-into the settings window. Each such key keeps its documentation here, with a
+**Several of these now have controls.** A `defaults write` key that expresses
+a decision a person can make was promoted into the settings window. Each such key keeps its documentation here, with a
 line naming the control that now owns it — the key still works, and it is still
 the only route to the values the UI deliberately does not offer. Every promoted
 per-display key lives on one display's **Advanced** sub-page (Settings → the

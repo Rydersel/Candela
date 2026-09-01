@@ -100,7 +100,7 @@ struct OledCareDisplayPage: View {
       }
 
       if prefs.oledCareEnrolled {
-        // The findings sit above the settings they argue for (Ryder,
+        // The findings sit above the settings they argue for (settled
         // 2026-08-20). The Heat Map window keeps the map and the instruments
         // that interrogate it.
         let findings = model.oledCare.healthSummary(for: persistenceKey)

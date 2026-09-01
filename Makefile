@@ -1,4 +1,4 @@
-# Candela build, test and deploy targets.
+# Candela build and test targets.
 #
 # THE RULE THIS FILE EXISTS FOR: DD is a stable per-worktree DerivedData path,
 # gitignored, and it must NOT be a session scratchpad path. A path that is
@@ -23,7 +23,6 @@ APPTESTS := CandelaAppTests
 XCB      := xcodebuild -project $(PROJ) -quiet
 REL_APP  := $(DD)/Build/Products/Release/Candela.app
 REL_BIN  := $(REL_APP)/Contents/MacOS/Candela
-INSTALLED := /Applications/Candela.app
 
 # The Release debug-marker gate. The control MUST be found or the method is
 # broken and a zero marker count means nothing: a check whose failure mode is
@@ -38,7 +37,7 @@ INSTALLED := /Applications/Candela.app
 CONTROL := Where this display has been lit
 MARKER  := CANDELA_
 
-.PHONY: help build release test test-app check markers deploy regen probe conform clean
+.PHONY: help build release test test-app check markers regen probe conform clean
 
 help:
 	@echo "Candela targets            (DD=$(DD))"
@@ -49,7 +48,6 @@ help:
 	@echo "  make test-app    CandelaAppTests bundle       (host-free, safe with panels attached)"
 	@echo "  make check       Both suites"
 	@echo "  make markers     Release build + debug-marker gate with its positive control"
-	@echo "  make deploy      markers + signing gate + quit check + copy to /Applications + launch"
 	@echo "  make probe A='list'      candela-probe (run with no A= for its usage)"
 	@echo "  make conform     Platform-conformance suite; the exit code is the verdict"
 	@echo "  make regen       Force xcodegen generate"
@@ -114,7 +112,7 @@ markers: release
 	if [ "$$ctl" -eq 0 ]; then \
 	  echo "FAIL: positive control found nothing in $(REL_BIN)."; \
 	  echo "      The grep method or the path is wrong, so a clean marker"; \
-	  echo "      result would mean nothing. Fix the method, do not deploy."; \
+	  echo "      result would mean nothing. Fix the method, do not ship it."; \
 	  exit 1; \
 	fi; \
 	machos=$$(find "$(REL_APP)" -type f -print0 | xargs -0 file \
@@ -137,67 +135,6 @@ markers: release
 	echo "markers: control found ($$ctl hits), no '$(MARKER)*' in any of $$nbin Mach-Os. OK"; \
 	echo "         NOTE: strings cannot see a Swift literal of 15 bytes or fewer;"; \
 	echo "         name debug switches CANDELA_DEBUG_<thing> so they clear 16."
-
-# Chained on the build's success throughout: a deploy whose build step failed
-# and whose copy step ran anyway installs a STALE bundle that passes signing,
-# notarization and every string grep aimed at what it already had.
-# Freshness needs no wall-clock gate: deploy -> markers -> release run in THIS
-# invocation, and xcodebuild only succeeds when the product matches the current
-# sources, so a stale product cannot survive the chain. (A 600 s mtime gate was
-# tried here and refused the no-change incremental build it exists to allow.)
-# The signing gate is verify-signing.sh, run BEFORE installing: `codesign
-# --verify` has passed on a Release build that notarization rejects, so it
-# proves nothing. No re-sign step, and adding one back is a regression: cp -R
-# preserves the Developer ID signature, and the old ad-hoc re-sign destroyed the
-# identity and its Accessibility grant with it. The trash step is Finder's own
-# delete: rm -rf on the installed bundle is permission-denied in this setup, and
-# Finder's lands it in the Trash where a clobbered build can be recovered.
-deploy: markers
-	@set -euo pipefail; \
-	running=$$(pgrep -lf "MacOS/Candela" | grep -v 'MacOS/Candela.debug' || true); \
-	if [ -n "$$running" ]; then \
-	  if echo "$$running" | grep -qv "$(INSTALLED)"; then \
-	    echo "REFUSING: a Candela is running from somewhere other than $(INSTALLED):"; \
-	    echo "$$running" | sed 's/^/    /'; \
-	    echo "  A DerivedData or other build path means this is not the installed app."; \
-	    echo "  Only one DDC writer at a time. Quit that one, then retry."; \
-	    exit 1; \
-	  fi; \
-	fi; \
-	echo "==> signing gate: scripts/verify-signing.sh (achieved state, not exit codes)"; \
-	scripts/verify-signing.sh "$(REL_APP)" Release; \
-	if [ -f "$(INSTALLED)/Contents/MacOS/Candela" ]; then \
-	  inst_m=$$(stat -f %m "$(INSTALLED)/Contents/MacOS/Candela"); \
-	  rel_m=$$(stat -f %m "$(REL_BIN)"); \
-	  if [ "$$inst_m" -gt "$$rel_m" ] && \
-	     ! cmp -s "$(INSTALLED)/Contents/MacOS/Candela" "$(REL_BIN)"; then \
-	    echo "REFUSING: $(INSTALLED) is newer than the build being installed, and"; \
-	    echo "  differs from it. Another session deployed while this build was made;"; \
-	    echo "  the running-process check above cannot see a copied-but-not-launched"; \
-	    echo "  bundle. Work out which build you want installed, then retry."; \
-	    exit 1; \
-	  fi; \
-	fi; \
-	echo "==> quitting the installed Candela"; \
-	osascript -e 'tell application "Candela" to quit' 2>/dev/null || true; \
-	for i in 1 2 3 4 5 6 7 8 9 10; do pgrep -x Candela >/dev/null || break; sleep 0.5; done; \
-	if pgrep -x Candela >/dev/null; then pkill -x Candela 2>/dev/null || true; sleep 1; fi; \
-	sleep 2; \
-	if pgrep -lx Candela; then \
-	  echo "REFUSING: Candela is still running after the quit (a slow quit, or"; \
-	  echo "  LaunchServices respawned it; a kill is not proof it stays down)."; \
-	  echo "  Installing over a live process risks two DDC writers."; \
-	  echo "  Re-check pgrep once it is really down, then retry."; \
-	  exit 1; \
-	fi; \
-	echo "==> installing $(REL_APP) -> $(INSTALLED)"; \
-	if [ -e "$(INSTALLED)" ]; then \
-	  osascript -e 'tell application "Finder" to delete POSIX file "$(INSTALLED)"' >/dev/null; \
-	fi; \
-	cp -R "$(REL_APP)" "$(INSTALLED)"; \
-	scripts/verify-signing.sh "$(INSTALLED)" Release; \
-	open "$(INSTALLED)"; \
-	echo "==> launched. Readiness is still a fixed wait here; polling is a separate change."
 
 A ?=
 probe:

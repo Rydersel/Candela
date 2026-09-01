@@ -5,10 +5,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Please check ROADMAP.md first. It lists what is planned, and also what
-        has been ruled out along with the reason, which is the part worth
-        reading: a few obvious features are deliberately absent because they
-        were tried and cut.
+        Please search the open and closed issues first. A few obvious features
+        are deliberately absent because they were tried and cut, and where that
+        is the case an issue says why.
 
   - type: textarea
     id: problem
