@@ -1,0 +1,116 @@
+/* Design tokens for the Candela site. Every component reads these; no
+   component hardcodes a colour or a type size. */
+:root {
+  /* The page is dark by design, and the browser has to know it: without this,
+     Windows and Linux paint their default light scrollbar and form widgets
+     against the near-black page. macOS overlay scrollbars hide the problem on
+     the machine the site is built on, which is exactly why it is declared. */
+  color-scheme: dark;
+
+  --bg: #0a0a0c;
+  --surface: #141417;
+  --text: rgba(255, 255, 255, 0.92);
+  --text-dim: rgba(255, 255, 255, 0.56);
+  --accent: #e8a13a;
+
+  --radius: 12px;
+
+  /* Fluid down to a phone, capped so the hero does not swallow a wide desktop. */
+  --fs-hero: clamp(2.5rem, 6vw, 4.5rem);
+  --fs-h2: clamp(1.75rem, 3vw, 2.5rem);
+  --fs-body: 1.0625rem;
+  --fs-small: 0.8125rem;
+
+  /* System stack only: the built page makes no external requests. */
+  --font-sans: -apple-system, "SF Pro Display", Helvetica, sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+}
+
+/* Smooth scrolling is armed by App.tsx after the load event, never in the
+   stylesheet directly: the browser performs its load-time fragment jump
+   under the default instant behavior, so opening /#verifies lands at once,
+   and only in-page anchor clicks glide. */
+html.smooth-anchors {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* height: auto is the other half of the reset: width and height attributes are
+   what reserve the box before a file arrives, and without this they also pin a
+   used height, squashing the picture as soon as a container narrows it. An
+   element selector still outranks those attributes, which the cascade sorts
+   below every author rule, while any component class overrides it. */
+img,
+svg,
+video {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* Selection ships blue by default, the one cold colour on a page with a single
+   warm light source. Solid mix rather than an alpha, so the result never
+   depends on what the selection happens to sit over. */
+::selection {
+  background: color-mix(in srgb, var(--accent) 30%, var(--bg));
+  color: var(--text);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* The link reset above strips every default affordance, so keyboard focus needs
+   its own visible ring. Global on purpose: components opt out, never in. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+}
+
+ul,
+ol {
+  list-style: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.smooth-anchors {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    /* Without this, staggered entrances still pop in one by one: a delay is
+       not a duration, so the overrides above leave it running. */
+    animation-delay: -1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

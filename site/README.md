@@ -1,7 +1,7 @@
 # Candela landing page
 
 One-page site for Candela, built with Vite + React + TypeScript.
-Design spec: `docs/superpowers/specs/2026-08-06-candela-site-design.md`.
+Design spec: `docs/superpowers/specs/2026-08-28-site-redesign-design.md`.
 
 ```sh
 npm install
@@ -10,6 +10,8 @@ npm run build     # static output in dist/, deployable anywhere (base is './')
 npm run preview   # serve the production build locally
 ```
 
-Constraints (from the spec): dark-only, macOS dark-mode palette, system font
-stack, runtime deps are react/react-dom only, and the built page must make
-no external requests.
+Constraints as shipped: near-black token theme (`src/theme.css` holds the
+palette and type scale every component derives from), runtime deps are
+react/react-dom only, and the built page makes no external requests.
+`scripts/check-copy.sh` gates em dashes and leftover placeholder assets;
+`functions/download.ts` is the Pages Function behind the download button.

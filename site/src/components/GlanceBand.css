@@ -1,0 +1,186 @@
+/* The features at a glance: six beats sitting on one continuous rail that
+   runs the full viewport width, entering from one edge and leaving by the
+   other. Explicitly not cards (SR10): no boxes, no surfaces, one line and six
+   stations on it. */
+
+.glance {
+  /* Mixes chosen for contrast against --bg: the dots compute above 3:1. */
+  --rail: color-mix(in srgb, var(--text) 20%, transparent);
+  --rail-bright: color-mix(in srgb, var(--text) 45%, transparent);
+  --rail-glow: color-mix(in srgb, var(--accent) 55%, transparent);
+
+  position: relative;
+  overflow: clip;
+  padding: clamp(3rem, 7vh, 4.5rem) 1.5rem;
+}
+
+.glance-loop {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 1.75rem;
+  max-width: 78rem;
+  margin: 0 auto;
+}
+
+/* The rail: full-bleed, so the line reads as passing through this stretch of
+   the page rather than starting and stopping with the text. */
+.glance-loop::before {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  width: 100vw;
+  height: 1px;
+  transform: translateX(-50%);
+  background: var(--rail);
+}
+
+/* A pulse of light travelling the rail: the app is running, not a diagram of
+   one. Reduced motion removes it outright (below): the global override would
+   freeze it as a stray amber smear at the rail's left bleed, not a signal. */
+.glance-loop::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: -12rem;
+  width: 10rem;
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--rail-glow), transparent);
+  box-shadow: 0 0 10px 1px var(--rail-glow);
+  animation: glance-pulse 7s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes glance-pulse {
+  to {
+    transform: translateX(calc(100vw + 24rem));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glance-loop::after {
+    display: none;
+  }
+}
+
+.glance-beat {
+  position: relative;
+}
+
+/* Station dot, centered on the rail. */
+.glance-beat::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 1px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1px solid var(--rail-bright);
+  background: var(--bg);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.glance-link {
+  display: block;
+  padding-top: 1.9rem;
+  border-radius: calc(var(--radius) / 2);
+}
+
+/* The ring hugs a rounded block and stands clear of the rail it crosses. */
+.glance-link:focus-visible {
+  outline-offset: 5px;
+}
+
+.glance-title {
+  display: block;
+  font-size: 1.125rem;
+  font-weight: 600;
+  transition: color 160ms ease;
+}
+
+.glance-line {
+  display: block;
+  margin-top: 0.4rem;
+  font-size: calc(var(--fs-body) * 0.88);
+  line-height: 1.5;
+  color: var(--text-dim);
+  text-wrap: pretty;
+}
+
+.glance-link:hover .glance-title {
+  color: var(--accent);
+}
+
+.glance-beat:has(.glance-link:hover)::before {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 12px 2px var(--rail-glow);
+}
+
+/* Six beats need more room than four did, so the band turns vertical earlier:
+   same rail, same stations, read top to bottom. */
+@media (max-width: 1100px) {
+  .glance {
+    padding-block: clamp(3rem, 8vh, 4.5rem);
+  }
+
+  .glance-loop {
+    grid-template-columns: 1fr;
+    gap: 1.75rem;
+    max-width: 30rem;
+  }
+
+  /* Vertically the rail still passes through the band rather than starting
+     inside it: it overshoots into the section padding and the mask fades
+     both ends, so the rail dissolves into the dark and re-emerges at each
+     deep section's station marker below. The arithmetic that keeps the
+     dissolve complete: alpha only reaches zero at the box ends, and the
+     section's overflow clips at its padding edge, so the overshoot must not
+     exceed the padding's clamp minimum (3rem). The literal black is
+     geometry, not paint: mask-image reads only the alpha channel, so no
+     painted colour bypasses the palette. */
+  .glance-loop::before {
+    top: -3rem;
+    bottom: -3rem;
+    left: 3px;
+    width: 1px;
+    height: auto;
+    transform: none;
+    mask-image: linear-gradient(
+      to bottom,
+      transparent,
+      black 3rem,
+      black calc(100% - 3rem),
+      transparent
+    );
+  }
+
+  .glance-loop::after {
+    display: none;
+  }
+
+  .glance-beat::before {
+    top: 0.5em;
+    left: 0;
+  }
+
+  .glance-link {
+    padding-top: 0;
+    padding-left: 1.9rem;
+  }
+
+  .glance-title {
+    display: inline;
+  }
+
+  .glance-line {
+    display: block;
+    margin-top: 0.2rem;
+  }
+}

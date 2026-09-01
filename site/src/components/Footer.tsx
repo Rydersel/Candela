@@ -1,15 +1,28 @@
-export default function Footer() {
+import { footer, hero } from '../content/copy'
+import candelaMark from '../assets/candela-c.svg'
+import './Closing.css'
+
+// Outside <main> in App.tsx so this is a real contentinfo landmark; nested in
+// main it would be a plain group. The two links reuse the hero's own action
+// labels rather than inventing footer wording, and the download one points at
+// the counted /download route the same way the hero button does.
+export function Footer() {
   return (
-    <footer className="wrap">
-      <p className="disclosure">
-        Some features rely on private macOS APIs and may need an update after a new macOS release.
-        When that happens, fixes ship in the open — you can watch them land.
-      </p>
-      <p className="colophon">
-        Open source under the <a href="https://github.com/Rydersel/Candela/blob/main/LICENSE">MIT license</a>
-        &ensp;·&ensp;<a href="https://github.com/Rydersel/Candela">GitHub</a>
-      </p>
-      <p className="copyright">© 2026 Ryder Selikow and Candela contributors</p>
+    <footer className="closing site-footer">
+      <div className="closing-inner closing-rule-top footer-inner">
+        <div className="footer-brand">
+          <img className="footer-mark" src={candelaMark} alt="" width="22" height="23" />
+          <p className="footer-note">{footer.note}</p>
+        </div>
+        <div className="footer-links">
+          <a className="footer-link footer-link-lit" href="/download">
+            {hero.ctaPrimary}
+          </a>
+          <a className="footer-link" href="https://github.com/Rydersel/Candela">
+            {hero.ctaSecondary}
+          </a>
+        </div>
+      </div>
     </footer>
   )
 }

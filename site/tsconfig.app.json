@@ -22,5 +22,7 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  /* functions/ is type-checked here but never bundled: nothing in index.html
+     reaches it, and Cloudflare Pages compiles it separately at deploy. */
+  "include": ["src", "functions"]
 }

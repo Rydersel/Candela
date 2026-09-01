@@ -1,0 +1,81 @@
+/* The live local dimming figure: the screen as a grid, each cell's colour
+   computed from a registered --lum so the value itself can transition. The
+   settle is slow and the lift is fast, which is the whole point: what sits
+   still eases down, what changes comes back at once. The frame reuses
+   .protection-frame from DeepSections.css. */
+
+@property --lum {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+
+/* The ramp endpoints are sampled from the real heat-map capture (cold field,
+   hottest glow), so the concept grids and the capture above them share one
+   thermal language. Mixed in oklch, the path from purple to orange passes
+   through magenta and red, which is the map's own gradient. Both demos read
+   these. */
+:root {
+  --map-cold: #502c61;
+  --map-hot: #d88b4e;
+}
+
+.dim-demo {
+  display: block;
+  padding: 0.9rem;
+  aspect-ratio: 21 / 10;
+}
+
+.dim-grid {
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  grid-template-rows: repeat(10, 1fr);
+  gap: 2px;
+  width: 100%;
+  height: calc(100% - 1.6rem);
+}
+
+/* Fast by default, so a moved window's old region lifts at once: a
+   transition takes its timing from the state being entered, and the slow
+   ease belongs only to settling. */
+.dim-cell {
+  border-radius: 1px;
+  /* Hue from the thermal ramp, then overall level from --lum, so a dim cell
+     is both cooler and darker, the way the real map reads. */
+  background: color-mix(
+    in srgb,
+    color-mix(in oklch, var(--map-hot) calc(var(--lum) * 100%), var(--map-cold))
+      calc(18% + var(--lum) * 82%),
+    #121215
+  );
+  transition: --lum 200ms ease-out;
+}
+
+.dim-demo[data-settled] .dim-cell {
+  transition: --lum 1.5s ease-in-out;
+}
+
+.dim-phase {
+  margin-top: 0.45rem;
+  font-size: var(--fs-small);
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  transition: color 200ms ease;
+}
+
+.dim-demo[data-settled] .dim-phase {
+  color: color-mix(in srgb, var(--text) 42%, transparent);
+}
+
+.dim-caption {
+  margin-top: 0.9rem;
+  max-width: 34rem;
+  font-size: var(--fs-small);
+  line-height: 1.55;
+  color: var(--text-dim);
+  text-wrap: pretty;
+}
+
+/* Under reduced motion the component holds the settled state statically
+   (dimmed chrome beside a lit window is the concept); the theme override
+   collapses the transitions. */

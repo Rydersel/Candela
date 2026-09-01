@@ -1,0 +1,666 @@
+/* The six feature sections: one design language (near-black stage, hairline
+   rails, a single amber light source) at deliberate volumes. Protection is
+   the loudest room on the page (it keeps the seam and the strongest pool of
+   light, as the flagship differentiator); setup carries a faint glow; the
+   rest are bare hairline frames. Every colour derives from a token with
+   color-mix; nothing bypasses the palette. */
+
+.deep {
+  --deep-edge: color-mix(in srgb, var(--text) 10%, transparent);
+  --deep-sheen: color-mix(in srgb, var(--text) 5%, transparent);
+  --deep-glow-strong: color-mix(in srgb, var(--accent) 18%, transparent);
+  --deep-glow-faint: color-mix(in srgb, var(--accent) 9%, transparent);
+  --deep-seam: color-mix(in srgb, var(--accent) 45%, transparent);
+  --deep-rail-bright: color-mix(in srgb, var(--text) 45%, transparent);
+  /* Same mix as the glance band's rail-glow: the arrival pulse below is that
+     band's travelling light continued down the page. */
+  --deep-pulse: color-mix(in srgb, var(--accent) 55%, transparent);
+  --deep-lead-ink: color-mix(in srgb, var(--text) 82%, transparent);
+
+  position: relative;
+  /* Containment: the halo shadows paint past their frames and the pre-reveal
+     offsets translate content past its box, and the clip pins all of it
+     inside the section's own edges, whatever the assets or widths turn out
+     to be. clip, not hidden: it makes no scroll container, so the sticky pan
+     frame inside protection still tracks the viewport. */
+  overflow: clip;
+  padding-inline: 1.5rem;
+}
+
+/* Station marker: the rail arrives out of the dark above and lands on this
+   station's dot. The same loop the glance band draws, continued down the
+   page; on narrow screens this is also what resolves the band's rail, which
+   fades out at its bottom edge and re-emerges here. */
+.deep-station {
+  position: relative;
+  height: clamp(2.5rem, 5.5vh, 3.5rem);
+  margin-bottom: 1.25rem;
+}
+
+/* The dot is 7px in border-box, so its centre sits at 3.5px; the 1px line
+   spans 3px to 4px to share that centre. The centred variant repeats the
+   same arithmetic around 50%. */
+.deep-station::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 12px;
+  width: 1px;
+  background: linear-gradient(to top, var(--deep-rail-bright), transparent);
+}
+
+.deep-station::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1px solid var(--deep-rail-bright);
+  background: var(--bg);
+  transition:
+    background 250ms ease,
+    border-color 250ms ease,
+    box-shadow 250ms ease;
+}
+
+/* The glance band's travelling pulse, turned vertical: same 3px bar, same
+   glow. Parked above the station and invisible until the head reveals; a
+   background layer on the rail could not carry the box-shadow that makes the
+   glance pulse read as light, which is why this is its own element. */
+.deep-station-pulse {
+  position: absolute;
+  left: 2px;
+  bottom: calc(100% + 4px);
+  width: 3px;
+  height: 28px;
+  border-radius: 2px;
+  background: linear-gradient(to bottom, transparent, var(--deep-pulse), transparent);
+  box-shadow: 0 0 10px 1px var(--deep-pulse);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Arrival: when the head reveals, the pulse runs down the rail and the dot
+   lights as it lands (the dot's transition-delay is the flight time). Once
+   lit it stays lit, like everything else this product measures: the visit is
+   on the record. ease-in, because falling light accelerates; fill both, so
+   the packet rests invisible on either side of the run. */
+.deep-head.in .deep-station-pulse {
+  animation: deep-pulse-drop 0.55s cubic-bezier(0.5, 0, 0.85, 0.5) 0.1s both;
+}
+
+.deep-head.in .deep-station::after {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 12px 2px var(--deep-pulse);
+  transition-delay: 0.55s;
+}
+
+/* bottom, not transform: the travel distance is the station's own height,
+   which only a percentage can reach, and one 3px element relaying out for
+   half a second costs nothing. The packet fades as it lands so the dot's
+   bloom takes over carrying the light. */
+@keyframes deep-pulse-drop {
+  from {
+    bottom: calc(100% + 4px);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  82% {
+    opacity: 1;
+  }
+  to {
+    bottom: 9px;
+    opacity: 0;
+  }
+}
+
+.deep-h2 {
+  font-size: var(--fs-h2);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+  text-wrap: balance;
+  max-width: 24ch;
+}
+
+.deep-lead {
+  margin-top: 1.25rem;
+  max-width: 42rem;
+  font-size: calc(var(--fs-body) * 1.16);
+  line-height: 1.6;
+  color: var(--deep-lead-ink);
+  text-wrap: pretty;
+}
+
+.deep-head-center {
+  text-align: center;
+}
+
+.deep-head-center .deep-h2,
+.deep-head-center .deep-lead {
+  margin-inline: auto;
+}
+
+.deep-head-center .deep-station::before {
+  left: calc(50% - 0.5px);
+}
+
+.deep-head-center .deep-station::after {
+  left: calc(50% - 3.5px);
+}
+
+.deep-head-center .deep-station-pulse {
+  left: calc(50% - 1.5px);
+}
+
+.deep-body p {
+  max-width: 40rem;
+  color: var(--text-dim);
+  line-height: 1.65;
+  text-wrap: pretty;
+}
+
+.deep-body p + p {
+  margin-top: 1.15rem;
+}
+
+/* SR4: the power line is one unquantified side clause, set as a footnote
+   behind a hairline, never a headline. */
+.deep-aside {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--deep-edge);
+  max-width: 26rem;
+  font-size: var(--fs-small);
+  letter-spacing: 0.01em;
+}
+
+/* Scroll reveal: heads and lit objects rise as they enter. The long body
+   columns carry no reveal, so no stretch of running prose ever scrolls in
+   invisible; the short text inside a revealed block (a head's lead, the
+   aging strip's copy) does ride that block's reveal. The theme's
+   reduced-motion block collapses the transition to instant. */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.65s ease,
+    transform 0.65s ease;
+}
+
+.reveal.in {
+  opacity: 1;
+  transform: none;
+}
+
+/* Reduced motion opts out of the reveal entirely, not just its easing:
+   everything is simply there, whether or not the observer has fired. The
+   station dots are simply lit, for the same reason: no pulse, no delayed
+   bloom, just the record already showing. */
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+
+  .deep-station::after {
+    background: var(--accent);
+    border-color: var(--accent);
+    box-shadow: 0 0 12px 2px var(--deep-pulse);
+    transition: none;
+  }
+}
+
+/* ---- Controls: the first feature, at full volume ---- */
+
+.controls {
+  padding-block: clamp(5rem, 11vh, 7rem) clamp(3.25rem, 7vh, 4.5rem);
+}
+
+.controls-inner {
+  max-width: 72rem;
+  margin: 0 auto;
+}
+
+.controls-stage {
+  margin-top: clamp(2.25rem, 5vh, 3.25rem);
+}
+
+/* The walkthrough at full content width: hairline and a soft dark shadow,
+   no amber (the glow belongs to the flagship rooms). */
+.controls-flow {
+  width: 100%;
+  border-radius: calc(var(--radius) + 4px);
+  border: 1px solid var(--deep-edge);
+  background: var(--surface);
+  box-shadow:
+    inset 0 1px 0 var(--deep-sheen),
+    0 20px 60px -12px color-mix(in srgb, var(--bg) 88%, transparent),
+    0 6px 20px color-mix(in srgb, var(--bg) 60%, transparent);
+}
+
+/* The prose reads as a spread under the stage rather than a single wall. */
+.controls-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(2rem, 5vw, 4rem);
+  margin-top: clamp(2rem, 4.5vh, 3rem);
+}
+
+.controls-body p + p {
+  margin-top: 0;
+}
+
+/* ---- Sizes: the one section told typographically ---- */
+
+.sizes {
+  padding-block: clamp(3.25rem, 7vh, 4.5rem);
+}
+
+.sizes-inner {
+  max-width: 72rem;
+  margin: 0 auto;
+}
+
+.sizes-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  gap: clamp(2.5rem, 5vw, 4.5rem);
+  align-items: start;
+  margin-top: clamp(2.25rem, 5vh, 3.25rem);
+}
+
+/* The ladder is measured data set as a designed table, deliberately not a
+   mock screenshot: a hairline frame, tabular numerals, and the page's own
+   dot vocabulary. A lit dot means the same thing it means everywhere else
+   on this page: this one is on the record, and macOS was not showing it. */
+.sizes-ladder {
+  border: 1px solid var(--deep-edge);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+  padding: 1.1rem 1.25rem 0.9rem;
+}
+
+/* Sixteen rows in two columns of eight: half the height, none of the empty
+   air the single tall column carried. The shared double-resolution fact
+   lives once in the footnote instead of five times in the rows. */
+.sizes-rows {
+  columns: 2;
+  column-gap: 1.5rem;
+}
+
+.sizes-ladder-foot {
+  margin-top: 0.8rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid color-mix(in srgb, var(--text) 5%, transparent);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.sizes-ladder-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.85rem;
+}
+
+.sizes-ladder-panel {
+  font-size: var(--fs-small);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.sizes-ladder-stat {
+  font-size: var(--fs-small);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.sizes-row {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.42rem 0 0.42rem 1.15rem;
+  border-top: 1px solid color-mix(in srgb, var(--text) 5%, transparent);
+  font-size: var(--fs-small);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  break-inside: avoid;
+}
+
+/* The stock rows carry the hollow station dot, the hidden rows the lit one. */
+.sizes-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  transform: translateY(-50%);
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--text) 30%, transparent);
+  background: var(--bg);
+}
+
+.sizes-row-hidden::before {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 8px 1px var(--deep-pulse);
+}
+
+.sizes-row-hidden .sizes-row-size {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.sizes-row-size {
+  min-width: 5.6rem;
+}
+
+.sizes-row-tag {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.sizes-caption {
+  margin-top: 0.9rem;
+  max-width: 34rem;
+  font-size: var(--fs-small);
+  line-height: 1.55;
+  color: var(--text-dim);
+  text-wrap: pretty;
+}
+
+/* ---- Setup: the walkthrough, one register down from protection ---- */
+
+.setup {
+  padding-block: clamp(3.25rem, 7vh, 4.5rem);
+}
+
+.setup-inner {
+  max-width: 72rem;
+  margin: 0 auto;
+}
+
+.setup-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.02fr) minmax(0, 0.98fr);
+  gap: clamp(2.5rem, 6vw, 5rem);
+  align-items: start;
+  margin-top: clamp(2.25rem, 5vh, 3.25rem);
+}
+
+.setup-media {
+  position: sticky;
+  top: clamp(2rem, 12vh, 5rem);
+}
+
+.setup-frame {
+  position: relative;
+  width: 100%;
+  border-radius: var(--radius);
+  border: 1px solid var(--deep-edge);
+  background: var(--surface);
+  /* A register down from protection: the faint mix, a tighter halo. Same
+     construction for the same reason: a shadow stays with its frame. */
+  box-shadow:
+    inset 0 1px 0 var(--deep-sheen),
+    0 16px 50px color-mix(in srgb, var(--bg) 75%, transparent),
+    0 0 80px 2px var(--deep-glow-faint);
+}
+
+/* ---- Protection: the flagship, the loudest room on the page ---- */
+
+.protection {
+  padding-block: clamp(4rem, 9vh, 6rem);
+}
+
+.protection .deep-head {
+  max-width: 72rem;
+  margin: 0 auto;
+}
+
+/* The record movement's own quiet heading: the section's old headline, kept
+   as the introduction to the real measured map that closes the section. */
+.protection-record-title {
+  margin: clamp(3rem, 7vh, 4.5rem) auto 0;
+  max-width: 72rem;
+  text-align: center;
+  font-size: calc(var(--fs-h2) * 0.62);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+/* The record itself, closing the section as the proof the concept grids
+   were drawn from. Content width, not the old still's 100rem bleed: the
+   walkthrough is a 1920-wide production carrying its own zooms, and the
+   stage must match the video so the seam and the pause control sit on the
+   frame's own edges. */
+.protection-stage {
+  position: relative;
+  max-width: 72rem;
+  margin: clamp(1.75rem, 4vh, 2.5rem) auto 0;
+}
+
+/* Lit top seam, the same vocabulary as the hero frame: light falling onto
+   the panel from the copy above it. */
+.protection-stage::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--deep-seam), transparent);
+  pointer-events: none;
+}
+
+.protection-map {
+  position: relative;
+  width: 100%;
+  border-radius: calc(var(--radius) + 4px);
+  border: 1px solid var(--deep-edge);
+  background: var(--surface);
+  /* The strongest pool of light on the page rides the frame as a halo
+     shadow: a shadow hugs its box, so it is guaranteed to land beside the
+     frame and can never escape into the prose. */
+  box-shadow:
+    inset 0 1px 0 var(--deep-sheen),
+    0 30px 90px -20px color-mix(in srgb, var(--bg) 85%, transparent),
+    0 8px 28px color-mix(in srgb, var(--bg) 60%, transparent),
+    0 0 150px 14px var(--deep-glow-strong);
+}
+
+.protection-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: clamp(2.5rem, 6vw, 5.5rem);
+  align-items: start;
+  max-width: 72rem;
+  margin: clamp(2.75rem, 6.5vh, 4.25rem) auto 0;
+}
+
+/* The second movement swaps sides: the dim recording leads, the prose about
+   protection acting follows it. */
+.protection-grid-act {
+  grid-template-columns: minmax(0, 0.98fr) minmax(0, 1.02fr);
+}
+
+/* The pan recording rides beside the prose while it is read. */
+.protection-pan-wrap,
+.protection-media {
+  position: sticky;
+  top: clamp(2rem, 12vh, 5rem);
+}
+
+.protection-pan {
+  width: 100%;
+  border-radius: var(--radius);
+  border: 1px solid var(--deep-edge);
+  background: var(--surface);
+  box-shadow:
+    inset 0 1px 0 var(--deep-sheen),
+    0 12px 40px color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+.protection-frame {
+  position: relative;
+  width: 100%;
+  border-radius: var(--radius);
+  border: 1px solid var(--deep-edge);
+  background: var(--surface);
+  box-shadow:
+    inset 0 1px 0 var(--deep-sheen),
+    0 16px 50px color-mix(in srgb, var(--bg) 75%, transparent),
+    0 0 80px 2px var(--deep-glow-faint);
+}
+
+/* ---- Checkup: evidence, no glow ---- */
+
+.checkup {
+  padding-block: clamp(3.25rem, 7vh, 4.5rem);
+}
+
+.checkup-inner {
+  max-width: 72rem;
+  margin: 0 auto;
+}
+
+.checkup-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: clamp(2.5rem, 6vw, 5rem);
+  align-items: start;
+  margin-top: clamp(2.25rem, 5vh, 3.25rem);
+}
+
+/* The report is the thing you keep, so it is the section's whole visual. */
+.checkup-report {
+  width: 100%;
+  border-radius: var(--radius);
+  border: 1px solid var(--deep-edge);
+  background: var(--surface);
+  box-shadow:
+    inset 0 1px 0 var(--deep-sheen),
+    0 12px 40px color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+/* ---- And more: the toolbox ledger ---- */
+
+.more {
+  padding-block: clamp(3rem, 6vh, 4rem) clamp(3.5rem, 8vh, 5rem);
+}
+
+.more-inner {
+  max-width: 60rem;
+  margin: 0 auto;
+}
+
+.more-list {
+  margin-top: clamp(2rem, 4.5vh, 2.75rem);
+}
+
+/* The same ledger shape the trust section uses: title left, what backs it
+   right, a hairline between every pair. Features that earn a line each. */
+.more-item {
+  display: grid;
+  grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
+  gap: 0.6rem 2.75rem;
+  padding-block: 1.35rem;
+  border-top: 1px solid var(--deep-edge);
+}
+
+.more-title {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--deep-lead-ink);
+  text-wrap: pretty;
+}
+
+.more-body {
+  font-size: calc(var(--fs-body) * 0.94);
+  line-height: 1.65;
+  color: var(--text-dim);
+  text-wrap: pretty;
+}
+
+@media (max-width: 900px) {
+  .setup-grid,
+  .protection-grid,
+  .checkup-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2.5rem;
+  }
+
+  .setup-media,
+  .protection-pan-wrap,
+  .protection-media {
+    position: static;
+  }
+
+  .controls-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .controls-body p + p {
+    margin-top: 1.15rem;
+  }
+
+  .sizes-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2.5rem;
+  }
+
+  .more-item {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
+  }
+}
+
+@media (max-width: 560px) {
+  .controls {
+    padding-block: clamp(3.5rem, 9vh, 5rem) clamp(3rem, 7vh, 4rem);
+  }
+
+  .sizes,
+  .setup,
+  .checkup {
+    padding-block: clamp(3rem, 7vh, 4rem);
+  }
+
+  .protection {
+    padding-block: clamp(3.5rem, 9vh, 5rem);
+  }
+
+  .more {
+    padding-block: clamp(2.5rem, 6vh, 3.5rem) clamp(3rem, 7vh, 4rem);
+  }
+
+  .deep-station {
+    height: clamp(2.25rem, 5vh, 3rem);
+  }
+
+  .protection-stage {
+    margin-top: 2.25rem;
+  }
+
+  /* One column again on a phone: two columns of size-plus-tag do not fit. */
+  .sizes-rows {
+    columns: 1;
+  }
+}

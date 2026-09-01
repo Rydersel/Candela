@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Raw source art, kept out of the repo; the build consumes src/assets only.
+assets-raw/
+
+# Local state written by `wrangler pages dev` when testing functions/.
+.wrangler/

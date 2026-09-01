@@ -1,0 +1,46 @@
+/* The pause control every looping video carries (WCAG 2.2.2). Quiet by
+   contract: it appears on hover and on keyboard focus, pins to a corner so it
+   never sits over the middle of a capture, and stays visible while paused so
+   the way back is on screen. Every colour derives from a token with
+   color-mix; nothing bypasses the palette. */
+
+.media-shell {
+  position: relative;
+}
+
+.media-toggle {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  color: var(--text);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 160ms ease,
+    border-color 160ms ease;
+}
+
+.media-shell:hover .media-toggle,
+.media-toggle:focus-visible,
+.media-toggle[data-paused] {
+  opacity: 1;
+}
+
+.media-toggle:hover {
+  border-color: color-mix(in srgb, var(--text) 40%, transparent);
+}
+
+/* Under reduced motion the videos never play, so a play/pause control would
+   only offer to start what the visitor asked not to see. */
+@media (prefers-reduced-motion: reduce) {
+  .media-toggle {
+    display: none;
+  }
+}

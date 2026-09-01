@@ -1,0 +1,38 @@
+/* The accumulation figure: same cell vocabulary as the dim figure, its own
+   quiet frame (this is the watch movement, so no glow). --lum is registered
+   in DimDemo.css; the long transition here is what makes the stepped updates
+   read as a record warming rather than frames flipping. */
+
+.exposure-demo {
+  display: block;
+  padding: 0.9rem;
+  aspect-ratio: 21 / 10;
+  border-radius: var(--radius);
+  border: 1px solid var(--deep-edge);
+  background: var(--surface);
+  box-shadow:
+    inset 0 1px 0 var(--deep-sheen),
+    0 12px 40px color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+.exposure-grid {
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  grid-template-rows: repeat(10, 1fr);
+  gap: 2px;
+  width: 100%;
+  height: 100%;
+}
+
+.exposure-cell {
+  border-radius: 1px;
+  /* Same thermal ramp as the dim figure and the capture; tokens live in
+     DimDemo.css beside the --lum registration. */
+  background: color-mix(
+    in srgb,
+    color-mix(in oklch, var(--map-hot) calc(var(--lum) * 100%), var(--map-cold))
+      calc(18% + var(--lum) * 82%),
+    #121215
+  );
+  transition: --lum 600ms linear;
+}
