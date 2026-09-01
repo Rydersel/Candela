@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Candela's Sparkle feed. The URL https://candela.fyi/appcast.xml is baked
      into every shipped binary and must never move; this file lives in
-     site/public/ so every site deploy carries it to that path. New releases:
-     scripts/appcast.sh prints the signed <item> to add here, newest first.
-     Archives live on GitHub Releases, never beside this file. -->
+     site/public/ so every site deploy carries it to that path. New releases
+     add their signed <item> here, newest first. Archives live on GitHub
+     Releases, never beside this file. -->
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
     <title>Candela Updates</title>
