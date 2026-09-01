@@ -1,0 +1,15 @@
+{
+  "name": "candela-analytics-cleanup",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "triggers": {
+    "crons": ["17 2 * * *"]
+  },
+  "d1_databases": [
+    {
+      "binding": "ANALYTICS_DB",
+      "database_name": "candela-site-analytics",
+      "database_id": "88f5abac-2f95-4e38-ae74-c794b26e82e5"
+    }
+  ]
+}

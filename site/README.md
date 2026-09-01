@@ -49,9 +49,10 @@ npm run build
 npx wrangler pages deploy dist --project-name candela-site --branch main
 ```
 
-The public Cloudflare Web Analytics token is provided to the build as
-`VITE_CLOUDFLARE_WEB_ANALYTICS_TOKEN`. The browser bootstrap inserts the beacon
-only when `candela_analytics=off` is absent.
+The public Cloudflare Web Analytics site tag is checked into `.env.production`
+as `VITE_CLOUDFLARE_WEB_ANALYTICS_TOKEN`. Cloudflare must remain in manual
+snippet mode: the browser bootstrap inserts the beacon only when
+`candela_analytics=off` is absent.
 
 The report command requires a separate read-only token in
 `CLOUDFLARE_API_TOKEN` plus `CLOUDFLARE_ACCOUNT_ID` and
