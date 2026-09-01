@@ -1,0 +1,46 @@
+name: Feature request
+description: Suggest something Candela should do.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check ROADMAP.md first. It lists what is planned, and also what
+        has been ruled out along with the reason, which is the part worth
+        reading: a few obvious features are deliberately absent because they
+        were tried and cut.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that Candela makes hard or impossible today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+      description: Describe the behaviour, not the implementation, unless the implementation is the point.
+    validations:
+      required: true
+
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware this involves
+      description: >
+        If it depends on a particular monitor, connection or Mac, say which.
+        Some requests can only be built by someone who has the hardware to
+        verify them.
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do instead today
+      description: Another app, a script, a manual workaround, or nothing.
+    validations:
+      required: false

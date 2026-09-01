@@ -21,15 +21,21 @@ map: where on the panel the bright, static content has been, accumulated over
 time in the panel's own geometry. No firmware shows you this. The map is
 built from a coarse luminance grid (a 24 by 10 sampling of mean brightness),
 so nothing on your screen is stored and nothing can be reconstructed from it.
-By default it works without any permission, from what the system already
-exposes about your windows and wallpaper. Granting Screen Recording turns on
-measured sampling for a more accurate map; that stays opt-in.
+Sampling the screen needs Screen Recording, so it is opt-in and stays off
+until you turn it on. Enrol a display in OLED care and, with no permission at
+all, Candela counts its hours of use and records which app held which part of
+it, and for how long. The map itself waits for real readings rather than
+drawing an estimate and calling it a measurement, so it appears once you also
+turn measurement on.
 
 **Protection.** One-click auto-hide for the menu bar and the Dock, the two
 pieces of chrome that sit still for hours on an OLED. Dimming when you step
-away and while the Mac is locked, with a recommended preset you can enroll a
-display in with one click and adjust afterwards. A keep-awake assertion from
-the panel when you need it. Display settings Candela remembers for you: the
+away, while the Mac is locked, and on the display you are not working on. A
+separate per-display switch, off unless you turn it on, dims the bright regions
+that sit unchanged while you work; it needs measurement on first. Enrolling a
+display applies a recommended preset in one click (dim after five idle minutes,
+dim while locked, count hours of use); every setting is adjustable afterwards. A keep-awake toggle in the menu bar for when
+a display must not sleep. Display settings Candela remembers for you: the
 resolution you picked for each display comes back after a replug or a reboot,
 and you can forget it again from the same place.
 
@@ -50,8 +56,8 @@ not certify panels.
 **Controls.** Brightness, contrast and volume for external displays over
 DDC/CI, from the menu bar, with keyboard media keys and a HUD. Software
 dimming below the hardware floor. An HDR toggle. Every resolution the panel
-can actually show, including HiDPI sizes macOS refuses to compute on standard-
-density panels, plus an opt-in per-display setting that adds in-between
+can actually show, including HiDPI sizes macOS does not list on
+standard-density panels, plus an opt-in per-display setting that adds in-between
 scaled sizes rendered through a virtual display. Arrangement, mirroring and
 rotation from a canvas, with saved layouts. Virtual displays for headless and
 capture setups. A guided first-run setup that walks each attached display.
@@ -90,17 +96,33 @@ and the reason is what decides whether it ever changes.
 - **Screen Recording**, only if you opt into measured exposure sampling. The
   default health path never asks.
 
-DDC does not work while a display is in HDR mode. Candela says so in the
-panel rather than failing silently.
+DDC does not work while a display is in HDR mode. Rather than failing
+silently, Candela marks a display that is in HDR in the menu bar and states
+the consequence on that display's Diagnostics page.
 
 ## Install
 
-Download the notarized build from [candela.fyi](https://candela.fyi) and drag
-it to Applications. The app checks for updates on its own and asks before
-installing one; updates are signed, and a build whose signature does not
-match is refused.
+Download the notarized build from
+[Releases](https://github.com/Rydersel/Candela/releases/latest), unzip it, and
+drag Candela to Applications. [candela.fyi](https://candela.fyi) points at the
+same archive. There is also a Homebrew cask:
+
+```sh
+brew install --cask rydersel/tap/candela
+```
+
+After that, updates arrive in the app itself, delivered by Sparkle. Candela
+checks on its own and asks before installing anything. Every archive is signed,
+and one whose signature does not match the key baked into your build is
+refused.
 
 To build from source, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Documentation
+
+[docs/guide/](docs/guide/index.md) covers OLED care, Checkup, resolutions,
+the per-display Diagnostics page, and the advanced settings that are set with
+`defaults write` rather than a control.
 
 ## A note on private APIs
 
@@ -125,12 +147,16 @@ send.
 
 ## Credits
 
-Candela is a new engine, not a fork. Its DDC transport for Apple silicon and
-Intel, and part of its dimming math, are transplanted from
-[MonitorControl](https://github.com/MonitorControl/MonitorControl) under the
-MIT license and carry that project's copyright notice; the full list is in
-[THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md). MonitorControl is the
-best-known open-source app in this space and its DDC code is the most widely
-read there is. Candela would not exist without it.
+Candela is a new engine, and it is descended from
+[MonitorControl](https://github.com/MonitorControl/MonitorControl). Its DDC/CI
+transport for Apple silicon and Intel, its media-key handling, its
+software-dimming approach and its HDR toggle were transplanted or adapted from
+that project under the MIT license, and every file containing its code carries
+its copyright header. The exact list, file by file, with what came from
+upstream in each, is in
+[THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md), along with one link in the
+chain whose provenance is unresolved and recorded rather than rounded off.
+MonitorControl is the best-known open-source app in this space and its DDC code
+is the most widely read there is. Candela would not exist without it.
 
 Candela itself is released under the [MIT license](LICENSE).

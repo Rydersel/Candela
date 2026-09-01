@@ -764,8 +764,8 @@ struct DiagnosticsCopyTests {
     }
   }
 
-  /// §6: no em dashes in user-visible copy. Labels that live inline in a view are
-  /// where this leaks, so they are moved onto `DiagnosticsCopy` to be swept here.
+  /// House rule: no em dashes in user-visible copy. Labels written inline in a
+  /// view are where this leaks, so they live on `DiagnosticsCopy` to be swept here.
   @Test func noProducedStringContainsAnEmDash() {
     for produced in Self.everySentence() {
       #expect(!produced.contains("—"), "em dash: \(produced)")

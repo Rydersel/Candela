@@ -1,5 +1,10 @@
 # Contributing
 
+Bug reports and hardware reports are the most useful things you can send, and
+the issue templates ask for what actually settles them. If you are reporting a
+security problem, do not open an issue: see [SECURITY.md](SECURITY.md).
+Participation is under the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Layout
 
 - `CandelaKit/` is the engine: a Swift package with no AppKit or SwiftUI
@@ -7,11 +12,13 @@
   live here, along with the test suite that covers them without hardware.
 - `Candela/` is the app: SwiftUI, with a few AppKit islands (the HUD, the
   shade windows, the gamma enforcer) behind CandelaKit protocols.
-- `NORTHSTAR.md` is the product constitution. Scope and positioning decisions
-  run through its litmus tests; if a change contradicts it, one of the two
-  gets a pull request.
-- `docs/` holds the design specs, spike findings, engineering notes, and the
-  hardware verification ledger.
+- `docs/` holds the user guides (`docs/guide/`), the spike findings that decided
+  the hard questions (`docs/spikes/`), the engineering notes, the advanced
+  settings reference, and the hardware verification ledger.
+- `ROADMAP.md` is the scope document. It says what is planned and what has been
+  ruled out, each with its reason. A change that contradicts it wants a
+  conversation in an issue first, because the roadmap changes by pull request
+  too.
 
 ## Building
 
@@ -26,36 +33,38 @@ make check      # both test suites: the engine (swift test) and the app bundle
 ```
 
 `make test-app` runs the app suite without launching the app, so it is safe
-with monitors attached. The engine suite is fast whole; do not filter it.
+with monitors attached. The engine suite is fast whole; do not filter it. Both
+suites and a Release build run in CI on every pull request.
 
 For a hardware smoke test with no UI, `cd CandelaKit && swift run
 candela-probe` prints the usage. It covers brightness, volume, contrast, DDC
 capabilities, HDR, gamma, display topology and virtual displays, so check it
 before hand-rolling an experiment.
 
-## Local hooks
+## Pull requests
 
-Optional, once per clone. It wires a pre-commit hook that runs the two
-context gates locally in about a second, so a bad commit never exists rather
-than being caught later by CI:
+Pull requests are squash-merged, so the pull request title and description
+become the commit message. Write them for someone reading `git log` in a year.
 
-```sh
-git config core.hooksPath .githooks
-```
-
-`core.hooksPath` is per-clone config that `git clone` does not carry, so
-this is a command you run rather than something the repo can do for you.
-The same gates run in CI on every push and pull request; the hook only
-shortens the feedback loop, and `git commit --no-verify` skips it.
+Keep a branch to one change. A pull request that fixes a bug and reorganizes
+three files is two pull requests, and the second one is the reason the first
+takes a week.
 
 ## What a change needs
 
 - Tests in CandelaKit for anything hardware-free. Hardware truth comes from
   `candela-probe` and a real panel.
-- A hardware verification section in the issue, and the verification run
-  before the merge, in the same session that wrote the fix. The ledger in
-  `docs/VERIFICATION-STATUS.md` records the result.
-- No ticket numbers in source comments; name the mechanism instead.
+- **A change that touches hardware behaviour states how it was verified**:
+  which monitor, which connection, and what you observed. Do this before the
+  merge, not after: from the outside, a merged but unverified fix and an
+  untouched bug look identical. `docs/VERIFICATION-STATUS.md` records what has
+  and has not been verified, and every feature issue carries a
+  `## Hardware verification` section that is the script for the run.
+- If the verification genuinely cannot run, because nobody has the hardware or
+  the test would be disruptive, say so out loud on the issue and name what is
+  blocking it. Deferring is allowed. Deferring silently is not.
+- No ticket numbers in source comments; name the mechanism instead, because the
+  numbers go stale and the mechanism does not.
 - No em dashes in user-visible text or in new comments.
 - English only. No localization tooling.
 

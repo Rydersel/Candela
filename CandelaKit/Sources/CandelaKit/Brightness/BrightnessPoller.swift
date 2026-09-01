@@ -3,7 +3,8 @@ import Foundation
 
 /// Polls native brightness for displays whose controller is HDR-native,
 /// discards echoes of our own writes, and reports real external deltas to the
-/// controller (dossier §10, the fork's `refreshBrightness` poll job).
+/// controller. Ported from the MonitorControl fork's `refreshBrightness` poll
+/// job, the behavior oracle for both the cadence and the echo discard.
 ///
 /// It never smooths, never writes hardware and never decides staleness:
 /// `BrightnessController.adoptExternal` owns the easing and the generation

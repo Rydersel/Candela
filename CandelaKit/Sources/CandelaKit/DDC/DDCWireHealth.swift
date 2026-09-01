@@ -22,8 +22,8 @@ public struct DDCWireHealth: Sendable, Equatable {
   public init() {}
 
   /// True once the wire has failed `failuresBeforeUnresponsive` applies in a
-  /// row. Not latched: any reset route, or one successful apply, takes it back
-  /// to false. Crisp latches for the session and needs a replug.
+  /// row. Not latched, so a wire that starts working again is trusted again:
+  /// any reset route, or one successful apply, takes it back to false.
   public var isUnresponsive: Bool {
     consecutiveFailures >= Self.failuresBeforeUnresponsive
   }

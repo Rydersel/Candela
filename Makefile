@@ -11,9 +11,6 @@
 # is already the warm cache in the main checkout. dd/ is the documented scratch
 # name (gitignored at any depth) for a build that must NOT touch that cache:
 #   make release DD=dd
-#
-# CLAUDE.md §3 is the source of truth for the deploy sequence; the skill
-# `candela-deploy` holds the measured detail behind each gate here.
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
@@ -29,8 +26,8 @@ REL_BIN  := $(REL_APP)/Contents/MacOS/Candela
 INSTALLED := /Applications/Candela.app
 
 # The Release debug-marker gate. The control MUST be found or the method is
-# broken and a zero marker count means nothing (candela-deploy: "a check whose
-# failure mode is silence is not a check"). 31 bytes, so it clears the 16-byte
+# broken and a zero marker count means nothing: a check whose failure mode is
+# silence is not a check. The control string is 31 bytes, clearing the 16-byte
 # floor below which `strings` cannot see a Swift literal at all.
 # The marker is a PREFIX. CANDELA_DEBUG alone is 13 bytes, inline-stored, and
 # `strings` can never emit it, so that grep could not fail; and the one switch
@@ -41,7 +38,7 @@ INSTALLED := /Applications/Candela.app
 CONTROL := Where this display has been lit
 MARKER  := CANDELA_
 
-.PHONY: help build release test test-app check markers deploy regen probe conform clean prune prune-apply
+.PHONY: help build release test test-app check markers deploy regen probe conform clean
 
 help:
 	@echo "Candela targets            (DD=$(DD))"
@@ -57,12 +54,10 @@ help:
 	@echo "  make conform     Platform-conformance suite; the exit code is the verdict"
 	@echo "  make regen       Force xcodegen generate"
 	@echo "  make clean       Remove $(DD)/ and CandelaKit/.build"
-	@echo "  make prune       Report worktrees and DerivedData that are safe to delete"
-	@echo "  make prune-apply Delete what prune reported (destructive)"
 	@echo ""
 	@echo "The xcodeproj regenerates automatically when project.yml is newer."
 
-# Generated and gitignored: never edit the xcodeproj by hand (CLAUDE.md §2).
+# Generated and gitignored: never edit the xcodeproj by hand, edit project.yml.
 # Making it a real dependency is what stops a stale project from failing a build
 # for a reason that looks like a code error. It did exactly that on 2026-08-19:
 # project.yml carried the Sparkle merge, the generated project did not, and the
@@ -143,20 +138,20 @@ markers: release
 	echo "         NOTE: strings cannot see a Swift literal of 15 bytes or fewer;"; \
 	echo "         name debug switches CANDELA_DEBUG_<thing> so they clear 16."
 
-# Chained on the build's success throughout (candela-deploy): a deploy whose
-# build step failed and whose copy step ran anyway installs a STALE bundle that
-# passes signing, notarization and every string grep aimed at what it already had.
+# Chained on the build's success throughout: a deploy whose build step failed
+# and whose copy step ran anyway installs a STALE bundle that passes signing,
+# notarization and every string grep aimed at what it already had.
 # Freshness needs no wall-clock gate: deploy -> markers -> release run in THIS
 # invocation, and xcodebuild only succeeds when the product matches the current
 # sources, so a stale product cannot survive the chain. (A 600 s mtime gate was
 # tried here and refused the no-change incremental build it exists to allow.)
-# The signing gate is verify-signing.sh, run BEFORE installing (candela-deploy
-# step 5): `codesign --verify` has passed on a Release build that notarization
-# rejects, so it proves nothing. No re-sign step: cp -R preserves the Developer
-# ID signature, and the old ad-hoc re-sign destroyed the identity and its TCC
-# grant (CLAUDE.md §3). The trash step is Finder's own delete: rm -rf on the
-# installed bundle is permission-denied in this setup, and Finder's lands it in
-# the Trash where a clobbered build can be recovered (candela-deploy step 6).
+# The signing gate is verify-signing.sh, run BEFORE installing: `codesign
+# --verify` has passed on a Release build that notarization rejects, so it
+# proves nothing. No re-sign step, and adding one back is a regression: cp -R
+# preserves the Developer ID signature, and the old ad-hoc re-sign destroyed the
+# identity and its Accessibility grant with it. The trash step is Finder's own
+# delete: rm -rf on the installed bundle is permission-denied in this setup, and
+# Finder's lands it in the Trash where a clobbered build can be recovered.
 deploy: markers
 	@set -euo pipefail; \
 	running=$$(pgrep -lf "MacOS/Candela" | grep -v 'MacOS/Candela.debug' || true); \
@@ -164,8 +159,8 @@ deploy: markers
 	  if echo "$$running" | grep -qv "$(INSTALLED)"; then \
 	    echo "REFUSING: a Candela is running from somewhere other than $(INSTALLED):"; \
 	    echo "$$running" | sed 's/^/    /'; \
-	    echo "  A DerivedData, worktree or scratchpad path means another session owns it."; \
-	    echo "  Only one DDC writer at a time (CLAUDE.md §2). Coordinate, then retry."; \
+	    echo "  A DerivedData or other build path means this is not the installed app."; \
+	    echo "  Only one DDC writer at a time. Quit that one, then retry."; \
 	    exit 1; \
 	  fi; \
 	fi; \
@@ -179,7 +174,7 @@ deploy: markers
 	    echo "REFUSING: $(INSTALLED) is newer than the build being installed, and"; \
 	    echo "  differs from it. Another session deployed while this build was made;"; \
 	    echo "  the running-process check above cannot see a copied-but-not-launched"; \
-	    echo "  bundle (candela-deploy step 4). Coordinate (ListAgents), then retry."; \
+	    echo "  bundle. Work out which build you want installed, then retry."; \
 	    exit 1; \
 	  fi; \
 	fi; \
@@ -191,7 +186,7 @@ deploy: markers
 	if pgrep -lx Candela; then \
 	  echo "REFUSING: Candela is still running after the quit (a slow quit, or"; \
 	  echo "  LaunchServices respawned it; a kill is not proof it stays down)."; \
-	  echo "  Installing over a live process risks two DDC writers (CLAUDE.md §2)."; \
+	  echo "  Installing over a live process risks two DDC writers."; \
 	  echo "  Re-check pgrep once it is really down, then retry."; \
 	  exit 1; \
 	fi; \
@@ -213,17 +208,3 @@ conform:
 
 clean:
 	rm -rf $(DD) CandelaKit/.build
-
-# clean's counterpart across worktrees: clean empties THIS checkout's cache,
-# prune removes finished checkouts whole plus the global DerivedData left
-# orphaned by worktrees already gone.
-#
-# Two targets rather than `prune APPLY=1` because the destructive one has to be
-# typed on purpose. `prune` changes nothing, so it is safe to run whenever the
-# disk gets tight, and its report IS the argument for running prune-apply.
-# The script's gates are the safety, not this file: see its header.
-prune:
-	@scripts/prune-worktrees.sh --caches
-
-prune-apply:
-	@scripts/prune-worktrees.sh --caches --apply

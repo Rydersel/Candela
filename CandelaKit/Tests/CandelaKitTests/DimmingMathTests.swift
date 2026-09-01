@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// Expectations are the worked examples from `.superpowers/m3-dossier/dimming-math.md`
-/// (§1, §2, §3, §6, §9) — the fork is the behavior oracle for every number here.
+/// Expectations are the worked examples the port was written against: the
+/// MonitorControl fork is the behavior oracle for every number here.
 @Suite("Dimming math")
 struct DimmingMathTests {
   /// Only for expectations carrying binary-float residue (the sw reverse transform,

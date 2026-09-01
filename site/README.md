@@ -2,7 +2,6 @@
 
 Candela's landing and Privacy pages, built with Vite + React + TypeScript and
 hosted on Cloudflare Pages.
-Design spec: `docs/superpowers/specs/2026-08-28-site-redesign-design.md`.
 
 ```sh
 npm install
@@ -26,16 +25,19 @@ The Pages and Worker configurations are checked in as `wrangler.jsonc` and
 `analytics-worker/wrangler.jsonc`. Production and preview bind separate D1
 databases as `ANALYTICS_DB`.
 
-Set these secrets without committing them:
+Set this secret without committing it:
 
 ```sh
 npx wrangler pages secret put ANALYTICS_SIGNING_KEY --project-name candela-site
-npx wrangler pages secret put RELEASE_DOWNLOAD_URL --project-name candela-site
 ```
 
 The signing value must be a freshly generated high-entropy secret. Production
-and preview must not share it. The release URL must match the current enclosure
-in `public/appcast.xml` before Download is enabled.
+and preview must not share it.
+
+`RELEASE_DOWNLOAD_URL` is a committed var in `wrangler.jsonc`, because it is a
+public URL rather than a secret. It must match the current enclosure in
+`public/appcast.xml` before Download is enabled. A Pages secret of the same name
+overrides it if one is ever needed.
 
 Apply and deploy from this `site/` directory. Running the Pages deploy from the
 repository root omits `site/functions` and silently produces a static-only

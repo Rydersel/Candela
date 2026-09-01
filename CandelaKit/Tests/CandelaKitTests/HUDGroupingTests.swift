@@ -2,7 +2,7 @@ import CoreGraphics
 import Testing
 @testable import CandelaKit
 
-@Suite("HUD grouping for stepped displays (#123)")
+@Suite("HUD grouping for stepped displays")
 struct HUDGroupingTests {
   /// The defect itself. `expand(2)` hands the executor `[2, 1, 3]`; every one
   /// of those draws on 2, so one pill appears. Before this it was written three

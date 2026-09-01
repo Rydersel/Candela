@@ -2,7 +2,7 @@ import CoreGraphics
 import Testing
 @testable import CandelaKit
 
-@Suite("Confirmation window placement (#126)")
+@Suite("Confirmation window placement")
 struct ConfirmationPlacementTests {
   /// A 1440p-ish visible frame, and a window about the size the confirmation
   /// panels fit to.

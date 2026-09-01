@@ -6,7 +6,7 @@ import Testing
 /// 2026-08-17: the Dell published pairs whose CGS descriptors are byte-identical
 /// apart from the mode number, and the built-in published none, its apparent pairs
 /// being the NTSC rates (59.9 against 60.0) that must stay apart.
-@Suite("Duplicate mode rows (#95)")
+@Suite("Duplicate mode rows")
 struct DisplayModeListTests {
   private func mode(
     _ id: Int32, _ lw: Int, _ lh: Int, px: Int? = nil, py: Int? = nil,

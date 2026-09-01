@@ -1,0 +1,106 @@
+name: Bug report
+description: Something in Candela does not work, or does not do what it says.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Display bugs are hardware bugs more often than not, so the hardware
+        questions below are the ones that usually settle a report. If you can,
+        attach a diagnostics export: Settings, your display in the sidebar,
+        Diagnostics, then **Copy Report** or **Save Report...**. It covers
+        every connected display and contains no serial numbers.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what actually happened.
+      placeholder: |
+        Steps:
+        1.
+        2.
+        Expected:
+        Actual:
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "26.1"
+    validations:
+      required: true
+
+  - type: input
+    id: mac
+    attributes:
+      label: Mac model
+      description: Apple menu, About This Mac.
+      placeholder: "MacBook Pro (M3 Pro, 2023)"
+    validations:
+      required: true
+
+  - type: input
+    id: candela-version
+    attributes:
+      label: Candela version
+      description: Settings, About.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: monitor
+    attributes:
+      label: Monitor model
+      description: Make and model. If more than one is attached, list them all and say which one the bug is about.
+      placeholder: "Dell U2725QE"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: connection
+    attributes:
+      label: Connection
+      options:
+        - HDMI
+        - DisplayPort
+        - USB-C / Thunderbolt (direct)
+        - USB-C / Thunderbolt (through a dock or hub)
+        - DisplayPort over USB-C adapter
+        - Built-in display
+        - Other or not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: ddc-readback
+    attributes:
+      label: Does this display answer DDC reads?
+      description: The display's Diagnostics page reports this under Reported Capabilities, in the "Reading values back" row.
+      options:
+        - "Yes, it answers reads"
+        - "No, it is write-only (reads come back empty)"
+        - "It has never been asked"
+        - Not sure
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: conditions
+    attributes:
+      label: Anything true at the time
+      options:
+        - label: The display was in HDR mode (DDC does not work in HDR, and Candela says so in the menu bar item)
+        - label: Another app that controls displays was running
+        - label: The Mac had just woken from sleep, or displays had just been plugged or unplugged
+        - label: Candela was launched with Shift held (Safe Mode)
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics report
+      description: Paste the report here, or attach the saved file.
+      render: text

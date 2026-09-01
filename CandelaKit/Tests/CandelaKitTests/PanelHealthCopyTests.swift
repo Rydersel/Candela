@@ -110,9 +110,9 @@ struct PanelHealthCopyTests {
 
   // MARK: - The rule these all serve
 
-  /// §6: no em dashes in user-visible copy. Every string this type can produce
-  /// is user-visible, so the rule is checkable here rather than by grepping a
-  /// view.
+  /// House rule: no em dashes in user-visible copy. Every string this type can
+  /// produce is user-visible, so the rule is checkable here instead of by
+  /// grepping the views.
   @Test func noProducedStringContainsAnEmDash() {
     var produced: [String] = [
       PanelHealthCopy.hours(0), PanelHealthCopy.hours(0.001), PanelHealthCopy.hours(0.5),

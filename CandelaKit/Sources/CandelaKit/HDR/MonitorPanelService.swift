@@ -25,8 +25,8 @@ public protocol HDRToggling: Sendable {
   func displaysReconfigured() async
 }
 
-/// Programmatic control of the System Settings HDR toggle via the private
-/// MonitorPanel framework (the mechanism BetterDisplay and ToggleHDR use).
+/// Programmatic control of the System Settings HDR toggle through the private
+/// MonitorPanel framework, which is what the Displays pane itself drives.
 /// Actor isolation replaces the fork's serial DispatchQueue; MPDisplay and
 /// MPDisplayMgr existentials are non-Sendable and must never escape this actor,
 /// which the compiler enforces.

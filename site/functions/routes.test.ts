@@ -43,6 +43,14 @@ function context(request: Request, db = new Database()): FunctionContext {
   }
 }
 
+// No RELEASE_DOWNLOAD_URL, so the built-in fallback answers. It shipped
+// pointing at a release that did not exist, and nothing exercised this branch.
+function contextWithoutReleaseUrl(request: Request): FunctionContext {
+  const value = context(request)
+  delete value.env.RELEASE_DOWNLOAD_URL
+  return value
+}
+
 function post(path: string, cookie?: string) {
   return new Request(`https://candela.fyi${path}`, {
     method: 'POST',
@@ -110,5 +118,16 @@ describe('analytics routes', () => {
       redirect: 'manual',
     }), db))
     expect(db.statements).toHaveLength(0)
+  })
+
+  it('falls back to the current release archive when no download URL is configured', async () => {
+    const response = await download(contextWithoutReleaseUrl(new Request('https://candela.fyi/download', {
+      headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' },
+      redirect: 'manual',
+    })))
+    expect(response.status).toBe(302)
+    expect(response.headers.get('location')).toBe(
+      'https://github.com/Rydersel/Candela/releases/download/v1.0.0/Candela-1.0.0.zip',
+    )
   })
 })

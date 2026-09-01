@@ -12,7 +12,7 @@ import Testing
 /// rig 2026-08-17: a sleep, cable swap and wake produced "DELL departed" then
 /// "MAG arrived", two passes, so the display arrived as an ordinary new one.
 /// The scripted topology below is the only way in.
-@Suite("Panel swap reconciliation (#51)")
+@Suite("Panel swap reconciliation")
 @MainActor
 struct PanelSwapReconciliationTests {
   // The seam driver lives in `Fakes`: several suites drive the same one, and

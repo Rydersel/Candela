@@ -12,7 +12,7 @@ import Testing
 ///
 /// Ground truth for the whole suite:
 /// docs/spikes/exact-2to1-first-engagement/01-mag-modes.txt.
-@Suite("Wire-timing guard (#110)")
+@Suite("Wire-timing guard")
 struct WireTimingGuardTests {
   private let magW = CGSModeFixtures.magNativePixels.0
   private let magH = CGSModeFixtures.magNativePixels.1
