@@ -1,8 +1,9 @@
-import { dimDemo, exposureDemo, protection } from '../content/copy'
+import { protection } from '../content/copy'
 import { assets } from '../content/assets'
 import { MediaFrame } from './MediaFrame'
 import { DimDemo } from './DimDemo'
 import { ExposureDemo } from './ExposureDemo'
+import { ProofList } from './ProofList'
 import { useReveal } from '../useReveal'
 import './DeepSections.css'
 
@@ -26,25 +27,14 @@ export function SectionProtection() {
       <div className="protection-grid protection-grid-act">
         <div className="protection-media reveal" ref={media}>
           <DimDemo />
-          <p className="dim-caption">{dimDemo.caption}</p>
         </div>
-        <div className="deep-body">
-          {protection.actBody.map((paragraph) => (
-            <p key={paragraph}>{paragraph}</p>
-          ))}
-          <p className="deep-aside">{protection.sideClause}</p>
-        </div>
+        <ProofList items={protection.actProofs} />
       </div>
       <div className="protection-grid">
-        <div className="deep-body">
-          {protection.watchBody.map((paragraph) => (
-            <p key={paragraph}>{paragraph}</p>
-          ))}
-        </div>
         <div className="protection-pan-wrap reveal" ref={pan}>
           <ExposureDemo />
-          <p className="dim-caption">{exposureDemo.caption}</p>
         </div>
+        <ProofList items={protection.watchProofs} />
       </div>
       <h3 className="protection-record-title reveal" ref={recordHead}>
         {protection.recordTitle}

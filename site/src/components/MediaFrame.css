@@ -8,6 +8,29 @@
   position: relative;
 }
 
+.media-poster {
+  transition: opacity 180ms ease;
+}
+
+/* Two classes are deliberate: section capture classes also set position for
+   their in-flow poster. The overlay must win that later one-class rule. */
+.media-shell .media-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.media-shell[data-playing] .media-poster {
+  opacity: 0;
+}
+
+.media-shell[data-playing] .media-video {
+  opacity: 1;
+}
+
 .media-toggle {
   position: absolute;
   right: 0.75rem;
@@ -37,9 +60,20 @@
   border-color: color-mix(in srgb, var(--text) 40%, transparent);
 }
 
+@media (hover: none) {
+  .media-toggle {
+    opacity: 0.82;
+  }
+}
+
 /* Under reduced motion the videos never play, so a play/pause control would
    only offer to start what the visitor asked not to see. */
 @media (prefers-reduced-motion: reduce) {
+  .media-poster,
+  .media-video {
+    transition: none;
+  }
+
   .media-toggle {
     display: none;
   }

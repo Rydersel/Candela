@@ -148,100 +148,135 @@ export function HeroBackdropSwirl() {
   const wrapRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const canvas = canvasRef.current
-    const wrap = wrapRef.current
-    if (!canvas || !wrap) return
-
-    const gl = canvas.getContext('webgl2', { premultipliedAlpha: true, antialias: true })
-    if (!gl) return
-
-    const compile = (type: number, source: string) => {
-      const shader = gl.createShader(type)!
-      gl.shaderSource(shader, source)
-      gl.compileShader(shader)
-      return shader
+    type IdleWindow = Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
+      cancelIdleCallback?: (id: number) => void
     }
-    const vertexShader = compile(gl.VERTEX_SHADER, VERTEX_SHADER)
-    const fragmentShader = compile(gl.FRAGMENT_SHADER, FRAGMENT_SHADER)
-    const program = gl.createProgram()!
-    gl.attachShader(program, vertexShader)
-    gl.attachShader(program, fragmentShader)
-    gl.linkProgram(program)
-    gl.useProgram(program)
 
-    const positionBuffer = gl.createBuffer()
-    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer)
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
-      gl.STATIC_DRAW,
-    )
-    const positionLocation = gl.getAttribLocation(program, 'a_position')
-    gl.enableVertexAttribArray(positionLocation)
-    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0)
+    const idleWindow = window as IdleWindow
+    let disposed = false
+    let teardown = () => {}
 
-    const u = (name: string) => gl.getUniformLocation(program, name)
-    const [r1, g1, b1] = hexToRgb(PARAMS.color1)
-    const [r2, g2, b2] = hexToRgb(PARAMS.color2)
-    const [r3, g3, b3] = hexToRgb(PARAMS.color3)
-    gl.uniform4f(u('u_color1'), r1, g1, b1, 1)
-    gl.uniform4f(u('u_color2'), r2, g2, b2, 1)
-    gl.uniform4f(u('u_color3'), r3, g3, b3, 1)
-    gl.uniform1f(u('u_scale'), PARAMS.scale)
-    gl.uniform1f(u('u_rotation'), (PARAMS.rotation * Math.PI) / 180)
-    gl.uniform1f(u('u_proportion'), PARAMS.proportion)
-    gl.uniform1f(u('u_softness'), PARAMS.softness)
-    gl.uniform1f(u('u_shapeScale'), PARAMS.shapeScale)
-    gl.uniform1f(u('u_distortion'), PARAMS.distortion)
-    gl.uniform1f(u('u_swirl'), PARAMS.swirl)
-    gl.uniform1f(u('u_swirlIterations'), PARAMS.swirlIterations)
-    const uTime = u('u_time')
-    const uResolution = u('u_resolution')
-    const uPixelRatio = u('u_pixelRatio')
+    const initialize = () => {
+      if (disposed) return
+      const canvas = canvasRef.current
+      const wrap = wrapRef.current
+      if (!canvas || !wrap) return
 
-    const resize = () => {
-      const pixelRatio = window.devicePixelRatio || 1
-      canvas.width = wrap.clientWidth * pixelRatio
-      canvas.height = wrap.clientHeight * pixelRatio
-      gl.viewport(0, 0, canvas.width, canvas.height)
+      const gl = canvas.getContext('webgl2', { premultipliedAlpha: true, antialias: true })
+      if (!gl) return
+
+      const compile = (type: number, source: string) => {
+        const shader = gl.createShader(type)!
+        gl.shaderSource(shader, source)
+        gl.compileShader(shader)
+        return shader
+      }
+      const vertexShader = compile(gl.VERTEX_SHADER, VERTEX_SHADER)
+      const fragmentShader = compile(gl.FRAGMENT_SHADER, FRAGMENT_SHADER)
+      const program = gl.createProgram()!
+      gl.attachShader(program, vertexShader)
+      gl.attachShader(program, fragmentShader)
+      gl.linkProgram(program)
+      gl.useProgram(program)
+
+      const positionBuffer = gl.createBuffer()
+      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer)
+      gl.bufferData(
+        gl.ARRAY_BUFFER,
+        new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
+        gl.STATIC_DRAW,
+      )
+      const positionLocation = gl.getAttribLocation(program, 'a_position')
+      gl.enableVertexAttribArray(positionLocation)
+      gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0)
+
+      const u = (name: string) => gl.getUniformLocation(program, name)
+      const [r1, g1, b1] = hexToRgb(PARAMS.color1)
+      const [r2, g2, b2] = hexToRgb(PARAMS.color2)
+      const [r3, g3, b3] = hexToRgb(PARAMS.color3)
+      gl.uniform4f(u('u_color1'), r1, g1, b1, 1)
+      gl.uniform4f(u('u_color2'), r2, g2, b2, 1)
+      gl.uniform4f(u('u_color3'), r3, g3, b3, 1)
+      gl.uniform1f(u('u_scale'), PARAMS.scale)
+      gl.uniform1f(u('u_rotation'), (PARAMS.rotation * Math.PI) / 180)
+      gl.uniform1f(u('u_proportion'), PARAMS.proportion)
+      gl.uniform1f(u('u_softness'), PARAMS.softness)
+      gl.uniform1f(u('u_shapeScale'), PARAMS.shapeScale)
+      gl.uniform1f(u('u_distortion'), PARAMS.distortion)
+      gl.uniform1f(u('u_swirl'), PARAMS.swirl)
+      gl.uniform1f(u('u_swirlIterations'), PARAMS.swirlIterations)
+      const uTime = u('u_time')
+      const uResolution = u('u_resolution')
+      const uPixelRatio = u('u_pixelRatio')
+
+      const resize = () => {
+        // The backdrop is atmospheric, not content. Capping its internal
+        // resolution keeps a Retina display from quadrupling the fragment work.
+        const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5)
+        canvas.width = wrap.clientWidth * pixelRatio
+        canvas.height = wrap.clientHeight * pixelRatio
+        gl.viewport(0, 0, canvas.width, canvas.height)
+      }
+      resize()
+      const resizeObserver = new ResizeObserver(resize)
+      resizeObserver.observe(wrap)
+
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)')
+      const start = performance.now()
+      let frameId = 0
+      let onScreen = true
+
+      const draw = (time: number) => {
+        const elapsed = (time - start) / 1000
+        const speed = (PARAMS.speed / 100) * 5
+        gl.uniform1f(uTime, elapsed * speed + PARAMS.offset * 0.01)
+        gl.uniform2f(uResolution, canvas.width, canvas.height)
+        gl.uniform1f(uPixelRatio, Math.min(window.devicePixelRatio || 1, 1.5))
+        gl.drawArrays(gl.TRIANGLES, 0, 6)
+      }
+      const animate = (time: number) => {
+        draw(time)
+        frameId = requestAnimationFrame(animate)
+      }
+      // Reduced motion still gets the composition, held on its first frame.
+      // Ordinary motion stops whenever the backdrop is offscreen or the page
+      // is hidden, so the flourish has no background CPU cost.
+      const run = () => {
+        cancelAnimationFrame(frameId)
+        if (reduced.matches) draw(performance.now())
+        else if (onScreen && !document.hidden) frameId = requestAnimationFrame(animate)
+      }
+      const visibilityObserver = new IntersectionObserver(([entry]) => {
+        onScreen = entry.isIntersecting
+        run()
+      })
+      visibilityObserver.observe(wrap)
+      document.addEventListener('visibilitychange', run)
+      reduced.addEventListener('change', run)
+      run()
+
+      teardown = () => {
+        cancelAnimationFrame(frameId)
+        reduced.removeEventListener('change', run)
+        document.removeEventListener('visibilitychange', run)
+        visibilityObserver.disconnect()
+        resizeObserver.disconnect()
+        gl.deleteProgram(program)
+        gl.deleteShader(vertexShader)
+        gl.deleteShader(fragmentShader)
+        gl.deleteBuffer(positionBuffer)
+      }
     }
-    resize()
-    const resizeObserver = new ResizeObserver(resize)
-    resizeObserver.observe(wrap)
 
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const start = performance.now()
-    let frameId = 0
-
-    const draw = (time: number) => {
-      const elapsed = (time - start) / 1000
-      const speed = (PARAMS.speed / 100) * 5
-      gl.uniform1f(uTime, elapsed * speed + PARAMS.offset * 0.01)
-      gl.uniform2f(uResolution, canvas.width, canvas.height)
-      gl.uniform1f(uPixelRatio, window.devicePixelRatio || 1)
-      gl.drawArrays(gl.TRIANGLES, 0, 6)
-    }
-    const animate = (time: number) => {
-      draw(time)
-      frameId = requestAnimationFrame(animate)
-    }
-    // Reduced motion still gets the composition, held on its first frame.
-    const run = () => {
-      cancelAnimationFrame(frameId)
-      if (reduced.matches) draw(performance.now())
-      else frameId = requestAnimationFrame(animate)
-    }
-    run()
-    reduced.addEventListener('change', run)
+    const idleId = idleWindow.requestIdleCallback?.(initialize, { timeout: 1500 })
+    const timerId = idleId === undefined ? window.setTimeout(initialize, 500) : 0
 
     return () => {
-      cancelAnimationFrame(frameId)
-      reduced.removeEventListener('change', run)
-      resizeObserver.disconnect()
-      gl.deleteProgram(program)
-      gl.deleteShader(vertexShader)
-      gl.deleteShader(fragmentShader)
-      gl.deleteBuffer(positionBuffer)
+      disposed = true
+      if (idleId !== undefined) idleWindow.cancelIdleCallback?.(idleId)
+      if (timerId) window.clearTimeout(timerId)
+      teardown()
     }
   }, [])
 

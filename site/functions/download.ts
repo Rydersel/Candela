@@ -11,7 +11,7 @@
 //
 // ARCHIVE_URL must match the current appcast enclosure; the deploy task
 // replaces the placeholder and verifies both resolve.
-const ARCHIVE_URL = 'https://candela.fyi/CHANGE-AT-DEPLOY.zip'
+const ARCHIVE_URL = 'https://candela.fyi/Candela-0.1.0.zip'
 
 // Untyped rather than annotated PagesFunction: that type ships in
 // @cloudflare/workers-types, and the site takes no new dependencies.

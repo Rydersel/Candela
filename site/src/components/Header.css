@@ -1,0 +1,116 @@
+.skip-link {
+  position: fixed;
+  z-index: 100;
+  top: 0.75rem;
+  left: 1rem;
+  padding: 0.65rem 0.9rem;
+  border-radius: calc(var(--radius) * 0.75);
+  background: var(--accent);
+  color: var(--bg);
+  font-size: var(--fs-small);
+  font-weight: 700;
+  transform: translateY(calc(-100% - 1rem));
+  transition: transform 160ms ease;
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+.site-header {
+  position: fixed;
+  z-index: 40;
+  inset: 0 0 auto;
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(18px) saturate(1.08);
+}
+
+.site-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+  max-width: 78rem;
+  min-height: 3.75rem;
+  margin: 0 auto;
+  padding-inline: 1.5rem;
+}
+
+.site-brand {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  border-radius: calc(var(--radius) * 0.75);
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  transition: color 150ms ease;
+}
+
+.site-brand:hover {
+  color: var(--accent);
+}
+
+.site-nav-links {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.site-nav-link,
+.site-nav-download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5rem;
+  border-radius: calc(var(--radius) * 0.75);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  transition:
+    color 150ms ease,
+    background 150ms ease,
+    transform 150ms ease;
+}
+
+.site-nav-link {
+  padding-inline: 0.8rem;
+  color: var(--text-dim);
+}
+
+.site-nav-link:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.site-nav-download {
+  margin-left: 0.5rem;
+  padding-inline: 1rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: color-mix(in srgb, var(--accent) 72%, var(--text-dim));
+  font-family: inherit;
+  cursor: not-allowed;
+}
+
+@media (max-width: 620px) {
+  .site-nav {
+    padding-inline: 1rem;
+  }
+
+  .site-nav-link {
+    display: none;
+  }
+
+  .site-nav-download {
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .site-header {
+    background: var(--bg);
+    backdrop-filter: none;
+  }
+}

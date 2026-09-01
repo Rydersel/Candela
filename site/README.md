@@ -6,6 +6,7 @@ Design spec: `docs/superpowers/specs/2026-08-28-site-redesign-design.md`.
 ```sh
 npm install
 npm run dev       # local dev with HMR
+npm test          # interaction and accessibility regression tests
 npm run build     # static output in dist/, deployable anywhere (base is './')
 npm run preview   # serve the production build locally
 ```

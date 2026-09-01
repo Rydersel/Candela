@@ -5,19 +5,16 @@ import { trust } from '../content/copy'
 import { useReveal } from '../useReveal'
 import './Closing.css'
 
-// SR6, the one place the honest details live: local-only data, the published
-// idle cost, open source forever, and the private-API dependence. Four claims
-// carrying equal weight, so they are set as one ledger rather than as cards
-// with anything singled out; the private-API row is the same size as the rest
-// on purpose. The heading reveals, the claims do not: they are running prose,
-// and the deep sections already ruled that prose never scrolls in invisible.
+// The user-facing trust claims: local-only data, measured overhead, and open
+// source forever. They carry equal weight along one evidence spine.
+// The heading reveals; the claims stay visible as running evidence.
 export function Trust() {
   const head = useReveal<HTMLHeadingElement>()
 
   return (
-    <section id="trust" className="closing trust">
-      <div className="closing-inner closing-rule-top">
-        <h2 className="closing-h2 reveal" ref={head}>
+    <section id="trust" className="closing trust" aria-labelledby="trust-title">
+      <div className="closing-inner">
+        <h2 className="closing-h2 reveal" id="trust-title" ref={head}>
           {trust.h2}
         </h2>
         {/* role restated for the same reason the glance band restates it: the

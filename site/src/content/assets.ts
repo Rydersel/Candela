@@ -13,6 +13,13 @@ import healthFlowPoster from '../assets/captures/health-flow-poster.webp'
 import setupFlowPoster from '../assets/captures/setup-flow-poster.webp'
 import panelFlowPoster from '../assets/captures/panel-flow-poster.webp'
 import checkupReportCapture from '../assets/captures/checkup-report.webp'
+import tourVideo from '../assets/media/tour.webm'
+import tourVideoHevc from '../assets/media/tour-hevc.mp4'
+import healthFlowVideo from '../assets/media/health-flow.mp4'
+import healthFlowVideoHevc from '../assets/media/health-flow-hevc.mp4'
+import setupFlowVideo from '../assets/media/setup-flow.mp4'
+import setupFlowVideoHevc from '../assets/media/setup-flow-hevc.mp4'
+import panelFlowVideo from '../assets/media/panel-flow.mp4'
 
 export type Asset = {
   kind: 'image' | 'video'
@@ -29,6 +36,12 @@ export type Asset = {
   // Set on an above-the-fold image that is the page's largest paint, which must
   // not wait for the lazy pass.
   eager?: boolean
+  // Lets an above-the-fold video hold its poster through the first paint before
+  // autoplay replaces it with a decoded frame. Omitted everywhere else.
+  autoplayDelay?: number
+  // The primary product tour starts with the page on desktop instead of
+  // waiting for an intersection observation below the fold.
+  autoplayOnDesktopLoad?: boolean
 }
 
 type AssetKey =
@@ -51,17 +64,20 @@ export const assets: Record<AssetKey, Asset> = {
     // VP9, not H.264: every H.264 export of this cut artifacted on the
     // hero's dark gradients. HEVC still serves Safari; everything else
     // takes the webm.
-    src: './media/tour.webm',
-    srcHevc: './media/tour-hevc.mp4',
+    src: tourVideo,
+    srcHevc: tourVideoHevc,
     poster: tourPoster,
     width: 2080,
     height: 1524,
+    eager: true,
+    autoplayDelay: 1500,
+    autoplayOnDesktopLoad: true,
     alt: "A tour of Candela's settings: General, the OLED care pane with a display's measured hours and hottest area, and the menu bar and indicator options.",
   },
   healthFlow: {
     kind: 'video',
-    src: './media/health-flow.mp4',
-    srcHevc: './media/health-flow-hevc.mp4',
+    src: healthFlowVideo,
+    srcHevc: healthFlowVideoHevc,
     poster: healthFlowPoster,
     width: 1920,
     height: 1080,
@@ -69,8 +85,8 @@ export const assets: Record<AssetKey, Asset> = {
   },
   setupFlow: {
     kind: 'video',
-    src: './media/setup-flow.mp4',
-    srcHevc: './media/setup-flow-hevc.mp4',
+    src: setupFlowVideo,
+    srcHevc: setupFlowVideoHevc,
     poster: setupFlowPoster,
     width: 1520,
     height: 1184,
@@ -78,7 +94,7 @@ export const assets: Record<AssetKey, Asset> = {
   },
   panelFlow: {
     kind: 'video',
-    src: './media/panel-flow.mp4',
+    src: panelFlowVideo,
     poster: panelFlowPoster,
     width: 1920,
     height: 1080,

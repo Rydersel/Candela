@@ -1,6 +1,7 @@
 import { checkup } from '../content/copy'
 import { assets } from '../content/assets'
 import { MediaFrame } from './MediaFrame'
+import { ProofList } from './ProofList'
 import { useReveal } from '../useReveal'
 import './DeepSections.css'
 
@@ -19,14 +20,10 @@ export function SectionCheckup() {
           <p className="deep-lead">{checkup.lead}</p>
         </div>
         <div className="checkup-grid">
-          <div className="deep-body">
-            {checkup.body.map((paragraph) => (
-              <p key={paragraph}>{paragraph}</p>
-            ))}
-          </div>
           <div className="checkup-media reveal" ref={media}>
             <MediaFrame asset={assets.checkupReport} className="checkup-report" />
           </div>
+          <ProofList items={checkup.proofs} />
         </div>
       </div>
     </section>

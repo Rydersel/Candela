@@ -1,12 +1,13 @@
 import { controls } from '../content/copy'
 import { assets } from '../content/assets'
 import { MediaFrame } from './MediaFrame'
+import { ProofList } from './ProofList'
 import { useReveal } from '../useReveal'
 import './DeepSections.css'
 
 // The first feature section: centered head over the panel walkthrough at
 // full content width (the recording carries its own zooms, so it gets the
-// stage, not a column), with the prose reading as a spread below it.
+// stage, not a column), with three labeled receipts below it.
 export function SectionControls() {
   const head = useReveal<HTMLDivElement>()
   const stage = useReveal<HTMLDivElement>()
@@ -22,11 +23,7 @@ export function SectionControls() {
         <div className="controls-stage reveal" ref={stage}>
           <MediaFrame asset={assets.panelFlow} className="controls-flow" />
         </div>
-        <div className="controls-body deep-body">
-          {controls.body.map((paragraph) => (
-            <p key={paragraph}>{paragraph}</p>
-          ))}
-        </div>
+        <ProofList items={controls.proofs} className="controls-proof-list" />
       </div>
     </section>
   )

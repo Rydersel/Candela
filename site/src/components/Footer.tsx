@@ -3,9 +3,8 @@ import candelaMark from '../assets/candela-c.svg'
 import './Closing.css'
 
 // Outside <main> in App.tsx so this is a real contentinfo landmark; nested in
-// main it would be a plain group. The two links reuse the hero's own action
-// labels rather than inventing footer wording, and the download one points at
-// the counted /download route the same way the hero button does.
+// main it would be a plain group. The release action stays visibly held here
+// as it does in the hero, while GitHub remains available.
 export function Footer() {
   return (
     <footer className="closing site-footer">
@@ -15,9 +14,9 @@ export function Footer() {
           <p className="footer-note">{footer.note}</p>
         </div>
         <div className="footer-links">
-          <a className="footer-link footer-link-lit" href="/download">
+          <button className="footer-link footer-link-lit" type="button" disabled>
             {hero.ctaPrimary}
-          </a>
+          </button>
           <a className="footer-link" href="https://github.com/Rydersel/Candela">
             {hero.ctaSecondary}
           </a>

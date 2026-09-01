@@ -23,8 +23,8 @@ export const hero: {
   foss: string
 } = {
   h1: "The display software Apple forgot to ship.",
-  sub: "Your monitor is the most expensive thing on your desk that nothing takes care of. Candela watches its health, protects it from burn-in, checks it for defects and wear, and handles the everyday controls the way macOS should have.",
-  ctaPrimary: "Download Candela",
+  sub: "Candela watches your display's health, protects OLED panels from burn-in, checks for defects and wear, and gives every monitor the controls macOS should have.",
+  ctaPrimary: "Download at 1.0",
   ctaSecondary: "View on GitHub",
   foss: "Free and open source, forever.",
 }
@@ -36,11 +36,13 @@ export const brew: {
   cmd: string
   hint: string
   copied: string
+  failed: string
   copyLabel: string
 } = {
   cmd: "brew install --cask rydersel/tap/candela",
   hint: "click to copy",
   copied: "copied",
+  failed: "Copy failed. Select manually.",
   copyLabel: "Copy the Homebrew install command",
 }
 
@@ -51,6 +53,16 @@ export const glanceLabel = "What Candela does"
 export const mediaPause = "Pause"
 export const mediaResume = "Play"
 
+export const navigation = {
+  label: "Primary",
+  brand: "Candela",
+  features: "Features",
+  trust: "Trust",
+  questions: "Questions",
+  download: "Download at 1.0",
+  skip: "Skip to content",
+}
+
 // The five-second read: every key feature, one line each, in the order the
 // deep sections tell them. Most visitors never scroll past this band, so it
 // has to be the whole app in miniature.
@@ -60,98 +72,118 @@ export const glance: Array<{
   line: string
 }> = [
   {
-    id: "controls",
-    title: "Controls",
-    line: "Brightness, volume and contrast for every display, from the menu bar or your keys.",
-  },
-  {
-    id: "sizes",
-    title: "Sizes",
-    line: "The scaled resolutions macOS hides, for crisper text on 4K panels.",
-  },
-  {
-    id: "setup",
-    title: "Setup",
-    line: "Finds your displays and learns what each one can do.",
-  },
-  {
     id: "protection",
     title: "Protection",
-    line: "Maps every hour on your panel and dims what sits static, live.",
+    line: "Dims static OLED regions and maps their exposure.",
   },
   {
     id: "checkup",
     title: "Checkup",
-    line: "Checks a display for defects and wear, on the record.",
+    line: "Checks for defects and records what it found.",
+  },
+  {
+    id: "controls",
+    title: "Controls",
+    line: "Brightness, volume and contrast from your keys.",
+  },
+  {
+    id: "sizes",
+    title: "Sizes",
+    line: "Every sharp HiDPI size macOS hides.",
+  },
+  {
+    id: "setup",
+    title: "Setup",
+    line: "Learns what each connected display can do.",
   },
   {
     id: "more",
     title: "And more",
-    line: "Virtual displays, HDR, mirroring, arrangement, shortcuts.",
+    line: "Virtual displays, HDR, mirroring, arrangement and shortcuts.",
   },
 ]
 
-export const controls: { h2: string; lead: string; body: string[] } = {
+export type ProofItem = { title: string; body: string }
+
+export const controls: { h2: string; lead: string; proofs: ProofItem[] } = {
   h2: "Every control, for every display.",
-  lead: "macOS gives an external monitor almost nothing: no brightness key, no volume key, no mute. Candela treats your external displays the way macOS treats the built-in one.",
-  body: [
-    "Brightness, volume, contrast and mute over DDC, from the menu bar or the keys already on your keyboard; native brightness where the panel supports it. Careful means checked: Candela verifies what the display achieved instead of trusting the acknowledgement it got back, because monitors do acknowledge commands they then ignore.",
-    "HDR is a first-class state, not an error. Candela shows when HDR has the panel, switches it in one click, and tells you why a control went quiet instead of leaving you guessing. Most display utilities act as if HDR does not exist.",
+  lead: "Candela treats external displays like the built-in one: brightness, volume, contrast and mute from the menu bar or the keys you already use.",
+  proofs: [
+    {
+      title: "Everyday controls",
+      body: "Control every panel from one menu, with native brightness wherever the display supports it.",
+    },
+    {
+      title: "Verified at the display",
+      body: "Candela checks what the monitor actually did instead of trusting an acknowledgement.",
+    },
+    {
+      title: "HDR-aware",
+      body: "Switch HDR in one click and see why a control is unavailable.",
+    },
   ],
 }
 
-export const sizes: { h2: string; lead: string; body: string[] } = {
+export const sizes: { h2: string; lead: string; proofs: ProofItem[] } = {
   h2: "The sizes macOS will not show you.",
   lead: "A 4K panel can run at many scaled sizes. System Settings offers a handful per display and hides the rest.",
-  body: [
-    "On a high-density display the difference between sizes is not just how big things are, it is how sharp: a HiDPI size renders at double resolution and scales down, so text comes out crisp where a plain low-resolution mode comes out soft. The size you actually want is often one macOS never offers.",
-    "Candela lists every size your display can do, including HiDPI sizes macOS synthesizes for its own displays but withholds from yours, and applies them with a way back: if a change leaves the screen wrong, it reverts on its own unless you keep it.",
+  proofs: [
+    {
+      title: "Sharper HiDPI",
+      body: "See every scaled size your panel can render, including crisp HiDPI modes System Settings hides.",
+    },
+    {
+      title: "Safe rollback",
+      body: "If a new size leaves the screen wrong, Candela restores the previous one unless you keep it.",
+    },
   ],
 }
 
-// The sizes figure is measured data, not an illustration: the probe's curated
-// picker list for the MAG, read 2026-08-31 (95 modes -> 16 rows, 5 revealed).
-// Every row and framebuffer below is transcribed from that run. If the list
-// is ever re-measured, update the caption's date with it.
+// The sizes figure is measured data, not an illustration. The Dell capture
+// found 177 HiDPI modes across 27 distinct logical sizes while the panel was
+// rotated. These five examples transpose that record into landscape geometry.
 export const sizesFigure: {
   panel: string
+  sizeCount: number
   stat: string
   hiddenNote: string
+  hiddenListLabel: string
   foot: string
   caption: string
-  rows: Array<{ size: string; hidden?: boolean }>
+  examples: string[]
 } = {
-  panel: "MAG 341C OLED",
-  stat: "16 sizes from 95 modes",
-  hiddenNote: "hidden by macOS",
-  foot: "The lit sizes render at double resolution.",
-  caption: "The real size list for the MAG 341C OLED.",
-  rows: [
-    { size: "3440 × 1440" },
-    { size: "2560 × 1440" },
-    { size: "2048 × 858", hidden: true },
-    { size: "1920 × 1080" },
-    { size: "1920 × 804", hidden: true },
-    { size: "1720 × 720" },
-    { size: "1680 × 1050" },
-    { size: "1600 × 1200" },
-    { size: "1600 × 670", hidden: true },
-    { size: "1440 × 900" },
-    { size: "1344 × 1008" },
-    { size: "1344 × 562", hidden: true },
-    { size: "1280 × 1024" },
-    { size: "1280 × 960" },
-    { size: "1280 × 720" },
-    { size: "1280 × 536", hidden: true },
+  panel: "DELL U2725QE",
+  sizeCount: 27,
+  stat: "177 measured HiDPI modes across refresh rates.",
+  hiddenNote: "distinct HiDPI sizes found",
+  hiddenListLabel: "Five landscape HiDPI size examples",
+  foot: "Five landscape examples. Each renders at double resolution.",
+  caption: "Measured on the Dell U2725QE, shown in landscape orientation.",
+  examples: [
+    "3360 × 1890",
+    "3200 × 1800",
+    "3008 × 1692",
+    "2560 × 1440",
+    "2304 × 1296",
   ],
 }
 
-export const setup: { h2: string; lead: string; body: string[] } = {
+export const setup: { h2: string; lead: string; proofs: ProofItem[] } = {
   h2: "It configures itself to your setup.",
   lead: "On first launch Candela finds every display, asks each one what it can do, and builds the controls around the answers.",
-  body: [
-    "The setup says what it found in plain terms: which panel takes brightness and volume, which display refuses a control, which one is an OLED that deserves protection. When a monitor answers nothing at all, Candela says that too, and still drives it.",
-    "It also keeps your setup configured: brightness, resolution and arrangement come back after a sleep, a replug or a reboot, instead of resetting to whatever macOS remembered.",
+  proofs: [
+    {
+      title: "Learns each panel",
+      body: "Candela asks every display what it supports and builds its controls around the answers.",
+    },
+    {
+      title: "Explains what works",
+      body: "Setup shows which controls each display accepts, in plain language.",
+    },
+    {
+      title: "Restores your setup",
+      body: "Brightness, resolution and arrangement return after sleep, replugging or reboot.",
+    },
   ],
 }
 
@@ -161,23 +193,19 @@ export const setup: { h2: string; lead: string; body: string[] } = {
 // local dimming: static high-risk regions ease down, the rest stays lit,
 // and a moved window lifts its old spot at once.
 export const exposureDemo: {
-  caption: string
   figureLabel: string
 } = {
-  caption: "Weeks of use, cell by cell: the regions your habits keep lit build the brightest record.",
   figureLabel: "An animated concept grid: cells brighten over time where the screen's static habits sit, building the exposure record.",
 }
 
 export const dimDemo: {
   phases: { lit: string; settled: string }
-  caption: string
   figureLabel: string
 } = {
   phases: {
     lit: "you move the window",
     settled: "the static parts dim, the rest stays lit",
   },
-  caption: "What sits still eases down: the menu bar, a title bar, the dock. What you are using stays at full brightness, and any change lifts its region back at once.",
   figureLabel: "An animated demonstration of live local dimming: the static regions of a screen ease down while the active window stays bright, and moving the window restores its old region immediately.",
 }
 
@@ -187,36 +215,59 @@ export const dimDemo: {
 export const protection: {
   h2: string
   lead: string
-  actBody: string[]
-  watchBody: string[]
+  actProofs: ProofItem[]
+  watchProofs: ProofItem[]
   recordTitle: string
-  sideClause: string
 } = {
-  h2: "Protection that works while you do.",
-  lead: "OLED wear happens where the picture does not move. Candela's answer is live and local: the static, high-risk parts of the screen ease down while everything you are using stays at full brightness.",
-  actBody: [
-    "The parts of the screen that sit static and high risk, a menu bar untouched for an hour, a window's title bar, the dock, ease down on their own. Everything you are actually using stays exactly as bright as you set it.",
-    "The moment those pixels change, moving the window is enough, the region lifts back at once. It is the part other display apps do not have.",
-    "And protection that could hurt the panel does not ship: one power command was built, hardware tested, and cut after it took a real monitor down.",
+  h2: "Protection that adapts while you work.",
+  lead: "Candela's Adaptive Pixel Dimming detects bright, unchanged regions and eases them down in place, while active content stays at full brightness.",
+  actProofs: [
+    {
+      title: "Targets static hotspots",
+      body: "Toolbars, sidebars and other bright regions ease down after they stop changing, without dimming the rest of your display.",
+    },
+    {
+      title: "Responds as content moves",
+      body: "Move a window or update a region and Candela restores it to full brightness immediately.",
+    },
   ],
-  watchBody: [
-    "Underneath sits the record your monitor will never keep for you: which regions of the panel have been lit, how brightly, and for how long. The exposure map is a grid laid over the panel, and every cell accumulates the light it has actually shown.",
-    "A menu bar that never moves, a dock, the window that lives in the same corner every day: give it a few weeks and your own habits are sitting there on the map. No monitor firmware will hand you this; if the record is going to exist, something on your Mac has to keep it.",
+  watchProofs: [
+    {
+      title: "Maps cumulative exposure",
+      body: "A local exposure grid tracks where the panel has been lit, how brightly and for how long.",
+    },
+    {
+      title: "Attributes display time by app",
+      body: "See which apps have occupied the most panel area, without Candela reading window titles or contents.",
+    },
+    {
+      title: "Exports a portable panel record",
+      body: "Take lifetime hours, exposure history and checkup runs with the display in one integrity-checked file.",
+    },
   ],
   recordTitle: "See what your panel has been through.",
-  sideClause: "Dimming while you are away also trims the power draw.",
 }
 
 export const checkup: {
   h2: string
   lead: string
-  body: string[]
+  proofs: ProofItem[]
 } = {
   h2: "Checks your display for defects and wear.",
-  lead: "A checkup is a scripted run across the panel that ends in a report you keep: what the monitor claims, what it actually does, and what your eyes confirm.",
-  body: [
-    "The run works through what can be checked: DDC readbacks, mode changes, a refresh-rate sweep, the identity block where the monitor names its own make and model, and test fields for the things only your eyes can judge. Every line in the report carries how it was known: observed, refused, not observed, or self-reported.",
-    "For the checks that need your eyes, the run plants something faint that is definitely there. Miss it and the session records as inconclusive. A test you cannot fail is not a test.",
+  lead: "A checkup ends in a report you keep: what the monitor claims, what Candela observes, and what your eyes confirm.",
+  proofs: [
+    {
+      title: "Monitor reports",
+      body: "Candela records the identity and capabilities the display reports about itself.",
+    },
+    {
+      title: "Candela observes",
+      body: "Mode changes and other checks are labeled by how the result was known.",
+    },
+    {
+      title: "You confirm",
+      body: "Visual tests can be missed and recorded as inconclusive. A test you cannot fail is not a test.",
+    },
   ],
 }
 
@@ -233,16 +284,24 @@ export const more: {
       body: "Create a display that is not physically there, for a headless Mac or for testing.",
     },
     {
-      title: "Mirroring and arrangement",
-      body: "Mirror one display onto another and rearrange the layout without opening System Settings.",
+      title: "Dim past the hardware minimum",
+      body: "When a monitor reaches its lowest hardware setting, Candela can keep dimming in software, all the way to black.",
+    },
+    {
+      title: "Keep every display in sync",
+      body: "Adjust every display together or keep external panels matched to the built-in display automatically.",
+    },
+    {
+      title: "Mirroring, arrangement, rotation and refresh rate",
+      body: "Mirror, rearrange and rotate displays, then choose their refresh rates without opening System Settings.",
+    },
+    {
+      title: "Keep Display Awake",
+      body: "Prevent display sleep from the menu bar until you turn it off or quit Candela.",
     },
     {
       title: "Keyboard shortcuts",
       body: "Put brightness, volume and mute on the keys you choose, including a keyboard Apple never made.",
-    },
-    {
-      title: "A menu bar app, properly",
-      body: "Lives in the menu bar, launches at login if you ask, and puts nothing in the Dock.",
     },
   ],
 }
@@ -254,20 +313,16 @@ export const trust: {
   h2: "The record is yours, and only yours.",
   items: [
     {
-      title: "The exposure data never leaves your Mac",
-      body: "No account, no server, nothing to opt out of. When Candela samples the screen it keeps 240 numbers, one brightness per cell, and discards the frame inside the function that asked for it. This page holds the same line: the site keeps two totals, page views and downloads, and that is the whole of it.",
+      title: "Stays on your Mac",
+      body: "No account, no server and no upload. Screen samples are discarded as soon as Candela has the local exposure reading. The website records only page views and downloads.",
     },
     {
-      title: "Light on the machine",
-      body: "Every background feature in Candela carries a measured budget it has to hit, and a feature that misses its budget ships turned off. The receipts are ten seconds away: open Activity Monitor and look.",
+      title: "Measured overhead",
+      body: "Every background feature has a measured performance budget. If it misses, it ships turned off.",
     },
     {
       title: "Free and open source, forever",
-      body: "MIT licensed, and the whole repository is public: the engine, the hardware notes, the arguments about what to cut and why. No paid tier waiting behind a later version.",
-    },
-    {
-      title: "Some of this rests on private macOS APIs",
-      body: "Parts of Candela go through interfaces Apple does not document and can change in any macOS release. Every release gets a conformance run over those paths, and the built-in updater turns a break into a fix that reaches you.",
+      body: "Candela is MIT licensed, and the entire app is public. There is no paid tier waiting behind a later version.",
     },
   ],
 }
@@ -278,19 +333,19 @@ export const faqH2 = "Questions"
 export const faq: Array<{ q: string; a: string }> = [
   {
     q: "How is this different from MonitorControl or BetterDisplay?",
-    a: "Both are good, and neither is trying to do this. BetterDisplay is the deepest display toolbox on the Mac, and if virtual screens and resolution surgery are what you need, that is the app to use; Candela sits beside it. MonitorControl stands on the same free and open source ground Candela does, and it does the daily controls well. The difference is the care layer: the exposure map, the protection, the checkup, the record of what your panel has been through. Other display apps adjust settings in the moment. Candela stewards your display over its lifetime, and does the settings too. One caution whichever pair you run: only one app should write DDC to a panel at a time, so leave the controls on in one of them and off in the other.",
+    a: "MonitorControl handles daily controls well, while BetterDisplay is a deeper display toolbox. Candela's difference is the care layer: exposure maps, active OLED protection, checkups, and a record of panel use. If you run two display utilities, let only one control a panel's hardware settings.",
   },
   {
     q: "What do I need to run it?",
-    a: "macOS 14 Sonoma or later, on an Apple Silicon Mac. The build ships arm64 only. External displays are what Candela is for, and it reaches their hardware controls over DDC, which most DisplayPort, HDMI and USB-C connections carry; some docks and adapters drop it, and the Diagnostics page tells you which path each display is actually on and what it answered. The built-in display gets its own pane for the parts that apply to it.",
+    a: "macOS 14 Sonoma or later on an Apple Silicon Mac. Most DisplayPort, HDMI and USB-C connections carry the display controls Candela needs, but some docks and adapters block them. Diagnostics shows what each connected display supports.",
   },
   {
     q: "What permissions does it ask for, and why?",
-    a: "Accessibility, if you want the brightness and volume keys on your keyboard to reach an external display. Screen Recording is optional: it lets Candela sample what the panel is showing, which makes the exposure map sharper. Decline it and the map still builds from inputs that need no permission, and the app says which reading you are looking at. Nothing is uploaded under either answer.",
+    a: "Accessibility lets your keyboard's brightness and volume keys control external displays. Screen Recording is optional and makes the exposure map more precise. Without it, the map still builds from other inputs and Candela labels which reading you are seeing. Nothing is uploaded.",
   },
   {
     q: "My monitor ignores every read. Does it still work?",
-    a: "Yes, and it is one of the cases the app was designed around. One of the two panels this app is developed on takes every DDC write and answers every read with zeros: no brightness readback, no capabilities string, nothing at all. Candela tracks what it wrote, keeps it across restarts, and labels it a last-written value instead of dressing it up as a measurement. In a checkup, Candela records the questions your panel cannot answer as not observed, in those words, never as a blank and never as an invented number.",
+    a: "Yes. Some monitors accept changes but report no useful values. Candela keeps the last value it successfully wrote and labels it as last written, never measured. Checkup marks unanswered questions as not observed instead of inventing a result.",
   },
 ]
 

@@ -1,13 +1,10 @@
-/* The closing register: trust, FAQ, footer. The loop ended at station 04, so
-   nothing down here carries a rail or a station dot, no frame glows and no
-   media appears. This block is hairlines, dim ink and space, one step below
-   the quietest deep section by contract. The column also narrows from the
-   deep sections' 72rem to 56rem, so the page visibly tapers to a close.
+/* The closing register: trust, FAQ, footer. Trust opens as one pledge with an
+   evidence spine; FAQ and footer then taper back to hairlines, dim ink and
+   space. Every colour derives from a token with color-mix; nothing bypasses
+   the palette.
 
    The amber returns exactly once, on the footer's download link: the same
-   words the hero opened with, at the smallest size they appear on the page.
-   Every colour derives from a token with color-mix; nothing bypasses the
-   palette. */
+   words the hero opened with, at the smallest size they appear on the page. */
 
 .closing {
   --closing-rule: color-mix(in srgb, var(--text) 9%, transparent);
@@ -24,59 +21,115 @@
   margin: 0 auto;
 }
 
-/* Rules ride the content column rather than the viewport: a full-bleed hairline
-   here would be wider than the section it closes and would undo the taper. */
-.closing-rule-top {
-  border-top: 1px solid var(--closing-rule);
-}
-
 /* Both closing headings share one treatment, a notch under the controls
    section's own reduced h2, so neither reads as a new and louder section
    starting. */
 .closing-h2 {
+  font-family: var(--font-display);
   font-size: calc(var(--fs-h2) * 0.72);
-  font-weight: 700;
-  letter-spacing: -0.015em;
+  font-weight: 650;
+  font-stretch: 96%;
+  letter-spacing: -0.02em;
   line-height: 1.12;
   text-wrap: balance;
   max-width: 24ch;
 }
 
-/* ---- Trust: the ledger ---- */
+/* ---- Trust: one pledge, three pieces of evidence ---- */
 
 .trust {
-  padding-block: clamp(2.5rem, 6vh, 3.5rem) clamp(3rem, 7vh, 4.5rem);
+  position: relative;
+  padding-block: clamp(3.75rem, 8vh, 5.5rem);
+  background:
+    radial-gradient(
+      ellipse at 18% 42%,
+      color-mix(in srgb, var(--accent) 5%, transparent),
+      transparent 42%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface) 24%, var(--bg)),
+      color-mix(in srgb, var(--surface) 10%, var(--bg))
+    );
 }
 
 .trust .closing-inner {
-  padding-top: clamp(2.75rem, 6vh, 4rem);
+  display: grid;
+  grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
+  gap: clamp(4rem, 8vw, 7rem);
+  align-items: start;
+  max-width: 64rem;
+}
+
+.trust .closing-h2 {
+  position: relative;
+  max-width: 11ch;
+  padding-bottom: 1.5rem;
+  font-size: calc(var(--fs-h2) * 0.88);
+  line-height: 1.06;
+}
+
+.trust .closing-h2::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 2.5rem;
+  height: 1px;
+  background: linear-gradient(90deg, var(--accent), transparent);
 }
 
 .trust-list {
-  margin-top: clamp(2rem, 4.5vh, 2.75rem);
+  position: relative;
+  display: grid;
+  gap: clamp(2rem, 4.5vh, 2.75rem);
+  padding-left: 2.25rem;
 }
 
-/* Each claim is a row in a ledger: the claim on the left, what backs it on the
-   right, a hairline between every pair. */
+.trust-list::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0.55rem;
+  bottom: 0.9rem;
+  width: 1px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--accent) 65%, transparent),
+    color-mix(in srgb, var(--text) 16%, transparent)
+  );
+}
+
 .trust-item {
-  display: grid;
-  grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
-  gap: 0.6rem 2.75rem;
-  padding-block: 1.5rem;
-  border-top: 1px solid var(--closing-rule);
+  position: relative;
+}
+
+.trust-item::before {
+  content: '';
+  position: absolute;
+  left: calc(-2.25rem + 0.5px);
+  top: 0.45rem;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 24%, transparent);
 }
 
 .trust-title {
-  font-size: var(--fs-body);
-  font-weight: 600;
+  font-size: calc(var(--fs-body) * 1.04);
+  font-weight: 650;
   line-height: 1.35;
-  color: var(--closing-ink);
+  color: var(--text);
   text-wrap: pretty;
 }
 
 .trust-body {
+  margin-top: 0.45rem;
+  max-width: 36rem;
   font-size: calc(var(--fs-body) * 0.94);
-  line-height: 1.65;
+  line-height: 1.6;
   color: var(--text-dim);
   text-wrap: pretty;
 }
@@ -141,7 +194,12 @@
 }
 
 .faq-item[open] .faq-q::after {
+  border-color: var(--accent);
   transform: rotate(-45deg);
+}
+
+.faq-item[open] .faq-q {
+  color: var(--text);
 }
 
 .faq-a {
@@ -203,7 +261,12 @@
      the last actionable things on the page and the smallest type it sets. */
   display: inline-block;
   padding-block: 0.4rem;
+  border: 0;
+  background: transparent;
   color: var(--text-dim);
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
   transition: color 160ms ease;
 }
 
@@ -215,11 +278,8 @@
 }
 
 .footer-link-lit {
-  color: var(--accent);
-}
-
-.footer-link-lit:hover {
-  color: var(--accent);
+  color: color-mix(in srgb, var(--accent) 68%, var(--text-dim));
+  cursor: not-allowed;
 }
 
 /* 860 is the width the glance band already goes vertical at; the closing
@@ -227,10 +287,22 @@
    own. It also lands before 768, where the two-cluster footer row started
    wrapping mid-link. */
 @media (max-width: 860px) {
-  .trust-item {
+  .trust .closing-inner {
     grid-template-columns: minmax(0, 1fr);
-    gap: 0.5rem;
-    padding-block: 1.35rem;
+    gap: 2.5rem;
+  }
+
+  .trust .closing-h2 {
+    max-width: 18ch;
+  }
+
+  .trust-list {
+    gap: 2rem;
+    padding-left: 1.75rem;
+  }
+
+  .trust-item::before {
+    left: calc(-1.75rem + 0.5px);
   }
 
   .footer-inner {

@@ -121,10 +121,12 @@
 }
 
 .deep-h2 {
+  font-family: var(--font-display);
   font-size: var(--fs-h2);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.08;
+  font-weight: 650;
+  font-stretch: 96%;
+  letter-spacing: -0.025em;
+  line-height: 1.06;
   text-wrap: balance;
   max-width: 24ch;
 }
@@ -159,26 +161,30 @@
   left: calc(50% - 1.5px);
 }
 
-.deep-body p {
-  max-width: 40rem;
-  color: var(--text-dim);
-  line-height: 1.65;
+.proof-list {
+  align-self: start;
+}
+
+.proof-item {
+  padding-block: 1.1rem;
+  border-top: 1px solid var(--deep-edge);
+}
+
+.proof-title {
+  font-size: var(--fs-body);
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--deep-lead-ink);
   text-wrap: pretty;
 }
 
-.deep-body p + p {
-  margin-top: 1.15rem;
-}
-
-/* SR4: the power line is one unquantified side clause, set as a footnote
-   behind a hairline, never a headline. */
-.deep-aside {
-  margin-top: 2rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--deep-edge);
-  max-width: 26rem;
-  font-size: var(--fs-small);
-  letter-spacing: 0.01em;
+.proof-body {
+  margin-top: 0.45rem;
+  max-width: 36rem;
+  font-size: calc(var(--fs-body) * 0.94);
+  line-height: 1.55;
+  color: var(--text-dim);
+  text-wrap: pretty;
 }
 
 /* Scroll reveal: heads and lit objects rise as they enter. The long body
@@ -187,11 +193,16 @@
    aging strip's copy) does ride that block's reveal. The theme's
    reduced-motion block collapses the transition to instant. */
 .reveal {
+  opacity: 1;
+  transform: none;
+}
+
+.reveal.reveal-ready {
   opacity: 0;
   transform: translateY(18px);
   transition:
-    opacity 0.65s ease,
-    transform 0.65s ease;
+    opacity 0.65s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .reveal.in {
@@ -204,7 +215,8 @@
    station dots are simply lit, for the same reason: no pulse, no delayed
    bloom, just the record already showing. */
 @media (prefers-reduced-motion: reduce) {
-  .reveal {
+  .reveal,
+  .reveal.reveal-ready {
     opacity: 1;
     transform: none;
   }
@@ -245,16 +257,12 @@
     0 6px 20px color-mix(in srgb, var(--bg) 60%, transparent);
 }
 
-/* The prose reads as a spread under the stage rather than a single wall. */
-.controls-body {
+/* Three short receipts under the full-width walkthrough. */
+.controls-proof-list {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: clamp(2rem, 5vw, 4rem);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(1.5rem, 4vw, 3rem);
   margin-top: clamp(2rem, 4.5vh, 3rem);
-}
-
-.controls-body p + p {
-  margin-top: 0;
 }
 
 /* ---- Sizes: the one section told typographically ---- */
@@ -268,119 +276,120 @@
   margin: 0 auto;
 }
 
-.sizes-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
-  gap: clamp(2.5rem, 5vw, 4.5rem);
-  align-items: start;
+.sizes-stage {
   margin-top: clamp(2.25rem, 5vh, 3.25rem);
 }
 
-/* The ladder is measured data set as a designed table, deliberately not a
-   mock screenshot: a hairline frame, tabular numerals, and the page's own
-   dot vocabulary. A lit dot means the same thing it means everywhere else
-   on this page: this one is on the record, and macOS was not showing it. */
-.sizes-ladder {
-  border: 1px solid var(--deep-edge);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--surface) 55%, transparent);
-  padding: 1.1rem 1.25rem 0.9rem;
+/* The measurement is now one open composition: one takeaway on the left,
+   the five omitted sizes drawn as a descending scale on the right. The full
+   16-row probe remains the source data, but no longer competes with the point. */
+.sizes-reveal {
+  display: grid;
+  grid-template-columns: minmax(10rem, 0.58fr) minmax(0, 1.42fr);
+  gap: clamp(3rem, 8vw, 7rem);
+  align-items: center;
+  padding-block: clamp(2rem, 5vh, 3rem);
+  border-block: 1px solid var(--deep-edge);
 }
 
-/* Sixteen rows in two columns of eight: half the height, none of the empty
-   air the single tall column carried. The shared double-resolution fact
-   lives once in the footnote instead of five times in the rows. */
-.sizes-rows {
-  columns: 2;
-  column-gap: 1.5rem;
-}
-
-.sizes-ladder-foot {
-  margin-top: 0.8rem;
-  padding-top: 0.7rem;
-  border-top: 1px solid color-mix(in srgb, var(--text) 5%, transparent);
-  font-size: 0.75rem;
-  color: var(--text-dim);
-}
-
-.sizes-ladder-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 1rem;
-  padding-bottom: 0.85rem;
-}
-
-.sizes-ladder-panel {
-  font-size: var(--fs-small);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.sizes-ladder-stat {
-  font-size: var(--fs-small);
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
-}
-
-.sizes-row {
-  position: relative;
-  display: flex;
-  align-items: baseline;
-  gap: 0.6rem;
-  padding: 0.42rem 0 0.42rem 1.15rem;
-  border-top: 1px solid color-mix(in srgb, var(--text) 5%, transparent);
-  font-size: var(--fs-small);
-  font-variant-numeric: tabular-nums;
-  color: var(--text-dim);
-  break-inside: avoid;
-}
-
-/* The stock rows carry the hollow station dot, the hidden rows the lit one. */
-.sizes-row::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 50%;
-  width: 6px;
-  height: 6px;
-  transform: translateY(-50%);
-  border-radius: 50%;
-  border: 1px solid color-mix(in srgb, var(--text) 30%, transparent);
-  background: var(--bg);
-}
-
-.sizes-row-hidden::before {
-  border-color: var(--accent);
-  background: var(--accent);
-  box-shadow: 0 0 8px 1px var(--deep-pulse);
-}
-
-.sizes-row-hidden .sizes-row-size {
-  color: var(--text);
-  font-weight: 500;
-}
-
-.sizes-row-size {
-  min-width: 5.6rem;
-}
-
-.sizes-row-tag {
-  font-size: 0.68rem;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+.sizes-summary-count {
+  display: block;
+  font-size: clamp(5.5rem, 11vw, 8.5rem);
+  font-weight: 620;
+  letter-spacing: -0.04em;
+  line-height: 0.78;
   color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.sizes-summary-label {
+  margin-top: 1.15rem;
+  max-width: 13rem;
+  font-size: calc(var(--fs-body) * 1.08);
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.sizes-summary-stat {
+  margin-top: 1.2rem;
+  max-width: 15rem;
+  font-size: var(--fs-small);
+  line-height: 1.55;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.sizes-scale {
+  display: grid;
+  gap: 1.15rem;
+}
+
+.sizes-hidden-list {
+  display: grid;
+  gap: 1.2rem;
+}
+
+.sizes-hidden-item {
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: center;
+  min-height: 1.75rem;
+}
+
+.sizes-hidden-size {
+  font-size: calc(var(--fs-body) * 0.96);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--deep-lead-ink);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
+.sizes-hidden-rule {
+  position: relative;
+  display: block;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 38%, transparent),
+    var(--accent)
+  );
+}
+
+.sizes-hidden-rule::after {
+  content: '';
+  position: absolute;
+  right: -2px;
+  top: -2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 9px 1px var(--deep-pulse);
+}
+
+.sizes-scale-foot {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
 .sizes-caption {
-  margin-top: 0.9rem;
+  margin-top: 0.8rem;
   max-width: 34rem;
   font-size: var(--fs-small);
   line-height: 1.55;
   color: var(--text-dim);
   text-wrap: pretty;
+}
+
+.sizes-proof-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(2.5rem, 7vw, 6rem);
+  margin-top: clamp(2rem, 4.5vh, 3rem);
 }
 
 /* ---- Setup: the walkthrough, one register down from protection ---- */
@@ -400,11 +409,6 @@
   gap: clamp(2.5rem, 6vw, 5rem);
   align-items: start;
   margin-top: clamp(2.25rem, 5vh, 3.25rem);
-}
-
-.setup-media {
-  position: sticky;
-  top: clamp(2rem, 12vh, 5rem);
 }
 
 .setup-frame {
@@ -438,9 +442,11 @@
   margin: clamp(3rem, 7vh, 4.5rem) auto 0;
   max-width: 72rem;
   text-align: center;
+  font-family: var(--font-display);
   font-size: calc(var(--fs-h2) * 0.62);
-  font-weight: 650;
-  letter-spacing: -0.015em;
+  font-weight: 620;
+  font-stretch: 97%;
+  letter-spacing: -0.02em;
   text-wrap: balance;
 }
 
@@ -497,13 +503,6 @@
    protection acting follows it. */
 .protection-grid-act {
   grid-template-columns: minmax(0, 0.98fr) minmax(0, 1.02fr);
-}
-
-/* The pan recording rides beside the prose while it is read. */
-.protection-pan-wrap,
-.protection-media {
-  position: sticky;
-  top: clamp(2rem, 12vh, 5rem);
 }
 
 .protection-pan {
@@ -606,29 +605,46 @@
     gap: 2.5rem;
   }
 
-  .setup-media,
-  .protection-pan-wrap,
-  .protection-media {
-    position: static;
-  }
-
-  .controls-body {
+  .controls-proof-list {
     grid-template-columns: minmax(0, 1fr);
     gap: 0;
-  }
-
-  .controls-body p + p {
-    margin-top: 1.15rem;
-  }
-
-  .sizes-grid {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 2.5rem;
   }
 
   .more-item {
     grid-template-columns: minmax(0, 1fr);
     gap: 0.5rem;
+  }
+}
+
+@media (max-width: 700px) {
+  .sizes-reveal {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2.25rem;
+  }
+
+  .sizes-summary {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 1.25rem;
+    align-items: end;
+  }
+
+  .sizes-summary-count {
+    grid-row: span 2;
+  }
+
+  .sizes-summary-label {
+    margin-top: 0;
+  }
+
+  .sizes-summary-stat {
+    margin-top: 0.4rem;
+    max-width: 18rem;
+  }
+
+  .sizes-proof-list {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
   }
 }
 
@@ -655,12 +671,12 @@
     height: clamp(2.25rem, 5vh, 3rem);
   }
 
-  .protection-stage {
-    margin-top: 2.25rem;
+  .sizes-hidden-item {
+    grid-template-columns: 7rem minmax(0, 1fr);
+    gap: 0.85rem;
   }
 
-  /* One column again on a phone: two columns of size-plus-tag do not fit. */
-  .sizes-rows {
-    columns: 1;
+  .protection-stage {
+    margin-top: 2.25rem;
   }
 }

@@ -1,13 +1,16 @@
 import { sizes, sizesFigure } from '../content/copy'
 import { useReveal } from '../useReveal'
+import { ProofList } from './ProofList'
 import './DeepSections.css'
 
-// The prose beside a measured figure: the probe's curated size list for the
-// rig's ultrawide, with the five macOS-hidden sizes carrying the page's lit
-// dot. A designed table of real data, deliberately not a mock screenshot.
+// The measured figure leads, followed by two short receipts. The visual keeps
+// five useful examples from the Dell's larger measured mode set.
 export function SectionSizes() {
   const head = useReveal<HTMLDivElement>()
   const figure = useReveal<HTMLElement>()
+  const maxExampleWidth = Math.max(
+    ...sizesFigure.examples.map((size) => Number.parseInt(size, 10)),
+  )
 
   return (
     <section id="sizes" className="deep sizes">
@@ -17,37 +20,49 @@ export function SectionSizes() {
           <h2 className="deep-h2">{sizes.h2}</h2>
           <p className="deep-lead">{sizes.lead}</p>
         </div>
-        <div className="sizes-grid">
-          <div className="deep-body">
-            {sizes.body.map((paragraph) => (
-              <p key={paragraph}>{paragraph}</p>
-            ))}
-          </div>
-          <figure className="sizes-figure reveal" ref={figure}>
-            <div className="sizes-ladder">
-              <div className="sizes-ladder-head">
-                <span className="sizes-ladder-panel">{sizesFigure.panel}</span>
-                <span className="sizes-ladder-stat">{sizesFigure.stat}</span>
+        <div className="sizes-stage">
+          <figure
+            className="sizes-figure reveal"
+            ref={figure}
+            aria-labelledby="sizes-figure-caption"
+          >
+            <div className="sizes-reveal">
+              <div className="sizes-summary">
+                <span className="sizes-summary-count">{sizesFigure.sizeCount}</span>
+                <p className="sizes-summary-label">{sizesFigure.hiddenNote}</p>
+                <p className="sizes-summary-stat">{sizesFigure.stat}</p>
               </div>
-              {/* role restated because the global list-style reset drops
-                  implicit list semantics in Safari/VoiceOver. */}
-              <ul className="sizes-rows" role="list">
-                {sizesFigure.rows.map((row) => (
-                  <li
-                    className={row.hidden ? 'sizes-row sizes-row-hidden' : 'sizes-row'}
-                    key={row.size}
-                  >
-                    <span className="sizes-row-size">{row.size}</span>
-                    {row.hidden && (
-                      <span className="sizes-row-tag">{sizesFigure.hiddenNote}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-              <p className="sizes-ladder-foot">{sizesFigure.foot}</p>
+              <div className="sizes-scale">
+                {/* role restated because the global list-style reset drops
+                    implicit list semantics in Safari/VoiceOver. */}
+                <ul
+                  className="sizes-hidden-list"
+                  aria-label={sizesFigure.hiddenListLabel}
+                  role="list"
+                >
+                  {sizesFigure.examples.map((size) => {
+                    const width = Number.parseInt(size, 10)
+
+                    return (
+                      <li className="sizes-hidden-item" key={size}>
+                        <span className="sizes-hidden-size">{size}</span>
+                        <span
+                          className="sizes-hidden-rule"
+                          style={{ width: `${(width / maxExampleWidth) * 100}%` }}
+                          aria-hidden="true"
+                        />
+                      </li>
+                    )
+                  })}
+                </ul>
+                <p className="sizes-scale-foot">{sizesFigure.foot}</p>
+              </div>
             </div>
-            <figcaption className="sizes-caption">{sizesFigure.caption}</figcaption>
+            <figcaption className="sizes-caption" id="sizes-figure-caption">
+              {sizesFigure.caption}
+            </figcaption>
           </figure>
+          <ProofList items={sizes.proofs} className="sizes-proof-list" />
         </div>
       </div>
     </section>

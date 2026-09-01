@@ -1,6 +1,7 @@
 import { setup } from '../content/copy'
 import { assets } from '../content/assets'
 import { MediaFrame } from './MediaFrame'
+import { ProofList } from './ProofList'
 import { useReveal } from '../useReveal'
 import './DeepSections.css'
 
@@ -22,11 +23,7 @@ export function SectionSetup() {
           <div className="setup-media reveal" ref={media}>
             <MediaFrame asset={assets.setupFlow} className="setup-frame" />
           </div>
-          <div className="deep-body">
-            {setup.body.map((paragraph) => (
-              <p key={paragraph}>{paragraph}</p>
-            ))}
-          </div>
+          <ProofList items={setup.proofs} />
         </div>
       </div>
     </section>

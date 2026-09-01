@@ -59,10 +59,12 @@
 }
 
 .hero-h1 {
+  font-family: var(--font-display);
   font-size: var(--fs-hero);
-  font-weight: 700;
-  letter-spacing: -0.025em;
-  line-height: 1.04;
+  font-weight: 650;
+  font-stretch: 94%;
+  letter-spacing: -0.035em;
+  line-height: 1.02;
   text-wrap: balance;
   animation: hero-rise 0.7s ease 0.07s both;
 }
@@ -91,20 +93,14 @@
   display: inline-flex;
   align-items: center;
   padding: 0.78em 1.6em;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
   border-radius: var(--radius);
-  background: var(--accent);
-  color: var(--bg);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  color: color-mix(in srgb, var(--accent) 76%, var(--text-dim));
+  font-family: inherit;
+  font-size: inherit;
   font-weight: 600;
-  transition:
-    filter 150ms ease,
-    box-shadow 150ms ease,
-    transform 150ms ease;
-}
-
-.hero-cta:hover {
-  filter: brightness(1.08);
-  box-shadow: 0 0 32px var(--hero-glow);
-  transform: translateY(-1px);
+  cursor: not-allowed;
 }
 
 .hero-quiet {
@@ -149,6 +145,10 @@
   background: var(--surface);
 }
 
+.hero-brew:active {
+  background: color-mix(in srgb, var(--surface) 82%, var(--bg));
+}
+
 .hero-brew-cmd {
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: var(--fs-small);
@@ -163,16 +163,20 @@
 
 .hero-brew-hint {
   font-size: 0.75rem;
-  color: color-mix(in srgb, var(--text) 38%, transparent);
+  color: var(--text-dim);
   white-space: nowrap;
   transition: color 150ms ease;
 }
 
-.hero-brew[data-copied] .hero-brew-hint {
+.hero-brew[data-state='copied'] .hero-brew-hint {
   color: var(--accent);
 }
 
-.hero-brew-copied {
+.hero-brew[data-state='failed'] .hero-brew-hint {
+  color: var(--danger);
+}
+
+.hero-brew-feedback {
   display: none;
 }
 
@@ -236,24 +240,12 @@
     0 30px 80px -20px color-mix(in srgb, var(--bg) 85%, transparent),
     0 8px 28px color-mix(in srgb, var(--bg) 60%, transparent),
     0 0 130px 10px var(--hero-glow-strong);
-  animation: hero-settle 0.9s ease 0.32s both;
 }
 
 @keyframes hero-rise {
   from {
     opacity: 0;
     transform: translateY(16px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes hero-settle {
-  from {
-    opacity: 0;
-    transform: translateY(24px) scale(0.985);
   }
   to {
     opacity: 1;
@@ -291,18 +283,18 @@
   }
 
   .hero-brew-cmd {
-    font-size: 0.72rem;
+    font-size: clamp(0.57rem, 2.86vw, 0.72rem);
   }
 
   .hero-brew-hint {
     display: none;
   }
 
-  .hero-brew[data-copied] .hero-brew-cmd {
+  .hero-brew[data-state] .hero-brew-cmd {
     opacity: 0;
   }
 
-  .hero-brew-copied {
+  .hero-brew-feedback {
     position: absolute;
     inset: 0;
     display: grid;
@@ -313,7 +305,11 @@
     transition: opacity 150ms ease;
   }
 
-  .hero-brew[data-copied] .hero-brew-copied {
+  .hero-brew[data-state] .hero-brew-feedback {
     opacity: 1;
+  }
+
+  .hero-brew[data-state='failed'] .hero-brew-feedback {
+    color: var(--danger);
   }
 }

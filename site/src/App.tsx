@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Hero } from './components/Hero'
+import { Header } from './components/Header'
 import { GlanceBand } from './components/GlanceBand'
 import { SectionControls } from './components/SectionControls'
 import { SectionSizes } from './components/SectionSizes'
@@ -40,14 +41,15 @@ export default function App() {
 
   return (
     <>
-      <main>
+      <Header />
+      <main id="content">
         <Hero />
         <GlanceBand />
+        <SectionProtection />
+        <SectionCheckup />
         <SectionControls />
         <SectionSizes />
         <SectionSetup />
-        <SectionProtection />
-        <SectionCheckup />
         <SectionMore />
         <Trust />
         <Faq />
