@@ -39,7 +39,8 @@ describe('measurement windows', () => {
   it('replaces tampered and expired cookies', async () => {
     const created = await getOrCreateMeasurement(new Request('https://candela.fyi/'), env, now)
     const original = created.setCookie!.split(';', 1)[0]
-    const tampered = `${original.slice(0, -1)}x`
+    const replacement = original.at(-2) === 'x' ? 'y' : 'x'
+    const tampered = `${original.slice(0, -2)}${replacement}${original.at(-1)}`
     const tamperedResult = await getOrCreateMeasurement(new Request('https://candela.fyi/', {
       headers: { cookie: tampered },
     }), env, now)

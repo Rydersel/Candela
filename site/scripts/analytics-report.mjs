@@ -133,13 +133,13 @@ async function d1Query(sql) {
   return payload.result?.[0]?.results ?? []
 }
 
-async function loadData(days) {
+export async function loadData(days, query = d1Query) {
   const cutoff = new Date(Date.now() - (days - 1) * 86_400_000).toISOString().slice(0, 10)
   const now = Date.now()
-  const [counters, rollups, liveCompleted, provisional] = await Promise.all([
-    d1Query(`SELECT metric, placement, SUM(value) AS value FROM daily_counters WHERE day >= '${cutoff}' GROUP BY metric, placement`),
-    d1Query(`SELECT metric, dimension_name, dimension_value, SUM(value) AS value FROM cohort_rollups WHERE cohort_day >= '${cutoff}' GROUP BY metric, dimension_name, dimension_value`),
-    d1Query(`
+  const [counters, rollups, liveSummary, liveDimensions, provisional] = await Promise.all([
+    query(`SELECT metric, placement, SUM(value) AS value FROM daily_counters WHERE day >= '${cutoff}' GROUP BY metric, placement`),
+    query(`SELECT metric, dimension_name, dimension_value, SUM(value) AS value FROM cohort_rollups WHERE cohort_day >= '${cutoff}' GROUP BY metric, dimension_name, dimension_value`),
+    query(`
       SELECT 'unique_windows' AS metric, 'all' AS dimension_name, 'all' AS dimension_value, COUNT(*) AS value
       FROM measurement_windows WHERE cohort_day >= '${cutoff}' AND expires_at <= ${now}
       UNION ALL
@@ -150,7 +150,8 @@ async function loadData(days) {
       SELECT 'unique_' || action, 'placement', first_placement, COUNT(*) FROM unique_actions a
       JOIN measurement_windows w ON w.window_key = a.window_key
       WHERE w.cohort_day >= '${cutoff}' AND w.expires_at <= ${now} GROUP BY action, first_placement
-      UNION ALL
+    `),
+    query(`
       SELECT 'unique_windows', 'country', country_code, COUNT(*) FROM measurement_windows
       WHERE cohort_day >= '${cutoff}' AND expires_at <= ${now} GROUP BY country_code
       UNION ALL
@@ -160,9 +161,14 @@ async function loadData(days) {
       SELECT 'unique_windows', 'referrer', referrer_host, COUNT(*) FROM measurement_windows
       WHERE cohort_day >= '${cutoff}' AND expires_at <= ${now} GROUP BY referrer_host
     `),
-    d1Query(`SELECT COUNT(*) AS value FROM measurement_windows WHERE cohort_day >= '${cutoff}' AND expires_at > ${now}`),
+    query(`SELECT COUNT(*) AS value FROM measurement_windows WHERE cohort_day >= '${cutoff}' AND expires_at > ${now}`),
   ])
-  return { counters, rollups, liveCompleted, provisionalWindows: provisional[0]?.value ?? 0 }
+  return {
+    counters,
+    rollups,
+    liveCompleted: [...liveSummary, ...liveDimensions],
+    provisionalWindows: provisional[0]?.value ?? 0,
+  }
 }
 
 async function main() {

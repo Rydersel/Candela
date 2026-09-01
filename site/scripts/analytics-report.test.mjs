@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildReport, formatCsv, parseArgs } from './analytics-report.mjs'
+import * as reportModule from './analytics-report.mjs'
+
+const { buildReport, formatCsv, parseArgs } = reportModule
 
 test('parseArgs accepts supported windows and CSV output', () => {
   assert.deepEqual(parseArgs(['--days', '7']), { days: 7, format: 'table' })
@@ -73,4 +75,32 @@ test('formatCsv quotes operator-facing labels safely', () => {
   })
   assert.match(csv, /^metric,value$/m)
   assert.match(csv, /"Completed 24-hour browser windows",1/)
+})
+
+test('loadData keeps live aggregation queries within the D1 compound-select limit', async () => {
+  assert.equal(typeof reportModule.loadData, 'function')
+
+  const queries = []
+  const query = async (sql) => {
+    queries.push(sql)
+    const selectTerms = sql.match(/\bSELECT\b/gi)?.length ?? 0
+    if (selectTerms > 3) throw new Error('too many terms in compound SELECT')
+    if (sql.includes("'unique_windows' AS metric, 'all'")) {
+      return [{ metric: 'unique_windows', dimension_name: 'all', dimension_value: 'all', value: 4 }]
+    }
+    if (sql.includes("'unique_windows', 'country'")) {
+      return [{ metric: 'unique_windows', dimension_name: 'country', dimension_value: 'US', value: 4 }]
+    }
+    if (sql.includes('expires_at >')) return [{ value: 2 }]
+    return []
+  }
+
+  const data = await reportModule.loadData(7, query)
+
+  assert.equal(queries.length, 5)
+  assert.deepEqual(data.liveCompleted, [
+    { metric: 'unique_windows', dimension_name: 'all', dimension_value: 'all', value: 4 },
+    { metric: 'unique_windows', dimension_name: 'country', dimension_value: 'US', value: 4 },
+  ])
+  assert.equal(data.provisionalWindows, 2)
 })
