@@ -45,6 +45,7 @@ struct SettingsPageScaffold<Content: View>: View {
       .padding(.bottom, 32)
       // Centers the column as the window widens; content inside stays leading.
       .frame(maxWidth: .infinity)
+      .background(OverlayScrollers())
     }
     .labeledContentStyle(ThemedLabeledContentStyle())
   }

@@ -47,6 +47,7 @@ struct SettingsSidebar: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 2) {
         wordmark
+          .background(OverlayScrollers())
 
         ForEach(SettingsRegistry.sections) { section in
           if let header = section.header {

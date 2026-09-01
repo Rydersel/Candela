@@ -85,6 +85,7 @@ struct CheckupPageScaffold<Content: View, Actions: View>: View {
           .frame(maxWidth: CheckupStyle.pageWidth, alignment: .leading)
           .frame(maxWidth: .infinity)
           .padding(.horizontal, 24)
+          .background(OverlayScrollers())
       }
       .scrollBounceBehavior(.basedOnSize)
       Spacer(minLength: 16)
