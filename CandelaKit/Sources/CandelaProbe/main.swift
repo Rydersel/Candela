@@ -36,6 +36,7 @@ usage: candela-probe [--display <id>] <subcommand>
   mute on|off                             DDC write of VCP 0x8D (1=mute, 2=unmute)
   vcp get <hex>|set <hex> <0-65535>       raw VCP prober
   modes                                   merged mode list, marking CGS-revealed entries
+  synthstops                              the synthesized-size ladder as the launch reapply computes it (needs --display)
   curated                                 what the default size picker shows, after curation
   modeapply <ioModeID> [holdSeconds=5]    apply one mode by id at preview scope, then revert
   identity                                EDID identity facts as the checkup reads them, as JSON

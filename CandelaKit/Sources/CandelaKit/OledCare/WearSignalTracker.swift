@@ -147,12 +147,7 @@ public final class WearSignalTracker {
     return out
   }
 
-  /// Seconds per state, marginalized over every bucket, in `stateOrder`.
-  public func secondsByState() -> [(state: OledDimState, seconds: Double)] {
-    Self.stateOrder.map { ($0, seconds(inState: $0)) }
-  }
-
-  /// Both axes where `secondsByState` gives one marginal. Seconds are copied.
+  /// Both axes where `secondsByBucket` gives one marginal. Seconds are copied.
   public func histogram() -> WearHistogram {
     let rows = Self.stateOrder.indices.map { index -> [Double] in
       let start = index * Self.bucketCount

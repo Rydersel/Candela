@@ -50,9 +50,6 @@ public final class ModePersistence: @unchecked Sendable {
   /// "forget the mode I picked" and "stop remembering modes on this display"
   /// are separate answers, and clearing both here would silently opt the user
   /// back out the first time a mode became unavailable.
-  ///
-  /// No production caller yet: this is the engine seam a "forget this remembered
-  /// mode" control wires up.
   public func clear(for identity: DisplayConfigIdentity) {
     defaults.removeObject(forKey: key(PrefName.storedDisplayMode, identity))
   }
