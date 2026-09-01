@@ -1427,9 +1427,15 @@ final class AppModel {
       // controller can be looking at a panel that is not the one it saw last pass,
       // and this verdict is keyed by persistence key. Through a closure, so a probe
       // landing after this pass still decides the next mute.
-      let muteKey = state.display.persistenceKey
+      let key = state.display.persistenceKey
       state.volume.setMuteWireSupport { [weak self] in
-        self?.muteSupport[muteKey] ?? .unknown
+        self?.muteSupport[key] ?? .unknown
+      }
+      // The value register's own verdict, so a restore pass does not write
+      // 0x62 at a panel whose capabilities string denied it (the Dell); an
+      // unknown verdict (the write-only MAG) still restores.
+      state.volume.setValueWireSupport { [weak self] in
+        self?.volumeSupport[key] ?? .unknown
       }
     }
     builtIn?.controller.setEpochProvider(
