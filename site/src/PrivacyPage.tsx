@@ -7,10 +7,12 @@ import './components/Privacy.css'
 const sourceBase = 'https://github.com/Rydersel/Candela/blob/main/site'
 
 export function PrivacyPage() {
-  const [status, setStatus] = useState<string | null>(null)
+  const [analyticsEnabled, setAnalyticsEnabled] = useState<boolean | null>(null)
 
   useEffect(() => {
-    setStatus(new URLSearchParams(window.location.search).get('status'))
+    setAnalyticsEnabled(!document.cookie
+      .split(';')
+      .some((part) => part.trim() === 'candela_analytics=off'))
   }, [])
 
   return (
@@ -24,22 +26,32 @@ export function PrivacyPage() {
             <p className="privacy-lead">{privacy.lead}</p>
           </header>
 
-          {status === 'off' && <p className="privacy-status" role="status">Website analytics are off in this browser.</p>}
-          {status === 'on' && <p className="privacy-status" role="status">Website analytics are on in this browser.</p>}
-
           <section className="privacy-control" aria-labelledby="privacy-control-title">
             <div>
               <h2 id="privacy-control-title">Your choice</h2>
               <p>{privacy.control}</p>
             </div>
-            <div className="privacy-control-actions">
-              <form method="post" action="/analytics/opt-out">
-                <button className="privacy-button privacy-button-primary" type="submit">Opt out</button>
-              </form>
-              <form method="post" action="/analytics/opt-in">
-                <button className="privacy-button" type="submit">Opt in</button>
-              </form>
-            </div>
+            <form
+              className="privacy-toggle-form"
+              method="post"
+              action={analyticsEnabled === false ? '/analytics/opt-in' : '/analytics/opt-out'}
+            >
+              <button
+                className={`privacy-toggle${analyticsEnabled === true ? ' is-on' : ''}`}
+                type="submit"
+                role={analyticsEnabled === null ? undefined : 'switch'}
+                aria-checked={analyticsEnabled ?? undefined}
+                disabled={analyticsEnabled === null}
+              >
+                <span className="privacy-toggle-copy">Website analytics</span>
+                <span className="privacy-toggle-state" aria-live="polite">
+                  {analyticsEnabled === null ? 'Checking…' : analyticsEnabled ? 'On' : 'Off'}
+                </span>
+                <span className="privacy-toggle-track" aria-hidden="true">
+                  <span className="privacy-toggle-thumb" />
+                </span>
+              </button>
+            </form>
           </section>
 
           <section className="privacy-section">
