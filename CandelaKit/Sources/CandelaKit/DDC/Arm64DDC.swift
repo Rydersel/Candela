@@ -291,23 +291,32 @@ public class Arm64DDC: NSObject {
     return unmanagedAttributes.takeRetainedValue() as? [String: Any]
   }
 
-  static func ioregIterateToNextObjectOfInterest(interests: [String], iterator: inout io_iterator_t) -> (name: String, entry: io_service_t, preceedingEntry: io_service_t)? {
-    var entry: io_service_t = IO_OBJECT_NULL
-    var preceedingEntry: io_service_t = IO_OBJECT_NULL
+  /// The next entry in the walk whose name contains one of `interests`.
+  ///
+  /// `IOIteratorNext` hands back a RETAINED entry, so ownership matters here:
+  /// the returned entry carries that reference and the caller must release it,
+  /// while every entry the walk skips is released on the turn it is discarded.
+  /// The iteration is recursive over the whole IOService plane, so skipped
+  /// entries are thousands per pass, and discovery runs on every menu close.
+  static func ioregIterateToNextObjectOfInterest(interests: [String], iterator: inout io_iterator_t) -> (name: String, entry: io_service_t)? {
     let name = UnsafeMutablePointer<CChar>.allocate(capacity: MemoryLayout<io_name_t>.size)
     defer {
       name.deallocate()
     }
     while true {
-      preceedingEntry = entry
-      entry = IOIteratorNext(iterator)
-      guard IORegistryEntryGetName(entry, name) == KERN_SUCCESS, entry != MACH_PORT_NULL else {
+      let entry = IOIteratorNext(iterator)
+      guard entry != IO_OBJECT_NULL else {
+        break
+      }
+      guard IORegistryEntryGetName(entry, name) == KERN_SUCCESS else {
+        IOObjectRelease(entry)
         break
       }
       let nameString = String(cString: name)
-      for interest in interests where entry != IO_OBJECT_NULL && nameString.contains(interest) {
-        return (nameString, entry, preceedingEntry)
+      for interest in interests where nameString.contains(interest) {
+        return (nameString, entry)
       }
+      IOObjectRelease(entry)
     }
     return nil
   }
@@ -376,6 +385,13 @@ public class Arm64DDC: NSObject {
       guard let objectOfInterest = ioregIterateToNextObjectOfInterest(interests: [keyDCPAVServiceProxy] + keysFramebuffer, iterator: &iterator) else {
         break
       }
+      // The helper hands over the entry's reference. Both branches are finished
+      // with the entry when they return: the properties read copies what it
+      // wants, and IOAVServiceCreateWithService returns a CF object with its own
+      // lifetime, which outlives the registry entry it was made from. The
+      // release also covers a name that matched an interest by substring but
+      // neither branch by equality.
+      defer { IOObjectRelease(objectOfInterest.entry) }
       if keysFramebuffer.contains(objectOfInterest.name) {
         ioregService = self.getIORegServiceAppleCDC2Properties(entry: objectOfInterest.entry)
         serviceLocation += 1
