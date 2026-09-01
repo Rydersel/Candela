@@ -26,7 +26,7 @@ its code:
 | File | What came from upstream |
 |---|---|
 | `CandelaKit/Sources/CandelaKit/DDC/Arm64DDC.swift` | the Apple Silicon DDC/CI transport |
-| `CandelaKit/Sources/CandelaKit/DDC/IntelDDC.swift` | the Intel DDC/CI transport (see the note below) |
+| `CandelaKit/Sources/CandelaKit/DDC/IntelDDC.swift` | the Intel DDC/CI transport |
 | `CandelaKit/Sources/CandelaKit/HDR/MonitorPanelService.swift` | the MonitorPanel HDR toggle (`HDRControl`) |
 | `CandelaKit/Sources/CandelaKit/Brightness/BrightnessController.swift` | the combined-dimming split (attributed inline, at the function) |
 | `CandelaKit/Sources/CandelaKit/Brightness/DimmingMath.swift` | the dimming curve |
@@ -288,25 +288,3 @@ STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
 IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 ```
-
----
-
-## DDC.swift, and one unresolved link in the chain
-
-<https://github.com/reitermarkus/DDC.swift>
-
-`IntelDDC.swift` carries MonitorControl's own second attribution line,
-`Adapted from IntelDDC.swift, @reitermarkus`, and Candela preserves it.
-
-Recorded plainly because an audit that quietly rounded it off would be worth
-less than no audit: **that repository publishes no license file**, so there is
-no notice to reproduce here. What Candela relies on is MonitorControl's
-position, which has been to ship this code under its own MIT since 2017 with the
-attribution intact. Candela inherits that position and changes nothing about it.
-
-The exposure is small and worth stating precisely. `IntelDDC` is the Intel
-DDC/CI path; it compiles, but nothing constructs it (`DisplayDiscovery` returns
-no Intel services, and the Intel adapter is a later milestone), so it ships as
-unreachable code. If that stops being true, or if a clean provenance is wanted
-sooner, the fix is to ask the author to add a license rather than to delete the
-attribution line.
