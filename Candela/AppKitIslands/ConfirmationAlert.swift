@@ -118,35 +118,48 @@ struct ConfirmationAnswers<Content: View>: View {
 /// reconfigure a screen, so a click that feels unregistered invites a second one.
 struct AnswerButtonStyle: ButtonStyle {
   let isPrimary: Bool
-  @State private var isHovering = false
-  @Environment(\.isEnabled) private var isEnabled
 
   func makeBody(configuration: Configuration) -> some View {
-    configuration.label
-      .font(.body.weight(isPrimary ? .semibold : .regular))
-      .foregroundStyle(isPrimary ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
-      // A long answer ("Stop Mirroring Now") must shrink rather than truncate:
-      // a clipped verb on a safety prompt is worse than a small one.
-      .lineLimit(1)
-      .minimumScaleFactor(0.8)
-      .padding(.vertical, 8)
-      .padding(.horizontal, 4)
-      .frame(maxWidth: .infinity)
-      .background(
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-          .fill(fill(pressed: configuration.isPressed))
-      )
-      .opacity(isEnabled ? 1 : 0.4)
-      .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-      .onHover { isHovering = $0 }
+    HoverLabel(configuration: configuration, isPrimary: isPrimary)
   }
 
-  private func fill(pressed: Bool) -> AnyShapeStyle {
-    if isPrimary {
-      let accent = Color(nsColor: .controlAccentColor)
-      return AnyShapeStyle(accent.opacity(pressed ? 0.7 : (isHovering ? 0.88 : 1)))
+  /// The hover state lives on a real `View`, not on the style: a `ButtonStyle`
+  /// is not a view, so SwiftUI does not reliably install dynamic properties
+  /// declared on it and the answers could go dead to the pointer. Same shape as
+  /// the settings button styles.
+  private struct HoverLabel: View {
+    let configuration: Configuration
+    let isPrimary: Bool
+    @State private var isHovering = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+      configuration.label
+        .font(.body.weight(isPrimary ? .semibold : .regular))
+        .foregroundStyle(isPrimary ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+        // A long answer ("Stop Mirroring Now") must shrink rather than truncate:
+        // a clipped verb on a safety prompt is worse than a small one.
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 4)
+        .frame(maxWidth: .infinity)
+        .background(
+          RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(fill(pressed: configuration.isPressed))
+        )
+        .opacity(isEnabled ? 1 : 0.4)
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .onHover { isHovering = $0 }
     }
-    if pressed { return AnyShapeStyle(.tertiary) }
-    return AnyShapeStyle(isHovering ? AnyShapeStyle(.secondary.opacity(0.35)) : AnyShapeStyle(.quaternary))
+
+    private func fill(pressed: Bool) -> AnyShapeStyle {
+      if isPrimary {
+        let accent = Color(nsColor: .controlAccentColor)
+        return AnyShapeStyle(accent.opacity(pressed ? 0.7 : (isHovering ? 0.88 : 1)))
+      }
+      if pressed { return AnyShapeStyle(.tertiary) }
+      return AnyShapeStyle(isHovering ? AnyShapeStyle(.secondary.opacity(0.35)) : AnyShapeStyle(.quaternary))
+    }
   }
 }
