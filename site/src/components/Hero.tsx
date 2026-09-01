@@ -6,10 +6,8 @@ import { HeroBackdropSwirl } from './HeroBackdropSwirl'
 import candelaMark from '../assets/candela-c.svg'
 import './Hero.css'
 
-// The quiet alternate install route under the CTAs. Copies the command
-// without the decorative dollar sign; the hint carries the feedback on wide
-// screens, and on narrow ones a centered overlay does (Hero.css), so the
-// pill never has to fit both the command and the hint at once.
+// The quiet alternate install route under the CTAs. It reads as a measured
+// install rail rather than a competing CTA or a miniature terminal window.
 function BrewInstall() {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const timer = useRef(0)
@@ -55,9 +53,6 @@ function BrewInstall() {
         {brew.cmd}
       </span>
       <span className="hero-brew-hint" aria-hidden="true">
-        {feedback}
-      </span>
-      <span className="hero-brew-feedback" aria-hidden="true">
         {feedback}
       </span>
       <span className="sr-only" role="status" aria-live="polite">

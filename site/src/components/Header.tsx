@@ -13,14 +13,11 @@ export function Header() {
             {navigation.brand}
           </a>
           <div className="site-nav-links">
-            <a className="site-nav-link" href="#controls">
-              {navigation.features}
-            </a>
-            <a className="site-nav-link" href="#trust">
-              {navigation.trust}
-            </a>
             <a className="site-nav-link" href="#faq">
-              {navigation.questions}
+              {navigation.faq}
+            </a>
+            <a className="site-nav-link" href="https://github.com/Rydersel/Candela">
+              {navigation.github}
             </a>
             <button className="site-nav-download" type="button" disabled>
               {navigation.download}

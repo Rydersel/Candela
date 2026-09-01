@@ -40,7 +40,7 @@ export const brew: {
   copyLabel: string
 } = {
   cmd: "brew install --cask rydersel/tap/candela",
-  hint: "click to copy",
+  hint: "copy",
   copied: "copied",
   failed: "Copy failed. Select manually.",
   copyLabel: "Copy the Homebrew install command",
@@ -56,9 +56,8 @@ export const mediaResume = "Play"
 export const navigation = {
   label: "Primary",
   brand: "Candela",
-  features: "Features",
-  trust: "Trust",
-  questions: "Questions",
+  faq: "FAQ",
+  github: "GitHub",
   download: "Download at 1.0",
   skip: "Skip to content",
 }
@@ -328,7 +327,7 @@ export const trust: {
 }
 
 // Heading for the FAQ section: a wayfinding label, not a lead.
-export const faqH2 = "Questions"
+export const faqH2 = "FAQ"
 
 export const faq: Array<{ q: string; a: string }> = [
   {
