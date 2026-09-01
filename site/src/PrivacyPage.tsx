@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Header } from './components/Header'
 import { Footer } from './components/Footer'
 import { privacy } from './content/copy'
@@ -6,7 +7,11 @@ import './components/Privacy.css'
 const sourceBase = 'https://github.com/Rydersel/Candela/blob/main/site'
 
 export function PrivacyPage() {
-  const status = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('status')
+  const [status, setStatus] = useState<string | null>(null)
+
+  useEffect(() => {
+    setStatus(new URLSearchParams(window.location.search).get('status'))
+  }, [])
 
   return (
     <>

@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build && vite build --ssr src/entry-server.tsx --outDir dist-ssr && node scripts/prerender.mjs",
     "lint": "oxlint",
-    "test": "node --test scripts/prerender.test.mjs && vitest run src functions",
+    "test": "node --test scripts/prerender.test.mjs scripts/analytics-report.test.mjs && vitest run src functions analytics-worker",
     "preview": "vite preview",
     "d1:migrate:local": "wrangler d1 migrations apply candela-site-analytics --local",
     "d1:migrate:remote": "wrangler d1 migrations apply candela-site-analytics --remote"
