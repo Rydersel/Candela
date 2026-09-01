@@ -1,13 +1,10 @@
 import { sizes, sizesFigure } from '../content/copy'
-import { useReveal } from '../useReveal'
 import { ProofList } from './ProofList'
 import './DeepSections.css'
 
 // The measured figure leads, followed by two short receipts. The visual keeps
 // five useful examples from the Dell's larger measured mode set.
 export function SectionSizes() {
-  const head = useReveal<HTMLDivElement>()
-  const figure = useReveal<HTMLElement>()
   const maxExampleWidth = Math.max(
     ...sizesFigure.examples.map((size) => Number.parseInt(size, 10)),
   )
@@ -15,17 +12,13 @@ export function SectionSizes() {
   return (
     <section id="sizes" className="deep sizes">
       <div className="sizes-inner">
-        <div className="deep-head reveal" ref={head}>
-          <div className="deep-station"><span className="deep-station-pulse" /></div>
+        <div className="deep-head">
+          <div className="deep-station" />
           <h2 className="deep-h2">{sizes.h2}</h2>
           <p className="deep-lead">{sizes.lead}</p>
         </div>
         <div className="sizes-stage">
-          <figure
-            className="sizes-figure reveal"
-            ref={figure}
-            aria-labelledby="sizes-figure-caption"
-          >
+          <figure className="sizes-figure" aria-labelledby="sizes-figure-caption">
             <div className="sizes-reveal">
               <div className="sizes-summary">
                 <span className="sizes-summary-count">{sizesFigure.sizeCount}</span>

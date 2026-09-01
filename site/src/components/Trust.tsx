@@ -1,20 +1,13 @@
 import { trust } from '../content/copy'
-// .reveal's styles live in DeepSections.css, shared with the four deep
-// sections, and useReveal.ts holds the scroll observer that arms them;
-// Closing.css carries only this register's own classes.
-import { useReveal } from '../useReveal'
 import './Closing.css'
 
 // The user-facing trust claims: local-only data, measured overhead, and open
 // source forever. They carry equal weight along one evidence spine.
-// The heading reveals; the claims stay visible as running evidence.
 export function Trust() {
-  const head = useReveal<HTMLHeadingElement>()
-
   return (
     <section id="trust" className="closing trust" aria-labelledby="trust-title">
       <div className="closing-inner">
-        <h2 className="closing-h2 reveal" id="trust-title" ref={head}>
+        <h2 className="closing-h2" id="trust-title">
           {trust.h2}
         </h2>
         {/* role restated for the same reason the glance band restates it: the

@@ -36,35 +36,6 @@
   background: var(--rail);
 }
 
-/* A pulse of light travelling the rail: the app is running, not a diagram of
-   one. Reduced motion removes it outright (below): the global override would
-   freeze it as a stray amber smear at the rail's left bleed, not a signal. */
-.glance-loop::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: -12rem;
-  width: 10rem;
-  height: 3px;
-  border-radius: 2px;
-  background: linear-gradient(90deg, transparent, var(--rail-glow), transparent);
-  box-shadow: 0 0 10px 1px var(--rail-glow);
-  animation: glance-pulse 7s linear infinite;
-  pointer-events: none;
-}
-
-@keyframes glance-pulse {
-  to {
-    transform: translateX(calc(100vw + 24rem));
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .glance-loop::after {
-    display: none;
-  }
-}
-
 .glance-beat {
   position: relative;
 }
@@ -159,10 +130,6 @@
       black calc(100% - 3rem),
       transparent
     );
-  }
-
-  .glance-loop::after {
-    display: none;
   }
 
   .glance-beat::before {

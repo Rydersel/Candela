@@ -1,8 +1,4 @@
 import { faq, faqH2 } from '../content/copy'
-// .reveal's styles live in DeepSections.css, shared with the four deep
-// sections, and useReveal.ts holds the scroll observer that arms them;
-// Closing.css carries only this register's own classes.
-import { useReveal } from '../useReveal'
 import './Closing.css'
 
 // The summaries stay plain text rather than headings: five questions under one
@@ -12,14 +8,10 @@ import './Closing.css'
 // Native <details> per item, so open and close, keyboard operation and find in
 // page all work without a line of JavaScript.
 export function Faq() {
-  const head = useReveal<HTMLHeadingElement>()
-
   return (
     <section id="faq" className="closing faq">
       <div className="closing-inner">
-        <h2 className="closing-h2 reveal" ref={head}>
-          {faqH2}
-        </h2>
+        <h2 className="closing-h2">{faqH2}</h2>
         {/* role restated for the same reason the glance band restates it: the
             global list-style reset drops implicit list semantics in Safari. */}
         <ul className="faq-list" role="list">

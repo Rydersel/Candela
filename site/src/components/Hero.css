@@ -23,8 +23,7 @@
    and is masked out before the capture arrives, so the video's own glow
    stays the brightest light on the page. Faded down hard: at full strength
    the shader is a poster, at this strength it is weather. */
-/* No opacity here: hero-rise ends at opacity 1 and its fill mode holds that,
-   so each backdrop dims its own canvas instead. */
+/* The backdrop enters independently from the copy and dims its own canvas. */
 .hero-backdrop {
   position: absolute;
   inset: 0;
@@ -49,13 +48,13 @@
   position: relative;
   max-width: 52rem;
   margin: 0 auto;
+  animation: hero-copy-fade 0.65s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .hero-mark {
   width: 44px;
   margin: 0 auto 1.75rem;
   filter: drop-shadow(0 0 18px var(--hero-glow));
-  animation: hero-rise 0.7s ease both;
 }
 
 .hero-h1 {
@@ -66,7 +65,6 @@
   letter-spacing: -0.035em;
   line-height: 1.02;
   text-wrap: balance;
-  animation: hero-rise 0.7s ease 0.07s both;
 }
 
 .hero-sub {
@@ -76,7 +74,6 @@
   line-height: 1.6;
   color: var(--text-dim);
   text-wrap: pretty;
-  animation: hero-rise 0.7s ease 0.15s both;
 }
 
 .hero-actions {
@@ -86,7 +83,6 @@
   align-items: center;
   gap: 0.75rem 1.5rem;
   margin-top: 2.25rem;
-  animation: hero-rise 0.7s ease 0.23s both;
 }
 
 .hero-cta {
@@ -137,7 +133,6 @@
   transition:
     border-color 150ms ease,
     background 150ms ease;
-  animation: hero-rise 0.7s ease 0.27s both;
 }
 
 .hero-brew:hover {
@@ -189,7 +184,6 @@
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--accent);
-  animation: hero-rise 0.7s ease 0.3s both;
 }
 
 /* The dot flows inline with the first word, so when the line wraps on a
@@ -250,6 +244,15 @@
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+@keyframes hero-copy-fade {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 1;
   }
 }
 

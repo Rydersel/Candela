@@ -12,17 +12,12 @@
   --deep-glow-faint: color-mix(in srgb, var(--accent) 9%, transparent);
   --deep-seam: color-mix(in srgb, var(--accent) 45%, transparent);
   --deep-rail-bright: color-mix(in srgb, var(--text) 45%, transparent);
-  /* Same mix as the glance band's rail-glow: the arrival pulse below is that
-     band's travelling light continued down the page. */
-  --deep-pulse: color-mix(in srgb, var(--accent) 55%, transparent);
   --deep-lead-ink: color-mix(in srgb, var(--text) 82%, transparent);
 
   position: relative;
-  /* Containment: the halo shadows paint past their frames and the pre-reveal
-     offsets translate content past its box, and the clip pins all of it
-     inside the section's own edges, whatever the assets or widths turn out
-     to be. clip, not hidden: it makes no scroll container, so the sticky pan
-     frame inside protection still tracks the viewport. */
+  /* Containment pins halo shadows inside the section's own edges. clip, not
+     hidden: it makes no scroll container, so the sticky pan frame inside
+     protection still tracks the viewport. */
   overflow: clip;
   padding-inline: 1.5rem;
 }
@@ -60,64 +55,6 @@
   border-radius: 50%;
   border: 1px solid var(--deep-rail-bright);
   background: var(--bg);
-  transition:
-    background 250ms ease,
-    border-color 250ms ease,
-    box-shadow 250ms ease;
-}
-
-/* The glance band's travelling pulse, turned vertical: same 3px bar, same
-   glow. Parked above the station and invisible until the head reveals; a
-   background layer on the rail could not carry the box-shadow that makes the
-   glance pulse read as light, which is why this is its own element. */
-.deep-station-pulse {
-  position: absolute;
-  left: 2px;
-  bottom: calc(100% + 4px);
-  width: 3px;
-  height: 28px;
-  border-radius: 2px;
-  background: linear-gradient(to bottom, transparent, var(--deep-pulse), transparent);
-  box-shadow: 0 0 10px 1px var(--deep-pulse);
-  opacity: 0;
-  pointer-events: none;
-}
-
-/* Arrival: when the head reveals, the pulse runs down the rail and the dot
-   lights as it lands (the dot's transition-delay is the flight time). Once
-   lit it stays lit, like everything else this product measures: the visit is
-   on the record. ease-in, because falling light accelerates; fill both, so
-   the packet rests invisible on either side of the run. */
-.deep-head.in .deep-station-pulse {
-  animation: deep-pulse-drop 0.55s cubic-bezier(0.5, 0, 0.85, 0.5) 0.1s both;
-}
-
-.deep-head.in .deep-station::after {
-  background: var(--accent);
-  border-color: var(--accent);
-  box-shadow: 0 0 12px 2px var(--deep-pulse);
-  transition-delay: 0.55s;
-}
-
-/* bottom, not transform: the travel distance is the station's own height,
-   which only a percentage can reach, and one 3px element relaying out for
-   half a second costs nothing. The packet fades as it lands so the dot's
-   bloom takes over carrying the light. */
-@keyframes deep-pulse-drop {
-  from {
-    bottom: calc(100% + 4px);
-    opacity: 0;
-  }
-  12% {
-    opacity: 1;
-  }
-  82% {
-    opacity: 1;
-  }
-  to {
-    bottom: 9px;
-    opacity: 0;
-  }
 }
 
 .deep-h2 {
@@ -157,10 +94,6 @@
   left: calc(50% - 3.5px);
 }
 
-.deep-head-center .deep-station-pulse {
-  left: calc(50% - 1.5px);
-}
-
 .proof-list {
   align-self: start;
 }
@@ -185,48 +118,6 @@
   line-height: 1.55;
   color: var(--text-dim);
   text-wrap: pretty;
-}
-
-/* Scroll reveal: heads and lit objects rise as they enter. The long body
-   columns carry no reveal, so no stretch of running prose ever scrolls in
-   invisible; the short text inside a revealed block (a head's lead, the
-   aging strip's copy) does ride that block's reveal. The theme's
-   reduced-motion block collapses the transition to instant. */
-.reveal {
-  opacity: 1;
-  transform: none;
-}
-
-.reveal.reveal-ready {
-  opacity: 0;
-  transform: translateY(18px);
-  transition:
-    opacity 0.65s cubic-bezier(0.16, 1, 0.3, 1),
-    transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.reveal.in {
-  opacity: 1;
-  transform: none;
-}
-
-/* Reduced motion opts out of the reveal entirely, not just its easing:
-   everything is simply there, whether or not the observer has fired. The
-   station dots are simply lit, for the same reason: no pulse, no delayed
-   bloom, just the record already showing. */
-@media (prefers-reduced-motion: reduce) {
-  .reveal,
-  .reveal.reveal-ready {
-    opacity: 1;
-    transform: none;
-  }
-
-  .deep-station::after {
-    background: var(--accent);
-    border-color: var(--accent);
-    box-shadow: 0 0 12px 2px var(--deep-pulse);
-    transition: none;
-  }
 }
 
 /* ---- Controls: the first feature, at full volume ---- */
