@@ -1,4 +1,5 @@
 import AppKit
+import CandelaKit
 import CoreGraphics
 import Testing
 
@@ -101,6 +102,27 @@ struct OverlayWindowTests {
     #expect(OverlayWindow.clampedAlpha(-.infinity) == 0)
     // The property the guard exists for, stated directly.
     #expect(OverlayWindow.clampedAlpha(.nan) == OverlayWindow.clampedAlpha(.nan))
+  }
+
+  // MARK: - The mask fallback
+
+  /// The 2026-08-07 opaque-black shape, surviving in the error path. A mask
+  /// arrives with `alpha = 1.0` BECAUSE it carries the absolute per-cell
+  /// opacity, so a mask that fails to render must not be paired with that 1.0:
+  /// the fallback layer under it is flat black and the panel would go fully
+  /// opaque at shielding level with nothing to lift it.
+  @Test func anUnrenderedMaskFallsBackToItsDarkestCellNotTheCallersAlpha() {
+    var cells = [Double](repeating: 0.2, count: PanelGrid.cellCount)
+    cells[0] = 0.6
+    let mask = OverlayMask(cells: cells).displayOriented(
+      through: PanelSpaceTransform(
+        displaySize: CGSize(width: 3440, height: 1440), rotation: .standard))
+
+    // 0.6, never the 1.0 the mask was going to be multiplied against.
+    #expect(OledOverlay.fallbackAlpha(forUnrendered: mask) == 0.6)
+    // No cells is no dim to fall back to: an invisible overlay beats a black
+    // screen.
+    #expect(OledOverlay.fallbackAlpha(forUnrendered: nil) == 0)
   }
 
   // MARK: - Helpers

@@ -152,9 +152,26 @@ final class OledOverlay {
     // OC15: blackout swallows mouse input (at full black a click-through click
     // is a blind click on live UI); every other level stays click-through.
     window.ignoresMouseEvents = !state.blackout
-    window.contentView?.alphaValue = CGFloat(state.alpha)
-    Self.writeMask(state.mask, to: window)
+    // Mask first, then the alpha it decides: the two are ONE decision, and
+    // writing the alpha ahead of the mask is what leaves a failed mask at 1.0
+    // over a flat black layer.
+    let masked = Self.writeMask(state.mask, to: window)
+    let alpha = masked ? state.alpha : Self.fallbackAlpha(forUnrendered: state.mask)
+    window.contentView?.alphaValue = CGFloat(alpha)
     window.orderFrontRegardless()
+  }
+
+  /// The alpha for a mask that was asked for and did not reach the layer.
+  ///
+  /// The caller's alpha is unusable here: it is 1.0 by the render funnel's
+  /// convention BECAUSE the mask carries the absolute per-cell opacity, so
+  /// writing it over the flat black fallback paints the whole panel opaque.
+  /// The mask's peak is the darkest cell it asked for, so this errs dark
+  /// without ever going darker than the mask itself would have. A mask with no
+  /// cells asked for nothing and gets nothing: an invisible overlay beats a
+  /// black screen.
+  static func fallbackAlpha(forUnrendered mask: OverlayMask.Oriented?) -> Double {
+    mask?.cells.max() ?? 0
   }
 
   /// Renders the spatial axis as the layer's contents.
@@ -167,19 +184,23 @@ final class OledOverlay {
   ///
   /// Nil CLEARS the contents: a display that had a mask and no longer does must
   /// go back to a uniform dim, not keep a stale gradient nothing updates.
-  private static func writeMask(_ mask: OverlayMask.Oriented?, to window: NSPanel) {
-    guard let layer = window.contentView?.layer else { return }
+  ///
+  /// Returns false ONLY when a mask was asked for and did not reach the layer,
+  /// which is the one case where the caller's alpha is not the alpha to write.
+  private static func writeMask(_ mask: OverlayMask.Oriented?, to window: NSPanel) -> Bool {
+    guard let layer = window.contentView?.layer else { return mask == nil }
     guard let mask else {
       layer.contents = nil
       layer.backgroundColor = .black
-      return
+      return true
     }
     guard let image = maskImage(mask) else {
-      // Fall back to the uniform dim, never to nothing: a failed image costs
-      // the spatial detail, not the dim the user asked for.
+      // Flat black here, and `write` pairs it with the mask's darkest cell:
+      // a failed image costs the spatial detail, not the dim the user asked
+      // for, and never the whole panel.
       layer.contents = nil
       layer.backgroundColor = .black
-      return
+      return false
     }
     // The image carries the black AND its per-cell alpha, so the flat
     // background must go: it would floor every cell at full black.
@@ -188,6 +209,7 @@ final class OledOverlay {
     layer.minificationFilter = .linear
     layer.contentsGravity = .resize
     layer.contents = image
+    return true
   }
 
   /// Black pixels whose ALPHA is the mask. Premultiplied, because the mask is
@@ -207,11 +229,18 @@ final class OledOverlay {
     let space = CGColorSpaceCreateDeviceRGB()
     let info = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue)
       .union(.byteOrder32Little)
-    guard let context = CGContext(
-      data: &pixels, width: cols, height: rows, bitsPerComponent: 8,
-      bytesPerRow: cols * 4, space: space, bitmapInfo: info.rawValue)
-    else { return nil }
-    return context.makeImage()
+    // Context AND `makeImage` inside the buffer's lifetime: `&pixels` as a call
+    // argument is a pointer valid only for that call, so a context that outlives
+    // the initializer is reading storage it no longer owns. Same shape as
+    // `LuminanceReduction.meanLuminance`.
+    return pixels.withUnsafeMutableBytes { buffer -> CGImage? in
+      guard let base = buffer.baseAddress,
+        let context = CGContext(
+          data: base, width: cols, height: rows, bitsPerComponent: 8,
+          bytesPerRow: cols * 4, space: space, bitmapInfo: info.rawValue)
+      else { return nil }
+      return context.makeImage()
+    }
   }
 
   func remove(for displayID: CGDirectDisplayID) {
