@@ -17,9 +17,10 @@ export function Footer() {
           <button className="footer-link footer-link-lit" type="button" disabled>
             {hero.ctaPrimary}
           </button>
-          <a className="footer-link" href="https://github.com/Rydersel/Candela">
+          <a className="footer-link" href="/github?placement=footer">
             {hero.ctaSecondary}
           </a>
+          <a className="footer-link" href="/privacy/">Privacy</a>
         </div>
       </div>
     </footer>

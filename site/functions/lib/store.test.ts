@@ -4,7 +4,8 @@ import type { D1Database, D1PreparedStatement } from './runtime'
 
 class Statement implements D1PreparedStatement {
   values: unknown[] = []
-  constructor(readonly query: string) {}
+  readonly query: string
+  constructor(query: string) { this.query = query }
   bind(...values: unknown[]) { this.values = values; return this }
   async first<T>() { return null as T | null }
   async all<T>() { return { success: true, results: [] as T[] } }

@@ -11,8 +11,9 @@ import { SectionMore } from './components/SectionMore'
 import { Trust } from './components/Trust'
 import { Faq } from './components/Faq'
 import { Footer } from './components/Footer'
+import { PrivacyPage } from './PrivacyPage'
 
-export default function App() {
+function LandingPage() {
   // Opening a deep link (/#verifies) must land instantly. The browser cannot
   // be trusted with it on an SPA: the target does not exist at parse time, so
   // its own fragment anchoring either never fires or re-anchors late with a
@@ -58,4 +59,8 @@ export default function App() {
       <Footer />
     </>
   )
+}
+
+export default function App({ pathname = '/' }: { pathname?: string }) {
+  return pathname.replace(/\/+$/, '') === '/privacy' ? <PrivacyPage /> : <LandingPage />
 }

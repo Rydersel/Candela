@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { hydrateRoot } from 'react-dom/client'
 import './theme.css'
 import App from './App.tsx'
+import { startAnalytics } from './analytics'
 
 type IdleWindow = Window & {
   requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
@@ -12,7 +13,7 @@ const hydrate = () => {
   hydrateRoot(
     root,
     <StrictMode>
-      <App />
+      <App pathname={window.location.pathname} />
     </StrictMode>,
   )
 }
@@ -25,3 +26,5 @@ requestAnimationFrame(() => {
   if (idleWindow.requestIdleCallback) idleWindow.requestIdleCallback(hydrate, { timeout: 1000 })
   else window.setTimeout(hydrate, 0)
 })
+
+void startAnalytics()

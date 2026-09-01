@@ -4,10 +4,17 @@ import { onRequestPost as optOut } from './analytics/opt-out'
 import { onRequestPost as optIn } from './analytics/opt-in'
 import { onRequestGet as github } from './github'
 import { onRequestGet as download } from './download'
-import type { AnalyticsEnv, D1Database, D1PreparedStatement, FunctionContext } from './lib/runtime'
+import type { D1Database, D1PreparedStatement, FunctionContext } from './lib/runtime'
 
 class Statement implements D1PreparedStatement {
-  constructor(readonly query: string, readonly shouldThrow: boolean, public values: unknown[] = []) {}
+  readonly query: string
+  readonly shouldThrow: boolean
+  values: unknown[]
+  constructor(query: string, shouldThrow: boolean, values: unknown[] = []) {
+    this.query = query
+    this.shouldThrow = shouldThrow
+    this.values = values
+  }
   bind(...values: unknown[]) { this.values = values; return this }
   async first<T>() { if (this.shouldThrow) throw new Error('d1 unavailable'); return null as T | null }
   async all<T>() { if (this.shouldThrow) throw new Error('d1 unavailable'); return { success: true, results: [] as T[] } }
@@ -16,7 +23,8 @@ class Statement implements D1PreparedStatement {
 
 class Database implements D1Database {
   statements: Statement[] = []
-  constructor(readonly shouldThrow = false) {}
+  readonly shouldThrow: boolean
+  constructor(shouldThrow = false) { this.shouldThrow = shouldThrow }
   prepare(query: string) { const value = new Statement(query, this.shouldThrow); this.statements.push(value); return value }
   async batch<T>(statements: D1PreparedStatement[]) {
     if (this.shouldThrow) throw new Error('d1 unavailable')

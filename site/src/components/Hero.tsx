@@ -77,7 +77,7 @@ export function Hero() {
           <button className="hero-cta" type="button" disabled>
             {hero.ctaPrimary}
           </button>
-          <a className="hero-quiet" href="https://github.com/Rydersel/Candela">
+          <a className="hero-quiet" href="/github?placement=hero">
             {hero.ctaSecondary}
           </a>
         </div>

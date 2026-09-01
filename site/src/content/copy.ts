@@ -313,7 +313,7 @@ export const trust: {
   items: [
     {
       title: "Stays on your Mac",
-      body: "No account, no server and no upload. Screen samples are discarded as soon as Candela has the local exposure reading. The website records only page views and downloads.",
+      body: "No account, no app telemetry and no upload. Screen samples are discarded after Candela makes the local exposure reading. First-party website analytics are explained and controllable on Privacy.",
     },
     {
       title: "Measured overhead",
@@ -350,4 +350,31 @@ export const faq: Array<{ q: string; a: string }> = [
 
 export const footer: { note: string } = {
   note: "Candela is free and open source, MIT licensed.",
+}
+
+export const privacy = {
+  h1: "Privacy, without the vague parts.",
+  lead: "Candela's website analytics are anonymous to Candela and first-party only. A random, short-lived cookie distinguishes one browser for 24 hours so we can count visits and whether that browser chooses Download or GitHub. There are no cross-site cookies.",
+  control: "Website analytics are enabled by default. Opting out stops both Candela's first-party funnel and Cloudflare Web Analytics in this browser. You can opt back in at any time.",
+  app: "The Candela app performs display analysis locally. It requires no account, sends no screen samples to Candela, and uploads no display-health record. Website analytics are separate from the app.",
+  does: [
+    "Counts pageviews and anonymous 24-hour browser windows.",
+    "Counts Download attempts and GitHub clicks, including which header, hero or footer link was used.",
+    "Records coarse country, device category and external referrer hostname.",
+    "Produces anonymous daily statistics and operational counts.",
+    "Uses one host-only measurement cookie restricted to candela.fyi.",
+  ],
+  doesNot: [
+    "Identify a human or create an account or personal profile.",
+    "Store IP addresses, full user agents, fingerprints or advertising identifiers.",
+    "Record full URLs, query strings, referrer paths, scrolling or interaction histories.",
+    "Follow a browser across websites, sell data, share it for advertising or use cross-site cookies.",
+    "Upload display information collected by the Candela app.",
+  ],
+  retention: [
+    "The random measurement cookie expires after 24 hours. It contains no name, account, email, IP address, fingerprint or advertising identifier, and it is never sent to another website.",
+    "A one-way derived browser-window key is retained for seven days so completed visit-to-action cohorts can be counted. The raw random cookie value is never stored in the database. After seven days, linkable rows are deleted and only thresholded anonymous totals remain. Groups smaller than ten browser windows are folded into other.",
+    "A 24-hour browser window is not a person. Two browsers on one Mac count separately, and a returning browser receives a new random window after the prior one expires. Anonymous totals already produced cannot be traced back to a browser and cannot be selectively removed.",
+  ],
+  source: "Candela is public, including the analytics implementation. The Functions, schema, retention Worker, report command and this disclosure can all be inspected in the source code.",
 }

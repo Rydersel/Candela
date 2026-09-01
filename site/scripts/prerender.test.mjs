@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { htmlToAgentMarkdown, injectAppMarkup, validateSeoOutput } from './prerender.mjs'
+import { htmlToAgentMarkdown, injectAppMarkup, privacyMetadata, validateSeoOutput } from './prerender.mjs'
 
 const root = new URL('../', import.meta.url)
 
@@ -83,4 +83,14 @@ test('source crawler files advertise the canonical landing page', async () => {
   assert.match(robots, /^User-agent: \*$/m)
   assert.match(robots, /^Sitemap: https:\/\/candela\.fyi\/sitemap\.xml$/m)
   assert.match(sitemap, /<loc>https:\/\/candela\.fyi\/<\/loc>/)
+  assert.match(sitemap, /<loc>https:\/\/candela\.fyi\/privacy\/<\/loc>/)
+})
+
+test('privacyMetadata gives the public disclosure its own canonical identity', () => {
+  const shell = '<title>Landing</title><meta name="description" content="Landing description" /><link rel="canonical" href="https://candela.fyi/" /><meta property="og:url" content="https://candela.fyi/" />'
+  const result = privacyMetadata(shell)
+  assert.match(result, /<title>Privacy \| Candela<\/title>/)
+  assert.match(result, /content="How Candela's first-party website analytics work, what they do not collect, and how to opt out\."/)
+  assert.match(result, /rel="canonical" href="https:\/\/candela\.fyi\/privacy\/"/)
+  assert.match(result, /property="og:url" content="https:\/\/candela\.fyi\/privacy\/"/)
 })

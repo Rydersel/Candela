@@ -1,4 +1,4 @@
-import { readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import { JSDOM } from 'jsdom'
 import TurndownService from 'turndown'
@@ -66,6 +66,21 @@ export function injectAppMarkup(shell, markup) {
   return shell.replace(rootPattern, `<div id="root">${portableMarkup}</div>`)
 }
 
+export function privacyMetadata(html) {
+  return html
+    .replace(/<title>[^<]*<\/title>/, '<title>Privacy | Candela</title>')
+    .replace(
+      /<meta name="description" content="[^"]*"\s*\/>/,
+      '<meta name="description" content="How Candela\'s first-party website analytics work, what they do not collect, and how to opt out." />',
+    )
+    .replace('<link rel="canonical" href="https://candela.fyi/" />', '<link rel="canonical" href="https://candela.fyi/privacy/" />')
+    .replace('<meta property="og:url" content="https://candela.fyi/" />', '<meta property="og:url" content="https://candela.fyi/privacy/" />')
+}
+
+function rebaseNestedAssets(html) {
+  return html.replaceAll('="./assets/', '="../assets/')
+}
+
 export function validateSeoOutput({ html, robots, sitemap }) {
   const issues = []
 
@@ -122,13 +137,16 @@ export async function prerender({ siteRoot = new URL('../', import.meta.url) } =
     readFile(new URL('robots.txt', dist), 'utf8'),
     readFile(new URL('sitemap.xml', dist), 'utf8'),
   ])
-  const html = injectAppMarkup(shell, render())
+  const html = injectAppMarkup(shell, render('/'))
+  const privacyHtml = rebaseNestedAssets(privacyMetadata(injectAppMarkup(shell, render('/privacy/'))))
   const markdown = htmlToAgentMarkdown(html)
 
   validateSeoOutput({ html, robots, sitemap })
+  await mkdir(new URL('privacy/', dist), { recursive: true })
   await Promise.all([
     writeFile(new URL('index.html', dist), html),
     writeFile(new URL('index.md', dist), markdown),
+    writeFile(new URL('privacy/index.html', dist), privacyHtml),
   ])
   await rm(new URL('dist-ssr/', siteRoot), { recursive: true, force: true })
 }
