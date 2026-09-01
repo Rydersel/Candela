@@ -119,13 +119,22 @@ enum CheckupLiveEnvironment {
       displays: entries,
       macOSBuild: ProcessInfo.processInfo.operatingSystemVersionString,
       appBuild: "\(AppInfo.version) (\(AppInfo.build))",
-      runners: { entry in
+      runners: { [weak model] entry in
         runnerSet(
           for: entry,
           writer: writers[entry.identityKey] ?? NoopDDCWriter(),
           capabilities: capabilities[entry.identityKey] ?? nil,
           hdr: hdr,
-          configurator: configurator)
+          configurator: configurator,
+          // Resolved when the leg ends rather than captured now: a replug during
+          // the run rebinds or rebuilds this panel's controllers, and a snapshot
+          // taken here would be writing at a wire that has gone.
+          restoreControls: {
+            guard let state = model?.allControlledStates.first(where: {
+              $0.display.persistenceKey == entry.identityKey
+            }) else { return }
+            restoringControls(of: state)
+          })
       },
       presenter: presenter,
       bookShowing: { [weak coordinator] identityKey, kind, seconds in
@@ -200,7 +209,8 @@ enum CheckupLiveEnvironment {
     writer: any DDCWriting,
     capabilities: String?,
     hdr: any HDRToggling,
-    configurator: CoreGraphicsDisplayConfigurator
+    configurator: CoreGraphicsDisplayConfigurator,
+    restoreControls: @escaping @Sendable @MainActor () -> Void
   ) -> CheckupRunnerSet {
     // One read shared by the identity and HDR legs, so the two cannot disagree
     // about the same panel.
@@ -213,7 +223,9 @@ enum CheckupLiveEnvironment {
       maxRefreshHz: DisplayModeCatalog.distinctRates(configurator.modes(for: entry.id)).max())
     return CheckupRunnerSet(
       identity: { identity },
-      capabilities: capabilitiesRunner(for: entry, writer: writer, capabilities: capabilities),
+      capabilities: capabilitiesRunner(
+        for: entry, writer: writer, capabilities: capabilities,
+        restoreControls: restoreControls),
       mode: CheckupLiveModeRunner(configurator: configurator, displayID: entry.id),
       hdr: CheckupLiveHDRRunner(
         hdr: hdr, displayID: entry.id, identity: identity ?? unreadIdentity(for: entry)))
@@ -225,11 +237,48 @@ enum CheckupLiveEnvironment {
     func run() async -> [CheckupClaim] { [] }
   }
 
+  /// CK11's round trip writes 0x10, 0x12 and 0x62 straight at the display,
+  /// outside the coalescers that own those registers. Anything that moves a
+  /// control while the leg is in flight (a media key, the panel slider, care's
+  /// lock dim) therefore ends with the panel holding the value the runner read
+  /// back and the coalescer's duplicate memo naming the newer one, so the move
+  /// back is skipped as a duplicate. The restore runs once the leg is graded,
+  /// whatever the verdict: the writes went out either way.
+  struct ControlRestoringCapabilitiesRunner: CheckupCapabilitiesRunning {
+    let base: any CheckupCapabilitiesRunning
+    let restore: @Sendable @MainActor () -> Void
+
+    func run() async -> [CheckupClaim] {
+      let claims = await base.run()
+      await restore()
+      return claims
+    }
+  }
+
+  /// The startup/wake restore pass's shape, gates included: the brightness leg
+  /// only for a display this app has ever written, the value controllers behind
+  /// their own saved-value gate. Without those gates a panel nobody has touched
+  /// would be handed an assumed default it never asked for.
+  @MainActor
+  static func restoringControls(of state: AppModel.DisplayState) {
+    if state.controller.hasStoredValue {
+      state.controller.resetWriteMemo()
+      state.controller.reassertHardware()
+    }
+    state.contrast.resetWriteMemo()
+    state.contrast.restoreToHardware()
+    state.volume.resetWriteMemo()
+    state.volume.restoreToHardware()
+  }
+
   private static func capabilitiesRunner(
-    for entry: CheckupDisplayEntry, writer: any DDCWriting, capabilities: String?
+    for entry: CheckupDisplayEntry, writer: any DDCWriting, capabilities: String?,
+    restoreControls: @escaping @Sendable @MainActor () -> Void
   ) -> any CheckupCapabilitiesRunning {
     guard entry.panelClass == .readsDDC, let capabilities else { return NoCapabilitiesRunner() }
-    return CheckupLiveCapabilitiesRunner(writer: writer, capabilities: capabilities)
+    return ControlRestoringCapabilitiesRunner(
+      base: CheckupLiveCapabilitiesRunner(writer: writer, capabilities: capabilities),
+      restore: restoreControls)
   }
 
   /// For a display with no parsed EDID. Nothing here is presented as reported
