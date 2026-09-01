@@ -17,5 +17,6 @@ the ten sizes into `Candela.iconset/`, then on a Mac:
 Keep `Candela/Assets.xcassets/AppIcon.appiconset/` in sync — it holds the same
 ten PNGs and is what the app actually compiles in
 (`ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon` in `project.yml`).
-The site reuses the master at `site/src/assets/candela-icon.svg` (hero mark)
-and `site/public/favicon.svg`.
+The site keeps its own copies: `site/src/assets/candela-c.svg` (the monogram's
+"C" without the background, used as the hero and footer mark) and
+`site/public/favicon.svg`.

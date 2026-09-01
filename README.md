@@ -33,20 +33,28 @@ the panel when you need it. Display settings Candela remembers for you: the
 resolution you picked for each display comes back after a replug or a reboot,
 and you can forget it again from the same place.
 
-**Checkup.** A guided verification of a newly connected monitor, with an
-exportable report, so you can check a panel before the return window closes.
-This is coming in 1.0 and is not in the app yet. When it ships, the report
-records observations and grades each one (observed, refused, not observed,
-self-reported). It does not certify panels.
+**Checkup.** A guided verification of a newly connected monitor, so you can
+check a panel before the return window closes. One flow covers a new panel, a
+used purchase, or a recheck of one you already own; which it was is recorded
+in the report rather than split into separate products. It reads the panel's
+identity, exercises what the panel will answer over DDC, applies its native
+mode and each refresh rate it advertises, and walks you through full-screen
+colour, grey and gradient fields. Every claim carries a grade: observed,
+refused, not observed, or self-reported. The fields you judge by eye are
+graded too, by one small mark planted on the first of them. You are told
+before the run that the mark is there, never where, and a run whose mark goes
+unfound records as inconclusive rather than clean. The report exports as a
+single integrity-checked file. There is no overall pass or fail, and it does
+not certify panels.
 
 **Controls.** Brightness, contrast and volume for external displays over
 DDC/CI, from the menu bar, with keyboard media keys and a HUD. Software
 dimming below the hardware floor. An HDR toggle. Every resolution the panel
 can actually show, including HiDPI sizes macOS refuses to compute on standard-
-density panels, plus a per-display "sharper text" mode. Arrangement,
-mirroring and rotation from a canvas, with saved layouts. Virtual displays
-for headless and capture setups. A guided first-run setup that walks each
-attached display.
+density panels, plus an opt-in per-display setting that adds in-between
+scaled sizes rendered through a virtual display. Arrangement, mirroring and
+rotation from a canvas, with saved layouts. Virtual displays for headless and
+capture setups. A guided first-run setup that walks each attached display.
 
 ## What it does not do
 
@@ -96,14 +104,14 @@ To build from source, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## A note on private APIs
 
-Parts of Candela rely on macOS interfaces Apple does not document:
-revealing and switching display modes, creating virtual displays, the
-menu-bar auto-hide key, and the exact-2:1 text-sharpness mode among them.
-These are the features other tools cannot offer, and they are also the ones
-that can break when a new macOS ships. Candela carries a conformance check
-that detects that drift, and fixes land in the open, so you can watch them
-happen. If something stops working the day after a macOS update, that is the
-most likely reason, and an update is the most likely fix.
+Parts of Candela rely on macOS interfaces Apple does not document: revealing
+and switching display modes, creating virtual displays, the menu-bar auto-hide
+key, and the HDR toggle among them. These are the features other tools cannot
+offer, and they are also the ones that can break when a new macOS ships.
+Candela carries a conformance check that detects that drift, and fixes land in
+the open, so you can watch them happen. If something stops working the day
+after a macOS update, that is the most likely reason, and an update is the
+most likely fix.
 
 ## Tested hardware
 
