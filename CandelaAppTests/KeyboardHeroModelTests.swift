@@ -95,23 +95,53 @@ struct KeyboardHeroModelTests {
   @Test func targetingPreviewSummarizesTargetAndSteps() {
     #expect(
       KeyboardHeroModel.targetingPreview(
-        brightnessMode: .media, target: .mouse, fineBrightness: false, fineVolume: false)
+        brightnessMode: .media, volumeMode: .media,
+        brightnessTarget: .mouse, volumeTarget: .mouse,
+        fineBrightness: false, fineVolume: false)
         == "Under the pointer · normal steps")
     #expect(
       KeyboardHeroModel.targetingPreview(
-        brightnessMode: .both, target: .allScreens, fineBrightness: true, fineVolume: true)
+        brightnessMode: .both, volumeMode: .both,
+        brightnessTarget: .allScreens, volumeTarget: .allScreens,
+        fineBrightness: true, fineVolume: true)
         == "Every display · fine steps")
     #expect(
       KeyboardHeroModel.targetingPreview(
-        brightnessMode: .media, target: .focusInsteadOfMouse, fineBrightness: true, fineVolume: false)
+        brightnessMode: .media, volumeMode: .media,
+        brightnessTarget: .focusInsteadOfMouse, volumeTarget: .mouse,
+        fineBrightness: true, fineVolume: false)
         == "Active window · mixed step sizes")
   }
 
-  @Test func targetingPreviewSaysKeysOffWhenTheFamilyIsDisabled() {
+  @Test func targetingPreviewSaysKeysOffOnlyWhenBOTHFamiliesAreDisabled() {
     #expect(
       KeyboardHeroModel.targetingPreview(
-        brightnessMode: .disabled, target: .mouse, fineBrightness: false, fineVolume: false)
+        brightnessMode: .disabled, volumeMode: .disabled,
+        brightnessTarget: .mouse, volumeTarget: .mouse,
+        fineBrightness: false, fineVolume: false)
         == "Keys off")
+  }
+
+  /// The row previewed "Keys off" over a page whose volume picker and volume
+  /// step switch were both live, which is the defect this pins.
+  @Test func targetingPreviewSpeaksForVolumeWhenBrightnessAloneIsDisabled() {
+    let preview = KeyboardHeroModel.targetingPreview(
+      brightnessMode: .disabled, volumeMode: .media,
+      brightnessTarget: .focusInsteadOfMouse, volumeTarget: .audioDeviceNameMatching,
+      fineBrightness: true, fineVolume: false)
+    #expect(preview != "Keys off")
+    // The brightness target and its fine switch are greyed on that page, so
+    // neither may reach the preview.
+    #expect(preview == "Matching the audio device · normal steps")
+  }
+
+  @Test func targetingPreviewIgnoresADisabledFamilysStepSize() {
+    #expect(
+      KeyboardHeroModel.targetingPreview(
+        brightnessMode: .custom, volumeMode: .disabled,
+        brightnessTarget: .allScreens, volumeTarget: .mouse,
+        fineBrightness: true, fineVolume: false)
+        == "Every display · fine steps")
   }
 
   // MARK: - House copy rules hold mechanically
@@ -121,11 +151,17 @@ struct KeyboardHeroModelTests {
     for mode in KeyMode.allCases {
       for target in MultiKeyboardBrightness.allCases {
         lines.append(KeyboardHeroModel.brightnessLine(mode: mode, target: target))
-        for fineB in [true, false] {
-          for fineV in [true, false] {
-            lines.append(
-              KeyboardHeroModel.targetingPreview(
-                brightnessMode: mode, target: target, fineBrightness: fineB, fineVolume: fineV))
+        for volumeMode in KeyMode.allCases {
+          for volumeTarget in MultiKeyboardVolume.allCases {
+            for fineB in [true, false] {
+              for fineV in [true, false] {
+                lines.append(
+                  KeyboardHeroModel.targetingPreview(
+                    brightnessMode: mode, volumeMode: volumeMode,
+                    brightnessTarget: target, volumeTarget: volumeTarget,
+                    fineBrightness: fineB, fineVolume: fineV))
+              }
+            }
           }
         }
       }
