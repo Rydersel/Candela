@@ -88,18 +88,43 @@ struct RotationPreviewSessionTests {
     #expect(fake.rotation(of: 2) == .ninety)
   }
 
-  /// A second request supersedes rather than nests, and its `from` is where the
-  /// display is, so one revert goes back one angle and not two.
-  @Test func aSecondPreviewSupersedesTheFirstAndRevertsToItsOwnStartingAngle() async {
+  /// A second request supersedes rather than nests, and it keeps the FIRST
+  /// preview's origin. The caller fills `from` with the live angle, which
+  /// inside a countdown window is the unapproved previewed one, so adopting it
+  /// would make the revert land on an angle nobody chose.
+  ///
+  /// The rewritten request is what `previewed` reports, and it is what an
+  /// answer has to carry back: the answer the UI holds comes from there.
+  @Test func aSecondPreviewSupersedesTheFirstAndKeepsItsOriginalStartingAngle() async {
     let fake = FakeConfigurator()
     fake.rotations = [2: .standard]
     let session = session(fake)
     _ = await session.begin(request(from: .standard, to: .ninety))
     _ = await session.begin(request(from: .ninety, to: .oneEighty))
 
-    #expect(await session.previewed == request(from: .ninety, to: .oneEighty))
-    #expect(await session.revert(request(from: .ninety, to: .oneEighty)) == .reverted)
-    #expect(fake.rotation(of: 2) == .ninety)
+    #expect(await session.previewed == request(from: .standard, to: .oneEighty))
+    // The angle the caller passed is no longer an answer about anything.
+    #expect(await session.revert(request(from: .ninety, to: .oneEighty)) == .stale)
+    #expect(await session.revert(request(from: .standard, to: .oneEighty)) == .reverted)
+    #expect(fake.rotation(of: 2) == .standard)
+  }
+
+  /// The harm, unanswered. A rotation is permanent the instant it applies, so an
+  /// expiry that reverted to the previous preview's angle would leave the
+  /// display resting at an angle the user never approved and whose own
+  /// countdown had already been cancelled.
+  @Test func anUnansweredSecondPreviewExpiresBackToTheAngleBeforeAnyPreview() async {
+    let fake = FakeConfigurator()
+    fake.rotations = [2: .standard]
+    let session = session(fake, timeout: 2)
+    _ = await session.begin(request(from: .standard, to: .ninety))
+    _ = await session.begin(request(from: .ninety, to: .oneEighty))
+    #expect(fake.rotation(of: 2) == .oneEighty)
+
+    #expect(await session.tick() == nil)
+    #expect(await session.tick() == .reverted)
+    #expect(fake.rotation(of: 2) == .standard)
+    #expect(await session.previewed == nil)
   }
 
   @Test func aFailedBeginLeavesNothingOutstandingToAnswer() async {

@@ -31,13 +31,28 @@ public actor RotationPreviewSession {
 
   /// Applies the rotation and starts the clock.
   ///
-  /// A second `begin` supersedes rather than nesting: the new request's `from`
-  /// is where the display is now, so reverting returns to the previous preview's
-  /// angle. Refusing would leave someone stuck at an angle they are trying to
-  /// change.
+  /// A second `begin` supersedes rather than nesting, and never refuses:
+  /// refusing would leave someone stuck at an angle they are trying to change.
+  ///
+  /// **It keeps the STANDING preview's `from`, discarding the new request's.**
+  /// A caller fills `from` with the display's current angle, and while a
+  /// preview stands that angle is the unapproved previewed one, so an
+  /// unanswered expiry would land on an angle nobody chose and, since a
+  /// rotation is permanent the instant it applies, rest there. The origin
+  /// therefore walks back to where the display was before any of this, however
+  /// many times the user rotates inside one window. `previewed` reports the
+  /// rewritten request, and `confirm`/`revert` match on it, so that is the
+  /// value an answer has to carry back.
   public func begin(_ request: RotationRequest) -> Result<Void, DisplayConfigError> {
+    var origin = request.from
+    if let standing = outstanding, standing.display == request.display {
+      origin = standing.from
+    }
+    let previewing = RotationRequest(
+      display: request.display, from: origin, to: request.to
+    )
     do {
-      try configurator.applyRotation(request.to, to: request.display)
+      try configurator.applyRotation(previewing.to, to: previewing.display)
     } catch let error as DisplayConfigError {
       return .failure(error)
     } catch {
@@ -47,7 +62,7 @@ public actor RotationPreviewSession {
       // indistinguishable from a real platform failure in the diagnostics.
       return .failure(DisplayConfigError(cgErrorCode: -1))
     }
-    outstanding = request
+    outstanding = previewing
     remaining = timeoutSeconds
     return .success(())
   }
