@@ -1431,9 +1431,8 @@ final class AppModel {
       state.volume.setMuteWireSupport { [weak self] in
         self?.muteSupport[key] ?? .unknown
       }
-      // The value register's own verdict, so a restore pass does not write
-      // 0x62 at a panel whose capabilities string denied it (the Dell); an
-      // unknown verdict (the write-only MAG) still restores.
+      // Same for the register the restore writes: a panel whose capabilities
+      // string denies 0x62 (the Dell) is skipped; unknown (the MAG) still restores.
       state.volume.setValueWireSupport { [weak self] in
         self?.volumeSupport[key] ?? .unknown
       }

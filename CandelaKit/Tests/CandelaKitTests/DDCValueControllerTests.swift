@@ -17,8 +17,7 @@ struct DDCValueControllerTests {
     /// The display's own VCP 0x8D verdict from the capabilities probe. A var,
     /// not an init constant: the probe lands mid-session and the gate reads it live.
     var muteWireSupport: VCPSupport = .unknown
-    /// The same, one register over: the verdict about the register this command
-    /// writes (VCP 0x62 on volume). A var for the same reason.
+    /// The same for the register this command writes (VCP 0x62 on volume).
     var valueWireSupport: VCPSupport = .unknown
 
     init(
@@ -757,9 +756,8 @@ struct DDCValueControllerTests {
   // MARK: - The display's own denial of the value register (D24, the restore's door)
 
   @Test func restoreWritesNothingOnADisplayThatDeniesTheVolumeRegister() async {
-    // The defect: the restore is the one value write with no gesture behind it,
-    // so the UI grey and the key filter never see it, and every launch, wake and
-    // checkup spent an I2C transaction on a register the DELL says it lacks.
+    // The restore is the one value write with no gesture behind it, so no UI gate
+    // sees it; every launch and wake used to write a register the Dell says it lacks.
     let harness = Harness(command: .volume, savedValue: 0.5, valueWireSupport: .unsupported)
     harness.controller.restoreToHardware()
     #expect(await harness.drainedWrites().isEmpty)
@@ -767,9 +765,8 @@ struct DDCValueControllerTests {
   }
 
   @Test func restoreStillWritesWhenTheVerdictIsUnknown() async {
-    // The MAG answers the capabilities read with zeros, so its verdict is
-    // permanently `.unknown`. D24 resolves that to allowed, and it has to: the
-    // stored value is the only record of where a write-only panel's register sits.
+    // The MAG's verdict is permanently `.unknown` (it answers the capabilities read
+    // with zeros). D24 must allow it: the stored value is the only record it has.
     let harness = Harness(command: .volume, savedValue: 0.5, valueWireSupport: .unknown)
     harness.controller.restoreToHardware()
     let writes = await harness.drainedWrites()
@@ -779,9 +776,8 @@ struct DDCValueControllerTests {
   }
 
   @Test func theDenialNeverCancelsTheRestoresUnmute() async {
-    // D29 rule 3: a display can deny 0x62 and still carry a 0x8D mute, and this
-    // pass is what clears one taken while the verdict was unknown. The value
-    // write goes; the unmute must not.
+    // D29 rule 3: a display can deny 0x62 and still carry a 0x8D mute taken while
+    // the verdict was unknown, and this pass clears it. Skip the value, never the unmute.
     let harness = Harness(
       command: .volume, savedValue: 0.5, muteWireSupport: .supported,
       valueWireSupport: .unsupported
@@ -794,9 +790,8 @@ struct DDCValueControllerTests {
   }
 
   @Test func mutedRestoreOnADeniedRegisterReassertsNoSilence() async {
-    // Degraded strategy on a display that denies the volume register too: the
-    // mute has no register to live in, so there is nothing to re-assert. The
-    // logical flag stands, and `toggleMute` is the ungated way back.
+    // Degraded mute on a display that denies the volume register: nothing to
+    // re-assert, the logical flag stands, and `toggleMute` is the ungated way back.
     let harness = Harness(command: .volume, savedValue: 0.5, valueWireSupport: .unsupported) {
       $0.muted = true
     }
@@ -806,9 +801,8 @@ struct DDCValueControllerTests {
   }
 
   @Test func contrastRestoreIgnoresTheAudioVerdictAndItsOverride() async {
-    // The audio override is about one display's speakers. A contrast restore
-    // reading it would strand the contrast register on any display set to
-    // "Always disabled".
+    // The audio override is about speakers; a contrast restore reading it would
+    // strand the contrast register on any display set to "Always disabled".
     let harness = Harness(command: .contrast, savedValue: 0.75, valueWireSupport: .unsupported) {
       $0.audioSinkOverride = .forceNone
     }

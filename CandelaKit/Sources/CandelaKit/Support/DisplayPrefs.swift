@@ -534,9 +534,8 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue.rawValue, forKey: "multiKeyboardBrightness") }
   }
 
-  /// Escape hatch (D26) with no UI: shows the Health pane's model-comparison
-  /// instrument, a soak-only gauge kept out of the shipped window until the
-  /// exposure-model verdict is recorded.
+  /// No UI (D26): shows the Health pane's model-comparison instrument, a soak-only
+  /// gauge kept off the shipped window until the exposure-model verdict is recorded.
   public var showModelComparison: Bool {
     get { defaults.bool(forKey: "showModelComparison") }
     set { defaults.set(newValue, forKey: "showModelComparison") }

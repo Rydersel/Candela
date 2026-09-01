@@ -21,18 +21,12 @@
 # decoy. Hence the count check below: a zero-match selector reports every control
 # missing, which reads exactly like a real defect in the app, and that has
 # already cost one issue filed against a defect that did not exist.
-# "Display resolution", "Display orientation" and "Display mirroring" are the
-# keep/revert countdown windows: transient, legitimate, and open exactly when a
-# pick just landed, so a selector that errors on them misdiagnoses a successful
-# pick as a selector failure. "Candela Checkup" (and its field window, caught by
-# the same prefix) is the same story for a checkup run. They are excluded like
-# the decoys; axprobe reaches INTO them (it walks every candidate), which is how
-# Keep is pressed.
-#
-# MEASURED 2026-09-01, one run each: with a checkup running, or with an
-# orientation card up, this bind saw more than one candidate and errored, and
-# the pass read it as the settings window being gone. Any window that can be
-# open beside settings belongs on this list.
+# The keep/revert countdown windows and the checkup windows are excluded too:
+# transient, legitimate, and open exactly when a pick or a checkup just landed,
+# so a bind that errors on them misdiagnoses success as a selector failure
+# (measured 2026-09-01: both cases read as the settings window being gone).
+# axprobe reaches INTO them, which is how Keep is pressed. Any window that can
+# be open beside settings belongs on this list.
 BIND='set cands to (every window whose name does not start with "Candela Gamma Activity Enforcer" and name does not start with "Candela OLED Care Overlay" and name does not start with "Display resolution" and name does not start with "Display orientation" and name does not start with "Display mirroring" and name does not start with "Candela Checkup" and name is not "Display Health" and name is not "Heat Map" and name is not "Candela Setup")
     if (count of cands) is not 1 then
       set seen to ""

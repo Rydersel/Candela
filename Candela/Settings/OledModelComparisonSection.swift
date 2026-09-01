@@ -8,11 +8,8 @@ import SwiftUI
 /// is on or a stored comparison exists, so turning measurement off keeps the
 /// score.
 ///
-/// TEMPORARY, built to be deleted (OCR7). Hidden from the shipped window behind
-/// the `showModelComparison` defaults key (D26) until Ryder records the verdict
-/// on the comparison gate; deletion is then: remove this file, the one call
-/// site in `HealthPane`, and the key. The stalled-sampling note already lives
-/// on the measurement toggle, since it proved necessary independently.
+/// TEMPORARY (OCR7): delete this file, its `HealthPane` call site and the
+/// `showModelComparison` key (D26) once Ryder records the comparison-gate verdict.
 @MainActor
 struct OledModelComparisonSection: View {
   let persistenceKey: String

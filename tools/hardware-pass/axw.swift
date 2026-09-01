@@ -8,29 +8,19 @@
 //   swift axw.swift <windowTitlePrefix> dec <desc>
 //   swift axw.swift <windowTitlePrefix> frame <desc>
 //
-// Why a third AX tool. `axprobe.swift` binds every window that is not a NAMED
-// decoy and walks them all, so the first match wins whenever more than one
-// window is legitimately open: the checkup flow ("Candela Checkup", "Candela
-// Checkup Field") and the keep/revert confirmation windows ("Display
-// resolution", "Display orientation", "Display mirroring") all coexist with
-// settings, and a run then reads or presses inside the wrong one while every
-// call reports success. `ax.sh` is worse off in that state: its exclusion list
-// does not name those windows, so it binds nothing and reports every control
-// missing, which reads exactly like a real defect in the app. Naming the window
-// on the command line is the fix, and it also reaches windows no exclusion list
-// will ever admit. A prefix match, not equality, because the settings window is
-// named for its current pane and the field window's title carries a suffix.
+// Why a third AX tool: `axprobe.swift` walks every non-decoy window and the
+// first match wins, so with a checkup or keep/revert window open beside settings
+// it reads or presses inside the wrong one while reporting success, and `ax.sh`
+// binds nothing in that state and reports every control missing. Naming the
+// window is the fix. Prefix match, because the settings window is named for its
+// current pane and the field window's title carries a suffix.
 //
-// Matching is on AXDescription or AXTitle and never on AXStaticText, for the
-// two measured reasons the other tools carry: SwiftUI publishes a control's
-// label as AXDescription here and leaves AXTitle absent, while AppKit windows
-// and menu items do the opposite, and multi-line static text publishes
-// synthesized AXButton children with no description that are not controls.
-// Unlike `axprobe.swift press`, which refuses an ambiguous match, `press` here
-// takes `--nth N` in tree order (the order `dump` prints), because a flow page
-// can legitimately carry one description more than once; the default is the
-// first match, so an unnoticed ambiguity still presses something. Prefer an
-// exact, unique description.
+// Matches AXDescription or AXTitle, never AXStaticText, for the measured reasons
+// the other tools carry: SwiftUI labels controls via AXDescription and AppKit
+// via AXTitle, and multi-line static text publishes description-less AXButton
+// children that are not controls. `press` takes `--nth N` in dump order because
+// a flow page can carry one description twice; the default is the first match,
+// so prefer an exact, unique description.
 import AppKit
 import ApplicationServices
 
@@ -76,14 +66,11 @@ else {
 let ax = AXUIElementCreateApplication(app.processIdentifier)
 var wv: CFTypeRef?
 AXUIElementCopyAttributeValue(ax, kAXWindowsAttribute as CFString, &wv)
-// Filter on the role first: AXWindows on this app also answers with
-// AXApplication elements titled "Candela", and binding one walks the entire
-// application tree instead of a window.
+// Role filter: AXWindows also returns AXApplication elements titled "Candela",
+// and binding one walks the whole application tree instead of a window.
 let wins = ((wv as? [AXUIElement]) ?? []).filter { str($0, kAXRoleAttribute as String) == "AXWindow" }
 guard let win = wins.first(where: { (str($0, kAXTitleAttribute as String) ?? "").hasPrefix(wantTitle) }) else {
-  // List what IS open: a title that matches nothing otherwise reports every
-  // control missing, which looks like a defect in the app rather than a
-  // mistyped or stale window name.
+  // List what is open, so a mistyped or stale title does not read as a defect in the app.
   print("no window titled '\(wantTitle)'; open: \(wins.map { str($0, kAXTitleAttribute as String) ?? "(unnamed)" })")
   exit(1)
 }

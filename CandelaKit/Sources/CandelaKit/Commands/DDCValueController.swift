@@ -60,16 +60,9 @@ public final class DDCValueController: PendingWireDraining {
   /// Defaults to `.unknown`, which D24 resolves to allowed: a controller nobody
   /// has told anything still sends the display's mute command.
   @ObservationIgnored private var muteWireSupport: () -> VCPSupport = { .unknown }
-  /// What the display's own capabilities string says about the register THIS
-  /// command writes (VCP 0x62 for volume), read live at every restore.
-  ///
-  /// A provider for the same reasons as the mute companion's verdict above: the
-  /// probe is asynchronous, and a controller is reused for whatever panel next
-  /// appears on its display ID.
-  ///
-  /// Defaults to `.unknown`, which D24 resolves to allowed. That default is what
-  /// keeps a write-only panel restoring: it can never answer the capabilities
-  /// read, and its stored value is the only record of where the register stands.
+  /// Capabilities verdict for the register this command writes (VCP 0x62 for
+  /// volume). `.unknown` allows (D24), so a write-only panel that cannot answer
+  /// the capabilities read still restores from its stored value.
   @ObservationIgnored private var valueWireSupport: () -> VCPSupport = { .unknown }
   /// The mute strategy the last restore acted on (volume only), or nil until
   /// this controller has restored anything. Read by
@@ -170,20 +163,9 @@ public final class DDCValueController: PendingWireDraining {
     )
   }
 
-  /// Does a value write on this command have a register to land in?
-  ///
-  /// The same D24 predicate that greys the slider, asked about the register the
-  /// write goes to, so the two cannot disagree: a display whose cleanly parsed
-  /// capabilities string omits VCP 0x62 is denying the feature, and a write to
-  /// it spends an I2C transaction on nothing. `.unknown` allows, which is what
-  /// keeps the write-only panels writing.
-  ///
-  /// Only the restore consults it. Every other value write is a gesture the UI
-  /// and the key filter already gate on this same verdict; the restore is the
-  /// one that fires with nobody asking.
-  ///
-  /// Volume only: no capabilities verdict in this app describes the contrast
-  /// register, and `audioSinkOverride` says nothing about contrast either.
+  /// The same D24 predicate that greys the slider, so the restore (the one value
+  /// write with no gesture behind it, hence no UI gate) cannot disagree with it.
+  /// Volume only: nothing in the app carries a verdict for the contrast register.
   private var writesValueRegister: Bool {
     guard command == .volume else { return true }
     return VolumeSliderPolicy.isEnabled(
@@ -309,12 +291,9 @@ public final class DDCValueController: PendingWireDraining {
   /// gate): a saved value exists only after this command was written at least
   /// once.
   ///
-  /// The value writes additionally obey `writesValueRegister`: an unprompted
-  /// restore must not spend an I2C transaction on a register the display's own
-  /// capabilities string denies, which is the same verdict that greys its
-  /// slider. The mute-wire submits are NOT gated on it. `submitMuteWire(1)` has
-  /// already passed the 0x8D verdict inside `usesDedicatedMuteCommand`, and
-  /// wire 2 is an unmute, which no verdict may cancel (D29 rule 3).
+  /// Only the value writes obey `writesValueRegister`. `submitMuteWire(1)` has
+  /// already passed the 0x8D verdict in `usesDedicatedMuteCommand`, and wire 2
+  /// is an unmute, which no verdict may cancel (D29 rule 3).
   public func restoreToHardware() {
     guard isAvailable, let store, let storageKey,
           store.savedBrightness(for: storageKey) != nil else { return }

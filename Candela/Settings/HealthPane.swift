@@ -46,8 +46,8 @@ struct HealthPane: View {
       if let scoped {
         measurementSection(for: scoped)
         collectedSection(for: scoped.display.persistenceKey)
-        // A soak instrument, off the shipped window until the exposure-model
-        // verdict is recorded; a defaults-write key shows it (D26).
+        // Soak-only instrument, kept off the shipped window until the
+        // exposure-model verdict is recorded; the key is a D26 escape hatch.
         if DisplayPrefs(persistenceKey: scoped.display.persistenceKey).showModelComparison {
           OledModelComparisonSection(persistenceKey: scoped.display.persistenceKey)
         }
@@ -392,12 +392,8 @@ private struct MeasurementControls: View {
     DisplayPrefWriter(persistenceKey: persistenceKey, actions: actions)
   }
 
-  /// Stalled means the pipeline should be producing readings and is not: pref
-  /// on, grant preflighting true, not Safe Mode, and the last paired reading
-  /// well past the sampling interval. The paired-reading clock is the only
-  /// per-sample timestamp the coordinator keeps, which is why a note about
-  /// measurement reads the comparison record. A missing grant is not stalled;
-  /// the branch above already says so.
+  /// Reads the comparison record because its paired-reading clock is the only
+  /// per-sample timestamp the coordinator keeps. A missing grant has its own note.
   private var isSamplingStalled: Bool {
     guard prefs.oledTelemetry, !model.isSafeMode, CGPreflightScreenCaptureAccess(),
       let last = model.oledCare.modelComparison(for: persistenceKey).lastPair
