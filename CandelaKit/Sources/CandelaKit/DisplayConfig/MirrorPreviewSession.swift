@@ -174,9 +174,17 @@ public actor MirrorPreviewSession {
   /// Applies `decision` at `.preview` scope and arms the countdown, falling
   /// back to `captured` if nobody answers.
   ///
-  /// `captured` is the caller's — read from the same `displays()` sample the
+  /// `captured` is the caller's: read from the same `displays()` sample the
   /// decision was computed from, so the fallback describes the same instant the
   /// decision does.
+  ///
+  /// **Except when a preview is already outstanding, where the ORIGINAL
+  /// fallback is kept and `captured` is discarded.** A caller samples live, and
+  /// a live sample taken inside a countdown window already contains the
+  /// unapproved set, so adopting it would make the expiry restore the very
+  /// topology the countdown exists to undo, at session scope. Same rule
+  /// `ModePreviewSession.begin` states for a mode: what is on screen is the
+  /// unconfirmed preview, which is never safe to fall back to.
   public func begin(
     _ decision: MirrorToggleDecision, from captured: MirrorTopology
   ) -> Result<Void, DisplayConfigError> {
@@ -196,11 +204,17 @@ public actor MirrorPreviewSession {
       // to prevent. Refusing is the only safe answer; the caller surfaces it.
       return .failure(DisplayConfigError(cgErrorCode: CGError.failure.rawValue))
     }
-    if outstanding != nil {
+    let fallback: MirrorTopology
+    if let standing = outstanding {
+      // Read BEFORE the revert, and it is the standing preview's own capture
+      // rather than the caller's live sample; see the doc comment.
+      fallback = standing.captured
       // A live preview is ended first, and a failed revert REFUSES: reporting
       // success here would leave a rig nobody named in an unapproved topology,
       // with no countdown left to take it back.
       if case let .failed(error) = revertOutstanding() { return .failure(error) }
+    } else {
+      fallback = captured
     }
     do {
       try configurator.applyMirroring(changes, scope: .preview)
@@ -210,7 +224,7 @@ public actor MirrorPreviewSession {
       return .failure(DisplayConfigError(cgErrorCode: -1))
     }
     outstanding = Outstanding(
-      confirmationDisplayID: master, applied: changes, captured: captured
+      confirmationDisplayID: master, applied: changes, captured: fallback
     )
     // Cleared HERE, not on entry: a begin() that fails establishes nothing, so
     // the last thing that actually happened is still the last outcome. Wiping

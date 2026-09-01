@@ -273,6 +273,38 @@ struct MirrorPreviewSessionTests {
     #expect(await session.isCountingDown)
   }
 
+  /// A SECOND preview inside the first one's countdown window keeps the FIRST
+  /// preview's fallback. The caller samples live, and a live sample taken while
+  /// a preview stands already describes the unapproved set, so adopting it
+  /// would have the expiry restore the topology the user declined to answer for
+  /// and commit it at session scope: mirrored anyway, for the whole login
+  /// session, after letting the clock run out.
+  @Test func aSecondPreviewKeepsTheFirstPreviewsFallbackRatherThanTheLiveSet() async {
+    let fake = FakeConfigurator()
+    fake.configuredDisplays = [
+      MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2),
+      MirrorFixtures.display(3),
+    ]
+    let session = MirrorPreviewSession(configurator: fake, countdownSeconds: 2)
+    let unmirrored = MirrorTopology(fake.displays())
+    _ = await session.begin(MirrorTopologyPolicy.engage(unmirrored, master: 2), from: unmirrored)
+    #expect(MirrorTopology(fake.displays()).masters == [2])
+
+    // What the coordinator does before a second engage: resample live. The
+    // sample contains the first preview's set.
+    let contaminated = MirrorTopology(fake.displays())
+    #expect(contaminated.masters == [2])
+    _ = await session.begin(
+      MirrorTopologyPolicy.engage(contaminated, master: 3), from: contaminated
+    )
+    #expect(MirrorTopology(fake.displays()).masters == [3])
+
+    #expect(await session.tick() == nil)
+    #expect(await session.tick() == .reverted)
+    #expect(MirrorTopology(fake.displays()).masters.isEmpty)
+    #expect(await session.hasOutstandingPreview == false)
+  }
+
   // MARK: - Breaking a set while a preview is outstanding
 
   /// The rig the supersede rule exists for: a set ALREADY EXISTS (1 mirroring 3),
