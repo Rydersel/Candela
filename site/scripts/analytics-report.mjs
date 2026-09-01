@@ -37,6 +37,16 @@ function placementMap(groups, metric) {
   return result
 }
 
+function dimensionMap(groups, dimensionName) {
+  const result = {}
+  for (const row of groups.flat()) {
+    if (row.metric === 'unique_windows' && row.dimension_name === dimensionName) {
+      result[row.dimension_value] = (result[row.dimension_value] ?? 0) + Number(row.value)
+    }
+  }
+  return result
+}
+
 function percentage(numerator, denominator) {
   return denominator === 0 ? 0 : Math.round((numerator / denominator) * 10_000) / 100
 }
@@ -58,9 +68,16 @@ export function buildReport(data, days) {
     uniqueDownloadWindows,
     downloadConversion: percentage(uniqueDownloadWindows, completedWindows),
     optOuts: sum(data.counters, 'opt_out'),
+    droppedWrites: sum(data.counters, 'dropped_write'),
+    cleanupRuns: sum(data.counters, 'cohorts_finalized'),
     placements: {
       github: placementMap(groups, 'unique_github'),
       download: placementMap(groups, 'unique_download'),
+    },
+    dimensions: {
+      country: dimensionMap(groups, 'country'),
+      device: dimensionMap(groups, 'device'),
+      referrer: dimensionMap(groups, 'referrer'),
     },
   }
 }
@@ -77,6 +94,8 @@ const reportRows = (report) => [
   ['Unique Download browser windows', report.uniqueDownloadWindows],
   ['Download conversion (%)', report.downloadConversion],
   ['Opt-outs', report.optOuts],
+  ['Dropped writes recorded', report.droppedWrites],
+  ['Cohorts finalized', report.cleanupRuns],
 ]
 
 export function formatCsv(report) {
@@ -86,11 +105,15 @@ export function formatCsv(report) {
 
 export function formatTable(report) {
   const rows = reportRows(report)
-  const width = Math.max(...rows.map(([label]) => label.length))
   const placements = ['github', 'download'].flatMap((action) =>
     Object.entries(report.placements[action]).map(([placement, value]) => [`${action} unique from ${placement}`, value]),
   )
-  return [...rows, ...placements].map(([label, value]) => `${label.padEnd(width)}  ${value}`).join('\n')
+  const dimensions = ['country', 'device', 'referrer'].flatMap((dimension) =>
+    Object.entries(report.dimensions[dimension]).map(([valueName, value]) => [`${dimension}: ${valueName}`, value]),
+  )
+  const allRows = [...rows, ...placements, ...dimensions]
+  const width = Math.max(...allRows.map(([label]) => label.length))
+  return allRows.map(([label, value]) => `${label.padEnd(width)}  ${value}`).join('\n')
 }
 
 async function d1Query(sql) {
@@ -127,6 +150,15 @@ async function loadData(days) {
       SELECT 'unique_' || action, 'placement', first_placement, COUNT(*) FROM unique_actions a
       JOIN measurement_windows w ON w.window_key = a.window_key
       WHERE w.cohort_day >= '${cutoff}' AND w.expires_at <= ${now} GROUP BY action, first_placement
+      UNION ALL
+      SELECT 'unique_windows', 'country', country_code, COUNT(*) FROM measurement_windows
+      WHERE cohort_day >= '${cutoff}' AND expires_at <= ${now} GROUP BY country_code
+      UNION ALL
+      SELECT 'unique_windows', 'device', device_category, COUNT(*) FROM measurement_windows
+      WHERE cohort_day >= '${cutoff}' AND expires_at <= ${now} GROUP BY device_category
+      UNION ALL
+      SELECT 'unique_windows', 'referrer', referrer_host, COUNT(*) FROM measurement_windows
+      WHERE cohort_day >= '${cutoff}' AND expires_at <= ${now} GROUP BY referrer_host
     `),
     d1Query(`SELECT COUNT(*) AS value FROM measurement_windows WHERE cohort_day >= '${cutoff}' AND expires_at > ${now}`),
   ])

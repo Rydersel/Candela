@@ -17,17 +17,22 @@ test('buildReport keeps attempts, completed browser windows, and provisional win
       { metric: 'github_attempt', placement: 'header', value: 5 },
       { metric: 'download_attempt', placement: 'hero', value: 12 },
       { metric: 'opt_out', placement: 'all', value: 2 },
+      { metric: 'cohorts_finalized', placement: 'all', value: 3 },
+      { metric: 'dropped_write', placement: 'all', value: 1 },
     ],
     rollups: [
       { metric: 'unique_windows', dimension_name: 'all', dimension_value: 'all', value: 50 },
       { metric: 'unique_github', dimension_name: 'all', dimension_value: 'all', value: 20 },
       { metric: 'unique_download', dimension_name: 'all', dimension_value: 'all', value: 8 },
       { metric: 'unique_github', dimension_name: 'placement', dimension_value: 'hero', value: 18 },
+      { metric: 'unique_windows', dimension_name: 'country', dimension_value: 'US', value: 50 },
     ],
     liveCompleted: [
       { metric: 'unique_windows', dimension_name: 'all', dimension_value: 'all', value: 10 },
       { metric: 'unique_github', dimension_name: 'all', dimension_value: 'all', value: 4 },
       { metric: 'unique_download', dimension_name: 'all', dimension_value: 'all', value: 2 },
+      { metric: 'unique_windows', dimension_name: 'device', dimension_value: 'desktop', value: 10 },
+      { metric: 'unique_windows', dimension_name: 'referrer', dimension_value: 'github.com', value: 4 },
     ],
     provisionalWindows: 6,
   }, 7)
@@ -40,7 +45,12 @@ test('buildReport keeps attempts, completed browser windows, and provisional win
   assert.equal(report.provisionalWindows, 6)
   assert.equal(report.githubAttempts, 35)
   assert.equal(report.optOuts, 2)
+  assert.equal(report.cleanupRuns, 3)
+  assert.equal(report.droppedWrites, 1)
   assert.equal(report.placements.github.hero, 18)
+  assert.equal(report.dimensions.country.US, 50)
+  assert.equal(report.dimensions.device.desktop, 10)
+  assert.equal(report.dimensions.referrer['github.com'], 4)
 })
 
 test('formatCsv quotes operator-facing labels safely', () => {
@@ -56,7 +66,10 @@ test('formatCsv quotes operator-facing labels safely', () => {
     uniqueDownloadWindows: 0,
     downloadConversion: 0,
     optOuts: 0,
+    droppedWrites: 0,
+    cleanupRuns: 0,
     placements: { github: {}, download: {} },
+    dimensions: { country: {}, device: {}, referrer: {} },
   })
   assert.match(csv, /^metric,value$/m)
   assert.match(csv, /"Completed 24-hour browser windows",1/)

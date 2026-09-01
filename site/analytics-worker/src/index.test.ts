@@ -26,4 +26,12 @@ describe('anonymous dimension rollups', () => {
       { metric: 'unique_windows', dimensionName: 'device', dimensionValue: 'other', value: 5 },
     ])
   })
+
+  it('keeps exact all-up funnel totals below the dimension threshold', () => {
+    const cells: DimensionCell[] = [
+      { metric: 'unique_download', dimensionName: 'all', dimensionValue: 'all', value: 3 },
+      { metric: 'unique_github', dimensionName: 'all', dimensionValue: 'all', value: 5 },
+    ]
+    expect(collapseSmallCells(cells)).toEqual(cells)
+  })
 })

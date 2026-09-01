@@ -17,7 +17,7 @@ export function collapseSmallCells(cells: DimensionCell[], minimum = 10) {
   const kept: DimensionCell[] = []
   const folded = new Map<string, DimensionCell>()
   for (const cell of cells) {
-    if (cell.value >= minimum) {
+    if (cell.dimensionName === 'all' || cell.value >= minimum) {
       kept.push(cell)
       continue
     }
