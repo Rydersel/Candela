@@ -392,7 +392,7 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     }
 
     // Do not drop this line: without it the panel has no content view and the
-    // HUD is invisible (docs/ENGINEERING-NOTES.md, "OSD / HUD").
+    // HUD is invisible.
     panel.contentView = rootView
 
     return HUD(panel: panel, effectView: effectView, nameLabel: nameLabel, leftIcon: leftIcon,

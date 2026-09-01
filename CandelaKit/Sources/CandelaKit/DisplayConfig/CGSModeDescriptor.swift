@@ -3,9 +3,9 @@ import Foundation
 /// One entry from the private CGS display-mode list.
 ///
 /// Field offsets verified byte-for-byte on three panels against macOS 26.6.1
-/// (25G76); see `docs/spikes/2026-08-06-cgs-mode-revelation.md` §3. Offsets 200
-/// and 204 carry the framebuffer size directly, which the community-transcribed
-/// headers omit and which beats multiplying logical by density and rounding.
+/// (25G76), 2026-08-06. Offsets 200 and 204 carry the framebuffer size directly,
+/// which the community-transcribed headers omit and which beats multiplying
+/// logical by density and rounding.
 public struct CGSModeDescriptor: Sendable, Equatable, Hashable {
   /// Also the index it was read at, and the same ID space as
   /// `CGDisplayMode.ioDisplayModeID` (S6 §4).

@@ -167,10 +167,10 @@ public protocol DisplayArrangementConfiguring: Sendable {
 /// same rule.
 ///
 /// **`CGCompleteDisplayConfiguration` returning `.success` is not evidence the
-/// request was honoured**: measured twice on the mirroring hardware pass with every
-/// stage AND the complete returning `.success`
-/// (`docs/spikes/2026-08-04-mirroring-hardware-pass.md` §6.2). `MirrorVerification`
-/// is this rule for a topology, `CoreGraphicsDisplayConfigurator.apply` for a mode.
+/// request was honoured**: measured twice on the mirroring hardware pass
+/// (2026-08-04) with every stage AND the complete returning `.success`.
+/// `MirrorVerification` is this rule for a topology,
+/// `CoreGraphicsDisplayConfigurator.apply` for a mode.
 enum ArrangementVerification {
   /// The first change in the plan the achieved layout does not show, or `nil`
   /// when the layout stands.

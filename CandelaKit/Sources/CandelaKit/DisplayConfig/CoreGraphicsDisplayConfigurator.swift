@@ -454,12 +454,12 @@ enum SkyLight {
   // MARK: - CGS mode list
   //
   // Enumeration and application of the modes CoreGraphics computes but never
-  // publishes. Layout and behaviour verified on macOS 26.6.1 (25G76) across
-  // three panels: docs/spikes/2026-08-06-cgs-mode-revelation.md.
+  // publishes. Layout and behaviour verified byte-for-byte on macOS 26.6.1
+  // (25G76) across three panels, 2026-08-06.
   //
-  // RE-RUN THAT SPIKE AFTER EVERY MACOS MINOR RELEASE. The 212-byte descriptor
-  // is the fragile part; `CGSModeRevelation.isPlausible` turns a shifted layout
-  // into "nothing revealed" rather than garbage modes.
+  // RE-VERIFY THAT LAYOUT AFTER EVERY MACOS MINOR RELEASE. The 212-byte
+  // descriptor is the fragile part; `CGSModeRevelation.isPlausible` turns a
+  // shifted layout into "nothing revealed" rather than garbage modes.
 
   typealias GetDisplayModeCount =
     @convention(c) (CGDirectDisplayID, UnsafeMutablePointer<Int32>) -> Int32

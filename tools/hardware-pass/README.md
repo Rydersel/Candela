@@ -49,5 +49,8 @@ The discipline that decides whether any of it means anything is the positive
 control: alongside the measurement, run something whose answer is already known.
 A check that reports a pass when its subject is absent, its path is wrong or its
 grep matches nothing is not a check, and every driver here has a way to fail
-that quietly. `docs/CHECKPOINT-1-HARDWARE.md` is the worked example, with the
-controls written out next to the measurements they qualify.
+that quietly. The worked shape, from the Release debug-marker check: before
+grepping a binary for a marker that must be absent, grep the same binary in the
+same command for a literal you know is present. If the control comes back zero,
+the tool or the path is wrong and the marker's zero means nothing. Write the
+control next to the measurement it qualifies, every time.

@@ -3,7 +3,6 @@ import Foundation
 @testable import CandelaKit
 
 /// Captured from real hardware on 2026-08-06, macOS 26.6.1 (25G76).
-/// See docs/spikes/2026-08-06-cgs-mode-revelation.md.
 enum CGSModeFixtures {
   // MARK: MAG 341C OLED — native 3440x1440, aspect 2.3889
 

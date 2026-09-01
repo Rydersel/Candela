@@ -152,9 +152,8 @@ public struct MirrorChange: Sendable, Equatable {
 /// real configurator and its test double are held to the same rule.
 ///
 /// **`CGCompleteDisplayConfiguration` returning `.success` is not evidence the
-/// request was honoured.** Measured on the mirroring hardware pass
-/// (`docs/spikes/2026-08-04-mirroring-hardware-pass.md` §6.2), with every stage
-/// AND the complete returning `.success` in both cases:
+/// request was honoured.** Measured on the mirroring hardware pass (2026-08-04),
+/// with every stage AND the complete returning `.success` in both cases:
 ///
 /// - a cyclic list `[166→167, 167→166]` achieved `166→167, 167→0`;
 /// - a list naming one display twice, `[166→167, 166→168]`, applied the FIRST

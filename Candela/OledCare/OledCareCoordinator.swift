@@ -1483,15 +1483,15 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// and SPECIFIC apps that emitted nothing, and both are persisted.
   ///
   /// Bounded, not fixed, because a blanked panel is indistinguishable at every
-  /// layer we can observe and does not self-recover; the measurements are in
-  /// `docs/ENGINEERING-NOTES.md`, under DPMS power-off over DDC. HID idle
-  /// time is the bound: with nobody typing, the engine leaves `.active` at the
-  /// idle threshold and sampling stops. **The uncovered case is a second
-  /// display**, where the user works on one panel while the other sits blanked,
-  /// holding idle at zero. **A synthesized size widens that hole knowingly**:
-  /// the engine's mirror input holds `.suspended` whatever the idle counter
-  /// says. Do not "fix" this with a readback or a DPMS probe: a write-only panel
-  /// answers neither, and the probe itself can strand the display.
+  /// layer we can observe and does not self-recover [MEASURED with the panel
+  /// held in DPMS power-off over DDC]. HID idle time is the bound: with nobody
+  /// typing, the engine leaves `.active` at the idle threshold and sampling
+  /// stops. **The uncovered case is a second display**, where the user works on
+  /// one panel while the other sits blanked, holding idle at zero. **A
+  /// synthesized size widens that hole knowingly**: the engine's mirror input
+  /// holds `.suspended` whatever the idle counter says. Do not "fix" this with a
+  /// readback or a DPMS probe: a write-only panel answers neither, and the
+  /// probe itself can strand the display.
   private func samplingQualifies(dimState: OledDimState, on target: OledTelemetryTarget) -> Bool {
     guard !resetting, target.samplingMayRun(dimState: dimState), !lockObserver.isLocked
     else { return false }

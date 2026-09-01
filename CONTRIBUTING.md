@@ -12,9 +12,8 @@ Participation is under the [Code of Conduct](CODE_OF_CONDUCT.md).
   live here, along with the test suite that covers them without hardware.
 - `Candela/` is the app: SwiftUI, with a few AppKit islands (the HUD, the
   shade windows, the gamma enforcer) behind CandelaKit protocols.
-- `docs/` holds the user guides (`docs/guide/`), the spike findings that decided
-  the hard questions (`docs/spikes/`), the engineering notes, the advanced
-  settings reference, and the hardware verification ledger.
+- `docs/` holds the user guides (`docs/guide/`), the advanced settings
+  reference, and the committed conformance baselines (`docs/conformance/`).
 - `ROADMAP.md` is the scope document. It says what is planned and what has been
   ruled out, each with its reason. A change that contradicts it wants a
   conversation in an issue first, because the roadmap changes by pull request
@@ -57,9 +56,9 @@ takes a week.
 - **A change that touches hardware behaviour states how it was verified**:
   which monitor, which connection, and what you observed. Do this before the
   merge, not after: from the outside, a merged but unverified fix and an
-  untouched bug look identical. `docs/VERIFICATION-STATUS.md` records what has
-  and has not been verified, and every feature issue carries a
-  `## Hardware verification` section that is the script for the run.
+  untouched bug look identical. The maintainers keep the measured records, and
+  every feature issue carries a `## Hardware verification` section that is the
+  script for the run.
 - If the verification genuinely cannot run, because nobody has the hardware or
   the test would be disruptive, say so out loud on the issue and name what is
   blocking it. Deferring is allowed. Deferring silently is not.

@@ -140,10 +140,9 @@ most likely fix.
 Development runs on Apple silicon with macOS 26 and two external panels: an
 MSI MAG 341C OLED (3440 by 1440, write-only DDC) and a Dell U2725QE (4K,
 mounted rotated, full DDC read support). Every feature is verified on real
-hardware before it merges, and the record of what has and has not been
-verified is public in `docs/VERIFICATION-STATUS.md`. If your panel behaves
-differently, an issue with the model name is the most useful thing you can
-send.
+hardware before it merges, and the maintainers keep the measured records. If
+your panel behaves differently, an issue with the model name is the most useful
+thing you can send.
 
 ## Credits
 

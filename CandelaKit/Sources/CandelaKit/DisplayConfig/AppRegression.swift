@@ -733,28 +733,22 @@ public enum AppRegression {
 
   /// `<yyyy-MM-dd>-<sha7>.json`, in UTC.
   ///
-  /// Pure, and pinned by a test, because the ledger's CI leg selects the newest
-  /// record LEXICALLY and its drift guard reddens on any filename in the
-  /// directory that does not match this shape. A date that followed the running
-  /// machine's time zone would roll the day over at the wrong moment, and an
-  /// unpadded month or day would sort `2026-1-5` after `2026-10-05`: either way
-  /// the job reads a record that is not the newest and reports an outstanding
-  /// count for the wrong run. This function is the one definition of the shape.
+  /// Readers pick the newest record LEXICALLY, so the date has to be UTC and
+  /// zero-padded: local time rolls the day over at the wrong moment, and
+  /// `2026-1-5` sorts after `2026-10-05`. This is the one definition of the shape.
   ///
-  /// It does not validate the token it is handed, deliberately: a mistyped
-  /// `--commit` lands in the ledger as a well-formed filename naming a build
-  /// that does not exist. The ledger job's positive control catches that by
-  /// resolving the record's `commit` field with `git cat-file -e`. Rejecting it
-  /// here would be a second definition of what a commit is, in the layer least
-  /// able to answer.
+  /// A mistyped `--commit` is accepted on purpose: it lands as a well-formed
+  /// filename naming a build that does not exist, and a reader catches that with
+  /// `git cat-file -e`. Rejecting it here would be a second definition of what a
+  /// commit is, in the layer least able to answer.
   public static func recordFilename(commit: String, date: Date) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
     formatter.timeZone = TimeZone(identifier: "UTC")
     formatter.dateFormat = "yyyy-MM-dd"
     let trimmed = commit.trimmingCharacters(in: .whitespacesAndNewlines)
-    // Never a bare trailing dash: a record nobody can attribute is one the
-    // drift guard reddens on without saying why.
+    // Never a bare trailing dash: a record nobody can attribute cannot be
+    // matched to the build it measured.
     let sha = trimmed.isEmpty ? "unknown" : String(trimmed.prefix(7))
     return "\(formatter.string(from: date))-\(sha).json"
   }
