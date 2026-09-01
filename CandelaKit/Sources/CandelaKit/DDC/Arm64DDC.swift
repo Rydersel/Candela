@@ -291,13 +291,8 @@ public class Arm64DDC: NSObject {
     return unmanagedAttributes.takeRetainedValue() as? [String: Any]
   }
 
-  /// The next entry in the walk whose name contains one of `interests`.
-  ///
-  /// `IOIteratorNext` hands back a RETAINED entry, so ownership matters here:
-  /// the returned entry carries that reference and the caller must release it,
-  /// while every entry the walk skips is released on the turn it is discarded.
-  /// The iteration is recursive over the whole IOService plane, so skipped
-  /// entries are thousands per pass, and discovery runs on every menu close.
+  /// Next entry whose name contains one of `interests`. Returned RETAINED: the
+  /// caller must release it. Skipped entries (thousands per pass) are released here.
   static func ioregIterateToNextObjectOfInterest(interests: [String], iterator: inout io_iterator_t) -> (name: String, entry: io_service_t)? {
     let name = UnsafeMutablePointer<CChar>.allocate(capacity: MemoryLayout<io_name_t>.size)
     defer {
@@ -385,12 +380,8 @@ public class Arm64DDC: NSObject {
       guard let objectOfInterest = ioregIterateToNextObjectOfInterest(interests: [keyDCPAVServiceProxy] + keysFramebuffer, iterator: &iterator) else {
         break
       }
-      // The helper hands over the entry's reference. Both branches are finished
-      // with the entry when they return: the properties read copies what it
-      // wants, and IOAVServiceCreateWithService returns a CF object with its own
-      // lifetime, which outlives the registry entry it was made from. The
-      // release also covers a name that matched an interest by substring but
-      // neither branch by equality.
+      // Owned reference from the helper. Safe to release after either branch:
+      // the properties read copies, and the IOAVService has its own lifetime.
       defer { IOObjectRelease(objectOfInterest.entry) }
       if keysFramebuffer.contains(objectOfInterest.name) {
         ioregService = self.getIORegServiceAppleCDC2Properties(entry: objectOfInterest.entry)

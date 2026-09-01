@@ -152,24 +152,18 @@ final class OledOverlay {
     // OC15: blackout swallows mouse input (at full black a click-through click
     // is a blind click on live UI); every other level stays click-through.
     window.ignoresMouseEvents = !state.blackout
-    // Mask first, then the alpha it decides: the two are ONE decision, and
-    // writing the alpha ahead of the mask is what leaves a failed mask at 1.0
-    // over a flat black layer.
+    // Mask first, since it decides the alpha: 1.0 over a failed mask's flat
+    // black layer blacks out the panel.
     let masked = Self.writeMask(state.mask, to: window)
     let alpha = masked ? state.alpha : Self.fallbackAlpha(forUnrendered: state.mask)
     window.contentView?.alphaValue = CGFloat(alpha)
     window.orderFrontRegardless()
   }
 
-  /// The alpha for a mask that was asked for and did not reach the layer.
-  ///
-  /// The caller's alpha is unusable here: it is 1.0 by the render funnel's
-  /// convention BECAUSE the mask carries the absolute per-cell opacity, so
-  /// writing it over the flat black fallback paints the whole panel opaque.
-  /// The mask's peak is the darkest cell it asked for, so this errs dark
-  /// without ever going darker than the mask itself would have. A mask with no
-  /// cells asked for nothing and gets nothing: an invisible overlay beats a
-  /// black screen.
+  /// Alpha for a mask that did not reach the layer. The caller's 1.0 (the mask
+  /// carries the per-cell opacity) over the flat black fallback blacks out the
+  /// panel. The peak errs dark, never darker than the mask would have; no
+  /// cells means no dim, since an invisible overlay beats a black screen.
   static func fallbackAlpha(forUnrendered mask: OverlayMask.Oriented?) -> Double {
     mask?.cells.max() ?? 0
   }
@@ -185,8 +179,7 @@ final class OledOverlay {
   /// Nil CLEARS the contents: a display that had a mask and no longer does must
   /// go back to a uniform dim, not keep a stale gradient nothing updates.
   ///
-  /// Returns false ONLY when a mask was asked for and did not reach the layer,
-  /// which is the one case where the caller's alpha is not the alpha to write.
+  /// Returns false only when a mask was asked for and did not reach the layer.
   private static func writeMask(_ mask: OverlayMask.Oriented?, to window: NSPanel) -> Bool {
     guard let layer = window.contentView?.layer else { return mask == nil }
     guard let mask else {
@@ -195,9 +188,8 @@ final class OledOverlay {
       return true
     }
     guard let image = maskImage(mask) else {
-      // Flat black here, and `write` pairs it with the mask's darkest cell:
-      // a failed image costs the spatial detail, not the dim the user asked
-      // for, and never the whole panel.
+      // Flat black, paired by `write` with the mask's darkest cell: a failed
+      // image costs the spatial detail, not the dim, and never the whole panel.
       layer.contents = nil
       layer.backgroundColor = .black
       return false
@@ -229,10 +221,8 @@ final class OledOverlay {
     let space = CGColorSpaceCreateDeviceRGB()
     let info = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue)
       .union(.byteOrder32Little)
-    // Context AND `makeImage` inside the buffer's lifetime: `&pixels` as a call
-    // argument is a pointer valid only for that call, so a context that outlives
-    // the initializer is reading storage it no longer owns. Same shape as
-    // `LuminanceReduction.meanLuminance`.
+    // `makeImage` inside the closure too: `&pixels` as a call argument is valid
+    // only for that call, so a context that outlives it reads freed storage.
     return pixels.withUnsafeMutableBytes { buffer -> CGImage? in
       guard let base = buffer.baseAddress,
         let context = CGContext(

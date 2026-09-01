@@ -88,13 +88,8 @@ struct RotationPreviewSessionTests {
     #expect(fake.rotation(of: 2) == .ninety)
   }
 
-  /// A second request supersedes rather than nests, and it keeps the FIRST
-  /// preview's origin. The caller fills `from` with the live angle, which
-  /// inside a countdown window is the unapproved previewed one, so adopting it
-  /// would make the revert land on an angle nobody chose.
-  ///
-  /// The rewritten request is what `previewed` reports, and it is what an
-  /// answer has to carry back: the answer the UI holds comes from there.
+  /// A second request keeps the FIRST preview's origin: the caller's `from` is
+  /// the unapproved live angle. Answers must carry what `previewed` reports.
   @Test func aSecondPreviewSupersedesTheFirstAndKeepsItsOriginalStartingAngle() async {
     let fake = FakeConfigurator()
     fake.rotations = [2: .standard]
@@ -109,10 +104,8 @@ struct RotationPreviewSessionTests {
     #expect(fake.rotation(of: 2) == .standard)
   }
 
-  /// The harm, unanswered. A rotation is permanent the instant it applies, so an
-  /// expiry that reverted to the previous preview's angle would leave the
-  /// display resting at an angle the user never approved and whose own
-  /// countdown had already been cancelled.
+  /// A rotation is permanent once applied, so an expiry back to the previous
+  /// preview's angle would leave the display at an angle nobody approved.
   @Test func anUnansweredSecondPreviewExpiresBackToTheAngleBeforeAnyPreview() async {
     let fake = FakeConfigurator()
     fake.rotations = [2: .standard]

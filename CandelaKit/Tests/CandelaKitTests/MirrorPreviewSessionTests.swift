@@ -273,12 +273,8 @@ struct MirrorPreviewSessionTests {
     #expect(await session.isCountingDown)
   }
 
-  /// A SECOND preview inside the first one's countdown window keeps the FIRST
-  /// preview's fallback. The caller samples live, and a live sample taken while
-  /// a preview stands already describes the unapproved set, so adopting it
-  /// would have the expiry restore the topology the user declined to answer for
-  /// and commit it at session scope: mirrored anyway, for the whole login
-  /// session, after letting the clock run out.
+  /// A second preview mid-countdown keeps the FIRST preview's fallback:
+  /// expiring to the live sample would commit the unapproved set at session scope.
   @Test func aSecondPreviewKeepsTheFirstPreviewsFallbackRatherThanTheLiveSet() async {
     let fake = FakeConfigurator()
     fake.configuredDisplays = [

@@ -58,10 +58,8 @@ enum KeyboardHeroModel {
   /// than a value that could go stale.
   static let modifiersPreview = "5 combinations"
 
-  /// Both families, because the page behind the chevron gates its target picker
-  /// and its step switch per family: a preview built from brightness alone
-  /// announced "Keys off" over a live volume picker. Every row of a disabled
-  /// family is greyed there, so a disabled family contributes nothing here.
+  /// Both families: the page behind the chevron greys each family's picker and
+  /// step switch on its own, so a disabled family contributes nothing here.
   static func targetingPreview(
     brightnessMode: KeyMode, volumeMode: KeyMode,
     brightnessTarget: MultiKeyboardBrightness, volumeTarget: MultiKeyboardVolume,

@@ -173,11 +173,8 @@ struct CheckupFlowModelTests {
     #expect(presenter.isHolding == false)
   }
 
-  /// Quit is not a close. `NSApplication.terminate` runs neither window
-  /// delegate callback, so `CheckupWindowController.abandonForTermination` is
-  /// the stand-in and makes the same two calls. Pinned here because it is the
-  /// contract that path leans on: a run in flight at quit still saves as
-  /// incomplete and still books the light it put on the panel.
+  /// The contract `CheckupWindowController.abandonForTermination` leans on: a
+  /// run in flight at quit still saves as incomplete and still books its field.
   @Test func quittingMidFieldSavesIncompleteAndBooksTheField() async {
     var booked: [(CheckupFieldKind, TimeInterval)] = []
     let presenter = FakePresenter()

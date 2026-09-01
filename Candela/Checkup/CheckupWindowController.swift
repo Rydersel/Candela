@@ -171,16 +171,15 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
     return true
   }
 
-  /// The quit-time equivalent of `windowShouldClose`. `NSApplication.terminate`
-  /// does not close windows, so without this a run in flight at quit reaches
-  /// neither delegate callback: no incomplete report is saved and the field's
-  /// time on the panel is never booked to the exposure record.
+  /// The quit-time `windowShouldClose`: `NSApplication.terminate` closes no
+  /// windows, so a run in flight at quit would otherwise save no report and
+  /// book no field time.
   func abandonForTermination() {
     if model?.page != .summary {
       model?.abandon(reason: CheckupCopy.closedReason)
     }
-    // `abandon` hides through the presenter; this covers the run that had
-    // already ended with the field somehow still up.
+    // `abandon` hides through the presenter; this covers a run that already
+    // ended with the field still up.
     fieldWindow.hide()
   }
 

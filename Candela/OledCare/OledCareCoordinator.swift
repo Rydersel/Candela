@@ -759,10 +759,8 @@ final class OledCareCoordinator: CheckupCareHolding {
 
   private func dropState(for key: String) {
     guard var state = states.removeValue(forKey: key) else { return }
-    // Unconditionally, and BEFORE the lookup: a departed display is exactly the
-    // case the lookup misses, and the state that owns the ramp is about to be
-    // discarded, so nothing else can ever cancel it. `endAllLockDims` does the
-    // same in its no-controller branch.
+    // BEFORE the controller lookup, which misses a departed display: the state
+    // owning the ramp is being discarded, so nothing else can cancel it.
     state.lockDimRamp?.cancel()
     state.lockDimRamp = nil
     // Un-enrollment is the case that matters: the display is still connected,

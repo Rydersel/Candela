@@ -126,9 +126,8 @@ enum CheckupLiveEnvironment {
           capabilities: capabilities[entry.identityKey] ?? nil,
           hdr: hdr,
           configurator: configurator,
-          // Resolved when the leg ends rather than captured now: a replug during
-          // the run rebinds or rebuilds this panel's controllers, and a snapshot
-          // taken here would be writing at a wire that has gone.
+          // Looked up when the leg ends, not captured now: a replug mid-run
+          // rebuilds this panel's controllers, leaving a snapshot at a dead wire.
           restoreControls: {
             guard let state = model?.allControlledStates.first(where: {
               $0.display.persistenceKey == entry.identityKey
@@ -237,13 +236,11 @@ enum CheckupLiveEnvironment {
     func run() async -> [CheckupClaim] { [] }
   }
 
-  /// CK11's round trip writes 0x10, 0x12 and 0x62 straight at the display,
-  /// outside the coalescers that own those registers. Anything that moves a
-  /// control while the leg is in flight (a media key, the panel slider, care's
-  /// lock dim) therefore ends with the panel holding the value the runner read
-  /// back and the coalescer's duplicate memo naming the newer one, so the move
-  /// back is skipped as a duplicate. The restore runs once the leg is graded,
-  /// whatever the verdict: the writes went out either way.
+  /// CK11's round trip writes VCP registers straight at the display, past the
+  /// coalescers that own them. A control moved mid-leg is left at the runner's
+  /// read-back value while the coalescer's memo names the newer one, so the
+  /// move back is skipped as a duplicate. Restores whatever the verdict: the
+  /// writes went out either way.
   struct ControlRestoringCapabilitiesRunner: CheckupCapabilitiesRunning {
     let base: any CheckupCapabilitiesRunning
     let restore: @Sendable @MainActor () -> Void
@@ -255,10 +252,8 @@ enum CheckupLiveEnvironment {
     }
   }
 
-  /// The startup/wake restore pass's shape, gates included: the brightness leg
-  /// only for a display this app has ever written, the value controllers behind
-  /// their own saved-value gate. Without those gates a panel nobody has touched
-  /// would be handed an assumed default it never asked for.
+  /// Same gates as the startup/wake restore: `restoreToHardware` gates itself,
+  /// and a panel this app never wrote must not be handed an assumed default.
   @MainActor
   static func restoringControls(of state: AppModel.DisplayState) {
     if state.controller.hasStoredValue {

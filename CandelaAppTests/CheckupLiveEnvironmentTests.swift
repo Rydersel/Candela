@@ -121,12 +121,8 @@ struct CheckupLiveEnvironmentTests {
 
   // MARK: - Putting the wire back after the capabilities leg
 
-  /// CK11's round trip writes 0x10 straight at the panel, past the coalescer
-  /// that owns it. A brightness move made while the leg is in flight is left on
-  /// the display as the value the runner read, and the coalescer's duplicate
-  /// memo names the newer one, so the move back is skipped as a duplicate and
-  /// nothing inside the app can recover it. The leg has to clear that memo and
-  /// re-assert the published value once it is graded.
+  /// A brightness move mid-leg is left at the runner's read-back value, and
+  /// the coalescer's memo names the newer one; only a memo reset puts it back.
   @Test @MainActor func theCapabilitiesLegPutsTheBrightnessRegisterBack() async {
     let writer = FakeDDCWriter()
     // Far enough from anything 0.8 resolves to that the two writes cannot be
@@ -159,9 +155,8 @@ struct CheckupLiveEnvironmentTests {
     #expect(restored > clobber)
   }
 
-  /// The re-assert is not a licence to push numbers at a panel this app has
-  /// never written. A fresh display publishes assumed defaults, and asserting
-  /// those would move controls nobody touched.
+  /// A fresh display publishes assumed defaults; re-asserting those would move
+  /// controls nobody touched.
   @Test @MainActor func anUntouchedDisplayIsNotHandedItsAssumedDefaults() async {
     let writer = FakeDDCWriter()
     let state = displayState(writer: writer, store: nil)
@@ -172,9 +167,8 @@ struct CheckupLiveEnvironmentTests {
     #expect(writer.writes.isEmpty)
   }
 
-  /// Volume and contrast keep no store, so their own saved-value gate holds
-  /// them shut; the brightness store is what lets `hasStoredValue` turn true
-  /// the way it does in the app.
+  /// Volume and contrast have no store, so their own gate holds them shut; the
+  /// brightness store is what lets `hasStoredValue` turn true.
   @MainActor private func displayState(
     writer: FakeDDCWriter, store: (any BrightnessStoring)?
   ) -> AppModel.DisplayState {

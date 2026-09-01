@@ -16,8 +16,8 @@ public enum BuiltInDisplayDiscovery {
   /// `CoreDisplay_DisplayCreateInfoDictionary`'s product name, falling back to
   /// "Built-in Display".
   public static func discover() -> (id: CGDirectDisplayID, name: String)? {
-    // 32, not the historical 16, for the reason `DisplayDiscovery` gives:
-    // virtual displays fill this buffer before anything filters them out.
+    // 32 to match `DisplayDiscovery`: virtual displays fill this buffer before
+    // anything filters them out.
     var displayIDs = [CGDirectDisplayID](repeating: 0, count: 32)
     var count: UInt32 = 0
     guard CGGetOnlineDisplayList(32, &displayIDs, &count) == .success else {

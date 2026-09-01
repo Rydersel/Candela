@@ -123,10 +123,8 @@ struct AnswerButtonStyle: ButtonStyle {
     HoverLabel(configuration: configuration, isPrimary: isPrimary)
   }
 
-  /// The hover state lives on a real `View`, not on the style: a `ButtonStyle`
-  /// is not a view, so SwiftUI does not reliably install dynamic properties
-  /// declared on it and the answers could go dead to the pointer. Same shape as
-  /// the settings button styles.
+  /// Hover state on a real `View`: SwiftUI does not reliably install dynamic
+  /// properties declared on a `ButtonStyle`, and the answers went dead to hover.
   private struct HoverLabel: View {
     let configuration: Configuration
     let isPrimary: Bool

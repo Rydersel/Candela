@@ -146,10 +146,8 @@ struct OnboardingOledCarePage: View {
     // The grant can land outside the app (System Settings), so the copy
     // re-checks whenever the page comes back on screen.
     .onAppear { model.refreshScreenRecordingGranted() }
-    // The card's own copy sends the user to System Settings, and the return
-    // trip does not re-run `onAppear`: the page was never removed, so without
-    // this the flow keeps saying "Waiting for permission" after the grant
-    // landed. Event-driven, so it adds no poller and dies with the view.
+    // Coming back from System Settings does not re-run `onAppear` (the page was
+    // never removed), so the grant would go unnoticed until the next page turn.
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
       model.refreshScreenRecordingGranted()
     }

@@ -178,13 +178,9 @@ public actor MirrorPreviewSession {
   /// decision was computed from, so the fallback describes the same instant the
   /// decision does.
   ///
-  /// **Except when a preview is already outstanding, where the ORIGINAL
-  /// fallback is kept and `captured` is discarded.** A caller samples live, and
-  /// a live sample taken inside a countdown window already contains the
-  /// unapproved set, so adopting it would make the expiry restore the very
-  /// topology the countdown exists to undo, at session scope. Same rule
-  /// `ModePreviewSession.begin` states for a mode: what is on screen is the
-  /// unconfirmed preview, which is never safe to fall back to.
+  /// While a preview is outstanding, `captured` is DISCARDED for the standing
+  /// preview's fallback: a live sample taken mid-countdown already holds the
+  /// unapproved set, and expiring to it would commit it at session scope.
   public func begin(
     _ decision: MirrorToggleDecision, from captured: MirrorTopology
   ) -> Result<Void, DisplayConfigError> {
@@ -206,8 +202,7 @@ public actor MirrorPreviewSession {
     }
     let fallback: MirrorTopology
     if let standing = outstanding {
-      // Read BEFORE the revert, and it is the standing preview's own capture
-      // rather than the caller's live sample; see the doc comment.
+      // Read BEFORE the revert; the doc comment says why this is not `captured`.
       fallback = standing.captured
       // A live preview is ended first, and a failed revert REFUSES: reporting
       // success here would leave a rig nobody named in an unapproved topology,

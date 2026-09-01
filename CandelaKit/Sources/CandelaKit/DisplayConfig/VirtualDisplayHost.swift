@@ -341,8 +341,8 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
   /// release, so the mirroring displays land back on their own framebuffers
   /// rather than on a departing one. Public CoreGraphics only.
   private func breakMasteredMirrors(of displayID: CGDirectDisplayID) {
-    // 32, not the historical 16, for the reason `DisplayDiscovery` gives:
-    // virtual displays fill this buffer before anything filters them out.
+    // 32 to match `DisplayDiscovery`: virtual displays fill this buffer before
+    // anything filters them out.
     var ids = [CGDirectDisplayID](repeating: 0, count: 32)
     var count: UInt32 = 0
     guard CGGetOnlineDisplayList(32, &ids, &count) == .success else { return }

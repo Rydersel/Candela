@@ -427,10 +427,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       }
     }
 
-    // Departure cleanup, wired to the model rather than read off `refresh()`'s
-    // return value: whichever caller started the pass, the pass itself reports
-    // once, so a topology event that joins a menu close's pass is still cleaned
-    // up. `checkupWindow` is read at call time because it is built on first use.
+    // Wired here rather than read off `refresh()`'s return value, which a joiner
+    // never sees. `checkupWindow` is read at call time: it is built on first use.
     model.onDisplaysDeparted = { [weak self] departed in
       guard let self else { return }
       for id in departed {
@@ -456,9 +454,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         // it. The coordinator observes the raw screen-parameters notification
         // itself, so this is a backstop like the line above, not the trigger.
         self.model.mirroring.refreshTopology()
-        // Departure cleanup rides `onDisplaysDeparted`, not this return value:
-        // this loop regularly JOINS a pass a menu close started, and a joiner is
-        // handed an empty list by design.
+        // Return value ignored: this loop often JOINS a pass a menu close started,
+        // and a joiner gets an empty list. Cleanup rides `onDisplaysDeparted`.
         await self.model.refresh()
         self.refreshTapConfig()
         self.updateStatusItemVisibility()
@@ -948,10 +945,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   func applicationWillTerminate(_: Notification) {
     gammaController.resetAllGamma() // not DDC, always runs
     shadeOverlay.removeAllShades() // not DDC, always runs
-    // CK27: quitting mid-run abandons it, and an abandoned run is still saved
-    // as incomplete with its field time booked. Above the safe-mode guard
-    // because it writes a file rather than sending DDC, and a run started in a
-    // safe-mode session deserves its report like any other.
+    // CK27. Above the safe-mode guard: this writes a report, not DDC, and a run
+    // started in safe mode gets its report like any other.
     checkupWindow?.abandonForTermination()
     // D11: safe mode sends no unattended DDC. The full-range restore undoes
     // combined-mode dimming at quit, and safe mode never installed any, so
@@ -1248,12 +1243,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     //         state derived from the prefs just destroyed.
     await model.rebuildControllers()
 
-    // ---- 5a. The rebuild hands back fresh controllers, and the hook is wired
-    //          from the app target rather than inside the refresh pass, so
-    //          without this every gamma write until the next topology event or
-    //          menu close would skip the interference check. Before 5b, which
-    //          reaches `applySoftware` and so takes the first post-reset gamma
-    //          write.
+    // ---- 5a. Rebuilt controllers carry no interference hooks. Before 5b, which
+    //          makes the first post-reset gamma write and would skip the check.
     wireInterferenceHooks()
 
     // ---- 5b. The post-reset value has to reach the GLASS, not just the slider.
