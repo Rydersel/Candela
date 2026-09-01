@@ -46,7 +46,11 @@ struct HealthPane: View {
       if let scoped {
         measurementSection(for: scoped)
         collectedSection(for: scoped.display.persistenceKey)
-        OledModelComparisonSection(persistenceKey: scoped.display.persistenceKey)
+        // Soak-only instrument, kept off the shipped window until the
+        // exposure-model verdict is recorded; the key is a D26 escape hatch.
+        if DisplayPrefs(persistenceKey: scoped.display.persistenceKey).showModelComparison {
+          OledModelComparisonSection(persistenceKey: scoped.display.persistenceKey)
+        }
       }
     }
     // One-shot scope handoff from a link on another pane (SC4). Cleared on
@@ -388,6 +392,15 @@ private struct MeasurementControls: View {
     DisplayPrefWriter(persistenceKey: persistenceKey, actions: actions)
   }
 
+  /// Reads the comparison record because its paired-reading clock is the only
+  /// per-sample timestamp the coordinator keeps. A missing grant has its own note.
+  private var isSamplingStalled: Bool {
+    guard prefs.oledTelemetry, !model.isSafeMode, CGPreflightScreenCaptureAccess(),
+      let last = model.oledCare.modelComparison(for: persistenceKey).lastPair
+    else { return false }
+    return Date().timeIntervalSince(last) > 600
+  }
+
   var body: some View {
     // Spec §4's prompt copy, verbatim, so the reason is on screen BEFORE
     // macOS's own dialog, which can only say "record the contents of your
@@ -424,6 +437,8 @@ private struct MeasurementControls: View {
           OledInlineNote(Text("Safe Mode is on for this session, so nothing is being measured whatever this is set to, and Screen Recording is not needed until the next normal launch."))
         } else if prefs.oledTelemetry, !CGPreflightScreenCaptureAccess() {
           OledInlineNote(Text("macOS has not granted Screen Recording, so no readings are being taken. Grant it in System Settings > Privacy & Security > Screen Recording."))
+        } else if isSamplingStalled {
+          OledInlineNote(Text("No reading in over 10 minutes while measurement is on. If this persists, macOS may have dropped the Screen Recording grant after an update to the app; check System Settings > Privacy & Security > Screen Recording."))
         }
       }
     }

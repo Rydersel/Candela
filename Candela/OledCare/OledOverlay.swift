@@ -152,9 +152,20 @@ final class OledOverlay {
     // OC15: blackout swallows mouse input (at full black a click-through click
     // is a blind click on live UI); every other level stays click-through.
     window.ignoresMouseEvents = !state.blackout
-    window.contentView?.alphaValue = CGFloat(state.alpha)
-    Self.writeMask(state.mask, to: window)
+    // Mask first, since it decides the alpha: 1.0 over a failed mask's flat
+    // black layer blacks out the panel.
+    let masked = Self.writeMask(state.mask, to: window)
+    let alpha = masked ? state.alpha : Self.fallbackAlpha(forUnrendered: state.mask)
+    window.contentView?.alphaValue = CGFloat(alpha)
     window.orderFrontRegardless()
+  }
+
+  /// Alpha for a mask that did not reach the layer. The caller's 1.0 (the mask
+  /// carries the per-cell opacity) over the flat black fallback blacks out the
+  /// panel. The peak errs dark, never darker than the mask would have; no
+  /// cells means no dim, since an invisible overlay beats a black screen.
+  static func fallbackAlpha(forUnrendered mask: OverlayMask.Oriented?) -> Double {
+    mask?.cells.max() ?? 0
   }
 
   /// Renders the spatial axis as the layer's contents.
@@ -167,19 +178,21 @@ final class OledOverlay {
   ///
   /// Nil CLEARS the contents: a display that had a mask and no longer does must
   /// go back to a uniform dim, not keep a stale gradient nothing updates.
-  private static func writeMask(_ mask: OverlayMask.Oriented?, to window: NSPanel) {
-    guard let layer = window.contentView?.layer else { return }
+  ///
+  /// Returns false only when a mask was asked for and did not reach the layer.
+  private static func writeMask(_ mask: OverlayMask.Oriented?, to window: NSPanel) -> Bool {
+    guard let layer = window.contentView?.layer else { return mask == nil }
     guard let mask else {
       layer.contents = nil
       layer.backgroundColor = .black
-      return
+      return true
     }
     guard let image = maskImage(mask) else {
-      // Fall back to the uniform dim, never to nothing: a failed image costs
-      // the spatial detail, not the dim the user asked for.
+      // Flat black, paired by `write` with the mask's darkest cell: a failed
+      // image costs the spatial detail, not the dim, and never the whole panel.
       layer.contents = nil
       layer.backgroundColor = .black
-      return
+      return false
     }
     // The image carries the black AND its per-cell alpha, so the flat
     // background must go: it would floor every cell at full black.
@@ -188,6 +201,7 @@ final class OledOverlay {
     layer.minificationFilter = .linear
     layer.contentsGravity = .resize
     layer.contents = image
+    return true
   }
 
   /// Black pixels whose ALPHA is the mask. Premultiplied, because the mask is
@@ -207,11 +221,16 @@ final class OledOverlay {
     let space = CGColorSpaceCreateDeviceRGB()
     let info = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue)
       .union(.byteOrder32Little)
-    guard let context = CGContext(
-      data: &pixels, width: cols, height: rows, bitsPerComponent: 8,
-      bytesPerRow: cols * 4, space: space, bitmapInfo: info.rawValue)
-    else { return nil }
-    return context.makeImage()
+    // `makeImage` inside the closure too: `&pixels` as a call argument is valid
+    // only for that call, so a context that outlives it reads freed storage.
+    return pixels.withUnsafeMutableBytes { buffer -> CGImage? in
+      guard let base = buffer.baseAddress,
+        let context = CGContext(
+          data: base, width: cols, height: rows, bitsPerComponent: 8,
+          bytesPerRow: cols * 4, space: space, bitmapInfo: info.rawValue)
+      else { return nil }
+      return context.makeImage()
+    }
   }
 
   func remove(for displayID: CGDirectDisplayID) {

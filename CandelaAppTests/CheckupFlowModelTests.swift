@@ -173,6 +173,28 @@ struct CheckupFlowModelTests {
     #expect(presenter.isHolding == false)
   }
 
+  /// The contract `CheckupWindowController.abandonForTermination` leans on: a
+  /// run in flight at quit still saves as incomplete and still books its field.
+  @Test func quittingMidFieldSavesIncompleteAndBooksTheField() async {
+    var booked: [(CheckupFieldKind, TimeInterval)] = []
+    let presenter = FakePresenter()
+    let flow = CheckupFlowModel(
+      environment: environment(presenter: presenter, entry: entry(), booked: { booked.append(($0, $1)) }))
+    var saved: [CheckupReportEnvelope] = []
+    flow.onSaved = { saved.append($0) }
+    await toFirstField(flow)
+    flow.startShowing()
+    for _ in 0..<3 { flow.timeoutTick() }
+    flow.abandon(reason: CheckupCopy.closedReason)
+    presenter.hide()
+    #expect(saved.count == 1)
+    #expect(saved.first?.report.completion == .incomplete(reason: CheckupCopy.closedReason))
+    #expect(booked.map(\.0) == presenter.shown.map(\.0))
+    #expect(booked.first?.1 == 3)
+    #expect(presenter.isHolding == false)
+    #expect(isBalanced(presenter.holds))
+  }
+
   @Test func aWriteOnlyPlanRecordsPregradedRowsWithoutRunningThem() async {
     let flow = CheckupFlowModel(environment: environment(presenter: FakePresenter(), entry: entry(.writeOnlyDDC)))
     await flow.advance(); flow.selectedDisplay = flow.environment.displays[0]; await flow.advance()

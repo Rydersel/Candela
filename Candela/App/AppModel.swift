@@ -393,9 +393,11 @@ final class AppModel {
   }
 
   private func logOrphanedVirtualDisplays() {
-    var ids = [CGDirectDisplayID](repeating: 0, count: 16)
+    // 32 to match `DisplayDiscovery`: orphaned slot displays are exactly what
+    // this looks for, so a truncated list would hide the thing being counted.
+    var ids = [CGDirectDisplayID](repeating: 0, count: 32)
     var count: UInt32 = 0
-    guard CGGetOnlineDisplayList(16, &ids, &count) == .success else { return }
+    guard CGGetOnlineDisplayList(32, &ids, &count) == .success else { return }
     let owned = virtualDisplays.ownedDisplayIDs
     for id in ids.prefix(Int(count)) where !owned.contains(id) {
       let vendor = CGDisplayVendorNumber(id)
@@ -1215,9 +1217,14 @@ final class AppModel {
     pollerTask?.cancel()
   }
 
-  /// Returns the IDs of displays that departed in this pass, for HUD cleanup. A
-  /// caller that JOINED an already-running pass gets `[]`, not that pass's result:
-  /// only the caller that started the pass sees its departures.
+  /// Fires once per pass that saw a departure. `refresh()` returns departures
+  /// only to the caller that started the pass, so a joiner relying on that
+  /// would clean up nothing.
+  @ObservationIgnored var onDisplaysDeparted: ([CGDirectDisplayID]) -> Void = { _ in }
+
+  /// Returns the IDs of displays that departed in this pass. A caller that
+  /// JOINED an already-running pass gets `[]`, not that pass's result, which is
+  /// why cleanup rides `onDisplaysDeparted` instead.
   @discardableResult
   func refresh() async -> [CGDirectDisplayID] {
     // Cleared HERE as well as inside `performRefresh`, and the piggyback is why: a
@@ -1420,9 +1427,14 @@ final class AppModel {
       // controller can be looking at a panel that is not the one it saw last pass,
       // and this verdict is keyed by persistence key. Through a closure, so a probe
       // landing after this pass still decides the next mute.
-      let muteKey = state.display.persistenceKey
+      let key = state.display.persistenceKey
       state.volume.setMuteWireSupport { [weak self] in
-        self?.muteSupport[muteKey] ?? .unknown
+        self?.muteSupport[key] ?? .unknown
+      }
+      // Same for the register the restore writes: a panel whose capabilities
+      // string denies 0x62 (the Dell) is skipped; unknown (the MAG) still restores.
+      state.volume.setValueWireSupport { [weak self] in
+        self?.volumeSupport[key] ?? .unknown
       }
     }
     builtIn?.controller.setEpochProvider(
@@ -1469,7 +1481,10 @@ final class AppModel {
     // Includes an ID whose panel was REPLACED: the HUD this returns to clean up
     // belongs to the monitor that left, and the one now on that ID gets its own
     // on the next keypress.
-    return Array(plan.departed)
+    let departed = Array(plan.departed)
+    // After every await, so the hook never sees a half-reconciled display list.
+    if !departed.isEmpty { onDisplaysDeparted(departed) }
+    return departed
   }
 
   /// Reconciles the built-in slot against discovery. Same identity rule as

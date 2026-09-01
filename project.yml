@@ -70,8 +70,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rydersel.Candela
-        MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "3"
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "4"
         # Developer ID in BOTH configurations, not Release alone. TCC keys a
         # grant to the code identity, so an ad-hoc Debug build is a different
         # app to the system than the Release one and re-earns the Accessibility

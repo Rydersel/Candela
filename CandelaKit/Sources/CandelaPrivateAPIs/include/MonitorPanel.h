@@ -14,10 +14,8 @@
 
 @protocol MPDisplay <NSObject>
 @property(readonly) unsigned int displayID;
-@property(readonly) BOOL isBuiltIn;
 @property(readonly) BOOL hasHDRModes;
 @property BOOL preferHDRModes;
-- (NSString *)displayName;
 @end
 
 @protocol MPDisplayMgr <NSObject>

@@ -174,9 +174,13 @@ public actor MirrorPreviewSession {
   /// Applies `decision` at `.preview` scope and arms the countdown, falling
   /// back to `captured` if nobody answers.
   ///
-  /// `captured` is the caller's — read from the same `displays()` sample the
+  /// `captured` is the caller's: read from the same `displays()` sample the
   /// decision was computed from, so the fallback describes the same instant the
   /// decision does.
+  ///
+  /// While a preview is outstanding, `captured` is DISCARDED for the standing
+  /// preview's fallback: a live sample taken mid-countdown already holds the
+  /// unapproved set, and expiring to it would commit it at session scope.
   public func begin(
     _ decision: MirrorToggleDecision, from captured: MirrorTopology
   ) -> Result<Void, DisplayConfigError> {
@@ -196,11 +200,16 @@ public actor MirrorPreviewSession {
       // to prevent. Refusing is the only safe answer; the caller surfaces it.
       return .failure(DisplayConfigError(cgErrorCode: CGError.failure.rawValue))
     }
-    if outstanding != nil {
+    let fallback: MirrorTopology
+    if let standing = outstanding {
+      // Read BEFORE the revert; the doc comment says why this is not `captured`.
+      fallback = standing.captured
       // A live preview is ended first, and a failed revert REFUSES: reporting
       // success here would leave a rig nobody named in an unapproved topology,
       // with no countdown left to take it back.
       if case let .failed(error) = revertOutstanding() { return .failure(error) }
+    } else {
+      fallback = captured
     }
     do {
       try configurator.applyMirroring(changes, scope: .preview)
@@ -210,7 +219,7 @@ public actor MirrorPreviewSession {
       return .failure(DisplayConfigError(cgErrorCode: -1))
     }
     outstanding = Outstanding(
-      confirmationDisplayID: master, applied: changes, captured: captured
+      confirmationDisplayID: master, applied: changes, captured: fallback
     )
     // Cleared HERE, not on entry: a begin() that fails establishes nothing, so
     // the last thing that actually happened is still the last outcome. Wiping

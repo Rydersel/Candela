@@ -621,6 +621,10 @@ final class DisplayModeCoordinator {
         sizeAppliedByUser.remove(displayID)
         selectChangesSize[displayID] = nil
         synthesisPreviewRefresh[displayID] = nil
+        // Nothing reads these before writing them in the same operation, but a
+        // future read-before-write must not inherit a departed panel's origin.
+        origins[displayID] = nil
+        surfaces[displayID] = nil
         // Nothing to restore onto a display that is not attached, and the next
         // arrival can inherit this id.
         restoreStopIfPickFalls[displayID] = nil

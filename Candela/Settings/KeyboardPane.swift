@@ -222,7 +222,9 @@ struct KeyboardPane: View {
         title: "Targeting & Precision",
         value: KeyboardHeroModel.targetingPreview(
           brightnessMode: prefs.keyboardBrightness,
-          target: prefs.multiKeyboardBrightness,
+          volumeMode: prefs.keyboardVolume,
+          brightnessTarget: prefs.multiKeyboardBrightness,
+          volumeTarget: prefs.multiKeyboardVolume,
           fineBrightness: prefs.useFineScaleBrightness,
           fineVolume: prefs.useFineScaleVolume),
         action: { keyboardPath.wrappedValue.append(.targeting) })

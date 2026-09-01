@@ -291,23 +291,27 @@ public class Arm64DDC: NSObject {
     return unmanagedAttributes.takeRetainedValue() as? [String: Any]
   }
 
-  static func ioregIterateToNextObjectOfInterest(interests: [String], iterator: inout io_iterator_t) -> (name: String, entry: io_service_t, preceedingEntry: io_service_t)? {
-    var entry: io_service_t = IO_OBJECT_NULL
-    var preceedingEntry: io_service_t = IO_OBJECT_NULL
+  /// Next entry whose name contains one of `interests`. Returned RETAINED: the
+  /// caller must release it. Skipped entries (thousands per pass) are released here.
+  static func ioregIterateToNextObjectOfInterest(interests: [String], iterator: inout io_iterator_t) -> (name: String, entry: io_service_t)? {
     let name = UnsafeMutablePointer<CChar>.allocate(capacity: MemoryLayout<io_name_t>.size)
     defer {
       name.deallocate()
     }
     while true {
-      preceedingEntry = entry
-      entry = IOIteratorNext(iterator)
-      guard IORegistryEntryGetName(entry, name) == KERN_SUCCESS, entry != MACH_PORT_NULL else {
+      let entry = IOIteratorNext(iterator)
+      guard entry != IO_OBJECT_NULL else {
+        break
+      }
+      guard IORegistryEntryGetName(entry, name) == KERN_SUCCESS else {
+        IOObjectRelease(entry)
         break
       }
       let nameString = String(cString: name)
-      for interest in interests where entry != IO_OBJECT_NULL && nameString.contains(interest) {
-        return (nameString, entry, preceedingEntry)
+      for interest in interests where nameString.contains(interest) {
+        return (nameString, entry)
       }
+      IOObjectRelease(entry)
     }
     return nil
   }
@@ -376,6 +380,9 @@ public class Arm64DDC: NSObject {
       guard let objectOfInterest = ioregIterateToNextObjectOfInterest(interests: [keyDCPAVServiceProxy] + keysFramebuffer, iterator: &iterator) else {
         break
       }
+      // Owned reference from the helper. Safe to release after either branch:
+      // the properties read copies, and the IOAVService has its own lifetime.
+      defer { IOObjectRelease(objectOfInterest.entry) }
       if keysFramebuffer.contains(objectOfInterest.name) {
         ioregService = self.getIORegServiceAppleCDC2Properties(entry: objectOfInterest.entry)
         serviceLocation += 1

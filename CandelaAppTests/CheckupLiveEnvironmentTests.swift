@@ -119,6 +119,77 @@ struct CheckupLiveEnvironmentTests {
     #expect(caps.allSatisfy { $0.pregraded == nil })
   }
 
+  // MARK: - Putting the wire back after the capabilities leg
+
+  /// A brightness move mid-leg is left at the runner's read-back value, and
+  /// the coalescer's memo names the newer one; only a memo reset puts it back.
+  @Test @MainActor func theCapabilitiesLegPutsTheBrightnessRegisterBack() async {
+    let writer = FakeDDCWriter()
+    // Far enough from anything 0.8 resolves to that the two writes cannot be
+    // confused; the runner writes back whatever its first read said.
+    writer.readAnswer = (current: 3, max: 100)
+    let state = displayState(writer: writer, store: MemoryBrightnessStore())
+    state.controller.setBrightness(0.8)
+    await state.controller.waitForPendingWrites()
+    guard let applied = writer.writes.last(where: { $0.command == VCP.brightness })?.value else {
+      Issue.record("the brightness leg never reached the wire")
+      return
+    }
+
+    let runner = CheckupLiveEnvironment.ControlRestoringCapabilitiesRunner(
+      base: CheckupLiveCapabilitiesRunner(writer: writer, capabilities: "(vcp(10))"),
+      restore: { CheckupLiveEnvironment.restoringControls(of: state) })
+    let claims = await runner.run()
+    await state.controller.waitForPendingWrites()
+
+    // The wrapper grades nothing of its own and swallows none of the base's.
+    #expect(claims.contains { $0.id == CheckupCheckID.capabilityBrightness })
+    guard let clobber = writer.writes.lastIndex(where: {
+      $0.command == VCP.brightness && $0.value == 3
+    }), let restored = writer.writes.lastIndex(where: {
+      $0.command == VCP.brightness && $0.value == applied
+    }) else {
+      Issue.record("expected the runner's write and the re-assert on the wire")
+      return
+    }
+    #expect(restored > clobber)
+  }
+
+  /// A fresh display publishes assumed defaults; re-asserting those would move
+  /// controls nobody touched.
+  @Test @MainActor func anUntouchedDisplayIsNotHandedItsAssumedDefaults() async {
+    let writer = FakeDDCWriter()
+    let state = displayState(writer: writer, store: nil)
+    CheckupLiveEnvironment.restoringControls(of: state)
+    await state.controller.waitForPendingWrites()
+    await state.volume.waitForPendingWrites()
+    await state.contrast.waitForPendingWrites()
+    #expect(writer.writes.isEmpty)
+  }
+
+  /// Volume and contrast have no store, so their own gate holds them shut; the
+  /// brightness store is what lets `hasStoredValue` turn true.
+  @MainActor private func displayState(
+    writer: FakeDDCWriter, store: (any BrightnessStoring)?
+  ) -> AppModel.DisplayState {
+    let key = "checkup-restore"
+    let prefs = TestFixtures.prefs(persistenceKey: key)
+    let volume = DDCValueController(writer: writer, command: .volume, prefs: prefs)
+    let contrast = DDCValueController(writer: writer, command: .contrast, prefs: prefs)
+    let controller = BrightnessController(
+      writer: writer,
+      backends: BrightnessBackends(
+        applierNative: FakeBrightnessApplier(), hdr: nil, shade: nil, gamma: nil),
+      prefs: prefs,
+      displayID: 2,
+      store: store,
+      storageKey: "combinedBrightness.\(key)",
+      wireSiblings: [volume, contrast])
+    return AppModel.DisplayState(
+      display: ExternalDisplay(id: 2, name: "DELL", persistenceKey: key),
+      controller: controller, volume: volume, contrast: contrast, writer: writer)
+  }
+
   private func dell(capabilities: String?) -> CheckupLiveEnvironment.Source {
     source(
       id: 2, key: "d", name: "DELL", capabilities: capabilities, hasDDCService: true,
@@ -137,6 +208,15 @@ struct CheckupLiveEnvironmentTests {
       hdrEngaged: hdrEngaged, pixelWidth: pixelWidth, pixelHeight: pixelHeight,
       pointHeight: pointHeight)
   }
+}
+
+/// Unchecked because each instance is confined to one test's main-actor body;
+/// nothing here crosses a task boundary.
+private final class MemoryBrightnessStore: BrightnessStoring, @unchecked Sendable {
+  private var values: [String: Double] = [:]
+
+  func savedBrightness(for key: String) -> Double? { values[key] }
+  func saveBrightness(_ value: Double, for key: String) { values[key] = value }
 }
 
 private actor ReadCount {

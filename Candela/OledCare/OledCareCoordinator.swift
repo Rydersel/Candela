@@ -759,6 +759,10 @@ final class OledCareCoordinator: CheckupCareHolding {
 
   private func dropState(for key: String) {
     guard var state = states.removeValue(forKey: key) else { return }
+    // BEFORE the controller lookup, which misses a departed display: the state
+    // owning the ramp is being discarded, so nothing else can cancel it.
+    state.lockDimRamp?.cancel()
+    state.lockDimRamp = nil
     // Un-enrollment is the case that matters: the display is still connected,
     // and dropping the state that remembers the dim without ending it would
     // strand the panel dark with nothing left to restore it. A departed display

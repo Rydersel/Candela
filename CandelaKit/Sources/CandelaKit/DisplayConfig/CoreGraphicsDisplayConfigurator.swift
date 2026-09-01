@@ -23,9 +23,11 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// rather than by the caller: the mirror state has to describe the same instant
   /// as the list.
   public func displays() -> [ConfiguredDisplay] {
-    var ids = [CGDirectDisplayID](repeating: 0, count: 16)
+    // 32 to match `DisplayDiscovery`: virtual displays fill this buffer before
+    // anything filters them out.
+    var ids = [CGDirectDisplayID](repeating: 0, count: 32)
     var count: UInt32 = 0
-    guard CGGetOnlineDisplayList(16, &ids, &count) == .success else { return [] }
+    guard CGGetOnlineDisplayList(32, &ids, &count) == .success else { return [] }
     return ids.prefix(Int(count)).map { id in
       // `!= 0` is safe HERE only because `id` came out of the line above.
       // `CGDisplayIsBuiltin` returns **-1**, not 0, for an ID it does not know

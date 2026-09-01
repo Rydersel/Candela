@@ -32,6 +32,7 @@ struct PrefPropagationTests {
     // they get no row and no case. Adding one would be a lie in the table.
     #expect(PrefName(rawValue: "menuItemStyle") == nil)
     #expect(PrefName(rawValue: "showTickMarks") == nil)
+    #expect(PrefName(rawValue: "showModelComparison") == nil)
     #expect(PrefName(rawValue: "longerDelay") == nil)
     // `wireTimingGuard` has no UI by design (D26). Being read at use is not the
     // reason (`pollingMode` is read at use and IS a case); having no pane to

@@ -17,12 +17,15 @@ struct DDCValueControllerTests {
     /// The display's own VCP 0x8D verdict from the capabilities probe. A var,
     /// not an init constant: the probe lands mid-session and the gate reads it live.
     var muteWireSupport: VCPSupport = .unknown
+    /// The same for the register this command writes (VCP 0x62 on volume).
+    var valueWireSupport: VCPSupport = .unknown
 
     init(
       command: DDCCommand, savedValue: Double? = nil,
       writer: (any DDCWriting)? = nil, // e.g. ScriptedDDC for retry/failure tests
       panelIdentity: String? = nil, // only the rebind tests care which panel this is
       muteWireSupport: VCPSupport = .unknown,
+      valueWireSupport: VCPSupport = .unknown,
       configure: (DisplayPrefs) -> Void = { _ in }
     ) {
       defaults = InMemoryDefaults()
@@ -35,7 +38,9 @@ struct DDCValueControllerTests {
         store: store, storageKey: storageKey, panelIdentity: panelIdentity
       )
       self.muteWireSupport = muteWireSupport
+      self.valueWireSupport = valueWireSupport
       controller.setMuteWireSupport { [weak self] in self?.muteWireSupport ?? .unknown }
+      controller.setValueWireSupport { [weak self] in self?.valueWireSupport ?? .unknown }
     }
 
     func drainedWrites() async -> [(command: UInt8, value: UInt16)] {
@@ -746,6 +751,65 @@ struct DDCValueControllerTests {
     let writes = await harness.drainedWrites()
     #expect(writes.last?.command == VCP.audioSpeakerVolume)
     #expect(writes.last?.value == 0) // divergence: fork would audibly unmute here (planner flag 3, endorsed)
+  }
+
+  // MARK: - The display's own denial of the value register (D24, the restore's door)
+
+  @Test func restoreWritesNothingOnADisplayThatDeniesTheVolumeRegister() async {
+    // The restore is the one value write with no gesture behind it, so no UI gate
+    // sees it; every launch and wake used to write a register the Dell says it lacks.
+    let harness = Harness(command: .volume, savedValue: 0.5, valueWireSupport: .unsupported)
+    harness.controller.restoreToHardware()
+    #expect(await harness.drainedWrites().isEmpty)
+    #expect(harness.controller.value == 0.5) // belief untouched: only the wire is spared
+  }
+
+  @Test func restoreStillWritesWhenTheVerdictIsUnknown() async {
+    // The MAG's verdict is permanently `.unknown` (it answers the capabilities read
+    // with zeros). D24 must allow it: the stored value is the only record it has.
+    let harness = Harness(command: .volume, savedValue: 0.5, valueWireSupport: .unknown)
+    harness.controller.restoreToHardware()
+    let writes = await harness.drainedWrites()
+    #expect(writes.count == 1)
+    #expect(writes[0].command == VCP.audioSpeakerVolume)
+    #expect(writes[0].value == 50)
+  }
+
+  @Test func theDenialNeverCancelsTheRestoresUnmute() async {
+    // D29 rule 3: a display can deny 0x62 and still carry a 0x8D mute taken while
+    // the verdict was unknown, and this pass clears it. Skip the value, never the unmute.
+    let harness = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .supported,
+      valueWireSupport: .unsupported
+    ) { $0.enableMuteUnmute = true }
+    harness.controller.restoreToHardware()
+    let writes = await harness.drainedWrites()
+    #expect(writes.count == 1)
+    #expect(writes[0].command == VCP.audioMuteScreenBlank)
+    #expect(writes[0].value == 2)
+  }
+
+  @Test func mutedRestoreOnADeniedRegisterReassertsNoSilence() async {
+    // Degraded mute on a display that denies the volume register: nothing to
+    // re-assert, the logical flag stands, and `toggleMute` is the ungated way back.
+    let harness = Harness(command: .volume, savedValue: 0.5, valueWireSupport: .unsupported) {
+      $0.muted = true
+    }
+    harness.controller.restoreToHardware()
+    #expect(await harness.drainedWrites().isEmpty)
+    #expect(harness.controller.isMuted)
+  }
+
+  @Test func contrastRestoreIgnoresTheAudioVerdictAndItsOverride() async {
+    // The audio override is about speakers; a contrast restore reading it would
+    // strand the contrast register on any display set to "Always disabled".
+    let harness = Harness(command: .contrast, savedValue: 0.75, valueWireSupport: .unsupported) {
+      $0.audioSinkOverride = .forceNone
+    }
+    harness.controller.restoreToHardware()
+    let writes = await harness.drainedWrites()
+    #expect(writes.last?.command == VCP.contrast)
+    #expect(writes.last?.value == 75)
   }
 
   // MARK: - Memo / rebind / dedupe

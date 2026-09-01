@@ -31,13 +31,23 @@ public actor RotationPreviewSession {
 
   /// Applies the rotation and starts the clock.
   ///
-  /// A second `begin` supersedes rather than nesting: the new request's `from`
-  /// is where the display is now, so reverting returns to the previous preview's
-  /// angle. Refusing would leave someone stuck at an angle they are trying to
-  /// change.
+  /// A second `begin` supersedes rather than nesting, and never refuses:
+  /// refusing would leave someone stuck at an angle they are trying to change.
+  ///
+  /// It keeps the STANDING preview's `from`: the caller's is the live angle,
+  /// which mid-countdown is the unapproved one, so an unanswered expiry would
+  /// rest there for good. `previewed` reports the rewritten request, and that
+  /// is what `confirm`/`revert` match on.
   public func begin(_ request: RotationRequest) -> Result<Void, DisplayConfigError> {
+    var origin = request.from
+    if let standing = outstanding, standing.display == request.display {
+      origin = standing.from
+    }
+    let previewing = RotationRequest(
+      display: request.display, from: origin, to: request.to
+    )
     do {
-      try configurator.applyRotation(request.to, to: request.display)
+      try configurator.applyRotation(previewing.to, to: previewing.display)
     } catch let error as DisplayConfigError {
       return .failure(error)
     } catch {
@@ -47,7 +57,7 @@ public actor RotationPreviewSession {
       // indistinguishable from a real platform failure in the diagnostics.
       return .failure(DisplayConfigError(cgErrorCode: -1))
     }
-    outstanding = request
+    outstanding = previewing
     remaining = timeoutSeconds
     return .success(())
   }

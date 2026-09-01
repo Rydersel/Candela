@@ -1,3 +1,5 @@
+import AppKit
+import Combine
 import SwiftUI
 
 /// Designation (OB4): every external display as a selectable card, the name
@@ -144,6 +146,11 @@ struct OnboardingOledCarePage: View {
     // The grant can land outside the app (System Settings), so the copy
     // re-checks whenever the page comes back on screen.
     .onAppear { model.refreshScreenRecordingGranted() }
+    // Coming back from System Settings does not re-run `onAppear` (the page was
+    // never removed), so the grant would go unnoticed until the next page turn.
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+      model.refreshScreenRecordingGranted()
+    }
   }
 
   /// The same toggle for every designated display, enrolled or not: a display

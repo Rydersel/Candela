@@ -17,7 +17,9 @@ struct SettingsCanvas: View {
       if reduceMotion {
         blobs(at: 0)
       } else {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+        // 12 fps: a blob centre moves about a third of a point per frame, and
+        // each frame costs two full-window Gaussian blurs.
+        TimelineView(.animation(minimumInterval: 1.0 / 12.0)) { context in
           blobs(at: context.date.timeIntervalSinceReferenceDate)
         }
       }

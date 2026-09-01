@@ -171,6 +171,18 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
     return true
   }
 
+  /// The quit-time `windowShouldClose`: `NSApplication.terminate` closes no
+  /// windows, so a run in flight at quit would otherwise save no report and
+  /// book no field time.
+  func abandonForTermination() {
+    if model?.page != .summary {
+      model?.abandon(reason: CheckupCopy.closedReason)
+    }
+    // `abandon` hides through the presenter; this covers a run that already
+    // ended with the field still up.
+    fieldWindow.hide()
+  }
+
   func windowWillClose(_: Notification) {
     tick?.cancel()
     tick = nil

@@ -106,7 +106,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   private lazy var displayHealthPresenter = DisplayHealthWindowPresenter(model: model)
   /// CK28: built on first use, app-lifetime, like the presenter above.
   private var checkupWindow: CheckupWindowController?
-  /// Stored so the topology loop can `cleanupDisplay` departed displays' HUD
+  /// Stored so the departure hook can `cleanupDisplay` departed displays' HUD
   /// panels; the executor shares this instance.
   private let hud = BrightnessHUD()
   #if DEBUG
@@ -427,9 +427,21 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       }
     }
 
+    // Wired here rather than read off `refresh()`'s return value, which a joiner
+    // never sees. `checkupWindow` is read at call time: it is built on first use.
+    model.onDisplaysDeparted = { [weak self] departed in
+      guard let self else { return }
+      for id in departed {
+        self.hud.cleanupDisplay(id)
+        // CK27: the target leaving ends the run as incomplete, naming the leg
+        // it was in. A no-op for any other display, and when no run is going.
+        self.checkupWindow?.displayDisconnected(id)
+      }
+    }
+
     // Topology consumption loop, the stream's single consumer: after each
-    // debounced reconfiguration, re-discover displays, re-arm the media-key tap,
-    // and drop departed displays' HUD panels.
+    // debounced reconfiguration, re-discover displays and re-arm the media-key
+    // tap.
     Task { [weak self] in
       guard let stream = self?.model.displayManager.topologyChanges else { return }
       for await _ in stream {
@@ -442,7 +454,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         // it. The coordinator observes the raw screen-parameters notification
         // itself, so this is a backstop like the line above, not the trigger.
         self.model.mirroring.refreshTopology()
-        let departed = await self.model.refresh()
+        // Return value ignored: this loop often JOINS a pass a menu close started,
+        // and a joiner gets an empty list. Cleanup rides `onDisplaysDeparted`.
+        await self.model.refresh()
         self.refreshTapConfig()
         self.updateStatusItemVisibility()
         // OLED care: display IDs can be REASSIGNED with every display still
@@ -465,12 +479,6 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         // The counter zeroes on every configure so unrelated events across a long
         // session never add up to an offer. `suspendedForSession` survives.
         self.interferenceMonitor.resetCounter()
-        for id in departed {
-          self.hud.cleanupDisplay(id)
-          // CK27: the target leaving ends the run as incomplete, naming the leg
-          // it was in. A no-op for any other display, and when no run is going.
-          self.checkupWindow?.displayDisconnected(id)
-        }
         // HDR state may have changed under the 2 s cache, since a mode switch is
         // itself a reconfiguration. Dropped BEFORE the per-display re-evaluation
         // so fresh state is read.
@@ -937,6 +945,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   func applicationWillTerminate(_: Notification) {
     gammaController.resetAllGamma() // not DDC, always runs
     shadeOverlay.removeAllShades() // not DDC, always runs
+    // CK27. Above the safe-mode guard: this writes a report, not DDC, and a run
+    // started in safe mode gets its report like any other.
+    checkupWindow?.abandonForTermination()
     // D11: safe mode sends no unattended DDC. The full-range restore undoes
     // combined-mode dimming at quit, and safe mode never installed any, so
     // skipping it leaves the monitor where the user last put it.
@@ -1231,6 +1242,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     //         controller for a still-connected display and leave it holding
     //         state derived from the prefs just destroyed.
     await model.rebuildControllers()
+
+    // ---- 5a. Rebuilt controllers carry no interference hooks. Before 5b, which
+    //          makes the first post-reset gamma write and would skip the check.
+    wireInterferenceHooks()
 
     // ---- 5b. The post-reset value has to reach the GLASS, not just the slider.
     //          The wipe leaves every display with an empty store, so each rebuilt

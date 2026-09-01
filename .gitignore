@@ -3,6 +3,7 @@
 /DerivedData
 .build/
 *.xcuserstate
+xcuserdata/
 /Candela/Info.plist
 /build/
 

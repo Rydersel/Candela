@@ -534,6 +534,13 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue.rawValue, forKey: "multiKeyboardBrightness") }
   }
 
+  /// No UI (D26): shows the Health pane's model-comparison instrument, a soak-only
+  /// gauge kept off the shipped window until the exposure-model verdict is recorded.
+  public var showModelComparison: Bool {
+    get { defaults.bool(forKey: "showModelComparison") }
+    set { defaults.set(newValue, forKey: "showModelComparison") }
+  }
+
   /// Reserved and inert (D32): nothing renders tick marks.
   public var showTickMarks: Bool {
     get { defaults.bool(forKey: "showTickMarks") }

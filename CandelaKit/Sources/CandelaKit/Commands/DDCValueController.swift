@@ -60,6 +60,10 @@ public final class DDCValueController: PendingWireDraining {
   /// Defaults to `.unknown`, which D24 resolves to allowed: a controller nobody
   /// has told anything still sends the display's mute command.
   @ObservationIgnored private var muteWireSupport: () -> VCPSupport = { .unknown }
+  /// Capabilities verdict for the register this command writes (VCP 0x62 for
+  /// volume). `.unknown` allows (D24), so a write-only panel that cannot answer
+  /// the capabilities read still restores from its stored value.
+  @ObservationIgnored private var valueWireSupport: () -> VCPSupport = { .unknown }
   /// The mute strategy the last restore acted on (volume only), or nil until
   /// this controller has restored anything. Read by
   /// `restoreIfMuteStrategyChanged` to tell a restore that is still correct
@@ -133,6 +137,10 @@ public final class DDCValueController: PendingWireDraining {
     muteWireSupport = provider
   }
 
+  public func setValueWireSupport(_ provider: @escaping () -> VCPSupport) {
+    valueWireSupport = provider
+  }
+
   /// Whether a mute on this display goes over its own mute command, or
   /// degrades to a volume-register 0 (what every display with no dedicated
   /// mute command already gets).
@@ -153,6 +161,15 @@ public final class DDCValueController: PendingWireDraining {
       override: prefs.audioSinkOverride,
       muteSupport: muteWireSupport()
     )
+  }
+
+  /// The same D24 predicate that greys the slider, so the restore (the one value
+  /// write with no gesture behind it, hence no UI gate) cannot disagree with it.
+  /// Volume only: nothing in the app carries a verdict for the contrast register.
+  private var writesValueRegister: Bool {
+    guard command == .volume else { return true }
+    return VolumeSliderPolicy.isEnabled(
+      override: prefs.audioSinkOverride, volumeSupport: valueWireSupport())
   }
 
   // MARK: - Input funnel
@@ -273,6 +290,10 @@ public final class DDCValueController: PendingWireDraining {
   /// strategy), but only for an ever-touched command (the fork's isTouched
   /// gate): a saved value exists only after this command was written at least
   /// once.
+  ///
+  /// Only the value writes obey `writesValueRegister`. `submitMuteWire(1)` has
+  /// already passed the 0x8D verdict in `usesDedicatedMuteCommand`, and wire 2
+  /// is an unmute, which no verdict may cancel (D29 rule 3).
   public func restoreToHardware() {
     guard isAvailable, let store, let storageKey,
           store.savedBrightness(for: storageKey) != nil else { return }
@@ -290,7 +311,7 @@ public final class DDCValueController: PendingWireDraining {
         // doctrine); the volume register catches up on unmute. Critical on
         // the wake chain, which would otherwise re-roll the race 10 times.
         submitMuteWire(1)
-      } else {
+      } else if writesValueRegister {
         // DIVERGENCE: the fork restores the saved volume here and audibly
         // loses the mute. With the always-persisted flag (D3), silence IS
         // the register state to restore.
@@ -298,7 +319,7 @@ public final class DDCValueController: PendingWireDraining {
       }
       return
     }
-    submitValue(value)
+    if writesValueRegister { submitValue(value) }
     if command == .volume, prefs.enableMuteUnmute {
       // Unmuted pair (value + wire 2): both cross-coalescer orders converge
       // — 0x8D=2 leaves the register alone, 0x62 at worst implicitly

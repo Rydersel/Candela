@@ -58,20 +58,31 @@ enum KeyboardHeroModel {
   /// than a value that could go stale.
   static let modifiersPreview = "5 combinations"
 
+  /// Both families: the page behind the chevron greys each family's picker and
+  /// step switch on its own, so a disabled family contributes nothing here.
   static func targetingPreview(
-    brightnessMode: KeyMode, target: MultiKeyboardBrightness,
+    brightnessMode: KeyMode, volumeMode: KeyMode,
+    brightnessTarget: MultiKeyboardBrightness, volumeTarget: MultiKeyboardVolume,
     fineBrightness: Bool, fineVolume: Bool
   ) -> String {
-    guard brightnessMode != .disabled else { return "Keys off" }
+    let brightnessLive = brightnessMode != .disabled
+    let volumeLive = volumeMode != .disabled
+    guard brightnessLive || volumeLive else { return "Keys off" }
+    // Brightness first when both are live: its picker is the page's first row.
+    let target = brightnessLive
+      ? shortPhrase(for: brightnessTarget)
+      : shortPhrase(for: volumeTarget)
+    let liveFine = [brightnessLive ? fineBrightness : nil, volumeLive ? fineVolume : nil]
+      .compactMap { $0 }
     let steps =
-      if fineBrightness, fineVolume {
+      if liveFine.allSatisfy({ $0 }) {
         "fine steps"
-      } else if !fineBrightness, !fineVolume {
-        "normal steps"
-      } else {
+      } else if liveFine.contains(true) {
         "mixed step sizes"
+      } else {
+        "normal steps"
       }
-    return "\(shortPhrase(for: target)) · \(steps)"
+    return "\(target) · \(steps)"
   }
 
   // MARK: - Target phrases
@@ -99,6 +110,14 @@ enum KeyboardHeroModel {
     case .mouse: "Under the pointer"
     case .allScreens: "Every display"
     case .focusInsteadOfMouse: "Active window"
+    }
+  }
+
+  private static func shortPhrase(for target: MultiKeyboardVolume) -> String {
+    switch target {
+    case .mouse: "Under the pointer"
+    case .allScreens: "Every display"
+    case .audioDeviceNameMatching: "Matching the audio device"
     }
   }
 }
