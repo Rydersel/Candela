@@ -747,8 +747,8 @@ public enum AppRegression {
     formatter.timeZone = TimeZone(identifier: "UTC")
     formatter.dateFormat = "yyyy-MM-dd"
     let trimmed = commit.trimmingCharacters(in: .whitespacesAndNewlines)
-    // Never a bare trailing dash: a record nobody can attribute is one the
-    // drift guard reddens on without saying why.
+    // Never a bare trailing dash: a record nobody can attribute cannot be
+    // matched to the build it measured.
     let sha = trimmed.isEmpty ? "unknown" : String(trimmed.prefix(7))
     return "\(formatter.string(from: date))-\(sha).json"
   }
