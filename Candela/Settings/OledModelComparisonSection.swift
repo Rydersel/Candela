@@ -8,11 +8,11 @@ import SwiftUI
 /// is on or a stored comparison exists, so turning measurement off keeps the
 /// score.
 ///
-/// TEMPORARY, built to be deleted (OCR7). Once Ryder records the verdict on the
-/// comparison gate, deletion is: remove this file, remove the one call site in
-/// `HealthPane`, and move the stalled-sampling note below onto the "Measure how
-/// bright each part of this display is" toggle, since that note proved necessary
-/// independently of the comparison.
+/// TEMPORARY, built to be deleted (OCR7). Hidden from the shipped window behind
+/// the `showModelComparison` defaults key (D26) until Ryder records the verdict
+/// on the comparison gate; deletion is then: remove this file, the one call
+/// site in `HealthPane`, and the key. The stalled-sampling note already lives
+/// on the measurement toggle, since it proved necessary independently.
 @MainActor
 struct OledModelComparisonSection: View {
   let persistenceKey: String
@@ -27,7 +27,7 @@ struct OledModelComparisonSection: View {
       SettingsCardSection(title: "Model Comparison") {
         SettingRow(caption: SettingsCaption("Scores an estimate built only from window positions, the wallpaper, and light or dark appearance against the measured readings above. If the two keep agreeing, the estimate can stand in when Screen Recording is off. Estimated figures are never presented as measured.")) {
           VStack(alignment: .leading, spacing: 6) {
-            SettingsCaption("A temporary instrument: it exists to judge the estimate during the current soak, and it is removed once that verdict is recorded.")
+            SettingsCaption("A temporary instrument: it exists to judge the estimate during the current soak, is shown only when turned on from the command line, and is removed once that verdict is recorded.")
             LabeledContent("Paired readings") {
               Text(verbatim: pairedReadingsLine(comparison))
                 .foregroundStyle(SettingsTheme.bodyColor)
@@ -62,9 +62,6 @@ struct OledModelComparisonSection: View {
             } else if comparison.pairCount > 0 {
               OledInlineNote(Text("Still accumulating. Scores appear after 30 paired readings."))
             }
-            if isComparisonStalled(comparison) {
-              OledInlineNote(Text("No paired reading in over 10 minutes while measurement is on. If this persists, macOS may have dropped the Screen Recording grant after an update to the app; check System Settings > Privacy & Security > Screen Recording."))
-            }
           }
         }
       }
@@ -79,17 +76,6 @@ struct OledModelComparisonSection: View {
       let last = comparison.lastPair
     else { return "\(comparison.pairCount)" }
     return "\(comparison.pairCount), spanning \(Self.spanPhrase(last.timeIntervalSince(first)))"
-  }
-
-  /// Stalled means the pipeline should be producing pairs and is not: pref on,
-  /// grant preflighting true, not Safe Mode, and the last pair well past the
-  /// sampling interval. A missing grant is NOT stalled here; the measurement rows
-  /// above already carry that note.
-  private func isComparisonStalled(_ comparison: ModelComparison) -> Bool {
-    guard prefs.oledTelemetry, !model.isSafeMode, CGPreflightScreenCaptureAccess(),
-      let last = comparison.lastPair
-    else { return false }
-    return Date().timeIntervalSince(last) > 600
   }
 
   private static func spanPhrase(_ interval: TimeInterval) -> String {

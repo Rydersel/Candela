@@ -46,7 +46,11 @@ struct HealthPane: View {
       if let scoped {
         measurementSection(for: scoped)
         collectedSection(for: scoped.display.persistenceKey)
-        OledModelComparisonSection(persistenceKey: scoped.display.persistenceKey)
+        // A soak instrument, off the shipped window until the exposure-model
+        // verdict is recorded; a defaults-write key shows it (D26).
+        if DisplayPrefs(persistenceKey: scoped.display.persistenceKey).showModelComparison {
+          OledModelComparisonSection(persistenceKey: scoped.display.persistenceKey)
+        }
       }
     }
     // One-shot scope handoff from a link on another pane (SC4). Cleared on
@@ -388,6 +392,19 @@ private struct MeasurementControls: View {
     DisplayPrefWriter(persistenceKey: persistenceKey, actions: actions)
   }
 
+  /// Stalled means the pipeline should be producing readings and is not: pref
+  /// on, grant preflighting true, not Safe Mode, and the last paired reading
+  /// well past the sampling interval. The paired-reading clock is the only
+  /// per-sample timestamp the coordinator keeps, which is why a note about
+  /// measurement reads the comparison record. A missing grant is not stalled;
+  /// the branch above already says so.
+  private var isSamplingStalled: Bool {
+    guard prefs.oledTelemetry, !model.isSafeMode, CGPreflightScreenCaptureAccess(),
+      let last = model.oledCare.modelComparison(for: persistenceKey).lastPair
+    else { return false }
+    return Date().timeIntervalSince(last) > 600
+  }
+
   var body: some View {
     // Spec §4's prompt copy, verbatim, so the reason is on screen BEFORE
     // macOS's own dialog, which can only say "record the contents of your
@@ -424,6 +441,8 @@ private struct MeasurementControls: View {
           OledInlineNote(Text("Safe Mode is on for this session, so nothing is being measured whatever this is set to, and Screen Recording is not needed until the next normal launch."))
         } else if prefs.oledTelemetry, !CGPreflightScreenCaptureAccess() {
           OledInlineNote(Text("macOS has not granted Screen Recording, so no readings are being taken. Grant it in System Settings > Privacy & Security > Screen Recording."))
+        } else if isSamplingStalled {
+          OledInlineNote(Text("No reading in over 10 minutes while measurement is on. If this persists, macOS may have dropped the Screen Recording grant after an update to the app; check System Settings > Privacy & Security > Screen Recording."))
         }
       }
     }

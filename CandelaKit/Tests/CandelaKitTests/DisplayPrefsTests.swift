@@ -390,6 +390,7 @@ struct DisplayPrefsTests {
     #expect(!prefs.enableSliderSnap)
     #expect(!prefs.enableSliderPercent)
     #expect(!prefs.hideBuiltInDisplay)
+    #expect(!prefs.showModelComparison)
 
     prefs.menuIcon = .externalOnly
     prefs.menuItemStyle = .text
@@ -400,6 +401,7 @@ struct DisplayPrefsTests {
     prefs.enableSliderSnap = true
     prefs.enableSliderPercent = true
     prefs.hideBuiltInDisplay = true
+    prefs.showModelComparison = true
 
     // 1. setter keys — unsuffixed, raw values as stored
     #expect(d.integer(forKey: "menuIcon") == 3)
@@ -411,6 +413,7 @@ struct DisplayPrefsTests {
     #expect(d.bool(forKey: "enableSliderSnap"))
     #expect(d.bool(forKey: "enableSliderPercent"))
     #expect(d.bool(forKey: "hideBuiltInDisplay"))
+    #expect(d.bool(forKey: "showModelComparison"))
     // no per-display suffix leaked in
     #expect(d.object(forKey: "menuIcon.irrelevant") == nil)
 
@@ -426,6 +429,7 @@ struct DisplayPrefsTests {
       #expect(p.enableSliderSnap)
       #expect(p.enableSliderPercent)
       #expect(p.hideBuiltInDisplay)
+      #expect(p.showModelComparison)
     }
   }
 
