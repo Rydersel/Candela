@@ -289,3 +289,28 @@
     font-size: clamp(0.52rem, 2.45vw, 0.7rem);
   }
 }
+
+/* The composition stands where the tour video stood: the same lit seam
+   along the top, the amber pooling behind it, and its own glow. */
+.hero-stage {
+  isolation: isolate;
+}
+
+.hero-stage::before {
+  content: '';
+  position: absolute;
+  inset: 12% -14% -26%;
+  z-index: -1;
+  background: radial-gradient(
+    ellipse 58% 52% at 50% 58%,
+    color-mix(in srgb, var(--accent) 15%, transparent),
+    transparent 72%
+  );
+  pointer-events: none;
+}
+
+.hero-stage .hero-comp {
+  filter:
+    drop-shadow(0 34px 60px color-mix(in srgb, var(--bg) 92%, transparent))
+    drop-shadow(0 0 72px color-mix(in srgb, var(--accent) 26%, transparent));
+}

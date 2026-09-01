@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { brew, hero } from '../content/copy'
-import { assets } from '../content/assets'
-import { MediaFrame } from './MediaFrame'
 import { HeroBackdropSwirl } from './HeroBackdropSwirl'
+import { HeroComposition } from './HeroComposition'
 import candelaMark from '../assets/candela-c.svg'
 import './Hero.css'
 
@@ -85,7 +84,7 @@ export function Hero() {
         <p className="hero-foss">{hero.foss}</p>
       </div>
       <div className="hero-stage">
-        <MediaFrame asset={assets.hero} className="hero-capture" />
+        <HeroComposition />
       </div>
     </section>
   )

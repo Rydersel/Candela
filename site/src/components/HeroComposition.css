@@ -1,0 +1,125 @@
+/* A desk of windows on a fixed 12:7 stage over a desktop picture. Each slot
+   is positioned in percentages of the stage (inline, from the layer table),
+   so the whole composition scales as one picture while every capture keeps
+   its own pixels. Colours derive from the palette tokens. */
+
+.hero-comp {
+  position: relative;
+  aspect-ratio: 2000 / 1166;
+  width: 100%;
+  overflow: hidden;
+  /* The export's geometry: corner radius, and windows that run past the edge
+     clipped by the frame, so the composition reads as one picture. */
+  border-radius: clamp(14px, 1.6vw, 24px);
+  /* The desktop at three quarters: the page's own dark shows through a
+     quarter of the way, so the wallpaper sits under the windows rather than
+     competing with them. */
+  background:
+    linear-gradient(color-mix(in srgb, var(--bg) 25%, transparent), color-mix(in srgb, var(--bg) 25%, transparent)),
+    var(--hero-comp-bg, none) center / cover no-repeat,
+    var(--surface);
+}
+
+.hero-comp-slot {
+  position: absolute;
+  animation: hero-comp-arrive 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.hero-comp-win {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* The captures carry macOS's rounded corners in their alpha; this radius
+     follows them at the sizes the stage renders, so the hairline hugs the
+     corner instead of squaring it. */
+  border-radius: clamp(8px, 0.9vw, 13px);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--text) 9%, transparent),
+    0 22px 48px -12px color-mix(in srgb, var(--bg) 96%, transparent),
+    0 8px 22px color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+/* Depth order, back to front: the display page, then Health in front of
+   it, the heat map and the menu-bar controls floating over both. */
+.hero-comp-slot-display {
+  z-index: 1;
+}
+
+.hero-comp-slot-display .hero-comp-win {
+  filter: brightness(0.9);
+}
+
+.hero-comp-slot-health {
+  z-index: 2;
+}
+
+.hero-comp-slot-heatmap,
+.hero-comp-slot-menubar {
+  z-index: 3;
+}
+
+.hero-comp-slot-menubar .hero-comp-win {
+  border-radius: clamp(8px, 0.8vw, 12px);
+}
+
+/* A thin gold frame on the desktop, with one bright point of light that
+   travels the perimeter: the frame catching the light, in the glance
+   band's idiom. The ring is a conic gradient masked to a 1px border; the
+   angle is the only thing that moves. */
+@property --hero-ring-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.hero-comp-ring {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border-radius: inherit;
+  padding: 1px;
+  background:
+    conic-gradient(
+      from var(--hero-ring-angle),
+      transparent 0deg,
+      color-mix(in srgb, var(--accent) 85%, white) 14deg,
+      transparent 34deg,
+      transparent 360deg
+    ),
+    color-mix(in srgb, var(--accent) 28%, transparent);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: hero-comp-ring 7s linear 1.2s infinite;
+}
+
+@keyframes hero-comp-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes hero-comp-ring {
+  to {
+    --hero-ring-angle: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-comp-slot,
+  .hero-comp-ring {
+    animation: none;
+  }
+
+}

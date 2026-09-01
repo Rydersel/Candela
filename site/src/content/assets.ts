@@ -3,18 +3,15 @@
 //
 // One of the five assets is a real capture of the shipped app: the checkup
 // report still, from a live run against the DELL U2725QE on the development
-// rig (2026-08-28). The tour, setup, menu-bar-panel and health walkthroughs
+// rig (2026-08-28). The setup, menu-bar-panel and health walkthroughs
 // are produced recordings of the real app (2026-08-31) with its measured
 // data on screen, re-encoded here. The dim and accumulation figures are not
 // assets at all: DimDemo.tsx and ExposureDemo.tsx draw them live.
 
-import tourPoster from '../assets/captures/tour-poster.webp'
 import healthFlowPoster from '../assets/captures/health-flow-poster.webp'
 import setupFlowPoster from '../assets/captures/setup-flow-poster.webp'
 import panelFlowPoster from '../assets/captures/panel-flow-poster.webp'
 import checkupReportCapture from '../assets/captures/checkup-report.webp'
-import tourVideo from '../assets/media/tour.webm'
-import tourVideoHevc from '../assets/media/tour-hevc.mp4'
 import healthFlowVideo from '../assets/media/health-flow.mp4'
 import healthFlowVideoHevc from '../assets/media/health-flow-hevc.mp4'
 import setupFlowVideo from '../assets/media/setup-flow.mp4'
@@ -45,7 +42,6 @@ export type Asset = {
 }
 
 type AssetKey =
-  | 'hero'
   | 'healthFlow'
   | 'setupFlow'
   | 'panelFlow'
@@ -59,21 +55,6 @@ type ImageAsset = Asset & { kind: 'image' }
 type VideoAsset = Asset & { kind: 'video'; poster: string }
 
 export const assets: Record<AssetKey, Asset> = {
-  hero: {
-    kind: 'video',
-    // VP9, not H.264: every H.264 export of this cut artifacted on the
-    // hero's dark gradients. HEVC still serves Safari; everything else
-    // takes the webm.
-    src: tourVideo,
-    srcHevc: tourVideoHevc,
-    poster: tourPoster,
-    width: 2080,
-    height: 1524,
-    eager: true,
-    autoplayDelay: 1500,
-    autoplayOnDesktopLoad: true,
-    alt: "A tour of Candela's settings: General, the OLED care pane with a display's measured hours and hottest area, and the menu bar and indicator options.",
-  },
   healthFlow: {
     kind: 'video',
     src: healthFlowVideo,
