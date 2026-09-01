@@ -11,9 +11,6 @@
 # is already the warm cache in the main checkout. dd/ is the documented scratch
 # name (gitignored at any depth) for a build that must NOT touch that cache:
 #   make release DD=dd
-#
-# The deploy target below is the whole deploy sequence. Every gate in it is a
-# past incident; the comments above each one say which.
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
@@ -30,7 +27,7 @@ INSTALLED := /Applications/Candela.app
 
 # The Release debug-marker gate. The control MUST be found or the method is
 # broken and a zero marker count means nothing: a check whose failure mode is
-# silence is not a check. The control string is 31 bytes, so it clears the 16-byte
+# silence is not a check. The control string is 31 bytes, clearing the 16-byte
 # floor below which `strings` cannot see a Swift literal at all.
 # The marker is a PREFIX. CANDELA_DEBUG alone is 13 bytes, inline-stored, and
 # `strings` can never emit it, so that grep could not fail; and the one switch

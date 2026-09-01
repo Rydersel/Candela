@@ -1,23 +1,22 @@
-# The pipeline that compiles Swift. Before it existed the engine's tests were
-# guarded on the honour system: green meant somebody remembered to run
-# `swift test` locally and read the output.
+# The pipeline that compiles Swift. Without it, a green branch meant only that
+# somebody remembered to run `swift test` locally and read the output.
 #
 # Four jobs. Two of them run tests:
 #   test             CandelaKit's suite, the engine's automated coverage
 #   app-build        the app target compiles, which the Kit suite cannot tell
 #                    you, then CandelaAppTests runs over the app's own sources
-#   release-build    the configuration that ships compiles, and carries none of
-#                    the debug markers a Release build must not carry
+#   release-build    the configuration that ships compiles, and carries none
+#                    of the debug switches added while iterating
 #   hardware-ledger  reports how stale the last hardware verification run is,
 #                    and gates nothing on the answer
 #
 # Why a hosted runner is a valid environment for the suite and not a degraded
-# one: CandelaKit is hardware-free by design, imports no AppKit
-# or SwiftUI, and needs no attached panel, no Accessibility grant and no signing
-# identity. Everything that touches a display sits behind a protocol and is
-# faked in the tests, so a machine with no monitors runs the whole suite rather
-# than a subset of it. Nothing here verifies display BEHAVIOUR, and nothing here
-# ever will: that is what candela-probe and the hardware passes are for. The
+# one: CandelaKit is hardware-free by design, imports no AppKit or SwiftUI, and
+# needs no attached panel, no Accessibility grant and no signing identity.
+# Everything that touches a display sits behind a protocol and is faked in the
+# tests, so a machine with no monitors runs the whole suite rather than a subset
+# of it. Nothing here verifies display BEHAVIOUR, and nothing here ever will:
+# that is what candela-probe and the hardware passes are for. The
 # third job is not an exception to that. It performs no hardware check; it reads
 # the record a person's run on the rig left behind and reports what is
 # outstanding.
@@ -36,12 +35,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# No `paths:` filter, and that is a decision rather than an oversight waiting to
-# be tuned. A hand-maintained path list goes stale the first time a check grows,
-# and it would fail worse here than elsewhere: the engine's tests cover types the
-# app target consumes, so a filter that misses a path lets a real break through
-# as green. The suite is well under a minute; always running it is both simpler
-# and safer.
+# No `paths:` filter, deliberately. A hand-maintained path list goes stale the
+# first time a check grows, and the engine's tests cover types the app target
+# consumes, so a filter that misses a path lets a real break through as green.
+# The suite is well under a minute, so always running it is simpler and safer.
 
 permissions:
   contents: read
@@ -98,9 +95,8 @@ jobs:
           # pipefail is load-bearing here, not boilerplate. A pipeline reports
           # the exit status of its LAST command, so `swift test | tee` without it
           # reports tee's status, and tee succeeds whatever swift test did. Every
-          # failing suite would be published as green. That is the same
-          # report-a-success-you-did-not-achieve defect this project catalogues
-          # in docs/ENGINEERING-NOTES.md, one layer up from the hardware.
+          # failing suite would be published as green: a reported success that
+          # was never achieved, one layer up from the hardware.
           swift test 2>&1 | tee "$RUNNER_TEMP/kit-tests.log"
 
       # A gate nobody has seen fail is a gate nobody should trust. The failure
@@ -156,13 +152,13 @@ jobs:
           fi
           echo "Positive control OK: $count tests discovered and run, above the floor of $floor."
 
-  # Added on evidence, not on principle. The open question was whether a hosted
-  # image can compile this app at all: the app target is macOS 14 at its
-  # deployment floor but calls at least one macOS 26 SDK symbol behind an
-  # `#available` check (`sharedBackgroundVisibility`, SettingsRootView.swift),
-  # which needs a macOS 26 SDK to compile even though it needs macOS 26 only to
-  # RUN. GitHub's images do not always carry the newest Xcode, and a build job
-  # that cannot compile the tree is worse than none.
+  # The open question was whether a hosted image can compile this app at all:
+  # the app target's deployment floor is macOS 14, but it calls at least one
+  # macOS 26 SDK symbol behind an `#available` check
+  # (`sharedBackgroundVisibility`), which needs a macOS 26 SDK to compile even
+  # though it needs macOS 26 only to RUN. GitHub's images do not always carry
+  # the newest Xcode, and a build job that cannot compile the tree is worse
+  # than none.
   #
   # Measured on the runner, 2026-08-11: macos-26-arm64 image 20260728.0273 runs
   # macOS 26.5.2 on arm64 with Xcode 26.6 (17F113) selected, Swift 6.3.3, and the
@@ -238,10 +234,9 @@ jobs:
       - name: Generate the project
         run: xcodegen generate
 
-      # An explicit -derivedDataPath for the same reason the deploy loop requires
-      # one: it puts the product somewhere known, so the check
-      # below is looking at THIS build's output and not at whatever a shared
-      # location happened to hold.
+      # An explicit -derivedDataPath for the same reason the deploy loop needs
+      # one: it puts the product somewhere known, so the check below reads THIS
+      # build's output and not whatever a shared location happened to hold.
       # The signing override is deliberate and spelled out rather than defaulted.
       # project.yml signs the app target with the Developer ID identity in both
       # configurations, which a GitHub runner cannot do: it has no keychain and
@@ -261,10 +256,10 @@ jobs:
             CODE_SIGN_IDENTITY="-" DEVELOPMENT_TEAM=""
 
       # `** BUILD SUCCEEDED **` is a claim about the build, not about a product.
-      # Treating it as proof that an app exists is the same mistake as treating a
-      # DDC write ACK as proof a monitor changed: check the achieved state.
-      # A misconfigured scheme or a target that compiled to nothing can both
-      # exit 0, so the binary is looked for by name.
+      # Treating it as proof that an app exists is the same mistake as treating
+      # a DDC write ACK as proof a monitor changed: check the achieved state. A
+      # misconfigured scheme or a target that compiled to nothing both exit 0,
+      # so the binary is looked for by name.
       # The digest is logged so the control's evidence outlives the test step
       # below, which writes into this same build directory.
       - name: Positive control (a product actually came out)
@@ -425,9 +420,9 @@ jobs:
       #
       # Two measured traps. `strings` without -a misses sections; it once found
       # the bundle identifier and missed a SwiftUI literal in the same binary.
-      # And Swift stores literals of 15 UTF-8 bytes
-      # or fewer inline in the code rather than in a string section, out of
-      # reach, so keep the control literal and every marker longer than that.
+      # And Swift stores literals of 15 UTF-8 bytes or fewer inline in the code
+      # rather than in a string section, out of reach, so keep the control
+      # literal and every marker longer than that.
       - name: Debug markers are absent from the Release build
         shell: bash
         run: |

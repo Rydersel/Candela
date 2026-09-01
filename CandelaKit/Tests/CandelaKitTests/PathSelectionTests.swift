@@ -583,9 +583,10 @@ struct PathSelectionTests {
 
   // MARK: Committing an engage on the achieved state and not the write
 
-  /// The reported-success-versus-achieved-state class, in the HDR path: the panel accepts the write,
-  /// reports success, and does not switch. Choosing the arm from `setHDR`'s return
-  /// persisted `.alwaysOn` across launches on a display that was never in HDR.
+  /// A reported success that was never achieved, in the HDR path: the panel
+  /// accepts the write, reports success, and does not switch. Choosing the arm
+  /// from `setHDR`'s return persisted `.alwaysOn` across launches on a display
+  /// that was never in HDR.
   @Test func anEngageThatIsAcceptedAndDoesNotSwitchRollsTheModeBack() async {
     let h = Harness(settle: .milliseconds(5))
     await h.prime()
@@ -1696,11 +1697,9 @@ struct DDCLegHandBackTests {
     #expect(h.submitted == [.ddc(raw: 100)])
   }
 
-  /// Under live HDR the DDC register is dead (`docs/ENGINEERING-NOTES.md`, HDR
-  /// vs DDC), so a register left
-  /// below full range stays there: the native path is not an abandonment this
-  /// can repair, and reaching for the wire to prove otherwise is the write that
-  /// cannot land.
+  /// Under live HDR the DDC register is dead, so a register left below full
+  /// range stays there: the native path is not an abandonment this can repair,
+  /// and reaching for the wire to prove otherwise is the write that cannot land.
   @Test func theNativePathIsNeverHandedBackOverDDC() async {
     let h = Harness(settle: .milliseconds(5))
     await h.prime()

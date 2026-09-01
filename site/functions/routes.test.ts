@@ -43,9 +43,8 @@ function context(request: Request, db = new Database()): FunctionContext {
   }
 }
 
-// The same context with no RELEASE_DOWNLOAD_URL, so the built-in fallback is
-// what answers. It shipped pointing at a version that no longer exists, which
-// nothing caught because nothing exercised this branch.
+// No RELEASE_DOWNLOAD_URL, so the built-in fallback answers. It shipped
+// pointing at a release that did not exist, and nothing exercised this branch.
 function contextWithoutReleaseUrl(request: Request): FunctionContext {
   const value = context(request)
   delete value.env.RELEASE_DOWNLOAD_URL

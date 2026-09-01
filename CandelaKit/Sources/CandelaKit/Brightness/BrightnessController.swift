@@ -1110,8 +1110,9 @@ public final class BrightnessController: PendingWireDraining {
         //
         // TWO ways of reaching it, and they are different facts. The write was never
         // issued (no panel, or the MonitorPanel lock was busy), or it was issued,
-        // returned success, and the display did not switch. The second is the
-        // reported-success-versus-achieved-state class this project tracks.
+        // returned success, and the display did not switch. The second is a
+        // reported success that was never achieved, the defect class this app
+        // keeps hitting at every layer.
         let reason = issued
           ? "was accepted and the display did not switch"
           : "was never issued"
