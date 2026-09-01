@@ -25,8 +25,8 @@ extension PlatformConformance {
       }
     }
 
-    /// Bumped only when a reader would break; a ledger reader reads it
-    /// alongside `commit` to decide whether it understands a row at all.
+    /// Bumped only when a reader would break; a reader checks it before
+    /// trusting any other field here.
     public let schema: Int
     /// Which run produced this: "conform" or "regress".
     public let label: String

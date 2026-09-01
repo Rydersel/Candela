@@ -1,7 +1,7 @@
 # The pipeline that compiles Swift. Without it, a green branch meant only that
 # somebody remembered to run `swift test` locally and read the output.
 #
-# Three jobs:
+# The jobs:
 #   test             CandelaKit's suite, the engine's automated coverage
 #   app-build        the app target compiles, which the Kit suite cannot tell
 #                    you, then CandelaAppTests runs over the app's own sources

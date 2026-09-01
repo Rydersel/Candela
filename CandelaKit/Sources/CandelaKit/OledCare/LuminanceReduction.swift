@@ -58,7 +58,6 @@ public enum LuminanceReduction {
   /// returns the constant. Exposure needs an area average because every pixel of
   /// a cell emits, so the request is oversampled and
   /// `PanelSpaceTransform.panelNativeGrid` does the area-weighted reduction.
-  /// The end-to-end numbers above were measured on the shipped path, 2026-08-18.
   ///
   /// Callers still read the DELIVERED size back off the image rather than
   /// assuming this one was honoured.

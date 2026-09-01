@@ -2,9 +2,9 @@ import Foundation
 @testable import CandelaKit
 
 /// Real mode data captured 2026-08-03 from the development panels. The two panel
-/// classes behave completely
-/// differently: the Dell (~163 PPI) gets a full scaled-HiDPI ladder from macOS, the
-/// MAG (~110 PPI) gets nothing above its native framebuffer. Check both.
+/// classes behave completely differently: the Dell (~163 PPI) gets a full
+/// scaled-HiDPI ladder from macOS, the MAG (~110 PPI) gets nothing above its
+/// native framebuffer. Check both.
 enum DisplayModeFixtures {
   /// DELL U2725QE, run rotated 270°, panel native 2160×3840.
   static let dellNativePixels = (2160, 3840)
