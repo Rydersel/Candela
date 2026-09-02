@@ -3,7 +3,7 @@ import { actionMeasurement, isEligibleNavigation, redirect } from './lib/request
 import { parsePlacement, type FunctionContext } from './lib/runtime'
 import { recordAction } from './lib/store'
 
-const releaseArchiveUrl = 'https://github.com/Rydersel/Candela/releases/download/v1.0.0/Candela-1.0.0.zip'
+const releaseArchiveUrl = 'https://github.com/Rydersel/Candela/releases/download/v1.0.0/Candela-1.0.0.dmg'
 
 export const onRequestGet = async (context: FunctionContext) => {
   const placement = parsePlacement(new URL(context.request.url).searchParams.get('placement'))

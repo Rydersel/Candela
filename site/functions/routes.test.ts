@@ -38,7 +38,7 @@ function context(request: Request, db = new Database()): FunctionContext {
     env: {
       ANALYTICS_DB: db,
       ANALYTICS_SIGNING_KEY: 'a-test-secret-that-is-long-enough-for-hmac',
-      RELEASE_DOWNLOAD_URL: 'https://candela.fyi/Candela-1.0.0.zip',
+      RELEASE_DOWNLOAD_URL: 'https://candela.fyi/Candela-1.0.0.dmg',
     },
   }
 }
@@ -110,7 +110,7 @@ describe('analytics routes', () => {
       redirect: 'manual',
     }), new Database(true)))
     expect(failed.status).toBe(302)
-    expect(failed.headers.get('location')).toBe('https://candela.fyi/Candela-1.0.0.zip')
+    expect(failed.headers.get('location')).toBe('https://candela.fyi/Candela-1.0.0.dmg')
 
     const db = new Database()
     await github(context(new Request('https://candela.fyi/github?placement=header', {
@@ -127,7 +127,7 @@ describe('analytics routes', () => {
     })))
     expect(response.status).toBe(302)
     expect(response.headers.get('location')).toBe(
-      'https://github.com/Rydersel/Candela/releases/download/v1.0.0/Candela-1.0.0.zip',
+      'https://github.com/Rydersel/Candela/releases/download/v1.0.0/Candela-1.0.0.dmg',
     )
   })
 })

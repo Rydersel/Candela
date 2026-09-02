@@ -70,7 +70,7 @@ Other display apps adjust settings in the moment. Candela stewards your display 
 
 ## Install
 
-Download the notarized build from [the latest release](https://github.com/Rydersel/Candela/releases/latest) or [candela.fyi](https://candela.fyi), unzip, and drag Candela to Applications. Or with Homebrew:
+Download the notarized build from [the latest release](https://github.com/Rydersel/Candela/releases/latest) or [candela.fyi](https://candela.fyi), open the disk image, and drag Candela to Applications. Or with Homebrew:
 
 ```sh
 brew install --cask rydersel/tap/candela
