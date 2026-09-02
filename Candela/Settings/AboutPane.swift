@@ -128,7 +128,7 @@ struct AboutPane: View {
 
       // One string, not assembled fragments: the fork built "Version 4.3.4
       // Build 6262" from separate localized words no translation could reorder.
-      Text("Version \(AppInfo.version) (build \(AppInfo.build))")
+      Text("Version \(AppInfo.version)")
         .font(.callout)
         .foregroundStyle(SettingsTheme.bodyColor)
         .monospacedDigit()

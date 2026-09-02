@@ -44,7 +44,7 @@ enum ProvenanceExporter {
     return ProvenanceAssembler.assemble(
       identity: identity(for: state, model: model, identityRun: latestReadIdentityRun(runs)),
       hours: hours, exposure: exposure, checkups: runs,
-      appBuild: "\(AppInfo.version) (\(AppInfo.build))",
+      appBuild: AppInfo.version,
       macOSBuild: ProcessInfo.processInfo.operatingSystemVersionString,
       now: now)
   }

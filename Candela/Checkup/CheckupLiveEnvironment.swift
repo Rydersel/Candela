@@ -118,7 +118,7 @@ enum CheckupLiveEnvironment {
     return CheckupEnvironment(
       displays: entries,
       macOSBuild: ProcessInfo.processInfo.operatingSystemVersionString,
-      appBuild: "\(AppInfo.version) (\(AppInfo.build))",
+      appBuild: AppInfo.version,
       runners: { [weak model] entry in
         runnerSet(
           for: entry,

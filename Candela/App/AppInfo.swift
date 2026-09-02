@@ -5,11 +5,9 @@ enum AppInfo {
   /// rename stays a one-line change.
   static let productName = "Candela"
 
+  /// The build number is the same string (project.yml sets one from the
+  /// other), so there is no second number to show anywhere.
   static var version: String {
     Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
-  }
-
-  static var build: String {
-    Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
   }
 }

@@ -696,7 +696,7 @@ final class AppModel {
   /// `DiagnosticsPrefSummary`'s, where a test pins every line it emits.
   func diagnosticsSnapshot() -> DiagnosticsReportSnapshot {
     DiagnosticsReportSnapshot(
-      appVersion: "\(AppInfo.version) (\(AppInfo.build))",
+      appVersion: AppInfo.version,
       osVersion: osVersionText,
       safeMode: safeMode,
       accessibilityGranted: accessibility.isGranted,
