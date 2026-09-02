@@ -2,8 +2,9 @@
 <!-- Renders the social cards from the site's own hero shader, frozen at one
      frame. Serve this directory (python3 -m http.server) and open
      card.html?t=12&p=0.5&sw=0.8 at a 2400x1260 viewport for
-     site/public/social-card.png, or 2560x1280 for
-     .github/assets/social-preview.png; downscale each by half. -->
+     site/public/social-card.png, or card.html?t=12&p=0.5&sw=0.8&gh=1 at
+     2560x1280 for the GitHub social preview (uploaded in the repository
+     settings, not committed); downscale each by half. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -130,6 +131,12 @@
     color: var(--accent);
     letter-spacing: 0.004em;
   }
+  /* GitHub's repo list card crops the preview to about 2.7:1, losing the top
+     and bottom ~13% of a 2:1 image. The brand row and the footer stay inside
+     that band; the site card is never cropped and keeps the default layout. */
+  .card.gh .content { padding: 210px 128px 220px; }
+  .card.gh .headline { font-size: 170px; }
+  .card.gh .meta { margin-top: 72px; }
 </style>
 </head>
 <body>
@@ -171,6 +178,7 @@ const Q = new URLSearchParams(location.search);
 const FROZEN_T = parseFloat(Q.get('t') || '40');
 if (Q.get('p')) PARAMS.proportion = parseFloat(Q.get('p'));
 if (Q.get('sw')) PARAMS.swirl = parseFloat(Q.get('sw'));
+if (Q.get('gh')) document.querySelector('.card').classList.add('gh');
 if (Q.get('o')) document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('swirl').style.opacity = Q.get('o');
 });
