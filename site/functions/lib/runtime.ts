@@ -1,4 +1,4 @@
-export type Placement = 'header' | 'hero' | 'footer' | 'readme'
+export type Placement = 'header' | 'hero' | 'footer' | 'readme' | 'guide'
 export type AnalyticsAction = 'download' | 'github'
 export type DeviceCategory = 'desktop' | 'mobile' | 'tablet' | 'unknown'
 
@@ -44,7 +44,7 @@ export type FunctionContext = {
   waitUntil?: (promise: Promise<unknown>) => void
 }
 
-export const placements = new Set<Placement>(['header', 'hero', 'footer', 'readme'])
+export const placements = new Set<Placement>(['header', 'hero', 'footer', 'readme', 'guide'])
 
 // Placements reached from another site: the README's download button lives on
 // github.com, so its click is a cross-site navigation and must not be dropped

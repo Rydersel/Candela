@@ -3,6 +3,7 @@
   "include": [
     "/",
     "/privacy/*",
+    "/guides/*",
     "/analytics/*",
     "/download",
     "/github"

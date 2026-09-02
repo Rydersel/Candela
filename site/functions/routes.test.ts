@@ -146,6 +146,18 @@ describe('analytics routes', () => {
     expect(crossSiteHero.statements).toHaveLength(0)
   })
 
+  it('counts a click from a guide page under its own placement', async () => {
+    const db = new Database()
+    const before = events.downloads.length
+    const response = await download(context(new Request('https://candela.fyi/download?placement=guide', {
+      headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' },
+      redirect: 'manual',
+    }), db))
+    expect(response.status).toBe(302)
+    expect(db.statements.length).toBeGreaterThan(0)
+    expect(events.downloads.slice(before)).toContainEqual({ indexes: ['guide'], blobs: ['guide', 'unknown', 'unknown'], doubles: [1] })
+  })
+
   it('falls back to the current release archive when no download URL is configured', async () => {
     const response = await download(contextWithoutReleaseUrl(new Request('https://candela.fyi/download', {
       headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' },

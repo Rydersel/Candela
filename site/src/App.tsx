@@ -12,6 +12,9 @@ import { Trust } from './components/Trust'
 import { Faq } from './components/Faq'
 import { Footer } from './components/Footer'
 import { PrivacyPage } from './PrivacyPage'
+import { GuidePage } from './GuidePage'
+import { GuidesIndexPage } from './GuidesIndexPage'
+import type { Guide } from './guides'
 
 function LandingPage() {
   // Opening a deep link (/#verifies) must land instantly. The browser cannot
@@ -61,6 +64,13 @@ function LandingPage() {
   )
 }
 
-export default function App({ pathname = '/' }: { pathname?: string }) {
-  return pathname.replace(/\/+$/, '') === '/privacy' ? <PrivacyPage /> : <LandingPage />
+// Only the SSR entry supplies guides. In the browser the list is empty and no
+// guide path hydrates, so the guide branches are dead there on purpose.
+export default function App({ pathname = '/', guides = [] }: { pathname?: string; guides?: Guide[] }) {
+  const path = pathname.replace(/\/+$/, '')
+  if (path === '/privacy') return <PrivacyPage />
+  if (path === '/guides') return <GuidesIndexPage guides={guides} />
+  const guide = guides.find((entry) => `/guides/${entry.slug}` === path)
+  if (guide) return <GuidePage guide={guide} guides={guides} />
+  return <LandingPage />
 }

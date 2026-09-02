@@ -10,20 +10,58 @@
   initial-value: 0;
 }
 
-/* The ramp endpoints are sampled from the real heat-map capture (cold field,
-   hottest glow), so the concept grids and the capture above them share one
-   thermal language. Mixed in oklch, the path from purple to orange passes
-   through magenta and red, which is the map's own gradient. Both demos read
-   these. */
+/* The header illustrations' ramp, dark purple through magenta to amber, which
+   is the heat map's own path. Both demos read these. */
 :root {
-  --map-cold: #502c61;
-  --map-hot: #d88b4e;
+  --map-cold: #1a0f2e;
+  --map-mid: #8a3a6a;
+  --map-hot: #ffd68c;
+}
+
+/* Same bezel and stand as the header illustrations, so a drawn display looks alike everywhere. */
+.screen {
+  padding: 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
+  border-radius: calc(var(--radius) * 1.25);
+  background: #101014;
+  box-shadow:
+    inset 0 1px 0 var(--deep-sheen),
+    0 12px 40px color-mix(in srgb, var(--bg) 70%, transparent);
+  aspect-ratio: 21 / 10;
+}
+
+.screen-stand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.screen-stand span:first-child {
+  width: 13%;
+  height: 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
+  border-top: 0;
+  border-radius: 0 0 4px 4px;
+  background: #15151a;
+}
+
+.screen-stand span:last-child {
+  width: 31%;
+  height: 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
+  border-radius: 999px;
+  background: #1a1a20;
 }
 
 .dim-demo {
   display: block;
-  padding: 0.9rem;
-  aspect-ratio: 21 / 10;
+}
+
+.dim-demo .screen {
+  box-shadow:
+    inset 0 1px 0 var(--deep-sheen),
+    0 16px 50px color-mix(in srgb, var(--bg) 75%, transparent),
+    0 0 80px 2px var(--deep-glow-faint);
 }
 
 .dim-grid {
@@ -32,21 +70,23 @@
   grid-template-rows: repeat(10, 1fr);
   gap: 2px;
   width: 100%;
-  height: calc(100% - 1.6rem);
+  height: 100%;
+  padding: 2px;
+  border-radius: 5px;
+  background: #0d0912;
 }
 
 /* Fast by default, so a moved window's old region lifts at once: a
    transition takes its timing from the state being entered, and the slow
    ease belongs only to settling. */
 .dim-cell {
-  border-radius: 1px;
-  /* Hue from the thermal ramp, then overall level from --lum, so a dim cell
-     is both cooler and darker, the way the real map reads. */
+  border-radius: 2px;
+  /* Two nested mixes so one number walks all three stops. oklch, because the path
+     from purple to amber runs through magenta and orange, the map's own gradient. */
   background: color-mix(
-    in srgb,
-    color-mix(in oklch, var(--map-hot) calc(var(--lum) * 100%), var(--map-cold))
-      calc(18% + var(--lum) * 82%),
-    #121215
+    in oklch,
+    var(--map-hot) calc(clamp(0, (var(--lum) - 0.3) / 0.45, 1) * 100%),
+    color-mix(in oklch, var(--map-mid) calc(clamp(0, var(--lum) / 0.3, 1) * 100%), var(--map-cold))
   );
   transition: --lum 200ms ease-out;
 }
@@ -56,7 +96,7 @@
 }
 
 .dim-phase {
-  margin-top: 0.45rem;
+  margin-top: 0.7rem;
   font-size: var(--fs-small);
   letter-spacing: 0.04em;
   color: var(--text-dim);

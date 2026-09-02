@@ -40,6 +40,13 @@ async function htmlResponse(context: Context) {
 
 const canonicalHost = 'candela.fyi'
 
+// Only the landing and the guides section get a Markdown twin from the prerender.
+function markdownAssetPath(pathname: string) {
+  if (pathname === '/') return '/index.md'
+  if (/^\/guides\/(?:[a-z0-9-]+\/)?$/.test(pathname)) return `${pathname}index.md`
+  return null
+}
+
 export const onRequest = async (context: Context) => {
   const url = new URL(context.request.url)
   // www is a Pages custom domain so that it resolves at all; the apex is the
@@ -48,13 +55,14 @@ export const onRequest = async (context: Context) => {
     url.hostname = canonicalHost
     return Response.redirect(url.toString(), 301)
   }
-  if (url.pathname !== '/') return context.next()
+  const markdownPath = markdownAssetPath(url.pathname)
+  if (!markdownPath) return context.next()
   if (!acceptsMarkdown(context.request.headers.get('accept'))) return htmlResponse(context)
 
   let asset: Response
   let markdown: string
   try {
-    const markdownUrl = new URL('/index.md', url)
+    const markdownUrl = new URL(markdownPath, url)
     asset = await context.env.ASSETS.fetch(new Request(markdownUrl, {
       headers: { accept: 'text/plain' },
     }))

@@ -4,7 +4,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 fails=0
-if grep -rn $'—' src --include='*.ts' --include='*.tsx' --include='*.css'; then
+if grep -rn $'—' src --include='*.ts' --include='*.tsx' --include='*.css' --include='*.md'; then
   echo "FAIL: em dash in site/src"; fails=1
 fi
 # Separate call on purpose: --include filters out an explicitly named path, so

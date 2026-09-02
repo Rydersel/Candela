@@ -1,7 +1,7 @@
-# Candela landing page
+# Candela website
 
-Candela's landing and Privacy pages, built with Vite + React + TypeScript and
-hosted on Cloudflare Pages.
+Candela's landing, Privacy and Guides pages, built with Vite + React + TypeScript
+and hosted on Cloudflare Pages.
 
 ```sh
 npm install
@@ -24,6 +24,13 @@ directory and prints its path; `--open` also opens it in the default browser.
 negotiation, the anonymous 24-hour analytics funnel, and fixed release/GitHub
 redirects. `migrations/` is the D1 schema. `analytics-worker/` finalizes
 seven-day pseudonymous records into thresholded anonymous rollups.
+
+Guides are Markdown files under `src/content/guides/`, one per page, with a
+frontmatter block the build validates (title, description, published,
+updated, the macOS version the page was checked on) and an optional `order`
+key that sequences the index, defaulting to 100. The build renders them into
+`dist/guides/`, writes a Markdown twin beside each page for clients that ask
+for `text/markdown`, and generates `sitemap.xml` from the route list.
 
 ## Cloudflare setup
 
@@ -75,3 +82,6 @@ The report command requires a separate read-only token in
 - Videos and hashed assets bypass Functions and preserve immutable caching and
   byte-range responses.
 - The appcast enclosure and `RELEASE_DOWNLOAD_URL` identify the same archive.
+- `/guides/` lists every guide, and `curl -H 'Accept: text/markdown' https://candela.fyi/guides/<slug>/` returns Markdown.
+- The guide placement migration has been applied (`npm run d1:migrate:remote`) before the deploy that first sends `placement=guide`.
+- A Search Console domain property for candela.fyi is verified and receiving data before the guides section is announced anywhere.
