@@ -105,7 +105,8 @@ export function ExposureDemo() {
   return (
     <div className="media-shell">
       <figure ref={figRef} className="exposure-demo" role="img" aria-label={exposureDemo.figureLabel}>
-        <div className="exposure-grid" aria-hidden="true">
+        <div className="screen" aria-hidden="true">
+        <div className="exposure-grid">
           {cells.map((heat, i) => (
             <span
               className="exposure-cell"
@@ -113,6 +114,11 @@ export function ExposureDemo() {
               style={{ '--lum': lumAt(heat, progress) } as React.CSSProperties}
             />
           ))}
+        </div>
+        </div>
+        <div className="screen-stand" aria-hidden="true">
+          <span />
+          <span />
         </div>
       </figure>
       <button
