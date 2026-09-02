@@ -193,7 +193,7 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
       // STRANDED slot is the exception: the token was released while the display
       // stayed online, so answering true reports a clean revert over a display
       // that is still there, and `ModeSynthesisEngine`'s unwind takes this
-      // return as its departure check (SS10).
+      // return as its departure check.
       let stillStranded = stranded.contains(slot)
       lock.unlock()
       return !stillStranded
@@ -281,7 +281,7 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
   /// retried briefly and then reported false rather than fought.
   ///
   /// Reading `CGDisplayCopyDisplayMode` here does not violate the
-  /// nothing-is-read-back rule (VD5): that rule covers the private
+  /// nothing-is-read-back rule: that rule covers the private
   /// CGVirtualDisplay object's own properties, which lie. The engaged mode is
   /// public CoreGraphics topology state.
   private static func engageHiDPIModeInThisProcess(
@@ -362,7 +362,7 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
     Set((try? FileManager.default.contentsOfDirectory(atPath: Self.profilesDirectory)) ?? [])
   }
 
-  /// VD11: each slot identity mints ONE permanent profile on its first creation
+  /// Each slot identity mints ONE permanent profile on its first creation
   /// on a machine, and never again. A log rather than an assertion because
   /// fixing requires root and the app never elevates; REPEATING growth for one
   /// slot means an identity is varying.

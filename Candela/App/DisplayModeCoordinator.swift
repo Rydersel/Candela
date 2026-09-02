@@ -38,12 +38,12 @@ final class DisplayModeCoordinator {
     case panel
   }
 
-  /// Which surface ANSWERS the outstanding preview (SO6): exactly one is
+  /// Which surface ANSWERS the outstanding preview: exactly one is
   /// answerable per preview. Decided at preview start and carried on the
   /// preview, never re-derived mid-countdown, so the buttons cannot migrate
   /// under the user's pointer.
   ///
-  /// THREE owners, not two (DM11). `.settingsBanner` iff the change originated in
+  /// THREE owners, not two. `.settingsBanner` iff the change originated in
   /// the settings window while it was key (the caller reads its own
   /// `controlActiveState` at the click). `.guidedSetup` iff the guided setup flow
   /// started the apply, since that window draws its own Keep and Revert from the
@@ -79,11 +79,11 @@ final class DisplayModeCoordinator {
     /// answer.
     let nativePixels: PixelSize?
     /// How many revealed modes the wire-timing guard withheld. Reported rather
-    /// than merely applied (CR11): on a hardware pass this count is what
+    /// than merely applied: on a hardware pass this count is what
     /// distinguishes "the guard fired" from "revelation found nothing".
     let withheldForWireTiming: Int
     /// What the density model made of this panel, judged over the SAME curated
-    /// rows this catalog publishes (PD1): a size the wire-timing guard withheld
+    /// rows this catalog publishes: a size the wire-timing guard withheld
     /// has no apply path, so it must never become a recommendation.
     ///
     /// nil when the panel's native pixels are unknown, or when no facts provider
@@ -92,9 +92,9 @@ final class DisplayModeCoordinator {
     /// abstains with a `.noPhysicalSize` verdict. Either way, no geometry means no
     /// judgement rather than one made from zeros.
     let density: DensityVerdict?
-    /// The synthesized stops this panel is offered (SS3/SS4), in the same
+    /// The synthesized stops this panel is offered, in the same
     /// descending order as `rows`. Empty when the display has not opted in, is
-    /// the built-in (SS14), or has no native geometry to take a percentage of.
+    /// the built-in, or has no native geometry to take a percentage of.
     ///
     /// Kept beside `rows` because a selection has to get from a picked ROW back
     /// to the `SyntheticSize` the engine engages, and a row carries only its
@@ -122,7 +122,7 @@ final class DisplayModeCoordinator {
     /// `current` is the raw readback, and while a stop is engaged it is not the
     /// answer: the engage tail re-times the slave, so the panel publishes a REAL
     /// descriptor (the HiDPI twin of its own mode) that readers would match
-    /// confidently and wrongly. The engine's pairing decides instead (SS1).
+    /// confidently and wrongly. The engine's pairing decides instead.
     ///
     /// The RATE comes from the readback, because the twin it re-times onto carries
     /// the panel's own refresh by construction. Label-only: nothing may match or
@@ -141,7 +141,7 @@ final class DisplayModeCoordinator {
     }
 
     /// What the already-on-screen no-op guards compare against. While a stop is
-    /// engaged the answer is nil: the stop is what is on screen (SS1), and the
+    /// engaged the answer is nil: the stop is what is on screen, and the
     /// engage tail re-times the slave onto a mode the panel really publishes.
     /// Comparing against that descriptor made picking the native size a silent
     /// no-op, which is the one pick that disengages [MEASURED 2026-08-18: a real
@@ -162,8 +162,8 @@ final class DisplayModeCoordinator {
   /// wrong display, and the engaged row could vanish from its own picker.
   private struct PanelBaseline {
     let nativePixels: PixelSize?
-    /// The native-flagged mode's LOGICAL size, which is what SS3's percentages
-    /// are percentages of. Not the pixel size: the two differ on a panel whose
+    /// The native-flagged mode's LOGICAL size, which is what the synthesized-size
+    /// percentages are percentages of. Not the pixel size: the two differ on a panel whose
     /// native mode is HiDPI.
     let nativeLogicalWidth: Int?
     let nativeLogicalHeight: Int?
@@ -171,7 +171,7 @@ final class DisplayModeCoordinator {
   }
 
   /// What the app layer knows about a panel that CoreGraphics mode enumeration
-  /// does not. Two joins meet here and neither belongs in the Kit (PD7): the
+  /// does not. Two joins meet here and neither belongs in the Kit: the
   /// declared physical size, filed per `persistenceKey` because display IDs
   /// reassign across a replug, and the is-virtual predicate, which no plausibility
   /// range could stand in for, since a virtual display declares an ordinary fake
@@ -192,7 +192,7 @@ final class DisplayModeCoordinator {
   struct Preview: Equatable {
     let displayID: CGDirectDisplayID
     let mode: DisplayMode
-    /// The one answerable surface (SO6), fixed at preview start.
+    /// The one answerable surface, fixed at preview start.
     let surface: PreviewSurface
     var secondsRemaining: Int
     /// Set when `confirm()`, `revert()` or the expiry threw. The display did not
@@ -203,7 +203,7 @@ final class DisplayModeCoordinator {
     /// Reported by the session, not inferred: a failed expiry disarms the
     /// countdown while a failed commit deliberately leaves it armed.
     var isCountingDown: Bool
-    /// Non-nil when this preview is a SYNTHESIZED size (SS4): the engine has a
+    /// Non-nil when this preview is a SYNTHESIZED size: the engine has a
     /// virtual display up and the panel mirrored onto it, and the answer goes
     /// to `SynthesisPreviewSession` rather than `ModePreviewSession`.
     ///
@@ -234,7 +234,7 @@ final class DisplayModeCoordinator {
   /// Reapply is unattended, so this is the ONLY way the user finds out. Kept per
   /// display, it survives until they dismiss it or pick a mode themselves: it has
   /// to still be there the next time they look. Unplugging the display does not
-  /// take it away (SO8), since the display coming back is when someone is in front
+  /// take it away, since the display coming back is when someone is in front
   /// of it again.
   struct ReapplyReport: Equatable {
     /// `DisplayConfigIdentity.key`, the SAME key the stored mode is filed under,
@@ -260,7 +260,7 @@ final class DisplayModeCoordinator {
 
     /// Two ways a selection can take no effect, and they are different
     /// statements: the hardware or CoreGraphics saying no, or this app refusing to
-    /// reconfigure a display while it is already reconfiguring displays (AR12).
+    /// reconfigure a display while it is already reconfiguring displays.
     /// One state with two reasons, so `dismissStartFailure` stays THE only place
     /// either is cleared.
     enum Reason: Equatable {
@@ -274,7 +274,7 @@ final class DisplayModeCoordinator {
   private(set) var startFailure: StartFailure?
   /// Keyed by `DisplayConfigIdentity.key`, not by display ID, so a report
   /// survives the replug that reassigns the ID and does not land on whatever
-  /// display inherits that ID (SO8). Read through `report(for:)`.
+  /// display inherits that ID. Read through `report(for:)`.
   ///
   /// It inherits that key's KNOWN LIMITATION rather than escaping it. Two
   /// identical panels reporting serial 0 produce the SAME key, so with twins
@@ -288,7 +288,7 @@ final class DisplayModeCoordinator {
   /// still named the old one: correct ordering, wrong intent. Set synchronously so
   /// the disable lands in the same body evaluation as the click.
   private(set) var isApplying = false
-  /// Displays whose user has applied a size in THIS session (PD8): a person who
+  /// Displays whose user has applied a size in THIS session: a person who
   /// just chose a size has answered the recommendation for now, and the durable
   /// opt-out is the dismissal pref.
   ///
@@ -298,7 +298,7 @@ final class DisplayModeCoordinator {
   /// so a reverted or expired try leaves the suggestion standing.
   private(set) var sizeAppliedByUser: Set<CGDirectDisplayID> = []
   /// Whether the select now in flight changes the display's logical SIZE,
-  /// sampled before `begin()` moves it. PD8 is about applying a size: a refresh
+  /// sampled before `begin()` moves it. This is about applying a size: a refresh
   /// rate picked at the size already on screen answers nothing about how big
   /// things look, so it must not hide the callout.
   @ObservationIgnored private var selectChangesSize: [CGDirectDisplayID: Bool] = [:]
@@ -306,7 +306,7 @@ final class DisplayModeCoordinator {
   let configurator: any DisplayConfiguring
   let persistence: ModePersistence
 
-  /// CR10. False means the mode list is exactly what CoreGraphics publishes,
+  /// False means the mode list is exactly what CoreGraphics publishes,
   /// reported in diagnostics rather than left indistinguishable from a panel that
   /// has no hidden modes.
   var revealsHiddenModes: Bool { configurator.revealsHiddenModes }
@@ -315,7 +315,7 @@ final class DisplayModeCoordinator {
   /// are always reported together.
   var guardsWireTiming: Bool { configurator.guardsWireTiming }
 
-  /// AR12. Held from just before `begin()` until nothing is outstanding, so no
+  /// The reconfiguration gate. Held from just before `begin()` until nothing is outstanding, so no
   /// other display-reconfiguring feature can move a display out from under a
   /// preview whose fallback was captured before it.
   ///
@@ -330,7 +330,7 @@ final class DisplayModeCoordinator {
   @ObservationIgnored weak var confirmation: (any ModeConfirmationPresenting)?
 
   /// Called after something actually wrote `storedDisplayMode` (a pin or a kept
-  /// preview), so the propagation seam hears about it (D27) no matter which
+  /// preview), so the propagation seam hears about it no matter which
   /// surface asked. Owned here because two views answering the same question is
   /// one too many: the second one written is the one that forgets.
   @ObservationIgnored var didStoreMode: (CGDirectDisplayID) -> Void = { _ in }
@@ -349,7 +349,7 @@ final class DisplayModeCoordinator {
   /// fraction-of-native rule, and no catalog carries a verdict.
   @ObservationIgnored var physicalFacts: (ConfiguredDisplay) -> PhysicalPanelFacts? = { _ in nil }
 
-  /// Synthesized sizes (SS4). Injected by `AppModel`, which owns it: a
+  /// Synthesized sizes. Injected by `AppModel`, which owns it: a
   /// synthesized stop is a row in THIS catalog and a preview on THIS clock, so
   /// the routing lives here while the engine, the pairing snapshot and the
   /// prefs live there.
@@ -404,7 +404,7 @@ final class DisplayModeCoordinator {
   /// lands.
   @ObservationIgnored private var restoreStopIfPickFalls: [CGDirectDisplayID: SyntheticSize] = [:]
   /// Which displays count as having just arrived: the "launch and reconnect, never
-  /// continuously" rule (DM7). It lives in `CandelaKit` under test because both
+  /// continuously" rule. It lives in `CandelaKit` under test because both
   /// failure directions are timing and both are invisible from here, too eager
   /// fighting the user forever and too shy restoring nothing on the replug the
   /// feature is named for.
@@ -465,14 +465,14 @@ final class DisplayModeCoordinator {
   /// query. A catalog is populated only when something has SHOWN this display (its
   /// own pane, or the panel's warm pass over externals), so a reader treating
   /// `catalogs` as the answer reports the built-in's mode as "not reported"
-  /// exactly when the report is copied from another display's page (D8).
+  /// exactly when the report is copied from another display's page.
   func currentMode(for displayID: CGDirectDisplayID) -> DisplayMode? {
     catalogs[displayID]?.current ?? configurator.currentMode(for: displayID)
   }
 
   /// Re-enumerates one display. Called when a pane appears, when the screen
   /// configuration changes, and after any mode this app applies, never on a
-  /// timer (DM7).
+  /// timer.
   func refreshCatalog(for displayID: CGDirectDisplayID) {
     observed.insert(displayID)
     guard let display = configurator.displays().first(where: { $0.id == displayID }) else {
@@ -502,7 +502,7 @@ final class DisplayModeCoordinator {
         )
       }
     }
-    // One value, two readers (PD1). Curating twice would let the rows the user
+    // One value, two readers. Curating twice would let the rows the user
     // can pick and the rows the model ranks drift apart.
     let published = DisplayModeCatalog.curated(
       all,
@@ -510,7 +510,7 @@ final class DisplayModeCoordinator {
       nativePixelHeight: native?.height ?? 0,
       geometry: geometry
     )
-    // Offered only where SS4's opt-in is on, and never on the built-in (SS14). The
+    // Offered only where the synthesized-size opt-in is on, and never on the built-in. The
     // ladder is cached on the baseline, so the rows a person sees do not change
     // under them while a size is engaged.
     let stops = synthesis?.offersSyntheticSizes(displayID: displayID) == true && !display.isBuiltIn
@@ -638,7 +638,7 @@ final class DisplayModeCoordinator {
     // present at both ends, and this handler can itself run late, which is why it
     // is told what was live rather than asked to look.
     arrivals.noteObserved(live: observedLive)
-    // Reports are deliberately NOT pruned here (SO8). Identity keying already
+    // Reports are deliberately NOT pruned here. Identity keying already
     // stops a report reappearing on whatever display took the ID next, and what is
     // left is the case the report exists for: a reapply nobody watched, on a
     // display the user unplugged before looking. Dropping it on departure would
@@ -681,9 +681,9 @@ final class DisplayModeCoordinator {
   ///
   /// Called from launch and from the app's debounced
   /// `CGDisplayReconfigurationCallBack` intake, and nowhere else: never on a pref
-  /// write, never on a timer (DM7).
+  /// write, never on a timer.
   ///
-  /// The arrival gate is the substance of DM7. A reconfiguration event is ALSO
+  /// The arrival gate is the substance of the arrival-only reapply rule. A reconfiguration event is ALSO
   /// what the user changing resolution in System Settings produces, so a pass that
   /// reapplied on every event would undo that change within a second, with no way
   /// out short of turning the feature off. From arrival until departure, the
@@ -751,7 +751,7 @@ final class DisplayModeCoordinator {
   }
 
   private func performReapply(_ displays: [ConfiguredDisplay]) async {
-    // Unattended, and still a reconfiguration, so AR12 applies exactly as it does
+    // Unattended, and still a reconfiguration, so the reconfiguration gate applies exactly as it does
     // to a pick: a stored mode re-asserted mid-arrangement-preview changes the very
     // tile sizes that layout was computed from. Refused, every arrival claim goes
     // back, since keeping it would mean "never".
@@ -864,7 +864,7 @@ final class DisplayModeCoordinator {
       return .done
     }
     // A display can leave across the queue wait or the apply itself. Not because
-    // a report about an absent display is unshowable (SO8 keeps those), but
+    // a report about an absent display is unshowable (reports survive departure), but
     // because this one describes an attempt that never finished. The claim goes
     // back with it, so the display's return is an arrival again and that pass
     // writes a fresh outcome in place of this half-answer.
@@ -880,7 +880,7 @@ final class DisplayModeCoordinator {
     return .done
   }
 
-  /// The unattended synthesis half (SS9/SS14, through `SynthesisReapplyPolicy`).
+  /// The unattended synthesis half, through `SynthesisReapplyPolicy`.
   ///
   /// Everything the policy needs about the panel comes from THIS pass's baseline,
   /// and the stored descriptor is resolved through
@@ -979,8 +979,7 @@ final class DisplayModeCoordinator {
   /// Queued for `pinCurrentMode`'s reason: the queue serialises every other write
   /// to `storedDisplayMode`, and a clear that skipped it could be overtaken by an
   /// in-flight pin and silently undone. Announced through `didStoreMode` because
-  /// the propagation seam has to hear about a removal on the same terms as a write
-  /// (D27).
+  /// the propagation seam has to hear about a removal on the same terms as a write.
   ///
   /// A stored SYNTHESIZED size is deliberately untouched: it is a different store
   /// with its own control, and a button in the resolution section is not where
@@ -1020,8 +1019,8 @@ final class DisplayModeCoordinator {
   /// `origin` and `surface` are not defaulted: every caller has to say where a
   /// failure is reported and where the answer is offered, because getting either
   /// wrong is invisible until a countdown expires against nobody. Settings callers
-  /// decide `surface` from their own window's key state at the click (SO6), the
-  /// guided setup flow passes `.guidedSetup` (DM11), everything else
+  /// decide `surface` from their own window's key state at the click, the
+  /// guided setup flow passes `.guidedSetup`, everything else
   /// `.floatingPanel`.
   func select(
     _ mode: DisplayMode, on displayID: CGDirectDisplayID,
@@ -1034,7 +1033,7 @@ final class DisplayModeCoordinator {
     inFlightSelects += 1
     isApplying = true
     queue.enqueue {
-      // Routed on PROVENANCE (SS5): a synthesized row's sentinel mode ID denotes
+      // Routed on PROVENANCE: a synthesized row's sentinel mode ID denotes
       // nothing in either mode-ID space, so no configuration transaction could
       // apply it. The configurator's refusal is a tripwire for a bypass rather
       // than a path anything is meant to take.
@@ -1157,7 +1156,7 @@ final class DisplayModeCoordinator {
     return await performResolve(answered, keeping: false, intent: .standDown) == .reverted
   }
 
-  /// Reconciles both preview sessions and gives the AR12 claim back if nothing
+  /// Reconciles both preview sessions and gives the reconfiguration-gate claim back if nothing
   /// is outstanding.
   ///
   /// **THE release funnel for `.displayModes`, and the reason it is exposed.**
@@ -1217,14 +1216,14 @@ final class DisplayModeCoordinator {
     // they are doing by hand, and leaving the notice up would contradict the choice
     // they just made. Through the one dismissal path.
     if let key = identity(for: displayID)?.key { dismissReport(forKey: key) }
-    // One preview at a time across both size paths (SO6). `ModePreviewSession.
+    // One preview at a time across both size paths. `ModePreviewSession.
     // begin` ends an outstanding preview of its OWN on another display and has
     // never heard of the synthesis session, so this is where the other half ends.
     // A failed disengage refuses, for `MirroringCoordinator`'s reason: reporting
     // success would leave a panel mirrored onto a virtual display nobody approved.
     //
     // **BEFORE the claim, and the order is the whole point.** Ending a preview
-    // runs `adopt`, which is the AR12 RELEASER, so standing the other preview down
+    // runs `adopt`, which is the reconfiguration-gate RELEASER, so standing the other preview down
     // after claiming would hand back the claim this operation just took and the
     // apply below would run unguarded. Standing down first costs nothing, and the
     // claim is then held continuously through the countdown's resolution.
@@ -1239,7 +1238,7 @@ final class DisplayModeCoordinator {
     }
     // A COMMITTED set is not a preview, so the guard above never sees it. Picking
     // an ordinary row while a synthesized size is engaged has to take the set down
-    // through the engine first (SS10): the panel is a mirror slave, and a mode
+    // through the engine first: the panel is a mirror slave, and a mode
     // applied underneath the mirror lands invisibly. Same stand-down-before-claim
     // ordering as above.
     if !mode.isSynthesized, synthesis?.isEngaged(displayID: displayID) == true {
@@ -1292,7 +1291,7 @@ final class DisplayModeCoordinator {
         return
       }
     }
-    // AR12, asked BEFORE `begin()` so a refusal costs nothing: no transaction is
+    // The reconfiguration gate, asked BEFORE `begin()` so a refusal costs nothing: no transaction is
     // open and no display has moved. Granted when WE already hold it, since a
     // select on a second display while one is previewing is supported and
     // `ModePreviewSession.begin` handles it.
@@ -1331,12 +1330,12 @@ final class DisplayModeCoordinator {
     refreshCatalog(for: displayID)
   }
 
-  /// `performSelect` for a synthesized stop (SS4/SS5): the same recording, the
+  /// `performSelect` for a synthesized stop: the same recording, the
   /// same gate, the same countdown, a different engine underneath.
   ///
   /// The guards are checked HERE rather than inside the engine because a refusal
-  /// has to be a sentence about this display: HDR is on (SS9), the display is the
-  /// built-in (SS14), the opt-in is off, or the stop is no longer offered.
+  /// has to be a sentence about this display: HDR is on, the display is the
+  /// built-in, the opt-in is off, or the stop is no longer offered.
   private func performSynthesisSelect(
     _ mode: DisplayMode, on displayID: CGDirectDisplayID,
     from origin: PreviewOrigin, surface: PreviewSurface
@@ -1374,7 +1373,7 @@ final class DisplayModeCoordinator {
     // name. Recorded even if the engage fails, since it describes the panel.
     synthesisPreviewRefresh[displayID] = configurator.currentMode(for: displayID)?.refreshHz
     // Every synthesized pick is a size the user chose, so it answers the
-    // recommendation the same way a published size does (PD8), and only if the
+    // recommendation the same way a published size does, and only if the
     // preview is KEPT.
     selectChangesSize[displayID] = true
     dismissStartFailure()
@@ -1406,7 +1405,7 @@ final class DisplayModeCoordinator {
     // session ends its OWN outstanding preview inside `begin`.
     //
     // **Before the claim**, for the reason `performSelect` states at the same
-    // step: ending a preview runs `adopt`, the AR12 releaser, so a stand-down
+    // step: ending a preview runs `adopt`, the reconfiguration-gate releaser, so a stand-down
     // after the claim would give back the claim this operation just took. The
     // engage runs for tens of seconds and the preview stands for thirty more, and
     // every second has to be guarded.
@@ -1415,7 +1414,7 @@ final class DisplayModeCoordinator {
       await adopt(.keep, synthesis: .keep)
       return
     }
-    // AR12, before anything is created, for `performSelect`'s reason: a refusal
+    // The reconfiguration gate, before anything is created, for `performSelect`'s reason: a refusal
     // has to cost nothing.
     if let holder = await gate.claim(.displayModes).refusedBy {
       synthesis.note(.blocked(by: holder), for: displayID)
@@ -1477,7 +1476,7 @@ final class DisplayModeCoordinator {
   /// back"; the pref naming their stop was never touched by the pick that fell.
   ///
   /// **Only ever called from an ANSWERED outcome, and only while this operation
-  /// still holds the AR12 claim.** Both halves are load-bearing.
+  /// still holds the reconfiguration-gate claim.** Both halves are load-bearing.
   /// `SynthesisCoordinator.engage` takes no claim of its own, so running it from a
   /// stand-down would perform tens of seconds of display reconfiguration inside
   /// another claimant's operation, or with nobody holding the gate. `ResolveIntent`
@@ -1604,7 +1603,7 @@ final class DisplayModeCoordinator {
       }
       // The pick stood, so the stop it displaced stays displaced.
       restoreStopIfPickFalls[answered.displayID] = nil
-      // The size recommendation IS answered here (PD8), and only by a kept size: a
+      // The size recommendation IS answered here, and only by a kept size: a
       // revert or an expiry leaves them on the size they were being asked about.
       if selectChangesSize[answered.displayID] == true {
         sizeAppliedByUser.insert(answered.displayID)
@@ -1617,7 +1616,7 @@ final class DisplayModeCoordinator {
       //
       // A stand-down does NOT restore: whoever asked for it is about to reconfigure
       // these displays itself, and standing a virtual display up underneath that is
-      // the collision AR12 exists to prevent. The stash is consumed either way, so
+      // the collision the reconfiguration gate exists to prevent. The stash is consumed either way, so
       // the pref cannot be left naming a stop the machine is not showing.
       switch intent {
       case .answered:
@@ -1664,7 +1663,7 @@ final class DisplayModeCoordinator {
       : await synthesis.revertPreview(previewed)
     switch outcome {
     case let .committed(pairing):
-      // SS11's ordering: the engage landed and was verified, the user kept it, and
+      // The engage-then-persist ordering: the engage landed and was verified, the user kept it, and
       // only now is anything written. A revert or an expiry persists nothing.
       synthesis.persist(pairing, unwindWasIncomplete: unwindWasIncomplete)
       if selectChangesSize[previewed.physicalDisplayID] == true {
@@ -1750,7 +1749,7 @@ final class DisplayModeCoordinator {
     guard let outstanding = await session.previewedMode else {
       preview = nil
       stopCountdown()
-      // THE release (AR12), here rather than at each call site: this funnel
+      // THE release (the reconfiguration gate), here rather than at each call site: this funnel
       // already runs after every path that can end a preview, so a claim cannot
       // outlive what it was protecting. Unconditional, because the gate refuses a
       // release from a claimant that is not holding it.
@@ -1800,14 +1799,14 @@ final class DisplayModeCoordinator {
     // stake. They can only coexist on DIFFERENT displays, since `performSelect`
     // clears the failure before it begins.
     //
-    // **The preview's own `surface` decides this window (SO6), fixed at start.**
+    // **The preview's own `surface` decides this window, fixed at start.**
     // The floating window is the default owner, on the display the question is
     // about. The settings banner owns the answer when the change came from a key
     // settings window, because two button rows asking one question is the defect
     // the surface model exists to prevent. The guided setup flow owns it when that
-    // window started the apply (DM11). Either owner takes this window off screen.
+    // window started the apply. Either owner takes this window off screen.
     //
-    // Known residue, accepted with SO6: ownership does not migrate mid-preview,
+    // Known residue, accepted: ownership does not migrate mid-preview,
     // and the banner region renders only on the preview's own display destination,
     // so switching the sidebar or closing the window hides the answerable surface.
     // An armed countdown survives both and its expiry reverts unattended. A failed
@@ -1987,7 +1986,7 @@ extension DisplayModeCoordinator.Catalog {
   /// The words that name one mode of THIS panel: the same logical size is native
   /// on one display and an oversized render on another.
   ///
-  /// **RM11 rests on this.** The size label no longer hedges, so these words carry
+  /// The size label no longer hedges, so these words carry
   /// the claim instead and every surface offering a size has to wear them. Computed
   /// in ONE place, because three private copies is how the rule drifts.
   ///
@@ -1995,7 +1994,7 @@ extension DisplayModeCoordinator.Catalog {
   /// row separates them with a dot. The words are the statement, the punctuation is
   /// layout.
   ///
-  /// SO14 retires "HiDPI" from copy. The inversion is macOS's own: the sharp mode
+  /// This naming rule retires "HiDPI" from copy. The inversion is macOS's own: the sharp mode
   /// says nothing, and the 1x duplicate it was distinguished FROM carries "low
   /// resolution" instead.
   ///
@@ -2038,7 +2037,7 @@ extension DisplayModeCoordinator.Catalog {
   /// caller draws one string on one line, so a mark of its own would be a second
   /// pair of brackets on a 280 pt row.
   ///
-  /// "Rendered by Candela" rides along too (SS5), as a COST rather than a note
+  /// "Rendered by Candela" rides along too, as a COST rather than a note
   /// about provenance: the menu-bar panel offers these stops from this very label,
   /// and pressing one stands a virtual display up for as long as the size is in
   /// use, so leaving it out would offer the cost invisibly. Last, because nothing

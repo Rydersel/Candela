@@ -92,7 +92,7 @@ struct CheckupReportTests {
     #expect(report.summary.line.contains("nothing was measured"))
   }
 
-  /// CK16's list is shipped schema: it round-trips, and a file written before
+  /// The occlusion list is shipped schema: it round-trips, and a file written before
   /// the key existed still decodes with it empty.
   @Test func theOcclusionListRoundTripsAndAnOlderFileStillDecodes() throws {
     var report = sample()

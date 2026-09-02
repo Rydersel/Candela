@@ -3,7 +3,7 @@ import Foundation
 @testable import CandelaKit
 
 /// One call the engine made against either backend, in order. One log across both
-/// fakes deliberately: the unwind ordering rule (SS10) is about the relationship
+/// fakes deliberately: the unwind ordering rule is about the relationship
 /// between a mirror change and a virtual-display destroy, which two logs cannot show.
 enum SynthesisCall: Equatable {
   case createVirtualDisplay(slot: Int, name: String, logicalWidth: Int, logicalHeight: Int, hiDPI: Bool)
@@ -182,8 +182,8 @@ final class FakeSynthesisWorld: @unchecked Sendable {
     set { lock.withLock { _displaysHidesTheMirror = newValue } }
   }
 
-  /// The mirror comes off and the panel stays on the master's geometry. SS10's
-  /// last disengage step is the only thing that looks at this.
+  /// The mirror comes off and the panel stays on the master's geometry. The
+  /// unwind-ordering rule's last disengage step is the only thing that looks at this.
   var panelStaysOnMasterGeometryAfterUnmirror: Bool {
     get { lock.withLock { _panelStaysOnMasterGeometryAfterUnmirror } }
     set { lock.withLock { _panelStaysOnMasterGeometryAfterUnmirror = newValue } }
@@ -338,8 +338,8 @@ final class FakeSynthesisWorld: @unchecked Sendable {
   }
 
   /// What a display PUBLISHES, which is a different question from what it is
-  /// reporting right now: the list does not change under a mirror. SS10's last
-  /// disengage step asks it whether the panel came back to a mode of its own,
+  /// reporting right now: the list does not change under a mirror. The
+  /// unwind-ordering rule's last disengage step asks it whether the panel came back to a mode of its own,
   /// so a fake that answered nothing would report every unwind incomplete.
   func modes(for id: CGDirectDisplayID) -> [DisplayMode] {
     lock.withLock { _panels[id].map { [$0.ownMode] } ?? [] }

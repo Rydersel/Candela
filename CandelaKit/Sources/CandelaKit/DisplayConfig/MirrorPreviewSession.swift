@@ -16,7 +16,7 @@ public struct PreviewedMirrorTopology: Sendable, Equatable {
   /// reason `PreviewedMode` carries its display ID. The master rather than the
   /// display named in the request, because that display is a SLAVE from the
   /// instant the preview applies: a mirrored panel is absent from
-  /// `NSScreen.screens` entirely (DT16), so a confirmation targeting it would
+  /// `NSScreen.screens` entirely, so a confirmation targeting it would
   /// dismiss itself and the countdown would run to expiry with the user shown
   /// nothing at all.
   public let confirmationDisplayID: CGDirectDisplayID
@@ -38,7 +38,7 @@ public struct PreviewedMirrorTopology: Sendable, Equatable {
 }
 
 /// Preview → confirm → commit for a mirror topology, with a countdown that
-/// **defaults to revert** (DT19).
+/// **defaults to revert**.
 ///
 /// A SIBLING of `ModePreviewSession`, deliberately not a generalisation of it:
 /// `OutstandingPreview` is keyed on one display and one `DisplayMode`, and a set
@@ -190,7 +190,7 @@ public actor MirrorPreviewSession {
       // handled here on purpose: `.disengage` carries `residualMembers`, and a
       // break that leaves a locked slave mirroring is a PARTIAL break its caller
       // has to report. A path through here that bound the changes and dropped the
-      // residue would re-create the T3 defect, success reported over a set the
+      // residue would re-create the defect, success reported over a set the
       // user is still looking at, one layer out.
       return .failure(DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue))
     }

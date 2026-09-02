@@ -1,7 +1,7 @@
 import CandelaKit
 import SwiftUI
 
-/// The one sentence every claimant says when the gate refuses it (AR12),
+/// The one sentence every claimant says when the gate refuses it,
 /// written once so the features cannot spell one statement several ways.
 ///
 /// Names the feature holding the gate rather than saying "busy": "finish that

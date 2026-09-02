@@ -4,14 +4,15 @@ import SwiftUI
 
 /// Rotation for one display, a row in the hub's Display section.
 ///
-/// **Nothing here is persisted (RT2).** RS7 measured that a rotation outlives
-/// the process that set it: it is WindowServer state, so macOS is already the
-/// store. No `PrefName` case, no `PrefPropagation` row, no reapply-on-reconnect.
+/// **Nothing here is persisted.** An earlier experiment measured that a
+/// rotation outlives the process that set it: it is WindowServer state, so
+/// macOS is already the store. No `PrefName` case, no `PrefPropagation` row,
+/// no reapply-on-reconnect.
 /// Adding one risks fighting the system on every wake, the failure
 /// `ModeReapplyPolicy` exists to prevent.
 ///
 /// A pop-up rather than a segmented control, matching System Settings' own
-/// rotation control and the Size row above it (RT14).
+/// rotation control and the Size row above it.
 ///
 /// The hairline above and below belongs to the hosting card: only the hub knows
 /// whether the size rows above rendered.
@@ -26,7 +27,7 @@ struct RotationRows: View {
   private var displayID: CGDirectDisplayID { state.id }
 
   var body: some View {
-    // RT5: no control at all rather than a dead one. A picker that cannot
+    // No control at all rather than a dead one. A picker that cannot
     // rotate only invites a click that produces a report.
     if coordinator.canRotate {
       ThemedChoiceRow(label: RotationCopy.label, selection: Binding(
@@ -42,7 +43,7 @@ struct RotationRows: View {
       .disabled(coordinator.isApplying)
 
       // The display reports a non-right angle, so the picker above is showing
-      // a fallback rather than the truth (RT7). Say so.
+      // a fallback rather than the truth. Say so.
       if coordinator.rotation(of: displayID) == nil {
         SettingsCaption(RotationCopy.refusal(.unreadable))
       }

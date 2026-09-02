@@ -1,6 +1,6 @@
 import os
 
-/// Command-generic DDC applier (D1): carries the VCP byte the write targets,
+/// Command-generic DDC applier: carries the VCP byte the write targets,
 /// plus the user's control-code remap — fork `getRemapControlCodes` semantics:
 /// a non-empty remap REPLACES the command, and writes go to EVERY remapped
 /// code (reads use only the first; the read side lives in the controllers).

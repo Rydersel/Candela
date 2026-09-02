@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-@Suite("Brightness path selection (B1)")
+@Suite("Brightness path selection")
 struct BrightnessPathPolicyTests {
   private func inputs(
     role: DisplayRole = .external,
@@ -196,7 +196,7 @@ struct BrightnessPathPolicyTests {
     }
   }
 
-  // MARK: - The wire stopped answering (WD2)
+  // MARK: - The wire stopped answering
 
   /// The demotion's ordinary shape: the software leg dims over `[0, s)` only, as it does
   /// when the user turns the command off. `.combined` would caption a dead wire (R-A).

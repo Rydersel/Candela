@@ -1,7 +1,7 @@
 import CoreGraphics
 
-/// Where the checkup flow window goes as a field goes up on the target (CK16:
-/// the field covers the target, so the controls belong on another display).
+/// Where the checkup flow window goes as a field goes up on the target (the
+/// field covers the target, so the controls belong on another display).
 ///
 /// Pure over frames so the rule is testable without screens. It moves only if
 /// it must, and then to the nearest other screen: the first screen AppKit lists

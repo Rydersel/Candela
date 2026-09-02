@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// One slot's persisted definition (VD9). `configured` means "should be live
+/// One slot's persisted definition. `configured` means "should be live
 /// NOW"; a definition whose display died with the last session reads
 /// unconfigured after `launchNormalized` runs, so the stored fields survive
 /// as the slot's remembered setup without implying a display exists.
@@ -20,7 +20,7 @@ public struct VirtualSlotDefinition: Sendable, Equatable {
   public var recreateAtLaunch: Bool
   /// Minted when the slot is first configured; survives destroy, recreate
   /// and relaunch, so logs and the pane can speak about "the same display"
-  /// across recreations (VD9).
+  /// across recreations.
   public var uuid: UUID?
 
   public init(
@@ -52,9 +52,9 @@ public enum VirtualDisplayReconciler {
   public enum Action: Sendable, Equatable {
     case create(slot: Int)
     case destroy(slot: Int)
-    /// Destroy then create under the same slot identity and uuid (VD1): the
+    /// Destroy then create under the same slot identity and uuid: the
     /// stored spec drifted from the live one, which is the pane's
-    /// explicit-apply path (VD17).
+    /// explicit-apply path.
     case recreate(slot: Int)
 
     public var slot: Int {
@@ -65,7 +65,7 @@ public enum VirtualDisplayReconciler {
   }
 
   /// - Parameter limitedTo: when set, only this slot converges. The pane's
-  ///   per-slot Create/Apply/Remove made structural (VD17): a Create on one slot
+  ///   per-slot Create/Apply/Remove made structural: a Create on one slot
   ///   must never recreate a drifted-but-not-applied other, and in Safe Mode an
   ///   explicit Create brings up exactly the clicked slot. nil is the launch
   ///   sweep, where nothing is live yet so only creates can fire.
@@ -80,7 +80,7 @@ public enum VirtualDisplayReconciler {
     // is a public function: keep the first rather than trapping.
     let liveBySlot = Dictionary(live.map { ($0.slot, $0) }, uniquingKeysWith: { first, _ in first })
     var actions: [Action] = []
-    // USER slots only (SS6). Synthesis slots are stood and torn down by the
+    // USER slots only. Synthesis slots are stood and torn down by the
     // engine and have no stored definition, so a full-family sweep would read
     // them as unconfigured-but-live and destroy them on the next sync.
     for slot in VirtualDisplayIdentity.userSlotRange {
@@ -104,7 +104,7 @@ public enum VirtualDisplayReconciler {
     return actions
   }
 
-  /// Launch prelude (the counterpart of VD13): a configured slot without
+  /// Launch prelude: a configured slot without
   /// recreate-at-launch died with the last session, and its pref must say so
   /// before the first sync, or that sync creates a display nobody asked for this
   /// session. Every other field survives as the slot's remembered setup.

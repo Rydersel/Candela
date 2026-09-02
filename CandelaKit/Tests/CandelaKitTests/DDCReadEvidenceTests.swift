@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-@Suite("DDC read evidence (B3)")
+@Suite("DDC read evidence")
 struct DDCReadEvidenceTests {
   /// Worst evidence wins within a display: one `allZeros` is not cancelled by a later
   /// `notAttempted`. Otherwise a display that answered zeros on brightness and was never
@@ -42,7 +42,7 @@ struct DDCReadEvidenceTests {
 /// a call site's fold with a plain assignment left every enum test green. They also pin the
 /// scope: evidence is the verdict of the most recent pass that asked the panel something,
 /// so a pass that asks nothing must not erase it and a pass that asks supersedes it.
-@Suite("Read evidence at the brightness call site (B3)")
+@Suite("Read evidence at the brightness call site")
 @MainActor
 struct BrightnessReadEvidenceCallSiteTests {
   /// Mirrors `makeLegacyPathController` but hands back the prefs: some of these turn the
@@ -124,7 +124,7 @@ struct BrightnessReadEvidenceCallSiteTests {
 /// `didReadMaxDDC` is the provenance of `maxDDCValue`: did the panel say 100, or did we
 /// assume 100 because it said nothing? The flag is only worth having if it can go back to
 /// assumed, or a panel that replugs into a read-failing state keeps a previous read's claim.
-@Suite("Max-DDC provenance (B5)")
+@Suite("Max-DDC provenance")
 @MainActor
 struct MaxDDCProvenanceTests {
   @Test func afreshControllerHasAssumedItsMaximum() {

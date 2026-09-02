@@ -3,7 +3,7 @@ import CandelaKit
 
 /// The one thing that writes to `MirrorTopologyStore`.
 ///
-/// The store is the engine boundary (DT15/DT16): everything that needs a display
+/// The store is the engine boundary: everything that needs a display
 /// it can actually draw on asks the store, and the AppKit islands keep a
 /// judgement-free `NSScreen` lookup. A store nobody updates holds the EMPTY
 /// topology, whose `drawableDisplayID` is the identity function, so without this
@@ -26,14 +26,14 @@ import CandelaKit
 /// **The staleness guarantee is ONE-DIRECTIONAL.** Lagging a mirror ENGAGING
 /// degrades safely: the store still calls the new slave its own drawable
 /// display, the `NSScreen` lookup fails, and the failure is reported rather than
-/// faked (DT17). Lagging a mirror BREAKING does not: the store resolves the
+/// faked. Lagging a mirror BREAKING does not: the store resolves the
 /// ex-slave to its ex-master, that master IS in `NSScreen.screens`, and a dimming
 /// path lands on a real but WRONG display while recording success. Accepted
 /// because the window is the gap between the reconfiguration and its
 /// notification, and no consumer takes an irreversible action inside it. It is
 /// why this samples the raw notification rather than anything debounced.
 ///
-/// **What this does NOT sample: the synthesis pairing (SS1).** CoreGraphics does
+/// **What this does NOT sample: the synthesis pairing.** CoreGraphics does
 /// not report which mirror sets the app engaged to serve a synthesized size.
 /// `SynthesisCoordinator` notes it on the store and `MirrorTopologyStore.update`
 /// stamps every sample with it, deliberately there rather than here: this is not

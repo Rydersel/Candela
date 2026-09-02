@@ -5,10 +5,10 @@ import Testing
 /// `localizedStandardCompare`, which reads the process locale. ASCII input
 /// orders identically under every locale these tests could run in, so the
 /// suite is locale-independent without pinning a locale.
-@Suite("Panel policy — display ordering, hide, menu-icon visibility (D5, D7)")
+@Suite("Panel policy — display ordering, hide, menu-icon visibility")
 struct PanelPolicyTests {
   /// Stand-in for `AppModel.DisplayState` (the app target has no test target,
-  /// D21 — the policy is generic over the projection precisely so it can be
+  /// and the policy is generic over the projection precisely so it can be
   /// tested against a plain value type).
   private struct Entry {
     let hardwareName: String
@@ -34,7 +34,7 @@ struct PanelPolicyTests {
   }
 
   @Test func orderIsAscendingNotTheForksDescending() {
-    // D7: the fork's comparator returns
+    // The fork's comparator returns
     // `localizedStandardCompare(...) == .orderedDescending`, listing displays Z→A.
     let entries = [Entry(hardwareName: "Studio Display"),
                    Entry(hardwareName: "ASUS PB278"),
@@ -57,7 +57,7 @@ struct PanelPolicyTests {
   }
 
   @Test func hiddenDisplaysAreDroppedAndTheFilterSurvivesTheSort() {
-    // Fork bug 1 (D2): MenuHandler builds a filtered array and then overwrites
+    // Fork bug 1: MenuHandler builds a filtered array and then overwrites
     // it with `sortDisplaysByFriendlyName()`, so the filter never reaches the
     // menu. Filtering and ordering are ONE call here so they cannot separate.
     let entries = [Entry(hardwareName: "Studio Display"),
@@ -85,7 +85,7 @@ struct PanelPolicyTests {
   // The three ordinal tests below cover the derivation, and only that. They do
   // NOT cover the thing that trapped: a sidebar row re-rendered against a
   // display list that had already been emptied. That path is a SwiftUI `ForEach`
-  // in the app target, which has no test target (D21), so nothing automated
+  // in the app target, which has no test target, so nothing automated
   // reaches it. The issue's hardware verification (a Reset All with the settings
   // window open) is the only evidence the crash is gone.
   @Test func uniqueKeysGetNoOrdinal() {
@@ -94,7 +94,7 @@ struct PanelPolicyTests {
   }
 
   @Test func repeatedKeysAreNumberedInListOrder() {
-    // SO21: identical units reporting no serial resolve to ONE persistence key,
+    // Identical units reporting no serial resolve to ONE persistence key,
     // so they share a name and a destination; the ordinal is what tells their
     // rows apart.
     #expect(
@@ -130,7 +130,7 @@ struct PanelPolicyTests {
   }
 
   @Test func pickerOrderIsExplicitAndIsNotRawValueOrder() {
-    // D5: `externalOnly` was appended as raw 3 but belongs third in the UI.
+    // `externalOnly` was appended as raw 3 but belongs third in the UI.
     // Iterating allCases would silently reorder the popup.
     #expect(MenuIconPolicy.pickerOrder == [.show, .sliderOnly, .externalOnly, .hide])
     #expect(MenuIconPolicy.pickerOrder != MenuIcon.allCases)
@@ -141,7 +141,7 @@ struct PanelPolicyTests {
   }
 
   @Test func onlyAUserRemovalPersistsHide() {
-    // D5 loop guard: our own programmatic hide must write nothing, or
+    // The hide loop guard: our own programmatic hide must write nothing, or
     // apply → observe → persist → apply thrashes.
     #expect(MenuIconPolicy.modeAfterVisibilityChange(
       isVisible: false, changedByUser: true, current: .show) == .hide)

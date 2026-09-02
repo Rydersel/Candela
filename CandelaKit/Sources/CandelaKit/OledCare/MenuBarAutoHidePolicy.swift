@@ -58,7 +58,7 @@ public enum MenuBarAutoHidePolicy {
 
   /// Hidden if EITHER half says hidden, deliberately pessimistic: the switch
   /// must read ON whenever anything is hiding the bar, because turning it off
-  /// is the only in-app route back (D29 rule 3).
+  /// is the only in-app route back.
   ///
   /// The participation guard is load-bearing. This predicate and
   /// `writesControlCenterRecord` ask the SAME question, so the read can never be

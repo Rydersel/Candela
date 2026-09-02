@@ -13,7 +13,7 @@ public enum HUDPosition: Int, Sendable, CaseIterable {
 
 /// The pill's origin on one display: screen geometry in, a point out.
 ///
-/// Pure and in the Kit like `HUDGrouping` (DT16, D21), because rotation needs
+/// Pure and in the Kit like `HUDGrouping`, because rotation needs
 /// pinning most: `CGDisplayBounds` swaps width and height on a rotated display, so a
 /// pill placed against the manufactured landscape geometry lands off the side of the
 /// screen while every log line reports success.

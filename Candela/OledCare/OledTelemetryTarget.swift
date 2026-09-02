@@ -14,7 +14,7 @@ import Foundation
 /// **Sampling is measurement, not intervention.** The interventions (idle dim,
 /// blackout, masking) stay suspended under a synthesized size, but the panel is
 /// lit, showing the desktop and wearing, which is why panel hours and the wear
-/// signal already carve synthesis out of the OC13 pause. Exposure sampling and
+/// signal already carve synthesis out of the mirror-set pause. Exposure sampling and
 /// window observation carve out the same way: a capture measures exactly what
 /// the glass is emitting.
 ///
@@ -52,7 +52,7 @@ struct OledTelemetryTarget: Equatable, Sendable {
   /// published state rather than re-derived from the signals behind it.
   ///
   /// In every dim state other than `.active` our own overlay is over the panel
-  /// and OC16 excludes it from the capture, so the capture is not what the panel
+  /// and it is excluded from the capture, so the capture is not what the panel
   /// is showing. `.suspended` under a synthesized size is the one exception: no
   /// overlay is up, so the capture is faithful.
   func samplingMayRun(dimState: OledDimState) -> Bool {

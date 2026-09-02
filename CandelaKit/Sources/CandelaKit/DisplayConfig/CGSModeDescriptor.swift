@@ -8,7 +8,7 @@ import Foundation
 /// logical by density and rounding.
 public struct CGSModeDescriptor: Sendable, Equatable, Hashable {
   /// Also the index it was read at, and the same ID space as
-  /// `CGDisplayMode.ioDisplayModeID` (S6 §4).
+  /// `CGDisplayMode.ioDisplayModeID`.
   public let modeNumber: Int32
   public let flags: UInt32
   public let logicalWidth: Int
@@ -16,7 +16,7 @@ public struct CGSModeDescriptor: Sendable, Equatable, Hashable {
   public let pixelWidth: Int
   public let pixelHeight: Int
   /// **Truncated, not rounded**: CoreGraphics' 59.9998 arrives here as 59.
-  /// Never compare this to a CoreGraphics refresh for equality (CR1).
+  /// Never compare this to a CoreGraphics refresh for equality.
   public let refreshHz: Int
   public let density: Double
 

@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// A pushed sub-page's title row, with a switcher that swaps the SAME sub-page
-/// onto another display when more than one is connected (SO23).
+/// onto another display when more than one is connected.
 ///
 /// The switcher calls back with a persistence key and nothing else. The root
 /// view owns what "switching" means; this view must not reach into navigation

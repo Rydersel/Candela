@@ -19,7 +19,7 @@ import CoreGraphics
   /// alpha 0 = no dimming, 1 = black. Synchronous, called inline on the drag
   /// path.
   ///
-  /// Returns whether the shade actually took the alpha (DT17). A display with no
+  /// Returns whether the shade actually took the alpha. A display with no
   /// `NSScreen`, which is every mirror SLAVE, gets no shade, and a `Void`
   /// signature let that failure disappear while the engine recorded the dimming
   /// as applied. The engine refuses to memoise a write that did not land.
@@ -39,9 +39,9 @@ import CoreGraphics
   /// Uniform scale of the display's captured default table. False = the write
   /// did not happen or the CG call failed.
   ///
-  /// TWO display IDs, and the difference is load-bearing (DT17):
+  /// TWO display IDs, and the difference is load-bearing:
   /// - `displayID` is the WRITE target, ordinarily the raw panel ID; under an
-  ///   engaged synthesis pairing the engine issues TWO legs (SS15), the panel
+  ///   engaged synthesis pairing the engine issues TWO legs, the panel
   ///   here and the drawable ID through `applyGammaScale(assumingLinearBaseline:
   ///   on:enforcerOn:)` below. MEASURED: a mirror slave's table STORES and reads
   ///   back changed, and whether it reaches the GLASS is undecidable from
@@ -55,13 +55,14 @@ import CoreGraphics
   func applyGammaScale(
     _ scale: Double, on displayID: CGDirectDisplayID, enforcerOn drawableDisplayID: CGDirectDisplayID
   ) -> Bool
-  /// SS15's second leg: the same write, for a display whose own default table
-  /// may not be readable at all.
+  /// The second synthesis-pairing leg: the same write, for a display whose own
+  /// default table may not be readable at all.
   ///
-  /// The process that created a virtual display cannot read it back, and SS15
-  /// needs both IDs of an engaged synthesis set to receive the table, so a
-  /// refused capture must not swallow the write. An implementation that holds
-  /// baselines uses the straight 0…1 ramp when it has none; that the ramp is a
+  /// The process that created a virtual display cannot read it back, and
+  /// delivering the table to both IDs of an engaged synthesis set needs this
+  /// second leg, so a refused capture must not swallow the write. An
+  /// implementation that holds baselines uses the straight 0…1 ramp when it
+  /// has none; that the ramp is a
   /// virtual display's true untouched table is an UNVERIFIED assumption.
   ///
   /// The default forwards to `applyGammaScale`, which is also the trap. A future

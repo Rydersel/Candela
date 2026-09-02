@@ -10,8 +10,8 @@ import os
 /// topology changes, so sharing instances would let either owner erase the
 /// other's work.
 ///
-/// The ID arriving here is the display care is enrolled on. OC13 suspends care
-/// on a mirror participant before any of this is reached.
+/// The ID arriving here is the display care is enrolled on. Mirror-set
+/// membership suspends care on a mirror participant before any of this is reached.
 @MainActor
 final class OledOverlay {
   private static let log = Logger(subsystem: "com.rydersel.Candela", category: "oledcare")
@@ -22,7 +22,7 @@ final class OledOverlay {
   ///
   /// It holds the panel, not just the number: without it the removal half of
   /// `verifyPresence` is a tautology ("no window cached" answers "not present"
-  /// for the exact strand OC12 exists to catch), and a detected strand needs a
+  /// for the exact strand verification exists to catch), and a detected strand needs a
   /// window to close again.
   ///
   /// The number is captured at close time, never read back later.
@@ -63,7 +63,7 @@ final class OledOverlay {
   private struct AppliedState: Equatable {
     let alpha: Double
     let blackout: Bool
-    /// The spatial axis (OC17). Nil is the scalar behaviour: one uniform alpha
+    /// The spatial axis. Nil is the scalar behaviour: one uniform alpha
     /// over the whole content view.
     ///
     /// `OverlayMask` quantizes to 1/255 on construction, which is what keeps
@@ -86,13 +86,13 @@ final class OledOverlay {
   /// washed out, per `OverlayWindow`.
   ///
   /// Returns false when no `NSScreen` matches the display, so no overlay exists
-  /// to carry the dim. Not a `Void` call, per DT17: a caller that cannot tell
+  /// to carry the dim. Not a `Void` call: a caller that cannot tell
   /// will memoise a dimming that never happened. **Removal always returns
   /// true**; `verifyPresence` reports a removal the window server ignored.
   ///
   /// The overlay is ordered front on creation and on a state change, never on
   /// an unchanged re-apply. Re-asserting a state the window already carries is
-  /// `reassert(on:)`, the OC12 reconcile's lever, and keeping the two apart is
+  /// `reassert(on:)`, the reconcile's lever, and keeping the two apart is
   /// what keeps the steady-state cadence off the window server.
   ///
   /// `mask` is already in DISPLAY orientation; nil keeps the scalar behaviour.
@@ -135,7 +135,7 @@ final class OledOverlay {
   }
 
   /// Re-asserts the overlay's last applied state: the recovery lever for an
-  /// OC12 mismatch, where the window server dropped a window we still hold (a
+  /// verification mismatch, where the window server dropped a window we still hold (a
   /// space transition, another shielding window, a reconfiguration). `apply`
   /// will not do it, since the state it is asked for is the state it has.
   ///
@@ -149,7 +149,7 @@ final class OledOverlay {
   }
 
   private func write(_ state: AppliedState, to window: NSPanel) {
-    // OC15: blackout swallows mouse input (at full black a click-through click
+    // Blackout swallows mouse input (at full black a click-through click
     // is a blind click on live UI); every other level stays click-through.
     window.ignoresMouseEvents = !state.blackout
     // Mask first, since it decides the alpha: 1.0 over a failed mask's flat
@@ -171,7 +171,7 @@ final class OledOverlay {
   /// Renders the spatial axis as the layer's contents.
   ///
   /// The mask becomes a tiny grayscale image and the layer magnifies it with a
-  /// LINEAR filter, which is what satisfies OC17's "smoothly interpolated
+  /// LINEAR filter, which is what satisfies the spatial axis's "smoothly interpolated
   /// gradient, never per-cell blocks". At 3440x1440 a cell is ~143 px, so drawn
   /// rectangles would give the visible tile pattern the feature exists to
   /// remove; letting the GPU interpolate produces the falloff for free.
@@ -258,7 +258,7 @@ final class OledOverlay {
     }
   }
 
-  /// Deliberately uncalled (W3a ruling): the reconfiguration response is
+  /// Deliberately uncalled (an earlier pass ruled it out): the reconfiguration response is
   /// removeAll + re-render, never a repin. Display IDs REASSIGN across a dock
   /// cycle with every panel still present, so a repin can pin an overlay to the
   /// WRONG panel. Kept for a future geometry-only path (mode/rotation changes).
@@ -273,7 +273,7 @@ final class OledOverlay {
     }
   }
 
-  /// OC12: presence answered by the window server, never by our own `NSWindow`
+  /// Presence answered by the window server, never by our own `NSWindow`
   /// state, which only restates the request we issued. True means an overlay for
   /// this display is on screen *now*, whether or not we still want one. Both
   /// halves of the ruling (an add that did not land, a removal that did not
@@ -337,7 +337,7 @@ final class OledOverlay {
       return nil
     }
     // An `NSPanel` with `.nonactivatingPanel`, not a plain `NSWindow`: the
-    // blackout overlay accepts clicks (OC15), and a click-accepting window in an
+    // blackout overlay accepts clicks, and a click-accepting window in an
     // accessory app would otherwise activate Candela and take key away from
     // whatever the user was in.
     let panel = NSPanel(contentRect: OverlayWindow.seedRect,

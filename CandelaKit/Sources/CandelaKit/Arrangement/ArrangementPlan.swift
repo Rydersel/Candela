@@ -15,14 +15,14 @@ public struct DisplayOriginChange: Sendable, Equatable {
 
 /// A layout change, staged as ONE transaction.
 ///
-/// **AR4 is structural here, not a check.** The plan stores a whole
-/// `DisplayArrangement` and derives `changes` from its tiles, so no initialiser takes
+/// **The whole-arrangement rule is structural here, not a check.** The plan stores a
+/// whole `DisplayArrangement` and derives `changes` from its tiles, so no initialiser takes
 /// a change list and a partial plan is unrepresentable. CoreGraphics repositions any
 /// display whose origin is not explicitly set (`CGDisplayConfiguration.h`,
 /// arrangement research §4.2), so naming one display hands the rest to a heuristic.
 ///
-/// **AR6:** mirror slaves get no tile, so they get no change. Setting the origin of a
-/// display that is mirroring another *removes it from the mirror set*
+/// **The mirror-slave rule:** mirror slaves get no tile, so they get no change.
+/// Setting the origin of a display that is mirroring another *removes it from the mirror set*
 /// (`CGDisplayConfiguration.h`), a silent unrequested topology change. `init` REFUSES
 /// an arrangement where a mirror slave also holds a tile rather than dropping it,
 /// because dropping it produces the partial plan above.
@@ -73,7 +73,7 @@ public struct ArrangementPlan: Sendable, Equatable {
   /// - **A different display set.** The baseline is what was on screen when the
   ///   gesture started, so applying it after an arrival or departure would leave the
   ///   newcomer's origin unset (§4.2 again).
-  /// - **A mirror slave holding a tile** (AR6, above).
+  /// - **A mirror slave holding a tile** (the mirror-slave rule, above).
   /// - **An origin outside `Int32`.** `CGConfigureDisplayOrigin` takes `int32_t`.
   ///   Checked on the anchored form, since those are the origins actually staged.
   public init?(applying arrangement: DisplayArrangement, to baseline: DisplayArrangement) {
@@ -97,7 +97,8 @@ extension DisplayArrangement {
   /// The same layout, expressed in coordinates CoreGraphics can honour.
   ///
   /// The display space is anchored on the main display: the tile at (0,0) IS main
-  /// (AR5), and a request that puts no tile there is one CG accepts and ignores (see
+  /// (the origin-is-main rule), and a request that puts no tile there is one CG
+  /// accepts and ignores (see
   /// `ArrangementPlan.init`). A layout with no main, which is what moving the main
   /// display's own tile produces, is translated so the BASELINE's main returns to
   /// (0,0): moving the main display does not change which display is main, so the move
@@ -133,7 +134,7 @@ extension DisplayArrangement {
 /// conformance is a thin adapter with no judgement in it.
 public protocol DisplayArrangementConfiguring: Sendable {
   /// The layout ON SCREEN now. Mirror slaves are folded into their master's
-  /// `mirroredIDs` and get no tile of their own (AR6).
+  /// `mirroredIDs` and get no tile of their own.
   func currentArrangement() -> DisplayArrangement
 
   /// The layout AND the online display list it was derived from, from ONE
@@ -141,8 +142,8 @@ public protocol DisplayArrangementConfiguring: Sendable {
   ///
   /// One call rather than two, because the restore path compares them:
   /// `ArrangementSnapshot` skips a display whose bounds are unreadable, so an online
-  /// display with no tile is the AR4-on-the-read-side case the reapply policy defers
-  /// on. Two questions a moment apart would let an arrival look exactly like that,
+  /// display with no tile is the whole-arrangement rule's read-side case the
+  /// reapply policy defers on. Two questions a moment apart would let an arrival look exactly like that,
   /// and a departure look like nothing at all.
   func currentTopology() -> (displays: [ConfiguredDisplay], arrangement: DisplayArrangement)
 

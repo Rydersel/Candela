@@ -247,7 +247,7 @@ case "list":
   }
 case "topology":
   // Every online display with its kind and identity, then the DDC candidate
-  // pool as the shipping filter computes it: the rig's oracle for VD3.
+  // pool as the shipping filter computes it: the rig's oracle.
   var ids = [CGDirectDisplayID](repeating: 0, count: 16)
   var count: UInt32 = 0
   _ = CGGetOnlineDisplayList(16, &ids, &count)
@@ -274,7 +274,7 @@ case "vd":
   // Exercises the shipping VirtualDisplayHost without the app: creation,
   // appearance, departure, and (with --hold plus an external kill -9) crash
   // reclaim. Colour profile counts print around the create so repeat-run growth
-  // shows up immediately (VD11).
+  // shows up immediately.
   let profilesDir = "/Library/ColorSync/Profiles/Displays"
   func profileCount() -> Int {
     (try? FileManager.default.contentsOfDirectory(atPath: profilesDir).count) ?? -1
@@ -291,7 +291,7 @@ case "vd":
     exit(2)
   }
   // User slots only. The host stands synthesis slots 4 and 5 too, but those
-  // are engine-internal (SS6) and standing one by hand would leave a display
+  // are engine-internal and standing one by hand would leave a display
   // the app's reconciler does not own.
   guard arguments.count >= 4, let slot = Int(arguments[2]),
         VirtualDisplayIdentity.userSlotRange.contains(slot),

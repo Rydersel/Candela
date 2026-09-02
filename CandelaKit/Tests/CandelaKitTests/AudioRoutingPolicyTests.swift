@@ -86,7 +86,7 @@ struct AudioRoutingPolicyTests {
     ))
   }
 
-  // MARK: - Tap rule (fork updateMediaKeyTap; D4)
+  // MARK: - Tap rule (fork updateMediaKeyTap)
 
   private let selfVolumeDevice = AudioOutputDevice(id: 1, name: "MacBook Pro Speakers", canSetOwnVolume: true)
   private let ddcOnlyDevice = AudioOutputDevice(id: 2, name: "MAG341C", canSetOwnVolume: false)
@@ -137,7 +137,7 @@ struct AudioRoutingPolicyTests {
   }
 
   /// The count is of displays a press would act on, not displays present: one that can
-  /// act keeps the family armed, which preserves the per-display swallow (R1) for the rest.
+  /// act keeps the family armed, which preserves the per-display swallow for the rest.
   @Test func oneActionableDisplayIsEnoughToKeepTheKeysWatched() {
     #expect(AudioRoutingPolicy.shouldWatchVolumeKeys(
       mode: .allScreens, ddcDisplaysExist: true, actionableDisplayCount: 1,

@@ -106,7 +106,7 @@ struct SettingsDetailPresentationTests {
 
   @Test func retentionIsNotTheSameAsPresentation() {
     // Presenting nothing for an absent display must not clear what is retained:
-    // the same key with the display back presents the same path again (SO23).
+    // the same key with the display back presents the same path again.
     let path = [Page.diagnostics]
     #expect(
       SettingsSelectionPolicy.present(

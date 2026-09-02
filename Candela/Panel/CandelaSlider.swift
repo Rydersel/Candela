@@ -19,7 +19,7 @@ struct CandelaSlider: View {
   var accessibilityLabel: String = "Brightness"
   /// Quarter-stop snapping while dragging (app-level `enableSliderSnap`).
   var snapsToStops: Bool = false
-  /// Whether `0` is one of the snap stops. FALSE on volume rows (D29): the
+  /// Whether `0` is one of the snap stops. FALSE on volume rows: the
   /// engine reads volume 0 as a mute event and may write VCP 0x8D = 1, so a
   /// 3-point capture window on 0 would let a cosmetic pref hardware-mute the
   /// display. Brightness and contrast have no such meaning for 0, and keep it.
@@ -86,7 +86,7 @@ struct CandelaSlider: View {
     .onKeyPress(keys: [.leftArrow, .rightArrow], phases: [.down, .repeat]) { press in
       // ⌥ is the escape from a coarse grid, so it steps by 1% even where the
       // snapping pref is on. It does NOT escape the zero-free floor: that one
-      // is D29, not a convenience.
+      // is the mute-strand rule, not a convenience.
       adjust(up: press.key == .rightArrow, fine: press.modifiers.contains(.option))
       return .handled
     }
@@ -156,7 +156,7 @@ struct CandelaSlider: View {
   /// on the other.
   ///
   /// `SliderSnap.stepped` owns the grid, including the zero-free one that keeps
-  /// a volume row off 0 (D29). `snapped` has no part in this: it captures only
+  /// a volume row off 0. `snapped` has no part in this: it captures only
   /// within `tolerance`, so on a volume row it hands back every value between
   /// the stops untouched and a walk-down reaches 0 unimpeded.
   ///

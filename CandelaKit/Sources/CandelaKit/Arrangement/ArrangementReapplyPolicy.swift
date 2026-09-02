@@ -6,14 +6,16 @@ import Foundation
 /// Restore runs unattended, at launch and on arrival, so nobody is watching to notice
 /// that the layout they saved is not the layout they got.
 public enum ArrangementReapplyNotice: Sendable, Equatable {
-  /// **AR11.** Identity keys the layout names that each describe more than one
-  /// attached display. A refusal rather than a failure; the remedy is outside the app.
+  /// **The identity-ambiguity rule.** Identity keys the layout names that each
+  /// describe more than one attached display. A refusal rather than a failure; the
+  /// remedy is outside the app.
   case ambiguousIdentity([String])
   /// The saved layout is about a different display set. Nothing was changed: half a
   /// layout is a different arrangement, not a smaller one.
   case setDiffers(missing: [String], extra: [String])
-  /// **AR7.** The saved origins do not tile the displays they are about, at the very
-  /// sizes those displays were recorded at. A resolution change is NOT this case; see
+  /// **The spring-back rule.** The saved origins do not tile the displays they are
+  /// about, at the very sizes those displays were recorded at. A resolution change
+  /// is NOT this case; see
   /// `savedForDifferentGeometry`. What is left is data that never described a legal
   /// layout, which is hand-edited or corrupt preferences.
   ///
@@ -120,8 +122,8 @@ public enum ArrangementReapplyPolicy {
   ///     wake as three arrivals.
   ///   - current: the layout on screen, as `ArrangementSnapshot` read it. Compared
   ///     against `attached` rather than trusted; see the guard below.
-  ///   - substituting: SS12's map, the same one the layout was saved under, so a
-  ///     layout saved for the panel is matched against the pair showing its picture
+  ///   - substituting: the synthesis-substitution map, the same one the layout was
+  ///     saved under, so a layout saved for the panel is matched against the pair showing its picture
   ///     rather than reported as a display set the user has never seen.
   public static func decide(
     isEnabled: Bool,
@@ -136,7 +138,8 @@ public enum ArrangementReapplyPolicy {
     // so deferring would hold a claim nobody took.
     guard !arrivals.isEmpty else { return .doNothing }
 
-    // **AR4 can be lost on the READ side.** `ArrangementSnapshot` SKIPS a display
+    // **The whole-arrangement rule can be lost on the READ side.** `ArrangementSnapshot`
+    // SKIPS a display
     // whose `CGDisplayBounds` is unreadable, so a plan built from those tiles stays
     // structurally total while describing an incomplete world. Applying it hands the
     // missing display to CoreGraphics' reposition-nearby heuristic, moving a display
@@ -155,7 +158,8 @@ public enum ArrangementReapplyPolicy {
       // triggers a full CoreGraphics reconfiguration, which blanks the screens, fires
       // the topology callback, and arrives back here as another event.
       guard layout != current else { return .doNothing }
-      // AR7, checked HERE rather than at the apply: an invalid layout is the one case
+      // The spring-back rule, checked HERE rather than at the apply: an invalid
+      // layout is the one case
       // the post-commit verification is turned off for, so sending it unattended
       // leaves nothing able to notice what macOS did instead.
       let problems = ArrangementRules.problems(in: layout)
@@ -192,7 +196,7 @@ public enum ArrangementReapplyPolicy {
   /// Whether the layout accounts for every display that can HOLD a position.
   ///
   /// Mirror slaves are expected to be absent: a slave has no independent origin and
-  /// setting one removes it from the mirror set (AR6). Anything else missing is a
+  /// setting one removes it from the mirror set. Anything else missing is a
   /// display the read could not place.
   private static func describesEveryPositionableDisplay(
     _ arrangement: DisplayArrangement, of attached: [ConfiguredDisplay]
@@ -244,8 +248,8 @@ public struct TopologyArrivalTracker: Sendable, Equatable {
   /// but not from the machine. A reset over that transient makes the whole set read as
   /// newly arrived and re-asserts a saved layout over a change the user just made.
   ///
-  /// **SS12**: `substituting` makes engaging or dropping a synthesized size not a
-  /// change of display SET. Without it every display reads as newly arrived the moment
+  /// **The synthesis-substitution map**: `substituting` makes engaging or dropping a
+  /// synthesized size not a change of display SET. Without it every display reads as newly arrived the moment
   /// a size engages. Runtime IDs, handed in with the sample; nothing here stores one.
   public mutating func claimArrivals(
     online: [ConfiguredDisplay], substituting: [CGDirectDisplayID: String] = [:]

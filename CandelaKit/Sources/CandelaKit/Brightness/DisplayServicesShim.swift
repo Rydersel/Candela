@@ -60,7 +60,7 @@ public enum DisplayServices {
     )
   }()
 
-  /// Whether DisplayServices.framework resolved at all on this machine (B6).
+  /// Whether DisplayServices.framework resolved at all on this machine.
   /// The shim itself only logs once at resolve time and then degrades to
   /// nil/false forever, so without this nothing can state the fact.
   ///

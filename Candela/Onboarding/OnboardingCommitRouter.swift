@@ -1,7 +1,7 @@
 import CandelaKit
 
 /// Routes the guided setup flow's commit records onto the app's existing write
-/// paths (OB6). Every leg is an injected closure: live wiring hands it the real
+/// paths. Every leg is an injected closure: live wiring hands it the real
 /// pref writer, the login item and the apply acknowledgement, tests hand it
 /// recorders. Nothing here constructs a writer, reads a pref or touches a
 /// display, so the routing rules stay testable without any of that.
@@ -11,7 +11,7 @@ import CandelaKit
 /// no-op.
 @MainActor
 struct OnboardingCommitRouter {
-  /// Writes the display's friendly name, D27 shape at the call site: the
+  /// Writes the display's friendly name, the standard pref-write shape at the call site: the
   /// `DisplayPrefs` setter followed by the `.friendlyName` pref-change
   /// notification.
   var writeFriendlyName: (_ displayKey: String, _ name: String) -> Void
@@ -19,7 +19,7 @@ struct OnboardingCommitRouter {
   var unenrollFromCare: (_ displayKey: String) -> Void
   var enableMeasuredTelemetry: (_ displayKey: String) -> Void
   var disableMeasuredTelemetry: (_ displayKey: String) -> Void
-  /// The LIVE registration state (D10 has one source of truth and no mirror),
+  /// The LIVE registration state (one source of truth, never mirrored),
   /// read at routing time so the gate below compares against the system rather
   /// than against whatever the flow snapshotted at launch.
   var isLoginItemEnabled: () -> Bool
@@ -61,7 +61,7 @@ struct OnboardingCommitRouter {
       disableMeasuredTelemetry(displayKey)
 
     case let .setLaunchAtLogin(enabled):
-      // OB13: differs-only. An unchanged toggle must not touch SMAppService: an
+      // Differs-only. An unchanged toggle must not touch SMAppService: an
       // unregister costs a registration made outside the app, and a re-register
       // buys nothing.
       guard enabled != isLoginItemEnabled() else { return }

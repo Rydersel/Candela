@@ -1,9 +1,9 @@
 import SwiftUI
 import Testing
 
-// Proof of life for the host-free bundle (AT1, AT2): an app-module symbol is
+// Proof of life for the host-free bundle: an app-module symbol is
 // callable and ImageRenderer produces pixels with no window and no booted app.
-// The fixture test proves the AT3 fixture path constructs real Kit
+// The fixture test proves the shared fixture path constructs real Kit
 // controllers over a fake wire without touching hardware.
 @Suite("Scaffold")
 struct ScaffoldTests {

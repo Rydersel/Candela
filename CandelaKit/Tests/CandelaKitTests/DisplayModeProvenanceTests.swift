@@ -27,14 +27,14 @@ struct DisplayModeProvenanceTests {
     #expect(mode(provenance: .coreGraphics) != mode(provenance: .coreGraphicsServices))
   }
 
-  /// CR3 — provenance must NOT reach the on-disk format.
+  /// Provenance must NOT reach the on-disk format.
   @Test func descriptorIsIdenticalAcrossProvenances() {
     #expect(
       mode(provenance: .coreGraphics).descriptor
         == mode(provenance: .coreGraphicsServices).descriptor)
   }
 
-  /// SS5. A synthesized row comes from neither enumeration: it is a size we
+  /// A synthesized row comes from neither enumeration: it is a size we
   /// render through a virtual display, so it is not "revealed" and its
   /// `ioModeID` is a sentinel that must never reach CoreGraphics.
   @Test func synthesizedIsNeitherRevealedNorCoreGraphics() {
@@ -50,7 +50,7 @@ struct DisplayModeProvenanceTests {
   }
 }
 
-/// SS5's routing half, against the real configurator: the CoreGraphics apply path
+/// The routing half of the synthesized-mode rule, against the real configurator: the CoreGraphics apply path
 /// refuses a synthesized mode rather than routing it anywhere.
 ///
 /// Safe on an attached display, structurally: the `.synthesized` arm throws before
@@ -64,7 +64,7 @@ struct DisplayModeProvenanceTests {
 /// The expected error is spelled exactly rather than `DisplayConfigError.self`: a
 /// wrong routing throws something, so a type-only expectation would pass against a
 /// configurator that had stopped refusing.
-@Suite("Synthesized apply refusal (SS5)")
+@Suite("Synthesized apply refusal")
 struct SynthesizedApplyRefusalTests {
   private let refusal = DisplayConfigError(cgErrorCode: CGError.invalidOperation.rawValue)
 
@@ -146,7 +146,7 @@ struct RevealedModeMarkingTests {
     #expect(revealed.isRevealed)
   }
 
-  /// The MAG's measured collision (S6): CoreGraphics and our revelation both offer
+  /// The MAG's measured collision: CoreGraphics and our revelation both offer
   /// 1920×804, and curation hands the row to the sharp one. Otherwise the mark has
   /// nothing to attach to and the feature is invisible where it delivers.
   @Test func curationHandsACollidedSizeToTheModeWeAdded() {
@@ -178,7 +178,7 @@ struct RevealedModeMarkingTests {
   }
 
   /// One framebuffer can hold both provenances at once, so a curated row cannot be
-  /// marked from its representative. Measured on the MAG after adoption (S6): once
+  /// marked from its representative. Measured on the MAG after adoption: once
   /// 1920×804 was engaged at 175 Hz, CoreGraphics published that rate while the
   /// other rates at the same framebuffer stayed ours, so the representative is
   /// published and a display at 120 Hz applies the mode we added. Pinned so a later

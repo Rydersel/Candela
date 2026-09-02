@@ -3,8 +3,8 @@ import SwiftUI
 /// The drifting glow ground under every settings page, tinted per destination.
 ///
 /// The window keeps ONE canvas alive across every selection so the light moves
-/// rather than cutting to a new one. Reduce Motion holds it at its first frame
-/// (SV8).
+/// rather than cutting to a new one. Reduce Motion holds it at its first
+/// frame.
 struct SettingsCanvas: View {
   var accent: Color
   var secondary: Color

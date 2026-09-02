@@ -1,8 +1,8 @@
 import Testing
 
-// The guided setup flow's commit routing (OB6): each recorded decision lands on
+// The guided setup flow's commit routing: each recorded decision lands on
 // exactly one existing write path, launch at login is written only when it
-// differs (OB13), and a kept size is acknowledged rather than applied twice.
+// differs, and a kept size is acknowledged rather than applied twice.
 // Every leg is a recorder here, so these pin the rules and nothing else.
 @Suite("Onboarding commit router") @MainActor
 struct OnboardingCommitRouterTests {

@@ -16,10 +16,10 @@ extension EnvironmentValues {
   }
 }
 
-/// Keyboard input settings as a hub (KMR1): the keycap hero answers "what do my
+/// Keyboard input settings as a hub: the keycap hero answers "what do my
 /// keys do right now", the mode pickers and their recorders stay on the root as
 /// the change-often controls, and the legend and the set-once controls sit one
-/// push deeper behind chevron rows that preview their value (KMR4).
+/// push deeper behind chevron rows that preview their value.
 ///
 /// The Accessibility warning sits at the TOP (HIG reading order, layout.md): a
 /// mode that wants the media-key tap does nothing without the grant, so every
@@ -91,8 +91,8 @@ struct KeyboardPane: View {
 
   // MARK: - Hero
 
-  /// The self-annotating keycap strip (KMR2), derived from the same prefs and
-  /// policies the engine uses (KMR3). The good-news Accessibility line gates
+  /// The self-annotating keycap strip, derived from the same prefs and
+  /// policies the engine uses. The good-news Accessibility line gates
   /// itself inside the hero, so it and the warning above never both speak.
   /// Uncarded: the deadspace around it is what makes it read as a hero.
   private var heroSection: some View {
@@ -112,7 +112,7 @@ struct KeyboardPane: View {
     SettingsCardSection(title: "Brightness and Contrast Keys") {
       SettingRow {
         // Explicit enum tags, never `enumerated()` positions (fork QUIRK): the
-        // raw values are shipped on-disk schema (D22), and UI order is not raw
+        // raw values are shipped on-disk schema, and UI order is not raw
         // order.
         ThemedChoiceRow(label: "Control brightness with:", selection: Binding(
           get: { prefs.keyboardBrightness },
@@ -121,7 +121,7 @@ struct KeyboardPane: View {
           Text("The keyboard's brightness keys").tag(KeyMode.media)
           Text("Custom shortcuts").tag(KeyMode.custom)
           Text("Both").tag(KeyMode.both)
-          // D25: the fork's "Disable keyboard" disables no keyboard, it stops
+          // The fork's "Disable keyboard" disables no keyboard, it stops
           // this app from handling one key family. Under a "Control brightness
           // with:" label the honest item is "Nothing".
           Text("Nothing").tag(KeyMode.disabled)
@@ -150,7 +150,7 @@ struct KeyboardPane: View {
         SettingsCardDivider()
         SettingRow("F14 and F15 are Scroll Lock and Pause on PC keyboards, and the brightness keys on some Logitech keyboards.") {
           Toggle("Also accept F14 and F15", isOn: Binding(
-            get: { prefs.interceptAlternateBrightnessKeys }, // D1 positive accessor
+            get: { prefs.interceptAlternateBrightnessKeys }, // positive accessor
             set: { setInterceptAlternateKeys($0) }
           ))
           .themedSwitch()
@@ -206,10 +206,10 @@ struct KeyboardPane: View {
   private static let modifierHint: LocalizedStringKey =
     "Click a field and press the keys you want. A shortcut has to include ⌘, ⌃, ⌥ or ⇧. A letter or number on its own is ignored, because it would be captured in every app."
 
-  // MARK: - More (KMR4)
+  // MARK: - More
 
   /// Both rows are always present: a nav row that appears and disappears breaks
-  /// path retention (KMR5), so inactivity is stated on the page rather than by
+  /// path retention, so inactivity is stated on the page rather than by
   /// hiding the way there.
   private var moreSection: some View {
     SettingsCardSection(title: "More") {
@@ -234,13 +234,13 @@ struct KeyboardPane: View {
   // MARK: - Writes
   //
   // Every write goes pref → shortcut registration → `prefDidChange`, with a
-  // `PrefName` case, never a string (D27). The engine reads prefs at
-  // construction and at key time, not reactively (D20), so a control that
+  // `PrefName` case, never a string. The engine reads prefs at
+  // construction and at key time, not reactively, so a control that
   // writes a pref and does not propagate is broken.
 
   /// Without this call site a mode change never re-arms the media-key tap, so
   /// the setting appears to do nothing until relaunch. The `.keyboardBrightness`
-  /// row also rechecks permissions (D2 bug 2: the fork never re-prompts for
+  /// row also rechecks permissions (the fork never re-prompts for
   /// Accessibility when switching INTO a media-key mode).
   private func setBrightnessMode(_ mode: KeyMode) {
     prefs.keyboardBrightness = mode
@@ -258,7 +258,7 @@ struct KeyboardPane: View {
 
   private func setInterceptAlternateKeys(_ accept: Bool) {
     prefs.interceptAlternateBrightnessKeys = accept
-    // The persisted key stays inverted (`disableAltBrightnessKeys`, D1/D22);
+    // The persisted key stays inverted (`disableAltBrightnessKeys`);
     // only the label and the accessor are positive.
     actions.prefDidChange(.disableAltBrightnessKeys)
   }

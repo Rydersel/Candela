@@ -7,7 +7,7 @@ import Testing
 // shielding-level window per display, whose content-view alpha carries the dim.
 //
 // Two properties here are worth more than the rest. `setShadeAlpha` returns
-// Bool so the engine never memoises a dimming that did not land (DT17), and its
+// Bool so the engine never memoises a dimming that did not land, and its
 // false answer is the only signal that exists: a display that was never shaded
 // is indistinguishable from a shaded one at every layer the engine can see. And
 // the dim rides the CONTENT VIEW's alpha, never the window's, because an
@@ -35,7 +35,7 @@ struct ShadeOverlayTests {
     NSScreen.screens.first { $0.displayID != nil }
   }
 
-  /// DT17. The engine memoises the brightness it believes it applied, so a
+  /// The engine memoises the brightness it believes it applied, so a
   /// shade that could not be built has to say so: a silent success leaves the
   /// display at its old level with the engine convinced it moved, and nothing
   /// downstream ever retries.

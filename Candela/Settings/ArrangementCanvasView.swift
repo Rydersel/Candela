@@ -16,8 +16,8 @@ import SwiftUI
 struct ArrangementCanvasView: View {
   /// The layout to draw, owned by `ArrangementPane`. Never mutated here.
   ///
-  /// Usually the live layout from `CGDisplayBounds` over the ONLINE display list
-  /// (AR1). While the coordinator has a reconfiguration in flight the pane hands
+  /// Usually the live layout from `CGDisplayBounds` over the ONLINE display list.
+  /// While the coordinator has a reconfiguration in flight the pane hands
   /// its settle down here instead, so this is then a layout that was REQUESTED,
   /// not one the machine has reached. See `isApplying`.
   let arrangement: DisplayArrangement
@@ -29,15 +29,15 @@ struct ArrangementCanvasView: View {
   /// the Virtual Displays pane's purple.
   var isVirtual: (CGDirectDisplayID) -> Bool = { _ in false }
   /// Is this tile a synthesized size: a virtual display whose picture IS a
-  /// physical panel's, standing in for it while the size is engaged (SS12).
+  /// physical panel's, standing in for it while the size is engaged.
   ///
   /// The tile is presented as that panel: it drops the virtual-display colour
   /// and the mirror count, which would be counting the panel the tile already
   /// names. It keeps its own ID and stays movable, because the virtual display
-  /// owns the desktop and so is the member of the pair a layout can move (AR6).
+  /// owns the desktop and so is the member of the pair a layout can move.
   var isSynthesisPair: (CGDirectDisplayID) -> Bool = { _ in false }
   /// Is this the built-in display, which draws as a laptop rather than as a
-  /// monitor (SV9). Asked, not decided, for `name`'s reason.
+  /// monitor. Asked, not decided, for `name`'s reason.
   var isBuiltIn: (CGDirectDisplayID) -> Bool = { _ in false }
   /// Whether the coordinator has a reconfiguration in flight.
   ///
@@ -58,7 +58,7 @@ struct ArrangementCanvasView: View {
   /// rotor user can ask for the layout already showing, and the pane and the
   /// coordinator both take that quietly.
   let onPropose: (DisplayArrangement) -> Void
-  /// Called when a drop was refused (AR7), with every problem that refused it,
+  /// Called when a drop was refused, with every problem that refused it,
   /// so the pane can say what is wrong in words. Colour alone is never the
   /// signal: a red border says "no" without saying why.
   let onRefuse: ([ArrangementProblem]) -> Void
@@ -93,7 +93,7 @@ struct ArrangementCanvasView: View {
     /// the same instant, so folding the policy's own output back in would apply
     /// the move again on every frame.
     let baseline: DisplayArrangement
-    /// FROZEN at drag start (AR2): the transform is fitted to the layout's
+    /// FROZEN at drag start: the transform is fitted to the layout's
     /// bounds, which the dragged tile changes, so recomputing it here would
     /// rescale the whole map under the pointer on every frame.
     let transform: CanvasTransform
@@ -140,7 +140,7 @@ struct ArrangementCanvasView: View {
 
   /// The snap guides for where the tile is, tagged apart from the landing guide
   /// for where it goes if it cannot stay there. Both come from the one proposal,
-  /// so the edge drawn is always the edge the release commits to (AR3).
+  /// so the edge drawn is always the edge the release commits to.
   ///
   /// The tag is carried here because `SnapLine` cannot answer it: an insert seam
   /// and an attachment edge are both `.abut`, so `kind` separates snapping from
@@ -166,7 +166,7 @@ struct ArrangementCanvasView: View {
   /// which displays they broke.
   ///
   /// A drop that is going to COMMIT reddens nothing. Red is reserved for the drop
-  /// that really will spring back, or it stops meaning anything (AR15).
+  /// that really will spring back, or it stops meaning anything.
   ///
   /// Keyed on `commitment`, not on whether a landing exists: a landing that
   /// resolves back to the baseline commits nothing, and keying on its existence
@@ -262,7 +262,7 @@ struct ArrangementCanvasView: View {
       // Greyed while an apply is outstanding, like the drag and the nudge: this
       // composes from `displayed`, which is the pane's settle then, so a request
       // built here carries the geometry of a layout only ASKED for. If the first
-      // apply is refused by AR12's gate, this one could land the machine in the
+      // apply is refused by the reconfiguration gate, this one could land the machine in the
       // very layout the gate turned down.
       Button("Use as Main Display") { onPropose(displayed.makingMain(tile.id)) }
         .disabled(isApplying || displayed.mainDisplayID == tile.id)
@@ -275,7 +275,7 @@ struct ArrangementCanvasView: View {
     .accessibilityHint("Use the arrow keys to move this display next to another one.")
     .accessibilityAddTraits(selection == tile.id ? [.isButton, .isSelected] : [.isButton])
     // The same action as the button and the context menu, reachable from the
-    // rotor: AR9 says setting the main display must not depend on a pointer
+    // rotor: setting the main display must not depend on a pointer
     // gesture.
     //
     // A custom action carries no greyed state a rotor user can read, so the
@@ -313,7 +313,7 @@ struct ArrangementCanvasView: View {
   }
 
   /// A synthesis pair is drawn as the panel it is showing, so it is not one of
-  /// the purple software displays (SS12).
+  /// the purple software displays.
   private func presentsAsVirtual(_ id: CGDirectDisplayID) -> Bool {
     isVirtual(id) && !isSynthesisPair(id)
   }
@@ -399,13 +399,13 @@ struct ArrangementCanvasView: View {
       }
       .onEnded { _ in
         guard let finished = drag else { return }
-        // AR3: the SAME proposal that was on screen. Nothing is recomputed here,
+        // The SAME proposal that was on screen. Nothing is recomputed here,
         // so a drop can only ever commit what the user was looking at.
         //
         // `commitment`, not `arrangement`: a drop into open space renders under
         // the pointer and lands on the edge its guide has been naming, so the
-        // landing is the one to apply. An overlap has no landing and springs back
-        // (AR7), and a no-op commits nothing.
+        // landing is the one to apply. An overlap has no landing and springs
+        // back, and a no-op commits nothing.
         if let commitment = finished.proposal.commitment {
           // `onPropose` is called from INSIDE the animation on purpose: it arms
           // the pane's settle, and the settle and this view's `drag = nil` have
@@ -465,7 +465,7 @@ struct ArrangementCanvasView: View {
   /// Same tint for both: a second colour would read as a second kind of state
   /// next to the red that already means "this drop springs back". Weight is the
   /// difference they describe. A snap guide is provisional; the landing says
-  /// where the display will BE after the release (AR15).
+  /// where the display will BE after the release.
   @ViewBuilder private func guide(_ guide: Guide) -> some View {
     let line = guide.line
     let start = transform.canvasPoint(guideStart(line))

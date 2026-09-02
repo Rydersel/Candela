@@ -10,7 +10,7 @@ private struct DisplayRow: Identifiable {
   var id: CGDirectDisplayID { state.id }
 }
 
-/// The SO21 ordinal every sidebar row draws, from ONE snapshot of the display
+/// The ordinal every sidebar row draws, from ONE snapshot of the display
 /// list. Nothing here reads the model, so the answer cannot be built against a
 /// list other than the one it was handed.
 func sidebarDisplayOrdinals(keys: [String]) -> [Int?] {
@@ -61,7 +61,7 @@ struct SettingsSidebar: View {
             ) {
               Text(pane.title).lineLimit(1)
             }
-            // A headerless break (SC1): a header's worth of air with nothing
+            // A headerless break: a header's worth of air with nothing
             // said, so the utility rows do not read as another section.
             .padding(.top, section.gapAbove && index == 0 ? 18 : 0)
           }
@@ -113,7 +113,7 @@ struct SettingsSidebar: View {
   }
 
   /// The brand mark AS the C of the product name, sized to the cap height so it
-  /// reads as a letter rather than an icon beside the word (SV10).
+  /// reads as a letter rather than an icon beside the word.
   private var wordmark: some View {
     HStack(alignment: .firstTextBaseline, spacing: 2) {
       BrandMark(tint: lighting.accent)
@@ -138,7 +138,7 @@ struct SettingsSidebar: View {
     .accessibilityLabel(Text(verbatim: AppInfo.productName))
   }
 
-  /// ONE kicker treatment for every section (SC2).
+  /// ONE kicker treatment for every section.
   ///
   /// `title` arrives uppercase as typography. VoiceOver gets the written word,
   /// so the label capitalizes it back rather than spelling out the caps.
@@ -234,7 +234,7 @@ struct SettingsSidebar: View {
       + (hasUnread ? ", has an unread notice" : "")
     row(
       .display(display.persistenceKey), label: spokenName,
-      // The built-in draws as a laptop everywhere it is depicted (SV9).
+      // The built-in draws as a laptop everywhere it is depicted.
       symbol: display.persistenceKey == "builtIn" ? "laptopcomputer" : "display",
       accent: accent.accent
     ) {
@@ -243,7 +243,7 @@ struct SettingsSidebar: View {
           Text(verbatim: name) // a display's name, never a lookup key
             .lineLimit(1)
             .truncationMode(.tail)
-          // Enrolled in OLED care (SC9). A shield, not the notice dot: two
+          // Enrolled in OLED care. A shield, not the notice dot: two
           // facts, two shapes, neither carried by colour. Faint because it is
           // a standing state, and the OLED Care overview holds the
           // authoritative badge.

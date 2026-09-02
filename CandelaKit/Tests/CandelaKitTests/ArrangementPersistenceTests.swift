@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// Saved layouts, and the AR11 refusal for the twin case. Every rule here runs
+/// Saved layouts, and the shared-identity refusal for the twin case. Every rule here runs
 /// unattended, so each is pinned rather than left to its single call site.
 @Suite("Arrangement persistence")
 struct ArrangementPersistenceTests {
@@ -140,9 +140,9 @@ struct ArrangementPersistenceTests {
       == .setDiffers(missing: [Self.magKey], extra: []))
   }
 
-  // MARK: - AR11
+  // MARK: - The shared-identity refusal
 
-  /// AR11: two attached displays can share an identity, since a MAG 341C reports serial
+  /// Two attached displays can share an identity, since a MAG 341C reports serial
   /// 0 and identical monitors side by side is a common setup. Nothing says which is
   /// which, and a coin flip that swaps the user's screens is worse than not restoring.
   @Test func aLayoutNamingAnIdentitySharedByTwoAttachedDisplaysIsRefused() {
@@ -284,7 +284,7 @@ struct ArrangementPersistenceTests {
     #expect(store.savedArrangement(for: TopologySignature(empty)) == nil)
   }
 
-  /// AR6: a mirror slave has no position of its own, so it is not in the set a layout
+  /// The mirror-slave rule: a mirror slave has no position of its own, so it is not in the set a layout
   /// is about. Plugging into a mirror set must not orphan the layout.
   @Test func aMirrorSlaveDoesNotChangeTheTopologySignature() {
     // The slave holds no tile — that is what `ArrangementSnapshot` produces —
@@ -296,9 +296,9 @@ struct ArrangementPersistenceTests {
     #expect(TopologySignature(mirrored) == TopologySignature(deskLayout))
   }
 
-  // MARK: - Synthesis substitution (SS12)
+  // MARK: - Synthesis substitution
 
-  /// SS12: engaging a synthesized size must not orphan the saved layout. The synthesis
+  /// The synthesis-substitution rule: engaging a synthesized size must not orphan the saved layout. The synthesis
   /// VD signs as the panel it stands in for, so the machine signs the same either way.
   @Test func anEngagedSynthesisSetSignsAsThePhysicalPanel() {
     let unmirrored = [online(id: 1, identity: "builtIn"), online(id: 2, identity: "mag")]
@@ -326,8 +326,8 @@ struct ArrangementPersistenceTests {
     #expect(plain.key == Self.identity(named: "vd").key)
   }
 
-  /// SS1: the substitution keys on the pairing the engine publishes, not on the VD
-  /// master's CG mirror flags. A slave the pairing does not name is still filtered (AR6).
+  /// The pairing-based substitution rule: the substitution keys on the pairing the engine publishes, not on the VD
+  /// master's CG mirror flags. A slave the pairing does not name is still filtered.
   @Test func theSubstitutedSignatureDoesNotDependOnTheMirrorFlags() {
     let flagless = [
       online(id: 2, identity: "mag", mirrors: 5),
@@ -352,7 +352,7 @@ struct ArrangementPersistenceTests {
     )
   }
 
-  /// The property SS12 is actually about, through the store: a layout saved
+  /// The property the synthesis-substitution rule is actually about, through the store: a layout saved
   /// before synthesis is engaged is still FOUND while it is engaged.
   @Test func aLayoutSavedBeforeSynthesisIsFoundWhileItIsEngaged() {
     let store = ArrangementPersistence(defaults: InMemoryDefaults())
@@ -389,7 +389,7 @@ struct ArrangementPersistenceTests {
     ])
   }
 
-  /// SS12 through the real save path: the layout is filed under the panel, so one store
+  /// The synthesis-substitution rule through the real save path: the layout is filed under the panel, so one store
   /// answers with or without a size engaged and nothing on disk names the virtual display.
   @Test func aLayoutSavedWhileASizeIsEngagedIsFiledUnderThePhysicalPanel() throws {
     let store = ArrangementPersistence(defaults: InMemoryDefaults())
@@ -596,7 +596,7 @@ struct ArrangementPersistenceTests {
     }
   }
 
-  /// AR5: the display at (0, 0) is the one holding the menu bar, so origins are
+  /// The origin-derives-main rule: the display at (0, 0) is the one holding the menu bar, so origins are
   /// stored exactly as read. Normalising them would lose which display that is.
   @Test func theMainDisplayIsPreservedThroughAStoredLayout() {
     let mainOnDell = deskLayout.makingMain(2)
@@ -612,7 +612,7 @@ struct ArrangementPersistenceTests {
     #expect(restored.mainDisplayID == 2)
   }
 
-  /// AR4 on the read side: a resolved layout names every attached tile, so the
+  /// The no-partial-plan rule on the read side: a resolved layout names every attached tile, so the
   /// plan built from it cannot leave a display's origin unset.
   @Test func aResolvedLayoutNamesEveryAttachedDisplay() {
     let saved = SavedArrangement(deskLayout)
@@ -632,10 +632,10 @@ struct ArrangementPersistenceTests {
     ) == .none)
   }
 
-  // MARK: - Propagation (D27)
+  // MARK: - Propagation
 
   /// Writing the opt-in must not yank anyone's screens, the same reason `rememberDisplayMode`
-  /// does not (DM7), and the menu bar follows whichever display ends up at the origin.
+  /// does not, and the menu bar follows whichever display ends up at the origin.
   @Test func restoreArrangementPropagatesToRefreshUIOnly() {
     #expect(PrefPropagation.effects(forChange: .restoreArrangement) == [.refreshUI])
     #expect(PrefPropagation.effects(forChange: .savedArrangements) == [.refreshUI])

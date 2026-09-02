@@ -2,7 +2,7 @@ import CandelaKit
 import SwiftUI
 import Testing
 
-// The Protection pane's two derivations (AT10 layer 1): the startup caption
+// The Protection pane's two derivations: the startup caption
 // that follows the restore picker, and the read-only summary of what
 // Remember-size promises on each display.
 //
@@ -70,7 +70,7 @@ struct ProtectionPaneTests {
   }
 
   /// The house rules, on the strings this pane can emit: no em dash, and the
-  /// hardware is never called a panel (SO14).
+  /// hardware is never called a panel.
   @Test func theStartupCaptionsFollowTheCopyRules() {
     for action in StartupAction.allCases {
       let caption = render(ProtectionPane.startupCaption(for: action))
@@ -163,7 +163,7 @@ struct ProtectionPaneTests {
 
   // MARK: - The page itself
 
-  /// Layer 2 (AT4). The fixture model has no displays, so this covers the page
+  /// Layer 2. The fixture model has no displays, so this covers the page
   /// with the restore picker on it and the summary in its empty state, which is
   /// what a Mac with nothing attached opens on.
   @Test func thePageRendersWithNoDisplaysAttached() {

@@ -5,7 +5,7 @@ import Testing
 /// `CapabilityString.outerGroupInterior` stops an unwrapped string from volunteering its
 /// own first group and manufacturing a denial, but it means anything the wire appends has
 /// to come off first. The asymmetry between trailing and interior NULs is the decision.
-@Suite("Capability payload reassembly (D24)")
+@Suite("Capability payload reassembly")
 struct CapabilityPayloadTests {
   /// [MEASURED 2026-08-04, `candela-probe caps`] The DELL U2725QE's capability string
   /// verbatim, minus the one trailing NUL the panel sends. The quirks are preserved on
@@ -36,7 +36,7 @@ struct CapabilityPayloadTests {
 
   /// The user-visible defect in one assertion: 0x62 is absent from a list this display
   /// stated in full, so `.unsupported` is the honest verdict. Before the trim it was
-  /// `.unknown`, which D24 resolves to enabled, leaving a live volume slider on a display
+  /// `.unknown`, which the capabilities-denial rule resolves to enabled, leaving a live volume slider on a display
   /// that ignores volume writes.
   @Test func theDellDoesNotListVolumeAndSaysSoCleanly() {
     #expect(CapabilityString.support(forVCP: 0x62, in: Self.dell) == .unsupported)
@@ -112,7 +112,7 @@ struct CapabilityPayloadTests {
   /// Passing an interior NUL to the parser is not the safe default. Outside the vcp list
   /// a NUL clears every gate: the string is balanced, it is one wrapped group, and the tag
   /// boundary check reads NUL like a space, so it reaches `.unsupported` on bytes known to
-  /// be damaged. That is a denial manufactured from a bad read, which D24 forbids.
+  /// be damaged. That is a denial manufactured from a bad read, which the capabilities-denial rule forbids.
   @Test func anInteriorNULWouldOtherwiseManufactureADenial() {
     let spliced = "(prot(monitor)\0vcp(10))"
     #expect(CapabilityString.support(forVCP: 0x62, in: spliced) == .unsupported)

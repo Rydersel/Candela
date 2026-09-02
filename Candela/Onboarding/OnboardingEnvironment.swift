@@ -1,12 +1,12 @@
 import Foundation
 
-/// The value snapshot the guided setup flow is derived from (OB2). Assembled
+/// The value snapshot the guided setup flow is derived from. Assembled
 /// from `AppModel` and `DisplayModeCoordinator` in live mode, from a fixture in
 /// mock mode and tests; the flow itself never reaches past this type.
 struct OnboardingEnvironment: Equatable, Sendable {
   var accessibilityGranted: Bool
   var loginItemEnabled: Bool
-  /// OB13: a first run arrives with launch at login checked as the presented
+  /// A first run arrives with launch at login checked as the presented
   /// recommendation; a re-run arrives at the live registration state.
   var isFirstRun: Bool
   var displays: [OnboardingDisplayEntry]
@@ -15,7 +15,8 @@ struct OnboardingEnvironment: Equatable, Sendable {
 /// One external display as the flow sees it. Everything here is presentation
 /// input; commits go through the flow model's seam, never through this value.
 struct OnboardingDisplayEntry: Equatable, Sendable, Identifiable {
-  /// How the display reported volume support. Drives OB9's positive phrasing:
+  /// How the display reported volume support. Drives the state-what-works
+  /// phrasing:
   /// what works is stated, what the display itself declined is stated as the
   /// display's own report, and unknown is never described as failure.
   enum VolumeSupport: Equatable, Sendable {
@@ -28,7 +29,7 @@ struct OnboardingDisplayEntry: Equatable, Sendable, Identifiable {
   /// The name shown and renamed in the flow (the friendly name when one is
   /// set, else the product name).
   var name: String
-  /// The display's own reported product name. The OLED preselection (OB4)
+  /// The display's own reported product name. The OLED preselection
   /// reads THIS, never the user's rename.
   var productName: String
   /// Panel-native pixels, manufactured orientation.
@@ -45,7 +46,7 @@ struct OnboardingDisplayEntry: Equatable, Sendable, Identifiable {
   var volume: VolumeSupport
   /// The recommendation, already filtered upstream: nil when the engine
   /// abstained or the display is already at the best size, so a size page
-  /// existing at all is OB8's decision made before the flow begins.
+  /// existing at all is the size-suppression decision made before the flow begins.
   var sizeSuggestion: OnboardingSizeSuggestion?
   var enrolledInCare: Bool
   /// The stored telemetry choice, meaningful only alongside `enrolledInCare`: a

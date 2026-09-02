@@ -73,7 +73,8 @@ public struct SnapResult: Sendable, Equatable {
 /// a bug report.
 ///
 /// A snap that *produces* an overlap is not undone here, because undoing it silently
-/// is the auto-correction AR7 avoids. `ArrangementDragPolicy` reports it through the
+/// is the auto-correction the spring-back rule avoids. `ArrangementDragPolicy`
+/// reports it through the
 /// proposal's `problems`.
 public enum ArrangementSnapper {
   /// - Parameter threshold: in **display** points. `ArrangementDragPolicy` owns the

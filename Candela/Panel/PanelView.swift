@@ -85,7 +85,7 @@ struct PanelView: View {
               controller: state.controller, displayName: name,
               snapsToStops: snapsToStops, showsPercent: showsPercent
             )
-            // WD5: not greyed like the volume denial below; the slider still
+            // Not greyed like the volume denial below; the slider still
             // dims in software. `staysLive` keeps the hover watcher off drags.
             .panelHoverReason(model.brightnessSliderCompactReason(state), staysLive: true)
             if Self.showsVolumeSlider(for: state, prefs: rowPrefs) {
@@ -103,12 +103,12 @@ struct PanelView: View {
                 showsPercent: showsPercent,
                 // `ValueSliderRow` derives `snapsToZero: !mutesAtZero` from
                 // this glyph. Dropping it lets the row snap to 0, which
-                // hardware-mutes the display over VCP 0x8D (D29).
+                // hardware-mutes the display over VCP 0x8D.
                 mutedSystemImage: "speaker.slash.fill"
               )
               .disabled(!volumeEnabled)
               // The reason comes from the policy that decided, so it cannot
-              // name a cause other than the one that applied (D24). Hover, not
+              // name a cause other than the one that applied. Hover, not
               // a tooltip: the panel delivers no tooltip anywhere.
               .panelHoverReason(model.volumeSliderCompactReason(state))
             }
@@ -167,11 +167,11 @@ struct PanelView: View {
   // MARK: - What the panel renders
   //
   // Static and non-private because StatusItemController asks the same question
-  // to decide `.sliderOnly` menu-bar visibility (D5).
+  // to decide `.sliderOnly` menu-bar visibility.
 
   /// Externals the panel renders: hide applied, then ascending by
-  /// friendly-or-hardware name (D7). One call, so the sort cannot discard the
-  /// filter the way the fork's does (D2 bug 1).
+  /// friendly-or-hardware name. One call, so the sort cannot discard the
+  /// filter the way the fork's does.
   ///
   /// `@MainActor` explicitly: on `View` only `body` is isolated, so a bare
   /// `static func` would be nonisolated and could not read `AppModel.displays`
@@ -196,8 +196,8 @@ struct PanelView: View {
   }
 
   /// The built-in section, behind the app-level toggle. Candela's working
-  /// version of the fork's `hideAppleFromMenu`, whose filter never ran (D2
-  /// bug 1). `@MainActor` because it reads `AppModel`.
+  /// version of the fork's `hideAppleFromMenu`, whose filter never ran.
+  /// `@MainActor` because it reads `AppModel`.
   @MainActor
   static func showsBuiltIn(_ model: AppModel) -> Bool {
     showsBuiltIn(hasBuiltIn: model.builtIn != nil, appPrefs: standardPrefs("app"))
@@ -252,7 +252,7 @@ struct PanelView: View {
   // are placeholders on a `NoopDDCWriter` that still reports `isAvailable`, so
   // rendering them would show a live-looking slider that does nothing.
 
-  /// D2: volume slider per DDC display, unless hidden, disabled per command, or
+  /// Volume slider per DDC display, unless hidden, disabled per command, or
   /// `forceSoftware`. The last two are `DDCValueController.isAvailable`, the
   /// same gate `setValue` self-gates on, so a visible slider is never a dead one.
   ///
@@ -269,7 +269,7 @@ struct PanelView: View {
     commandIsAvailable && !hideVolumeSlider
   }
 
-  /// D2: contrast slider behind the app-level `showContrast` pref (default
+  /// Contrast slider behind the app-level `showContrast` pref (default
   /// false, fork parity), never for a disabled or `forceSoftware` display.
   /// `showContrast` is unkeyed, so the display's own prefs object answers it.
   @MainActor
@@ -284,7 +284,7 @@ struct PanelView: View {
 
   /// Banner, not alert (spec §6). Shown only while the grant is missing and a
   /// key mode wants it; `AccessibilityPermission` observes for the app's
-  /// lifetime (D9), so a revoked grant brings this back with no relaunch.
+  /// lifetime, so a revoked grant brings this back with no relaunch.
   private var accessibilityBanner: some View {
     HStack(spacing: 8) {
       Image(systemName: "exclamationmark.triangle")
@@ -314,7 +314,7 @@ struct PanelView: View {
   /// clipped the footer off the bottom [MEASURED 2026-08-19].
   ///
   /// OLED care's idle dim, blackout and unfocused dim cannot engage while this
-  /// is on (A-21), which Settings > Menu Bar states next to the hide switch.
+  /// is on, which Settings > Menu Bar states next to the hide switch.
   private var keepAwakeRow: some View {
     HStack(spacing: 0) {
       // Label leading, control trailing, like the Resolution and Mirroring
@@ -377,10 +377,10 @@ enum PanelMenu {
 }
 
 extension PanelView {
-  /// Why the panel's HDR button cannot act, or nil when it can (SS9).
+  /// Why the panel's HDR button cannot act, or nil when it can.
   ///
   /// Only the ENGAGE direction is refused: with HDR live the button offers the
-  /// exit, and greying that would be the D29 rule 3 shape, a recovery control
+  /// exit, and greying that would be the forbidden shape: a recovery control
   /// unavailable in the state it recovers from.
   /// `BrightnessController.setHDRMode` enforces the same asymmetry.
   static func hdrRefusalReason(
@@ -509,7 +509,7 @@ private struct HDRModeButtonStyle: ButtonStyle {
 }
 
 // `DisplaySliderRow` and `ValueSliderRow` are shared with the settings hero, so
-// the D29 rule-4 `snapsToZero` derivation exists in one place.
+// the mute-strand rule's `snapsToZero` derivation exists in one place.
 
 /// Footer action button: a symbol and a word on a rounded background that
 /// appears on hover, with a distinct pressed state.

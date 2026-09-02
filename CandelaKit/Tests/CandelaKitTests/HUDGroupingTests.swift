@@ -61,8 +61,8 @@ struct HUDGroupingTests {
   }
 
   /// The placement display did not move, so naming it would report a step that
-  /// never happened. Reachable when a master has media keys disabled (R1
-  /// swallows its press) while its slaves do not.
+  /// never happened. Reachable when a master has media keys disabled (swallows
+  /// its press) while its slaves do not.
   @Test func aPillFallsBackToASteppedMemberWhenThePlacementDisplayDidNotMove() {
     #expect(
       HUDGrouping.pills(forStepped: [1, 3], topology: MirrorFixtures.mirroredTrio)
@@ -80,7 +80,7 @@ struct HUDGroupingTests {
     )
   }
 
-  // MARK: - Synthesis sets (SS1)
+  // MARK: - Synthesis sets
 
   /// A synthesized size is one panel to the person pressing the key. The pill is
   /// drawn on the virtual display, which owns the framebuffer, but names the panel

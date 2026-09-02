@@ -1,8 +1,8 @@
 import Foundation
 
-/// Prefs schema versioning (D13). Version 1 is the M5 settings surface.
+/// Prefs schema versioning. Version 1 is the 1.0 settings surface.
 ///
-/// A missing version means FIRST RUN, which is also the onboarding trigger (D14), so
+/// A missing version means FIRST RUN, which is also the onboarding trigger, so
 /// the version is recorded at onboarding completion rather than at launch. A stored
 /// version NEWER than `currentVersion` is left alone: downgrades never wipe, and the
 /// enum unknown-raw fallbacks carry the app.

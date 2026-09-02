@@ -11,7 +11,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   ///
   /// `DisplayModeCoordinator` samples this list to decide whether a display has
   /// DEPARTED, and a departure is what makes the next appearance an arrival that
-  /// reapply acts on (DM7). Under the active-only list every idle display sleep
+  /// reapply acts on. Under the active-only list every idle display sleep
   /// read as an unplug and every wake as a replug, so with "Remember this
   /// resolution" on, a resolution the user changed in System Settings mid-session
   /// was silently undone the next time their screen slept. Every other
@@ -81,7 +81,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// The CoreGraphics list, and the revelation pass over it when one ran.
   ///
   /// Split out from `modes(for:)` so the drop counts survive the call: they are
-  /// the only account of what the wire-timing guard withheld (CR11).
+  /// the only account of what the wire-timing guard withheld.
   // Internal rather than private because `PlatformConformance` needs the
   // published list and the revelation result SEPARATELY. The subset cross-check
   // is only meaningful against modes CoreGraphics computed on its own; a
@@ -171,8 +171,8 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// No `CGDisplayMode` object exists to cross-check before staging, so the
   /// pre-commit descriptor guard `applyPublishedMode` uses has no analogue here.
   /// The post-commit readback below is this path's guard instead: a deliberate
-  /// asymmetry, not an omission (CR9). Sound because CoreGraphics and CGS share
-  /// one mode-ID space (S6 §4).
+  /// asymmetry, not an omission. Sound because CoreGraphics and CGS share
+  /// one mode-ID space.
   private func applyRevealedMode(
     _ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope
   ) throws {
@@ -359,7 +359,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   }
 
   /// Reads the raw CGS list. Makes NO decisions — every gate lives in
-  /// `CGSModeRevelation`, which is Foundation-only and fixture-tested (CR8).
+  /// `CGSModeRevelation`, which is Foundation-only and fixture-tested.
   static func cgsDescriptors(for displayID: CGDirectDisplayID) -> [CGSModeDescriptor] {
     guard let getCount = SkyLight.getDisplayModeCount,
       let getDescription = SkyLight.getDisplayModeDescription
@@ -412,7 +412,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     guard error == CGError.success.rawValue else {
       throw DisplayConfigError(cgErrorCode: error)
     }
-    // RT8. The call already blocks until the rotation has taken effect (RS10:
+    // The call already blocks until the rotation has taken effect (measured
     // 0.4 to 1.1s), but the readback was measured still trailing its return by
     // ~26ms, so a single immediate check reports a false failure on the slow
     // path. Bounded, not unbounded: if it has not landed half a second after a
@@ -431,15 +431,15 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
 
 /// The one private-API seam this feature has.
 ///
-/// **RT4: there is no fallback and none should be written.** The Intel-era
+/// **There is no fallback and none should be written.** The Intel-era
 /// `IOServiceRequestProbe` + `kIOFBSetTransform` route has **zero**
-/// `IOFramebuffer` services to attach to on Apple Silicon (RS2).
+/// `IOFramebuffer` services to attach to on Apple Silicon.
 // Internal rather than private because `PlatformConformance` reads the resolved
 // symbols individually, so a post-macOS-update run can name WHICH one went
 // missing where `revealsHiddenModes` can only say that one did.
 enum SkyLight {
   /// Two arguments, the second a 32-bit integer of degrees. Read out of the
-  /// shipping binary's prologue rather than guessed (RS1): it saves `x0` and
+  /// shipping binary's prologue rather than guessed: it saves `x0` and
   /// `x1`, never touches `x2`, and stores argument 1 through `stp w22, w20`. A
   /// guessed `float` signature would have passed the angle in `s0`.
   typealias SetDisplayRotation = @convention(c) (CGDirectDisplayID, Int32) -> Int32

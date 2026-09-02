@@ -1,6 +1,6 @@
 import Foundation
 
-/// Startup and wake restore choreography (D5). After wake it waits out the sober
+/// Startup and wake restore choreography. After wake it waits out the sober
 /// delay, since some displays take time to recover, then repeats the restore pass at
 /// a fixed interval. The app injects the pass; it covers the brightness DDC leg,
 /// contrast, volume, and the mute companion.

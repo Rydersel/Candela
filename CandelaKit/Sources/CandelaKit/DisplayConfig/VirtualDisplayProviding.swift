@@ -2,8 +2,8 @@ import CoreGraphics
 import Foundation
 
 /// What the caller asks a virtual display to be. Values are the SOURCE OF
-/// TRUTH: nothing is ever read back from a live virtual display (VD5), so a
-/// spec change means destroy-and-recreate under the same slot (VD1).
+/// TRUTH: nothing is ever read back from a live virtual display, so a
+/// spec change means destroy-and-recreate under the same slot.
 public struct VirtualDisplaySpec: Sendable, Equatable {
   public var name: String
   public var logicalWidth: Int
@@ -23,9 +23,10 @@ public struct VirtualDisplaySpec: Sendable, Equatable {
   /// refresh quantized through `DisplayMode.quantizedRefresh`. The only place
   /// these rules live.
   ///
-  /// The even rounding is DEFENSIVE: S2 recorded odd dimensions silently
-  /// yielding non-HiDPI once, and a follow-up could not reproduce parity as the
-  /// cause. Kept because it costs nothing and the failure is unexplained.
+  /// The even rounding is DEFENSIVE: an earlier experiment recorded odd
+  /// dimensions silently yielding non-HiDPI once, and a follow-up could not
+  /// reproduce parity as the cause. Kept because it costs nothing and the
+  /// failure is unexplained.
   ///
   /// The ceiling clamp is not defensive: prefs are an escape-hatch surface
   /// (defaults write), and an unclamped width would trap the UInt32 conversion
@@ -46,7 +47,7 @@ public struct VirtualDisplaySpec: Sendable, Equatable {
 /// One live virtual display.
 ///
 /// `uuid` is the identity everything hangs off across recreation and
-/// relaunch (VD9); `displayID` is a RUNTIME handle that differs on every
+/// relaunch; `displayID` is a RUNTIME handle that differs on every
 /// creation. An identical descriptor re-created after release produced
 /// 63 -> 64, and IDs climbed 7 -> 133 across one session, so nothing may be
 /// keyed on it.
@@ -73,7 +74,7 @@ public struct VirtualDisplayHandle: Sendable, Equatable {
 public enum VirtualDisplayFailure: Error, Sendable, Equatable {
   /// `NSClassFromString` returned nil for one of the private classes. Every
   /// entry point is then inert; the whole class family is private, so there is
-  /// no public path to degrade to (VD10).
+  /// no public path to degrade to.
   case classFamilyUnavailable
   /// The slot is outside `VirtualDisplayIdentity.slotRange` or already live.
   case capExceeded
@@ -120,7 +121,7 @@ public protocol VirtualDisplayProviding: Sendable {
   var isAvailable: Bool { get }
 
   /// Synchronously readable, and the ONLY authority on "did Candela create
-  /// this?" (VD12). Consumed by `DisplayDiscovery.discover(excluding:)`.
+  /// this?" Consumed by `DisplayDiscovery.discover(excluding:)`.
   var ownedDisplayIDs: Set<CGDirectDisplayID> { get }
 
   func live() -> [VirtualDisplayHandle]
@@ -132,7 +133,7 @@ public protocol VirtualDisplayProviding: Sendable {
   /// Releases the slot's display and polls the online list until it is gone.
   /// Returns false if it was still online at the deadline; it reports rather
   /// than hangs. Idempotent; a slot with no live display is a no-op. Candela
-  /// never destroys a display it does not own (VD12).
+  /// never destroys a display it does not own.
   @discardableResult
   func destroy(slot: Int, departureTimeout: TimeInterval) -> Bool
 

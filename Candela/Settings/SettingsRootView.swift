@@ -4,15 +4,15 @@ import SwiftUI
 
 /// Sidebar navigation over a pane registry.
 ///
-/// The shell is hand-built (SV4): a canvas, a fixed-width sidebar, a hairline,
+/// The shell is hand-built: a canvas, a fixed-width sidebar, a hairline,
 /// the detail column. **Do not reintroduce a split view.** One owns its column
 /// backgrounds, so no canvas can be drawn under both columns, its sidebar drew
 /// a panel that dimmed when the window lost focus, and `NSSplitView` could hide
 /// the sidebar under a squeeze and autosave that, leaving a window with no
 /// navigation and no way back from inside the app.
 ///
-/// D6 generalises to the registry: `PaneID.rawValue` is the identifier, `title`
-/// is the label, and cross-pane state goes through AppModel/SettingsActions
+/// Identity in the registry: `PaneID.rawValue` is the identifier, `title` is
+/// the label, and cross-pane state goes through AppModel/SettingsActions
 /// observation, never view lifecycle ordering.
 ///
 /// `@MainActor` because `SettingsRegistry` is main-actor-isolated and a
@@ -22,24 +22,24 @@ import SwiftUI
 struct SettingsRootView: View {
   @State private var selection: SettingsDestination? = .pane(.general)
 
-  /// Each display destination's pushed-sub-page stack, keyed by persistence key
-  /// (SO23). Retained for the life of the window, cleared ONLY on that
+  /// Each display destination's pushed-sub-page stack, keyed by persistence
+  /// key. Retained for the life of the window, cleared ONLY on that
   /// display's departure, which is what makes a reconnection land on the hub
-  /// rather than a sub-page (SO9).
+  /// rather than a sub-page.
   @State private var subPagePaths: [String: [DisplaySubPage]] = [:]
   /// The display whose departure evicted the user, so its return can restore
-  /// the selection (SO9). Only the SELECTED display's departure is remembered:
+  /// the selection. Only the SELECTED display's departure is remembered:
   /// an unrelated monitor unplugging must not hijack a later arrival.
   @State private var lastDisplayKey: String?
-  /// The OLED Care pane's pushed-page stack (OCR1), here because it rides the
+  /// The OLED Care pane's pushed-page stack, here because it rides the
   /// same `NavigationStack`. Retained across selection changes like a display's,
   /// cleared when a display in it departs. Display Health is NOT in this stack:
-  /// it opens in its own AppKit window (OCR-A1).
+  /// it opens in its own AppKit window.
   @State private var oledCarePath: [OledCarePage] = []
   /// For the debug capture route's health window; the pane's own links read the
   /// same actions object from their environment.
   @Environment(SettingsActions.self) private var actions
-  /// The Keyboard pane's pushed-page stack (KMR11): same stack, same retention
+  /// The Keyboard pane's pushed-page stack: same stack, same retention
   /// rules as the OLED pane's. These pages name no hardware, so departure
   /// clearing never touches this.
   @State private var keyboardPath: [KeyboardPage] = []
@@ -53,7 +53,7 @@ struct SettingsRootView: View {
   var body: some View {
     ZStack {
       // One canvas for the life of the window, so a selection change moves the
-      // light rather than cutting to a new one (SV8).
+      // light rather than cutting to a new one.
       //
       // **The canvas is the ONLY view here that opts out of the safe area**,
       // and that asymmetry is the whole defence for the top strip: the glow
@@ -98,10 +98,10 @@ struct SettingsRootView: View {
     // Published once for the whole shell, so the wordmark and every themed
     // component read one destination's lighting.
     .environment(\.settingsAccent, currentAccent)
-    // Dark-only (SV2): every colour comes from the theme layer and none of
+    // Dark-only: every colour comes from the theme layer and none of
     // them has a light-appearance answer.
     .preferredColorScheme(.dark)
-    // The cross-link navigation seam (SC4, SC6), wired here because this view
+    // The cross-link navigation seam, wired here because this view
     // owns the selection and re-wired per appearance so a reopened window binds
     // to the live view identity.
     //
@@ -110,7 +110,8 @@ struct SettingsRootView: View {
     // on whatever sub-page that display was left on, which for Advanced or All
     // Sizes is a page the promised control is not on.
     //
-    // SO23 retention is untouched: sidebar clicks do not come through the seam.
+    // The retention rule is untouched: sidebar clicks do not come through
+    // the seam.
     .onAppear {
       actions.reveal = { destination in
         switch destination {
@@ -166,7 +167,7 @@ struct SettingsRootView: View {
             DebugSettingsHook.pendingKeyboardPath = nil
             keyboardPath = path
           }
-          // A window, not a pushed page (OCR-A1), so the capture route opens
+          // A window, not a pushed page, so the capture route opens
           // it over the pane through the same closure the pane's links use.
           if let key = DebugSettingsHook.pendingHealthWindowKey {
             DebugSettingsHook.pendingHealthWindowKey = nil
@@ -176,8 +177,8 @@ struct SettingsRootView: View {
       }
     #endif
     // A destination for an absent display must never render, so an unplug
-    // while selected falls back to a surviving sibling first, then to General
-    // (SO9). Keyed on persistence keys, not display IDs: an ID changes across a
+    // while selected falls back to a surviving sibling first, then to General.
+    // Keyed on persistence keys, not display IDs: an ID changes across a
     // replug and would evict the user every time a link renegotiated.
     //
     // The keys are `allControlledStates`, built-in first, which is sidebar
@@ -186,7 +187,7 @@ struct SettingsRootView: View {
     // dropped to General with a display destination still alive. The built-in
     // is a real departure source too, since clamshell removes it.
     .onChange(of: model.allControlledStates.map(\.display.persistenceKey)) { previous, connected in
-      // SO23: a departed display's sub-page stack dies with it, selected or
+      // A departed display's sub-page stack dies with it, selected or
       // not, so its return lands on the hub.
       for departed in Set(previous).subtracting(connected) {
         subPagePaths[departed] = nil
@@ -211,7 +212,7 @@ struct SettingsRootView: View {
       }
 
       // A remembered display returning takes the selection back, unless the
-      // user chose another display destination meanwhile (SO9).
+      // user chose another display destination meanwhile.
       // `currentIsDisplay` reads the possibly-just-updated selection, so a
       // sibling fallback above counts as "on a display" and blocks this.
       let arrived = Array(Set(connected).subtracting(previous))
@@ -231,7 +232,7 @@ struct SettingsRootView: View {
   }
 
   /// Every selection write, so the canvas relight, the sidebar pill and the
-  /// page swap ride one transaction (SV8).
+  /// page swap ride one transaction.
   ///
   /// Derived from `$selection`, never a fresh `Binding(get:set:)`: a hand-built
   /// binding carries no location, so SwiftUI cannot prove it equal between
@@ -289,7 +290,7 @@ struct SettingsRootView: View {
   /// rendered an empty destination over the fallback.
   ///
   /// Reads `subPagePaths` and never writes it: not presenting a path is not
-  /// forgetting one (SO23).
+  /// forgetting one.
   private var presentation: SettingsDetailPresentation<DisplaySubPage> {
     SettingsSelectionPolicy.present(
       selectedDisplayKey: selectedDisplayKey,
@@ -326,7 +327,8 @@ struct SettingsRootView: View {
   /// selection change must never remove the stack; it changes the ROOT and the
   /// PATH, so leaving a display pops its sub-page before the root swaps.
   ///
-  /// SO23 holds: the binding below still reads and writes per-display storage,
+  /// The retention rule holds: the binding below still reads and writes
+  /// per-display storage,
   /// and a pane selection just presents none of it.
   private var detail: some View {
     NavigationStack(path: currentPathBinding) {
@@ -354,7 +356,7 @@ struct SettingsRootView: View {
             }
           }
           // The system back item draws at the WINDOW's leading edge, over the
-          // sidebar's wordmark rather than over the column it acts on (SV1).
+          // sidebar's wordmark rather than over the column it acts on.
           // `SubPageHeader` draws the back control in the page instead. Cmd-[
           // and re-clicking the sidebar row write the path directly.
           .navigationBarBackButtonHidden(true)
@@ -386,7 +388,7 @@ struct SettingsRootView: View {
   }
 
   /// The banner region sits above the root AND above every pushed page from
-  /// these two placements alone (SO7), so a new sub-page cannot forget one.
+  /// these two placements alone, so a new sub-page cannot forget one.
   ///
   /// `.id(key)` on the ROOT CONTENT, never on the stack: it resets per-display
   /// root state on a switch without giving each display its own stack identity,
@@ -428,14 +430,14 @@ struct SettingsRootView: View {
         // is the orphaned-page defect `detail` documents). The switcher keeps
         // this page presented while `state` re-resolves, so without the re-key
         // the sub-page's `@State` survives the switch and a draft typed on one
-        // display commits into another's tuning (SO10).
+        // display commits into another's tuning.
         .id(key)
       }
     }
   }
 
-  /// An OLED Care pushed page (OCR1). Same placement rule as `pushedPage`:
-  /// `.id` on the content, so a display switch resets page state (SO10).
+  /// An OLED Care pushed page. Same placement rule as `pushedPage`:
+  /// `.id` on the content, so a display switch resets page state.
   @ViewBuilder
   private func oledPushedPage(_ page: OledCarePage) -> some View {
     Group {
@@ -458,7 +460,7 @@ struct SettingsRootView: View {
     }
   }
 
-  /// A Keyboard pushed page (KMR11). No display dependence, so no resolution
+  /// A Keyboard pushed page. No display dependence, so no resolution
   /// guard, no `.id` re-key and no switcher.
   @ViewBuilder
   private func keyboardPushedPage(_ page: KeyboardPage) -> some View {
@@ -488,7 +490,7 @@ struct SettingsRootView: View {
   /// a transition's write-back through a binding built before the selection
   /// moved, and a setter re-reading the selection landed that write under
   /// whatever was selected by then, clearing the NEW display's retained path on
-  /// a display-to-display switch (SO23).
+  /// a display-to-display switch.
   ///
   /// Matching the PRESENTATION rather than the selection is what lets a display
   /// leaving the list pop its page without losing it: the getter reports empty,
@@ -499,7 +501,7 @@ struct SettingsRootView: View {
         get: { (subPagePaths[boundKey] ?? []).map(SettingsPushedPage.display) },
         // Against the PRESENTATION, the stronger of the two, so the `[]` the
         // stack writes back while popping a departed display is dropped and the
-        // path stays retained (SO23).
+        // path stays retained.
         set: { newPath in
           guard presentation.displayKey == boundKey else { return }
           subPagePaths[boundKey] = newPath.compactMap {
@@ -524,7 +526,7 @@ struct SettingsRootView: View {
     if case .pane(.keyboard) = selection {
       return Binding(
         get: { keyboardPath.map(SettingsPushedPage.keyboard) },
-        // Same stale-write contract as the OLED branch above (KMR11).
+        // Same stale-write contract as the OLED branch above.
         set: { newPath in
           guard case .pane(.keyboard) = selection else { return }
           keyboardPath = newPath.compactMap {
@@ -538,7 +540,7 @@ struct SettingsRootView: View {
 
   /// Each page owns its own `SettingsPageScaffold`, so this switch names a view
   /// and nothing else. Every page starts with `SubPageHeader`, which supplies
-  /// title focus on push and the display switcher (SO23).
+  /// title focus on push and the display switcher.
   @ViewBuilder
   private func subPage(_ page: DisplaySubPage, key: String, state: AppModel.DisplayState) -> some View {
     // Rename dependency, registered HERE because `switcherDisplays` is read
@@ -594,12 +596,12 @@ struct SettingsRootView: View {
     if case .pane(.oledCare) = selection { oledCarePath.count } else { 0 }
   }
 
-  /// Same presented-not-retained rule for the Keyboard pane's stack (KMR11).
+  /// Same presented-not-retained rule for the Keyboard pane's stack.
   private var keyboardPresentedDepth: Int {
     if case .pane(.keyboard) = selection { keyboardPath.count } else { 0 }
   }
 
-  /// Sidebar render order: the registry's panes in section order (SC1), then
+  /// Sidebar render order: the registry's panes in section order, then
   /// `allControlledStates`. The command-number shortcuts index into this, and
   /// `SettingsRegistry.panes` follows `sections`, so re-sectioning the sidebar
   /// moves the shortcuts with it.
@@ -612,7 +614,8 @@ struct SettingsRootView: View {
   /// its root. Without it the click does nothing, since the row writes a
   /// selection that is already the selection.
   ///
-  /// SO23 retention holds: only the re-clicked destination is cleared, so A to
+  /// The retention rule holds: only the re-clicked destination is cleared,
+  /// so A to
   /// B to A still lands where the user was.
   ///
   /// The write goes through `currentPathBinding` rather than `subPagePaths`, so
@@ -657,7 +660,7 @@ struct SettingsRootView: View {
     }
   }
 
-  /// SO23's comparison workflow: the sub-page carries over, THEN the sidebar
+  /// The comparison workflow: the sub-page carries over, THEN the sidebar
   /// selection moves. The whole path is copied, not just the visible page.
   private func switchDisplay(from currentKey: String, to newKey: String) {
     subPagePaths[newKey] = subPagePaths[currentKey] ?? []
@@ -741,7 +744,7 @@ enum SettingsWindowMetrics {
 /// name at the leading edge over the sidebar's wordmark.
 ///
 /// The dark appearance is pinned here as well as by `.preferredColorScheme`
-/// (SV2), because the appearance decides the titlebar and traffic lights, which
+/// because the appearance decides the titlebar and traffic lights, which
 /// the colour scheme does not reach.
 ///
 /// **The whole contract is re-asserted, never written once.** Every property
@@ -849,7 +852,7 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
       if !window.titlebarAppearsTransparent {
         window.titlebarAppearsTransparent = true
       }
-      // Dark-only (SV2): the titlebar and traffic lights read the appearance
+      // Dark-only: the titlebar and traffic lights read the appearance
       // and never see `.preferredColorScheme`.
       if window.appearance?.name != .darkAqua {
         window.appearance = NSAppearance(named: .darkAqua)

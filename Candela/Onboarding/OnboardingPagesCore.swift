@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Welcome: one large softly-lit display object under ambient light, the
 /// pitch, and Begin Setup. The set piece is the product's subject, not
-/// decoration (OB10).
+/// decoration.
 struct OnboardingWelcomePage: View {
   let model: OnboardingFlowModel
   let accent: Color
@@ -170,7 +170,7 @@ struct OnboardingNoDisplaysPage: View {
   }
 }
 
-/// Finish: the green bloom, a cascade of what was configured, and the OB13
+/// Finish: the green bloom, a cascade of what was configured, and the
 /// launch at login decision.
 struct OnboardingFinishPage: View {
   @Bindable var model: OnboardingFlowModel

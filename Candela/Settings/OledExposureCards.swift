@@ -6,7 +6,7 @@ import SwiftUI
 /// carry findings rather than instruments, so they sit beside the dimming
 /// settings they argue for; the Heat Map window keeps the instruments.
 ///
-/// Copy rule (OC11): software has two levers against OLED wear, reduce luminance
+/// Copy rule: software has two levers against OLED wear, reduce luminance
 /// and reduce time at luminance. Nothing here may translate a measurement into a
 /// lifespan, a date, a percentage of damage avoided or a score. Relative
 /// exposure is measured and therefore sayable; nothing else is.

@@ -5,7 +5,7 @@ import Foundation
 /// Deliberately NOT `DisplayDiscovery.persistenceKey`, which comes from an
 /// `Arm64DDC.IOregService` and so exists only for DDC-capable externals. Mode
 /// switching also applies to the built-in and to virtual displays, so identity
-/// here comes from public CoreGraphics values every display has (spec DM8).
+/// here comes from public CoreGraphics values every display has.
 ///
 /// Known limitation, inherited from `persistenceKey`: a panel reporting serial 0
 /// (the MAG 341C does) collides with an identical unit, so twins share a stored

@@ -1,25 +1,25 @@
 import Observation
 
 /// Single source of truth for one display's value on one pure-DDC command —
-/// volume or contrast — the sibling of `BrightnessController` (D1): no
+/// volume or contrast — the sibling of `BrightnessController`: no
 /// software leg, no native leg, no HDR machinery, no poller. Owns its own
 /// write coalescer (and a second one for the VCP 0x8D mute companion): mute
 /// wire values 1/2 overlap small volume raws, and a shared duplicate memo
 /// would cross-suppress them.
 ///
-/// Under HDR, writes are best-effort with last-written tracking (fork parity;
-/// D3): DDC is dead while the display is in HDR mode, so the register catches
+/// Under HDR, writes are best-effort with last-written tracking (fork
+/// parity): DDC is dead while the display is in HDR mode, so the register catches
 /// up on the next write after HDR exits, or via startup/wake restore.
 @MainActor @Observable
 public final class DDCValueController: PendingWireDraining {
   public nonisolated let command: DDCCommand
   public private(set) var value: Double
   /// Logical mute flag (volume only; constitutively false for contrast).
-  /// Persists in BOTH mute strategies — D3 resolves the fork's
+  /// Persists in BOTH mute strategies — this resolves the fork's
   /// stepVolume/toggleMute persistence inconsistency toward always-persist.
   public private(set) var isMuted: Bool
   /// Per-command disable (fork unavailableDDC) AND the display-level
-  /// forceSoftware opt-out (fork isSw(), review R5): a display forced to
+  /// forceSoftware opt-out (fork isSw()): a display forced to
   /// software dimming gets NO DDC volume/contrast/mute traffic at all — the
   /// user set that pref because the DDC wire is broken. One choke point:
   /// step/setValue/toggleMute/restoreToHardware/refreshFromHardware all
@@ -57,11 +57,11 @@ public final class DDCValueController: PendingWireDraining {
   /// REUSED for whatever panel next appears on its display ID, so a stored copy
   /// would have to be re-pointed anyway.
   ///
-  /// Defaults to `.unknown`, which D24 resolves to allowed: a controller nobody
-  /// has told anything still sends the display's mute command.
+  /// Defaults to `.unknown`, which the capabilities-denial rule resolves to
+  /// allowed: a controller nobody has told anything still sends the display's mute command.
   @ObservationIgnored private var muteWireSupport: () -> VCPSupport = { .unknown }
   /// Capabilities verdict for the register this command writes (VCP 0x62 for
-  /// volume). `.unknown` allows (D24), so a write-only panel that cannot answer
+  /// volume). `.unknown` allows, so a write-only panel that cannot answer
   /// the capabilities read still restores from its stored value.
   @ObservationIgnored private var valueWireSupport: () -> VCPSupport = { .unknown }
   /// The mute strategy the last restore acted on (volume only), or nil until
@@ -73,12 +73,12 @@ public final class DDCValueController: PendingWireDraining {
   private let storageKey: String?
   /// Validated readback max (nil until a successful `.read` pass); feeds
   /// `CommandTuning.effectiveMaxDDC`. Observable rather than
-  /// `@ObservationIgnored` (B5): "the panel said 100" and "we assumed 100
+  /// `@ObservationIgnored`: "the panel said 100" and "we assumed 100
   /// because the read failed" are different facts, and `nil` is the only record
   /// of the second.
   public private(set) var readMax: Int?
 
-  /// What this command's reads have proved (B3).
+  /// What this command's reads have proved.
   ///
   /// Published per COMMAND, not per display, because `AppModel.DisplayState`
   /// holds brightness, volume and contrast as siblings with no owner among
@@ -163,8 +163,8 @@ public final class DDCValueController: PendingWireDraining {
     )
   }
 
-  /// The same D24 predicate that greys the slider, so the restore (the one value
-  /// write with no gesture behind it, hence no UI gate) cannot disagree with it.
+  /// The same capabilities-denial predicate that greys the slider, so the
+  /// restore (the one value write with no gesture behind it, hence no UI gate) cannot disagree with it.
   /// Volume only: nothing in the app carries a verdict for the contrast register.
   private var writesValueRegister: Bool {
     guard command == .volume else { return true }
@@ -194,7 +194,7 @@ public final class DDCValueController: PendingWireDraining {
   private func apply(_ next: Double) {
     // Mute companion (fork stepVolume + valueChangedOtherDisplay): crossing
     // away from 0 unmutes, landing on 0 mutes. 0x8D traffic only under the
-    // dedicated strategy; the logical flag always persists (D3).
+    // dedicated strategy; the logical flag always persists.
     var unmuting = false
     if command == .volume {
       if isMuted, next > 0 {
@@ -212,7 +212,7 @@ public final class DDCValueController: PendingWireDraining {
     let changed = next != value
     value = next
     // `unmuting` keeps the register rewrite alive when the crossing lands
-    // exactly on the stored value (concurrency F5): in the default strategy
+    // exactly on the stored value: in the default strategy
     // the register holds 0 while `value` kept the level — `changed` alone
     // would leave the panel silent behind an unmuted UI.
     guard changed || unmuting else { return }
@@ -240,11 +240,11 @@ public final class DDCValueController: PendingWireDraining {
         value = 1.0 / 16.0
         persist(value)
       }
-      // Ungated (D29 rule 3): this is the route back, and the display's own
+      // Ungated: this is the route back, and the display's own
       // verdict may have arrived after the mute it has to undo.
       if prefs.enableMuteUnmute { submitMuteWire(2) }
       // The unmute pair (wire 2 + value) rides two coalescers with no
-      // wire-order guarantee, but both orders CONVERGE (R2): 0x8D=2 never
+      // wire-order guarantee, but both orders CONVERGE: 0x8D=2 never
       // changes the volume register, and a 0x62 write at worst implicitly
       // unmutes. The REPEATED path (restoreToHardware) does not carry the pair
       // at all; see its muted branch.
@@ -284,7 +284,7 @@ public final class DDCValueController: PendingWireDraining {
     return true
   }
 
-  // MARK: - Startup/wake restore (D5)
+  // MARK: - Startup/wake restore
 
   /// Re-writes the saved value (+ mute companion under the dedicated mute
   /// strategy), but only for an ever-touched command (the fork's isTouched
@@ -293,7 +293,7 @@ public final class DDCValueController: PendingWireDraining {
   ///
   /// Only the value writes obey `writesValueRegister`. `submitMuteWire(1)` has
   /// already passed the 0x8D verdict in `usesDedicatedMuteCommand`, and wire 2
-  /// is an unmute, which no verdict may cancel (D29 rule 3).
+  /// is an unmute, which no verdict may cancel.
   public func restoreToHardware() {
     guard isAvailable, let store, let storageKey,
           store.savedBrightness(for: storageKey) != nil else { return }
@@ -304,7 +304,7 @@ public final class DDCValueController: PendingWireDraining {
       // mute wire instead would restore silence nowhere while skipping the
       // value write on the strength of it.
       if usesDedicatedMuteCommand {
-        // R2 wire-order rule: value and 0x8D ride SEPARATE coalescers, so a
+        // The wire-order convergence rule: value and 0x8D ride SEPARATE coalescers, so a
         // submitted pair races to the writer actor — and many panels treat
         // a 0x62 write as an implicit unmute. While muted, restore submits
         // ONLY the mute wire (silence is 0x8D's job, per apply()'s own
@@ -313,7 +313,7 @@ public final class DDCValueController: PendingWireDraining {
         submitMuteWire(1)
       } else if writesValueRegister {
         // DIVERGENCE: the fork restores the saved volume here and audibly
-        // loses the mute. With the always-persisted flag (D3), silence IS
+        // loses the mute. With the always-persisted flag, silence IS
         // the register state to restore.
         submitRaw(rawValue(for: 0))
       }
@@ -342,7 +342,7 @@ public final class DDCValueController: PendingWireDraining {
   /// the panel never took.
   ///
   /// Refuses to drive a MUTED display's volume register. A reset that could not
-  /// confirm an unmute carries the mute across the wipe on purpose (D29 rule 1),
+  /// confirm an unmute carries the mute across the wipe on purpose,
   /// so a value write here would either contradict that or, under the default
   /// strategy where silence IS the register at 0, leave a display meant to be
   /// silent holding a level nobody chose.
@@ -357,7 +357,7 @@ public final class DDCValueController: PendingWireDraining {
   ///
   /// The capabilities probe is asynchronous and its verdict is in-memory, so
   /// the launch restore runs with an absent verdict, resolves it to `.unknown`
-  /// (D24: no evidence allows) and takes the dedicated strategy. On a display
+  /// (no evidence allows) and takes the dedicated strategy. On a display
   /// that denies the register, that restore sent 0x8D=1 into nothing and, on
   /// its own doctrine, skipped the volume write that would have carried the
   /// silence. The same window opens on the first pass after a replug, where the
@@ -381,7 +381,7 @@ public final class DDCValueController: PendingWireDraining {
     return true
   }
 
-  /// D5 `.read`: validated DDC readback. `(0, 0)` and `max == 0` are FAILED
+  /// `.read`: validated DDC readback. `(0, 0)` and `max == 0` are FAILED
   /// reads — the MAG341C answers every read with zeros, and the fork's
   /// unvalidated read clobbers saved values to 0.
   public func refreshFromHardware() async {
@@ -391,13 +391,13 @@ public final class DDCValueController: PendingWireDraining {
     let tuning = prefs.tuning(for: command)
     // Fork parity: reads use only the FIRST remap code.
     let readCode = tuning.remapCodes.first ?? command.code
-    // Staleness fence (the I9 doctrine; concurrency F2): the read loop can
+    // Staleness fence (the I9 doctrine): the read loop can
     // span seconds on a wedged bus — a slider drag or key that lands
     // mid-flight must win over the stale read, INCLUDING in the persisted
     // store. Any submit bumps the generation, so a mismatch means user
     // input superseded this read.
     let issuedAtStart = issuedGeneration
-    // Captured HERE, not after the value loop (review F2): a toggleMute
+    // Captured HERE, not after the value loop: a toggleMute
     // landing mid-value-loop bumps the mute generation, and a later capture
     // would blind the 0x8D-readback guard to it — the readback could then
     // setMuted(false)+persist over the user's fresh mute.
@@ -407,7 +407,7 @@ public final class DDCValueController: PendingWireDraining {
     // attempts fold, worst-wins; a success supersedes them outright.
     var passEvidence = DDCReadEvidence.notAttempted
     for _ in 0 ..< tries {
-      // Two guards, not one (B3): a silent bus and a panel that answers zeros
+      // Two guards, not one: a silent bus and a panel that answers zeros
       // are different facts. Only the second is the write-only signature, and
       // it is the one the MAG 341C produces on every one of `tries` attempts.
       guard let result = await writer.read(command: readCode) else {
@@ -432,7 +432,7 @@ public final class DDCValueController: PendingWireDraining {
       // nil and later writes scale against the assumed 100.
       readMax = Int(result.max)
       // Muted default-strategy register 0 is the mute ARTIFACT, not
-      // information (review F1): adopting/persisting it would destroy the
+      // information: adopting/persisting it would destroy the
       // unmute restore target.
       if command == .volume, isMuted, result.current == 0 { break }
       let adopted = DimmingMath.ddcToValue(
@@ -590,7 +590,7 @@ public final class DDCValueController: PendingWireDraining {
     restoredMuteStrategy = nil
   }
 
-  /// Wake-restore prerequisite (D5): without the memo reset, repeat passes
+  /// Wake-restore prerequisite: without the memo reset, repeat passes
   /// are duplicate-skipped and never hit the wire. Also the HDR exit's
   /// prerequisite, for a sharper version of the same reason: a write ACKed
   /// while the display was in HDR was swallowed, so a memo built through that

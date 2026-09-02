@@ -145,7 +145,7 @@ struct ExposureAccumulatorTests {
     #expect(acc.hasEnoughSamplesForAnalysis == true)
   }
 
-  /// 30 samples at the 60 s cadence is the half-hour OC17 and OC19 both spend
+  /// 30 samples at the 60 s cadence is the half-hour both the wear-signal and exposure gates spend
   /// before they will speak. Changing it changes when the UI stops hedging.
   @Test func theAnalysisThresholdIsThirtySamples() {
     #expect(ExposureAccumulator.minimumSamplesForAnalysis == 30)

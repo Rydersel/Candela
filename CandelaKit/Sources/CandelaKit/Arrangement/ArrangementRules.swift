@@ -8,7 +8,7 @@ public enum ArrangementProblem: Sendable, Equatable {
 
   /// A display touching nothing has an obvious repair and a display on top of another
   /// does not, so `ArrangementDragPolicy` attaches the first and springs the second
-  /// back under AR7.
+  /// back under the spring-back rule.
   var isDisconnection: Bool {
     if case .disconnected = self { return true }
     return false
@@ -20,7 +20,7 @@ public enum ArrangementProblem: Sendable, Equatable {
 ///
 /// macOS cannot be made to hold an invalid arrangement; it silently moves things
 /// somewhere of its own choosing (§3.1). So the UI refuses the drop rather than
-/// letting the map lie about where the displays ended up (AR7).
+/// letting the map lie about where the displays ended up.
 public enum ArrangementRules {
   public static func isValid(_ arrangement: DisplayArrangement) -> Bool {
     problems(in: arrangement).isEmpty

@@ -260,7 +260,7 @@ public final class ModelReplayLog {
     try FileManager.default.createDirectory(
       at: directory, withIntermediateDirectories: true)
     // Resume AFTER the highest existing index, never into it, so a restart
-    // (MP6 requires one after a wallpaper change) neither discards the previous
+    // (which happens after a wallpaper change) neither discards the previous
     // run nor grows a file the caps can no longer reach.
     fileIndex = (try? Self.existingIndices(in: directory).max()).flatMap { $0 } ?? 0
   }

@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Shared styling for the guided setup flow. The window is forced dark
-/// (OB10), so these paint explicit whites over the canvas rather than
+/// so these paint explicit whites over the canvas rather than
 /// semantic colors that would follow a theme the window never shows.
 enum OnboardingStyle {
   static let titleColor = Color.white

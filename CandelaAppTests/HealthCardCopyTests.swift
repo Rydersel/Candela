@@ -4,7 +4,7 @@ import Testing
 @testable import CandelaKit
 
 /// The derivations the Health pane's cards and the OLED Care overview's cards
-/// share (SC4). Both read one display's measurement and both must read it the
+/// share. Both read one display's measurement and both must read it the
 /// same way, so the sentence they join lives in one function and is pinned here.
 ///
 /// The honesty precedence is what matters: `confidence` is a pure function of

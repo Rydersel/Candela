@@ -1,9 +1,9 @@
 import Testing
 @testable import CandelaKit
 
-@Suite("Pref propagation table (D20, D27)")
+@Suite("Pref propagation table")
 struct PrefPropagationTests {
-  // MARK: - Completeness (D27): the invariants a hand-typed table cannot hold
+  // MARK: - Completeness: the invariants a hand-typed table cannot hold
 
   @Test func everyKnownPrefFansOutToSomething() {
     for name in PrefName.allCases {
@@ -22,19 +22,19 @@ struct PrefPropagationTests {
   }
 
   @Test func engineStateIsNotAPrefName() {
-    // D8: `muted` is engine state, not a setting. D22: `hdrMode` goes through
+    // `muted` is engine state, not a setting. `hdrMode` goes through
     // the controller's state machine and must never be written by a pane.
     // Neither may become a PrefName case, or a pane could route through it.
     #expect(PrefName(rawValue: "muted") == nil)
     #expect(PrefName(rawValue: "hdrMode") == nil)
     #expect(PrefName(rawValue: "notARealPref") == nil)
-    // D32 inert keys: reserved in DisplayPrefs, but nothing reads them, so
+    // Inert keys: reserved in DisplayPrefs, but nothing reads them, so
     // they get no row and no case. Adding one would be a lie in the table.
     #expect(PrefName(rawValue: "menuItemStyle") == nil)
     #expect(PrefName(rawValue: "showTickMarks") == nil)
     #expect(PrefName(rawValue: "showModelComparison") == nil)
     #expect(PrefName(rawValue: "longerDelay") == nil)
-    // `wireTimingGuard` has no UI by design (D26). Being read at use is not the
+    // `wireTimingGuard` has no UI by design. Being read at use is not the
     // reason (`pollingMode` is read at use and IS a case); having no pane to
     // write it through is, so nothing can route a change.
     #expect(PrefName(rawValue: "wireTimingGuard") == nil)
@@ -54,7 +54,7 @@ struct PrefPropagationTests {
   }
 
   @Test func prefNameRawValuesAreTheOnDiskKeys() {
-    // D22: the raw values compose real on-disk key strings, so the ones that
+    // The raw values compose real on-disk key strings, so the ones that
     // invite a typo are pinned by hand. The rest are the case name verbatim.
     #expect(PrefName.forceSw.rawValue == "forceSw") // NOT "forceSW"
     #expect(PrefName.unavailableDDC.rawValue == "unavailableDDC")
@@ -86,7 +86,7 @@ struct PrefPropagationTests {
     #expect(PrefName.virtualSlotDefined.rawValue == "virtualSlotDefined")
     #expect(PrefName.sizeRecommendationDismissed.rawValue == "sizeRecommendationDismissed")
     // `storedSyntheticSize` holds a JSON descriptor; both are keys
-    // `DisplayPrefs` composes with `.<pk>` (SS4).
+    // `DisplayPrefs` composes with `.<pk>`.
     #expect(PrefName.offerSyntheticSizes.rawValue == "offerSyntheticSizes")
     #expect(PrefName.storedSyntheticSize.rawValue == "storedSyntheticSize")
     // Hide-shaped like `hideBuiltInDisplay`: an absent key means row shown.
@@ -109,10 +109,10 @@ struct PrefPropagationTests {
       #expect(PrefPropagation.effects(forChange: name).contains(.rearmTap), "\(name.rawValue)")
     }
     // NOT `isDisabled`, by ruling: a display whose keyboard control is off
-    // swallows the press (R1) rather than handing it to macOS, so the keys stay
+    // swallows the press rather than handing it to macOS, so the keys stay
     // armed. Only what makes the press impossible releases them.
     #expect(!PrefPropagation.effects(forChange: .isDisabled).contains(.rearmTap))
-    // Fork bug 3 (D2) is closed by construction, not by this table:
+    // Fork bug 3 is closed by construction, not by this table:
     // `StatusItemController` builds `KeyRouterConfig` inside the press closure,
     // so the fine-scale prefs are read at event time on every press.
     #expect(!PrefPropagation.effects(forChange: .useFineScaleBrightness).contains(.rearmTap))
@@ -120,7 +120,7 @@ struct PrefPropagationTests {
   }
 
   @Test func keyModeChangesRecheckPermissions() {
-    // Fork bug 2 (D2): switching a keyboard mode never re-prompted for AX.
+    // Fork bug 2: switching a keyboard mode never re-prompted for AX.
     #expect(PrefPropagation.effects(forChange: .keyboardBrightness).contains(.recheckPermissions))
     #expect(PrefPropagation.effects(forChange: .keyboardVolume).contains(.recheckPermissions))
     #expect(!PrefPropagation.effects(forChange: .showContrast).contains(.recheckPermissions))
@@ -223,7 +223,7 @@ struct PrefPropagationTests {
   }
 
   @Test func promotedReadAtUsePrefsAreCasesWithUIOnlyRows() {
-    // These have UI, so D27 requires cases, but they are read at use, so
+    // These have UI, so the completeness rule requires cases, but they are read at use, so
     // `refreshUI` alone is the deliberate answer rather than a missing row.
     for name in [PrefName.pollingMode, .pollingCount, .separateCombinedScale] {
       #expect(PrefPropagation.effects(forChange: name) == [.refreshUI])
@@ -231,7 +231,7 @@ struct PrefPropagationTests {
   }
 
   @Test func virtualSlotLifecycleRidesOnConfiguredAlone() {
-    // VD14/VD17: only the `configured` write converges live displays, so
+    // Only the `configured` write converges live displays, so
     // editing a running slot's fields never yanks a display under the user;
     // the pane's Create/Apply/Remove buttons are `configured` writes.
     #expect(PrefPropagation.effects(forChange: .virtualSlotConfigured)
@@ -244,7 +244,7 @@ struct PrefPropagationTests {
   }
 
   @Test func theSizeSuggestionDismissalRefreshesTheUIAndNothingElse() {
-    // A button writes this, so D27 makes it a case (unlike
+    // A button writes this, so the completeness rule makes it a case (unlike
     // `oledStandbyNoteDismissed`, which the hours tracker writes). Nothing else
     // may ride on it: the suggestion names a resolution but changes none, so any
     // display work would turn a "not now" into a mode change.
@@ -261,7 +261,7 @@ struct PrefPropagationTests {
   }
 
   @Test func synthesisPrefsRefreshTheUIAndNothingElse() {
-    // Same answer as the remembered-mode rows (SS11): the caller does the
+    // Same answer as the remembered-mode rows: the caller does the
     // verified engine work AROUND the write, so a row fanning out to display
     // work would run it again, unsequenced, from the pref edit.
     for name in [PrefName.offerSyntheticSizes, .storedSyntheticSize] {

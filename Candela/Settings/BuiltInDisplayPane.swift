@@ -9,10 +9,10 @@ import SwiftUI
 /// the built-in is in the configurator's list with its own persistence key, and
 /// the reapply pass already walks it.
 ///
-/// "Show the built-in display in the menu bar" stays in Menu Bar (R16): a
+/// "Show the built-in display in the menu bar" stays in Menu Bar: a
 /// laptop panel disappears in clamshell, so a control over whether this row
-/// exists cannot live inside it. The button below navigates there (D26 cut
-/// duplicate hide toggles).
+/// exists cannot live inside it. The button below navigates there rather than
+/// duplicating the toggle here.
 @MainActor
 struct BuiltInDisplayPane: View {
   @Binding var selection: SettingsDestination?
@@ -26,9 +26,9 @@ struct BuiltInDisplayPane: View {
   @FocusState private var focusedRow: DisplaySubPage?
 
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "builtIn") }
-  /// Every per-display write goes through this seam (D27): the engine reads
-  /// prefs at construction and at key time, not reactively, so a write without
-  /// propagation is a dead control.
+  /// Every per-display write goes through this seam (the shared pref-write
+  /// path): the engine reads prefs at construction and at key time, not
+  /// reactively, so a write without propagation is a dead control.
   private var writer: DisplayPrefWriter {
     DisplayPrefWriter(persistenceKey: "builtIn", actions: actions)
   }
@@ -73,7 +73,7 @@ struct BuiltInDisplayPane: View {
         }
       }
 
-      // DT45: the built-in gets Diagnostics too, because "why can't hardware
+      // The built-in gets Diagnostics too, because "why can't hardware
       // control reach my laptop screen?" is one of the questions it answers. No
       // readback preview: the built-in has no wire for a read verdict.
       SettingsCardSection {
@@ -103,7 +103,7 @@ struct BuiltInDisplayPane: View {
   /// countdown: a mode that leaves this panel unreadable leaves nothing to
   /// answer with, and the expiry is what recovers it.
   ///
-  /// Absent on purpose: synthesized sizes (SS14 keeps the built-in out and the
+  /// Absent on purpose: synthesized sizes (the built-in is never a target and the
   /// catalog carries no stops for it), mirroring and rotation (out of this
   /// page's scope), and the density recommendation (no physical size is ever
   /// filed for the built-in, so the model abstains).

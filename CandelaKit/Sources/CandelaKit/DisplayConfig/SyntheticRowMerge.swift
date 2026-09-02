@@ -2,7 +2,7 @@ import Foundation
 
 extension SyntheticSizeCatalog {
   /// The panel's curated rows plus the synthesized stops, as ONE picker list
-  /// (SS4: same picker, no separate control surface).
+  /// (same picker, no separate control surface).
   ///
   /// Ordering follows `DisplayModeCatalog.curated`, logical area descending,
   /// with one extra tie-break: a synthesized row's `ioModeID` is a NEGATIVE

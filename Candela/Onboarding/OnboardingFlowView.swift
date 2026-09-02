@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The flow's root: the persistent canvas, the current page, and the fixed
 /// chrome (back, step dots, Skip Setup). Pages slide with a crossfade; Reduce
-/// Motion collapses transitions to fades (OB10).
+/// Motion collapses transitions to fades.
 struct OnboardingFlowView: View {
   @Bindable var model: OnboardingFlowModel
 

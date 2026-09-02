@@ -1,13 +1,13 @@
 import CandelaKit
 import Testing
 
-// Row-model coverage for the Keyboard hub (AT10): the keycap hero's cluster
-// annotations and lighting, and the Targeting & Precision chevron preview
-// (KMR2-KMR4). Pure functions over enum inputs, so every mode is enumerable.
+// Row-model coverage for the Keyboard hub: the keycap hero's cluster
+// annotations and lighting, and the Targeting & Precision chevron preview.
+// Pure functions over enum inputs, so every mode is enumerable.
 @Suite("Keyboard hero model")
 struct KeyboardHeroModelTests {
 
-  // MARK: - Lighting follows KeyModePolicy, never a local copy (KMR3)
+  // MARK: - Lighting follows KeyModePolicy, never a local copy
 
   @Test func lightingAgreesWithWatchesMediaKeysForEveryMode() {
     for mode in KeyMode.allCases {
@@ -75,7 +75,7 @@ struct KeyboardHeroModelTests {
     }
   }
 
-  // MARK: - The good-news line never competes with the warning (KMR3)
+  // MARK: - The good-news line never competes with the warning
 
   @Test func accessibilityLineShowsOnlyWhenGrantedAndAMediaModeIsActive() {
     #expect(
@@ -90,7 +90,7 @@ struct KeyboardHeroModelTests {
       !KeyboardHeroModel.showsAccessibilityLine(granted: false, brightnessMode: .media, volumeMode: .media))
   }
 
-  // MARK: - Chevron previews (KMR4)
+  // MARK: - Chevron previews
 
   @Test func targetingPreviewSummarizesTargetAndSteps() {
     #expect(
@@ -174,7 +174,7 @@ struct KeyboardHeroModelTests {
     }
     for line in lines {
       #expect(!line.contains("\u{2014}"), "em dash in \(line)")
-      // SO14: hardware is a display, never a panel, in UI copy.
+      // Hardware is a display, never a panel, in UI copy.
       #expect(!line.lowercased().contains("panel"), "'panel' in \(line)")
     }
   }

@@ -3,11 +3,11 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// The "Keep this resolution?" surface, the DEFAULT owner of the answer
-/// (SO6). The coordinator presents it for every preview except one that
+/// The "Keep this resolution?" surface, the DEFAULT owner of the answer.
+/// The coordinator presents it for every preview except one that
 /// another surface owns: `.settingsBanner` (a change started from a key
 /// settings window), where the banner region answers instead, and
-/// `.guidedSetup`, where the setup window does (DM11). In both this window is
+/// `.guidedSetup`, where the setup window does. In both this window is
 /// never shown: one answerable surface per preview, decided at start.
 ///
 /// Why it is a window at all, and why its buttons take the first click, are
@@ -25,8 +25,8 @@ final class ModeConfirmationWindow: ModeConfirmationPresenting {
   /// unfinished in testing, not plausibly right.
   var displayName: (CGDirectDisplayID) -> String = { _ in "" }
   /// Resolves a display to one that has an `NSScreen`: itself, or its mirror
-  /// master (DT15). Injected because the island holds no topology of its own and
-  /// exercises no judgement about mirroring (DT16). Identity by default, which
+  /// master. Injected because the island holds no topology of its own and
+  /// exercises no judgement about mirroring. Identity by default, which
   /// is right for every unmirrored display; wired at launch.
   var drawableDisplayID: (CGDirectDisplayID) -> CGDirectDisplayID = { $0 }
 

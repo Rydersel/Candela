@@ -2,7 +2,7 @@ import CandelaKit
 import CoreGraphics
 import Testing
 
-/// SS13's one rule about the panic press, pinned on the pure seam that carries
+/// The one rule about the panic press, pinned on the pure seam that carries
 /// it: after every synthesis set has come down, the press may BREAK a mirror set
 /// and may never BUILD one.
 ///
@@ -77,8 +77,8 @@ struct MirrorPanicDecisionTests {
   /// The second reading, and the reason it exists. The caller verifies the
   /// unwind from the PAIRING TABLE, which is empty for the whole of an engage,
   /// so an unwind refused because one was in flight still reads as "everything
-  /// came down". This sample gets the last word: SS13's rule is that no raw
-  /// mirror change is staged over a standing synthesis set.
+  /// came down". This sample gets the last word: the panic-press rule is
+  /// that no raw mirror change is staged over a standing synthesis set.
   ///
   /// The fixture is the one that makes the rule bite: without the synthesis
   /// master the very same topology answers with a break.

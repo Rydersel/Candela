@@ -12,7 +12,7 @@ struct PrefIdentifierCoverageTests {
   /// Cases with no direct settings control, each with the writer that owns it.
   static let noControl: Set<PrefName> = [
     .storedDisplayMode,     // DisplayModeCoordinator, via the size pickers
-    .storedSyntheticSize,   // SynthesisCoordinator (SS11 ordering)
+    .storedSyntheticSize,   // SynthesisCoordinator
     .savedArrangements,     // ArrangementCoordinator, via the canvas
     .virtualSlotUUID,       // minted programmatically on Create
     .virtualSlotRefreshHz,  // no writer anywhere today

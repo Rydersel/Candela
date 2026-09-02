@@ -182,7 +182,7 @@ struct StaticRegionDetectorTests {
     #expect(mask?.cells[bandA.lowerBound] == 0)
   }
 
-  /// Feathering belongs to the renderer's linear magnification (OC17), so the
+  /// Feathering belongs to the renderer's linear magnification, so the
   /// nomination edge is a step: two adjacent cells, one in and one out, must
   /// come back at exactly the two values and never at anything between.
   @Test func theNominationEdgeIsNotSmoothedHere() {

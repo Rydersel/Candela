@@ -32,7 +32,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// Internal, not private: `CandelaApp` puts this in the Settings scene
   /// environment, and every pane reads it from there.
   let model: AppModel
-  /// The propagation seam's app-side fan-out (D20). Every settings pane writes
+  /// The propagation seam's app-side fan-out. Every settings pane writes
   /// a pref and then calls through here; the closures are wired at launch.
   let settingsActions: SettingsActions
   /// The one Sparkle updater. Built here so it starts with the app and outlives
@@ -41,13 +41,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   private var statusItem: NSStatusItem?
   /// KVO on the item's own visibility: `behavior = .removalAllowed` lets the
   /// user ⌘-drag the icon out of the menu bar, which must persist as
-  /// `menuIcon = .hide` (D5). Held so the observation stays registered.
+  /// `menuIcon = .hide`. Held so the observation stays registered.
   private var statusItemVisibilityObserver: NSKeyValueObservation?
-  /// D5 loop guard (fork `statusItemVisibilityChangedByUser`): brackets our own
+  /// Loop guard (fork `statusItemVisibilityChangedByUser`): brackets our own
   /// programmatic visibility writes so the KVO callback can tell them apart
   /// from a user drag. Without it: apply → observe → persist → apply, forever.
   private var isApplyingStatusItemVisibility = false
-  /// D11: Shift held at launch. Polled once in `init` and never re-read, so the
+  /// Safe mode: Shift held at launch. Polled once in `init` and never re-read, so the
   /// mode cannot change mid-session.
   let isSafeMode: Bool
 
@@ -65,7 +65,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     interferenceMonitor = monitor
     let model = AppModel(shade: shade, gamma: gamma, safeMode: safeMode)
     self.model = model
-    // Reporting-only handoff (B7): built here because it needs the AppKit alert
+    // Reporting-only handoff: built here because it needs the AppKit alert
     // island, read there because the diagnostics pane has no other way to say how
     // often another app took a display's color profile back.
     model.gammaInterference = monitor
@@ -101,10 +101,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// above: the coordinator references it weakly and the countdown outlives
   /// whatever started the change.
   private var arrangementConfirmation: ArrangementConfirmationWindow?
-  /// Display Health windows (OCR-A1): held like the confirmation windows above,
+  /// Display Health windows: held like the confirmation windows above,
   /// app-lifetime, one window per display key inside.
   private lazy var displayHealthPresenter = DisplayHealthWindowPresenter(model: model)
-  /// CK28: built on first use, app-lifetime, like the presenter above.
+  /// The checkup window: built on first use, app-lifetime, like the presenter above.
   private var checkupWindow: CheckupWindowController?
   /// Stored so the departure hook can `cleanupDisplay` departed displays' HUD
   /// panels; the executor shares this instance.
@@ -117,9 +117,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// Sleep/wake observation tokens: block-based observers stay registered only
   /// while retained. Never removed, app-lifetime.
   private var sleepWakeObservers: [any NSObjectProtocol] = []
-  /// Startup/wake DDC restore choreography (D5). `startupAction` is app-level
+  /// Startup/wake DDC restore choreography. `startupAction` is app-level
   /// but read through DisplayPrefs like every other engine pref, and under safe
-  /// mode through a prefs object whose getter reports `.doNothing` (D11), which
+  /// mode through a prefs object whose getter reports `.doNothing`, which
   /// is what disables both restores. Assigned in `init` because it needs that
   /// flag.
   private let restoreCoordinator: RestoreCoordinator
@@ -135,13 +135,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   private let checkupLog = Logger(subsystem: "com.rydersel.Candela", category: "checkup")
 
   func applicationDidFinishLaunching(_: Notification) {
-    // D11: the notice states exactly what safe mode does and does not do. The
+    // The notice states exactly what safe mode does and does not do. The
     // fork's copy ("Default settings are reloaded, DDC read is blocked") is wrong
     // twice: nothing is reloaded, and it blocks the startup write too. Someone
     // reaching for safe mode because a DDC write is wedging their monitor must
     // not be told the traffic stopped when it has not. Sliders and keys stay live
     // on purpose: gating them would kill every panel control and disable the only
-    // unmute affordance a hardware-muted display has (D29 rule 3).
+    // unmute affordance a hardware-muted display has.
     if isSafeMode {
       let alert = NSAlert()
       alert.messageText = "Safe Mode"
@@ -164,13 +164,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       alert.runModal()
     }
 
-    // Crash-while-dimmed protection (T5 contract): hand the gamma tables back to
+    // Crash-while-dimmed protection: hand the gamma tables back to
     // the OS ONCE before any applyGammaScale. A previous run may have died with a
     // scaled table installed, and capturing that as the baseline would bake the
     // dimming in permanently.
     gammaController.resetAllGamma()
 
-    // D5: the coordinator gates on startupAction internally, so every
+    // The coordinator gates on startupAction internally, so every
     // launch/reconfigure/wake call site is unconditional.
     restoreCoordinator.restorePass = { [weak model] in model?.performRestorePass() }
 
@@ -257,20 +257,20 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         // The observer closure runs off-main; the coordinator is MainActor.
         Task { @MainActor in
           self?.restoreCoordinator.noteWake()
-          // WD3: a wire that stopped answering before the Mac slept is asked
+          // A wire that stopped answering before the Mac slept is asked
           // again rather than staying demoted across a link the sleep rebuilt.
           self?.model.noteWakeForBrightnessWires()
         }
       })
     }
 
-    // Re-arm volume keys when the default output device changes (D4). The
+    // Re-arm volume keys when the default output device changes. The
     // handler fires on the CoreAudio listener queue; hop to main for the tap.
     model.audioDevices.setOnDefaultOutputChange { [weak self] in
       Task { @MainActor in self?.refreshTapConfig() }
     }
 
-    // Re-arm when a capabilities probe lands (D24). The watched set is gated on
+    // Re-arm when a capabilities probe lands. The watched set is gated on
     // the display's own verdict for the volume and mute registers, and that
     // verdict arrives asynchronously after the display does, so the first arm
     // after a plug is always made from the pre-probe answer.
@@ -295,7 +295,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       ShortcutManager.syncRegistration()
     }
     settingsActions.recheckPermissions = { [weak self] in
-      // D2 bug 2: the fork computes this and never calls it, so changing a
+      // The fork computes this and never calls it, so changing a
       // keyboard mode never re-prompts. Candela prompts, but only when the mode
       // change actually made the CGEvent tap wanted. Custom shortcuts are Carbon
       // hotkeys and need no grant, so an all-custom rig must not be shown a TCC
@@ -334,7 +334,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     confirmation.drawableDisplayID = drawableDisplayID
     modeConfirmation = confirmation
     model.displayModes.confirmation = confirmation
-    // D27: the coordinator writes `storedDisplayMode` when the user pins one and
+    // The coordinator writes `storedDisplayMode` when the user pins one and
     // when a kept change updates it, and the seam has to hear about it whichever
     // surface asked. Wired once here rather than per surface: the panel's window
     // has no `SettingsActions`, and a second copy is a second thing to forget.
@@ -370,7 +370,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     self.mirrorConfirmation = mirrorConfirmation
     model.mirroring.confirmation = mirrorConfirmation
     model.mirroring.displayName = displayName
-    // Rotation's own surface. There is no rotation hotkey (RT1), but the settings
+    // Rotation's own surface. There is no rotation hotkey, but the settings
     // window is often on a DIFFERENT display from the one that just rotated,
     // which is the "answered blind" case the window exists to prevent.
     let rotationConfirmation = RotationConfirmationWindow(coordinator: model.rotation)
@@ -386,7 +386,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // surface asking about it must go where the menu bar ended up.
     let arrangementConfirmation = ArrangementConfirmationWindow(coordinator: model.arrangement)
     arrangementConfirmation.drawableDisplayID = drawableDisplayID
-    // SS12: while a synthesized size stands, this window is talking about the
+    // While a synthesized size stands, this window is talking about the
     // virtual display holding the desktop while the reader is looking at their
     // monitor, so it names the panel the pair stands in for. An empty answer is
     // handled: `ArrangementCopy` falls back to an unnamed sentence.
@@ -400,13 +400,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // The canvas names its tiles through the coordinator, so the map and the
     // confirmation window call a display by the same name.
     model.arrangement.displayName = displayName
-    // SS12. What the coordinator keys a saved layout, its lookup and the arrival
+    // What the coordinator keys a saved layout, its lookup and the arrival
     // gate on: a synthesized size puts the desktop on a virtual display and makes
     // the panel its mirror slave, so without the pairing the topology signature
     // moves the moment a size engages and orphans the saved layout. Read live and
     // held nowhere, since display IDs are reassigned across a replug.
     model.arrangement.synthesisPairings = { [weak self] in self?.model.synthesis.pairings ?? [] }
-    // D27, the same wiring `didStoreMode` gets: the coordinator writes
+    // The same wiring `didStoreMode` gets: the coordinator writes
     // `savedArrangements` when a layout is kept and the seam has to hear about it.
     // No persistence key, since the layout is a fact about the display SET.
     model.arrangement.didSaveArrangement = { [weak self] in
@@ -414,11 +414,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     }
 
     // The orphaned-shade fix (see `MirroringCoordinator.rebuildSoftwareDimming`).
-    // Wired here because it needs an AppKit island and the display list. D28
-    // decides WHICH door: `reapplyAfterPrefChange()`, never
-    // `handleReconfigure(recapture:)`, which re-runs only the software leg and
-    // no-ops in pure-DDC mode, and never `setBrightness(sameValue)`, which is
-    // memo-suppressed.
+    // Wired here because it needs an AppKit island and the display list. The
+    // reapply-after-pref-change rule decides WHICH door:
+    // `reapplyAfterPrefChange()`, never `handleReconfigure(recapture:)`, which
+    // re-runs only the software leg and no-ops in pure-DDC mode, and never
+    // `setBrightness(sameValue)`, which is memo-suppressed.
     model.mirroring.rebuildSoftwareDimming = { [weak self] in
       guard let self else { return }
       self.shadeOverlay.removeAllShades()
@@ -433,7 +433,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       guard let self else { return }
       for id in departed {
         self.hud.cleanupDisplay(id)
-        // CK27: the target leaving ends the run as incomplete, naming the leg
+        // The target leaving ends the run as incomplete, naming the leg
         // it was in. A no-op for any other display, and when no run is going.
         self.checkupWindow?.displayDisconnected(id)
       }
@@ -465,7 +465,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         // freshly resolved IDs, never a repin. After `refresh()` so it reconciles
         // against the post-event display list.
         self.model.oledCare.displaysReconfigured()
-        // D5: a reconfigure pass restores once (the wake repeat chain, when
+        // A reconfigure pass restores once (the wake repeat chain, when
         // one is running, keeps re-asserting on its own schedule).
         self.restoreCoordinator.noteLaunchOrReconfigure()
         self.wireInterferenceHooks()
@@ -483,9 +483,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         // itself a reconfiguration. Dropped BEFORE the per-display re-evaluation
         // so fresh state is read.
         await self.model.hdrToggling.displaysReconfigured()
-        // Gamma reset once per event, before any recapture (T5 ordering:
-        // reset → recapture → re-apply; recapture must see an OS-owned
-        // table). Done here rather than per display so a later display's
+        // Gamma reset once per event, before any recapture (reset →
+        // recapture → re-apply; recapture must see an OS-owned table). Done
+        // here rather than per display so a later display's
         // reset cannot wipe an earlier display's just-reapplied dim.
         self.gammaController.resetAllGamma()
         // Shades reset the same way, for a reason the gamma line does not have: a
@@ -517,7 +517,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
           await state.controller.handleReconfigure()
         }
         #if DEBUG
-          // Panel row model (AT7), last in the pass: the HDR state above and the
+          // Panel row model, last in the pass: the HDR state above and the
           // re-applied dimming are what a dump taken here can report.
           DebugPanelDump.dumpIfRequested(self.model)
         #endif
@@ -566,7 +566,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     }
 
     let permission = model.accessibility
-    // D14: on a first run the Setup window owns the Accessibility ask so it can
+    // On a first run the Setup window owns the Accessibility ask so it can
     // explain WHY first. Prompting here would fire the system dialog before that
     // window is on screen. `prefsSchemaVersion` is the trigger and is written at
     // Setup completion, so an interrupted first run still counts as one.
@@ -580,7 +580,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     if permission.isGranted {
       startMediaKeyTap()
     }
-    // D9: monitoring runs for the app's lifetime and reports both directions, not
+    // Monitoring runs for the app's lifetime and reports both directions, not
     // a one-shot wait for the grant. An ad-hoc re-sign drops the TCC grant
     // silently, and without this the keys stop working with no banner and no way
     // back short of a relaunch.
@@ -639,17 +639,17 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       if isFirstRun {
         presentOnboarding()
       }
-      // Virtual display launch prelude (VD6/VD13): normalize the slot prefs, log
+      // Virtual display launch prelude: normalize the slot prefs, log
       // any orphan from a previous instance, and recreate the recreate-at-launch
       // slots (skipped in Safe Mode). Non-blocking; creation runs on the model's
       // serial vd queue.
       model.syncVirtualDisplaysAtLaunch()
       #if DEBUG
-        // Panel row model (AT7): the first dump, after the warm refresh, so it
+        // Panel row model: the first dump, after the warm refresh, so it
         // describes a discovered display list. Before the settings hook so a
         // capture run's window cannot land between the refresh and the dump.
         DebugPanelDump.dumpIfRequested(model)
-        // Screenshot hook (DT6). After `model.refresh()`, so `display:first`
+        // Screenshot hook. After `model.refresh()`, so `display:first`
         // has a display list to resolve against.
         DebugSettingsHook.openIfRequested(
           externalKeys: model.displays.map(\.display.persistenceKey)
@@ -658,7 +658,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     }
 
     // Destroy owned virtual displays on quit for a tidy topology handoff; a
-    // crash gets the same result from mach-port teardown (VD4). Blocking the
+    // crash gets the same result from mach-port teardown. Blocking the
     // terminate notification briefly is fine, and the short timeout bounds it.
     let virtualDisplayHost = model.virtualDisplays
     NotificationCenter.default.addObserver(
@@ -674,7 +674,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // main run loop mid-termination, turning the departing displays' own
       // screen-parameter notifications into topology refreshes, shade rebuilds
       // and DDC traffic on a process that is going away. The bounded wait lets a
-      // hung teardown fall through to mach-port reclaim (VD4).
+      // hung teardown fall through to mach-port reclaim.
       let finished = DispatchSemaphore(value: 0)
       DispatchQueue.global(qos: .userInitiated).async {
         virtualDisplayHost.destroyAll(departureTimeout: 1.5)
@@ -683,19 +683,19 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       _ = finished.wait(timeout: .now() + 4)
     }
 
-    // D13: nobody else calls this. A no-op while the version key is absent (first
+    // Nobody else calls this. A no-op while the version key is absent (first
     // run) and the forward path for every stored version after, so it must run
     // before Setup completion writes the schema version.
     PrefsSchema.migrateIfNeeded(in: .standard)
 
     settingsActions.showOnboarding = { [weak self] in self?.presentOnboarding() }
-    // Display Health windows (OCR-A1): an AppKit island, reached through a
+    // Display Health windows: an AppKit island, reached through a
     // closure like onboarding because the views cannot see it.
     settingsActions.openDisplayHealth = { [weak self] key in
       self?.displayHealthPresenter.open(key: key)
     }
     settingsActions.openCheckup = { [weak self] in self?.checkupController().present() }
-    // D12: a full-domain wipe removes prefsSchemaVersion, so the post-reset
+    // A full-domain wipe removes prefsSchemaVersion, so the post-reset
     // state IS a first-run state and gets the same window.
     settingsActions.postReset = { [weak self] in self?.presentOnboarding() }
 
@@ -773,7 +773,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       model: model,
       actions: settingsActions,
       onCompletion: {
-        // D14: completion is recorded HERE, on close by any route, not at launch.
+        // Completion is recorded HERE, on close by any route, not at launch.
         // A force-quit mid-Setup leaves the key absent and Setup runs again.
         PrefsSchema.recordCurrentVersion(in: .standard)
       }
@@ -939,16 +939,16 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     }
   }
 
-  /// D5: remove software dimming, then hand the DDC register the full-range
+  /// Remove software dimming, then hand the DDC register the full-range
   /// equivalent of the published brightness, so the monitor is not left at a
   /// combined-mode DDC floor.
   func applicationWillTerminate(_: Notification) {
     gammaController.resetAllGamma() // not DDC, always runs
     shadeOverlay.removeAllShades() // not DDC, always runs
-    // CK27. Above the safe-mode guard: this writes a report, not DDC, and a run
+    // Above the safe-mode guard: this writes a report, not DDC, and a run
     // started in safe mode gets its report like any other.
     checkupWindow?.abandonForTermination()
-    // D11: safe mode sends no unattended DDC. The full-range restore undoes
+    // Safe mode sends no unattended DDC. The full-range restore undoes
     // combined-mode dimming at quit, and safe mode never installed any, so
     // skipping it leaves the monitor where the user last put it.
     guard !isSafeMode else { return }
@@ -961,7 +961,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     model.oledCare.endAllLockDims()
     for state in model.displays {
       // Quitting while DisplayManager is suspended (mid-reconfigure or asleep)
-      // silently drops this at the epoch gate. Best-effort is the D5 contract.
+      // silently drops this at the epoch gate. Best-effort is the
+      // restore-choreography contract.
       state.controller.restoreFullRangeDDC()
     }
     // Best-effort barrier: the coalescer drains on the global executor, so a
@@ -977,7 +978,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// window to restore there is nothing for AppKit to do, so route it to
   /// Settings — never to onboarding, which is a first-run flow.
   ///
-  /// SO24's recovery route, named by the Menu Bar pane's hidden-icon caption.
+  /// The reopen recovery route, named by the Menu Bar pane's hidden-icon caption.
   /// Deliberately NOT gated on the icon being hidden: a reopen with the icon
   /// showing has nothing else to do either. It is also the only settings route
   /// this app controls, since ⌘, goes straight to SwiftUI's own menu item and
@@ -1013,7 +1014,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// view-driven enumeration lands after the menu closed and the section is
   /// missing on the open that asked for it.
   ///
-  /// Enumeration is on demand and cached (DM7, never on a timer), and this
+  /// Enumeration is on demand and cached (never on a timer), and this
   /// re-enumerates every listed display rather than only those with no catalog: a
   /// catalog describes the panel now behind that ID, and a replug can reassign
   /// IDs between two panels while both stay present. Every call site runs it
@@ -1027,7 +1028,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// The two unattended restores, remembered resolutions then the saved layout,
   /// as ONE operation.
   ///
-  /// Driven from the launch warm task and the topology loop, nowhere else (DM7).
+  /// Driven from the launch warm task and the topology loop, nowhere else.
   /// The topology loop is this app's `CGDisplayReconfigurationCallBack` intake,
   /// and its one-second quiet window is why reapply hangs off it rather than the
   /// raw screen-parameters notification: applying a mode mid-burst is the case
@@ -1037,10 +1038,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// resolution change resizes the display, so a layout applied first would be
   /// tiled against footprints that are about to change. Fired onto separate
   /// queues the ordering was luck, and worse, the two starved each other: they
-  /// claim the same AR12 gate, and a refused pass gives its arrival claims back
-  /// assuming the holder's reconfiguration event will call it again, which
-  /// neither produces when it applies nothing. `UnattendedRestoreSequence` has
-  /// the detail.
+  /// claim the same reconfiguration gate, and a refused pass gives its arrival
+  /// claims back assuming the holder's reconfiguration event will call it
+  /// again, which neither produces when it applies nothing.
+  /// `UnattendedRestoreSequence` has the detail.
   ///
   /// Safe mode gates BOTH here, where the flag lives. Safe mode is the launch you
   /// perform when the unattended restores are suspected of making things worse: a
@@ -1055,8 +1056,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     ])
   }
 
-  /// D12: full-domain wipe, explicitly confirmed by the caller. The General pane
-  /// owns the confirmation and SO20 binds its copy to this function, so it names
+  /// Full-domain wipe, explicitly confirmed by the caller. The General pane
+  /// owns the confirmation and its copy is bound to this function, so it names
   /// the hardware effects below (HDR off, unmute, OLED care torn down with the
   /// hour counters cleared) as well as what is destroyed, including the login
   /// item and the stored brightness, volume and contrast, which on a write-only
@@ -1071,11 +1072,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // has already thrown away.
     guard model.beginReset() else { return }
     defer { model.endReset() }
-    // ---- 0. OLED care first (D29's ordering applied to dimming): overlays down
-    //         and hour counters reset while their objects are still alive. The
-    //         domain wipe never reaches them, since `rebuildControllers()` does
-    //         not touch `model.oledCare`, so a live tracker's debounced
-    //         write-through would re-persist the hours just cleared.
+    // ---- 0. OLED care first (the mute-strand rule's ordering applied to
+    //         dimming): overlays down and hour counters reset while their
+    //         objects are still alive. The domain wipe never reaches them,
+    //         since `rebuildControllers()` does not touch `model.oledCare`, so
+    //         a live tracker's debounced write-through would re-persist the
+    //         hours just cleared.
     model.oledCare.prepareForReset()
     // The other half of the contract, bound to scope exit rather than the last
     // statement: `prepareForReset()` raised a latch that swallows every topology
@@ -1088,7 +1090,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
 
     // ---- 1. Drive the hardware to a known state through the engine's own
     //         doors, while the prefs that describe that state still exist.
-    //         (D30: the controllers holding this state are about to be dropped,
+    //         (the controllers holding this state are about to be dropped,
     //         so nothing downstream can undo it for us.)
     // Displays whose HDR the USER engaged in System Settings. Keyed by
     // `persistenceKey`, not `CGDirectDisplayID`: step 5 rebuilds every controller
@@ -1097,8 +1099,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     var restoreHDRAfterRebuild: Set<String> = []
     // Displays left muted as far as anyone can tell: the unmute stood down, or it
     // went out unconfirmed. Their mute state and their strategy have to survive
-    // the wipe. D29 rule 1 orders unmute before disabling, and where the unmute
-    // could not be established the only way to honour that is to not disable.
+    // the wipe. The mute-strand rule's first clause orders unmute before
+    // disabling, and where the unmute could not be established the only way to
+    // honour that is to not disable.
     // Written back after the wipe rather than exempted from it, because a domain
     // removal has no per-key exemptions to give.
     var keepMuteStateFor: [String: Bool] = [:]
@@ -1109,7 +1112,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // HDR first. Wiping the pref under an engaged controller strands the panel
       // in HDR while the app believes it is off, and the next launch writes DDC
       // into a register the monitor has locked, so brightness silently stops
-      // working with no diagnostic. (D22: never write `prefs.hdrMode` directly;
+      // working with no diagnostic. (Never write `prefs.hdrMode` directly;
       // the controller owns the state machine.)
       //
       // The RESET door rather than `setHDRMode(.off)`: that decides from the
@@ -1135,7 +1138,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         restoreHDRAfterRebuild.insert(state.display.persistenceKey)
       }
 
-      // D29 rule 2: clear the AVAILABILITY prefs BEFORE attempting the unmute,
+      // Clear the AVAILABILITY prefs BEFORE attempting the unmute,
       // never after. `DDCValueController.toggleMute` opens with
       // `guard command == .volume, isFresh, isAvailable`, and `isAvailable` is
       // `!unavailableDDC && !forceSoftware`, so an unmute attempted first is a
@@ -1159,15 +1162,16 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // unmute would clear the stored mute flag over a register that stayed
       // muted, and the wipe then retires the strategy that could undo it.
       // Standing down leaves the display muted and SAYING so, the recoverable
-      // half of D29's choice. The wipe still runs; it takes no hardware with it.
+      // half of the mute-strand rule's choice. The wipe still runs; it takes no
+      // hardware with it.
       //
       // An unmute that CANNOT BE CONFIRMED is the same outcome, not a log line.
       // `toggleMute` has already cleared the stored flag by then, so without the
       // same treatment the wipe would take the strategy too and the display would
       // come back reporting itself unmuted over a register nobody reached: the
-      // full D29 rule 1 strand, from the button that exists to undo it. Reachable
-      // without any race, since the disengage's own reconfiguration can outlast
-      // the settle window.
+      // full strand the mute-strand rule's first clause exists to prevent, from
+      // the button that exists to undo it. Reachable without any race, since the
+      // disengage's own reconfiguration can outlast the settle window.
       if state.volume.isMuted {
         var unmuteLanded = false
         if case .disengaged = hdrState {
@@ -1198,19 +1202,19 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     gammaController.resetAllGamma()
     shadeOverlay.removeAllShades()
 
-    // ---- 2b. Virtual displays down BEFORE the wipe removes their slot keys
-    //          (VD15): a wiped `configured` with the display still standing is
-    //          state the pane cannot explain, and the display would survive until
-    //          quit with no control that knows it. The explicit key clear is
+    // ---- 2b. Virtual displays down BEFORE the wipe removes their slot keys: a
+    //          wiped `configured` with the display still standing is state the
+    //          pane cannot explain, and the display would survive until quit
+    //          with no control that knows it. The explicit key clear is
     //          redundant with the domain wipe today, load-bearing for any future
     //          partial reset.
     await model.destroyAllVirtualDisplaysForReset()
     DisplayPrefs(persistenceKey: "app").clearVirtualSlots()
 
-    // ---- 3. D12(c): the login item is part of "all settings" and the copy says
-    //         so. `LoginItem.isEnabled` reads `SMAppService.mainApp.status` live
-    //         (D10), so any pane holding a LoginItem shows OFF right after this,
-    //         with no mirrored bool to go stale.
+    // ---- 3. The login item is part of "all settings" and the copy says so.
+    //         `LoginItem.isEnabled` reads `SMAppService.mainApp.status` live, so
+    //         any pane holding a LoginItem shows OFF right after this, with no
+    //         mirrored bool to go stale.
     // The async overload is the one Swift selects, and the one we want: it
     // resolves after the unregistration is recorded, so the live `isEnabled` read
     // that follows cannot observe a stale ON.
@@ -1238,7 +1242,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       prefs.muted = true
     }
 
-    // ---- 5. D30: rebuild, do NOT merely refresh. `refresh()` would reuse every
+    // ---- 5. Rebuild, do NOT merely refresh. `refresh()` would reuse every
     //         controller for a still-connected display and leave it holding
     //         state derived from the prefs just destroyed.
     await model.rebuildControllers()
@@ -1255,9 +1259,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     //          where the user left it, and on a write-only panel the slider's
     //          claim IS the app's belief, with no readback to correct it.
     //
-    //          R4's gate is not bypassed, it is inapplicable: it exists so a
-    //          LAUNCH-time restore never blasts a display this session has never
-    //          known to an assumed default, and these displays were under
+    //          The built-in brightness gate is not bypassed, it is
+    //          inapplicable: it exists so a LAUNCH-time restore never blasts
+    //          a display this session has never known to an assumed
+    //          default, and these displays were under
     //          Candela's control a moment ago. `reassertHardware` is deliberately
     //          ungated for this kind of caller.
     //
@@ -1270,11 +1275,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     //          that no door would otherwise send. The two DDC commands carry their
     //          own refusals inside `reassertHardware` so a caller cannot forget
     //          them: it declines while the display is muted, which is how a mute
-    //          this reset carried across the wipe survives (D29 rule 1), and when
+    //          this reset carried across the wipe survives (the mute-strand
+    //          rule's first clause), and when
     //          the command is unavailable or the display is forced to software.
     //
     //          The volume verdict is the exception that cannot live in the engine:
-    //          D24's answer is per display and observed here. `.unknown` allows,
+    //          The capabilities probe's answer is per display and observed here.
+    //          `.unknown` allows,
     //          as it does for the slider; only a capability string that parsed
     //          cleanly and omits 0x62 refuses, which spares a panel that would
     //          otherwise take a volume write into a register it does not
@@ -1310,8 +1317,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     settingsActions.postReset()
 
     // ---- 6. LAST. The reset dropped HDR so the register was unlocked for the
-    //         D29 unmute in step 1, and re-engaging locks it again, so this cannot
-    //         run before the rebuilt controllers have taken their opening writes.
+    //         mute-strand-rule unmute in step 1, and re-engaging locks it again,
+    //         so this cannot run before the rebuilt controllers have taken their
+    //         opening writes.
     //         "Taken" means confirmed applied, not submitted: the restore settles
     //         this display's queues and declines to re-engage if it cannot.
     //
@@ -1351,10 +1359,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
           // ...hand its tables back (per-display; `resetAllGamma` would drop
           // every other display's dimming too)...
           // Through the controller, not straight to the island: under an engaged
-          // synthesis pairing the dim wrote TWO tables (SS15), and the island call
+          // synthesis pairing the dim wrote TWO tables, and the island call
           // would restore only the panel's, leaving the virtual display holding a
           // scaled one under a display the shade now dims as well. The controller
-          // also owns the enforcer target (DT15).
+          // also owns the enforcer target.
           controller?.handBackGammaTables()
           // ...and re-apply the current brightness through the shade backend.
           // `handleReconfigure` is the door: it clears the software dedupe memo
@@ -1372,7 +1380,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   private func startMediaKeyTap() {
     guard let mediaKeyTap else { return }
     // Computed once and recorded only on success: `lastArmedTapConfig` is what is
-    // actually being watched, and a config that failed to arm is not that (B9).
+    // actually being watched, and a config that failed to arm is not that.
     let config = model.tapConfig
     do {
       try mediaKeyTap.start(config: config)
@@ -1400,7 +1408,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     model.noteTapArmed(config)
   }
 
-  /// Applies the `menuIcon` mode to the status item (D5). Called at launch, after
+  /// Applies the `menuIcon` mode to the status item. Called at launch, after
   /// every display refresh, and from the settings seam's `.updateStatusItem`
   /// effect, which fires for the hide-display prefs too because they decide
   /// `hasVisibleSlider`.

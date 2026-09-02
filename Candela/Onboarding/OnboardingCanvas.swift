@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Which act of the flow the canvas is lighting. The accent shifts per act
-/// (OB10): cool through detection, the display's warmth through care, green
+/// Which act of the flow the canvas is lighting. The accent shifts per act:
+/// cool through detection, the display's warmth through care, green
 /// at the finish.
 enum OnboardingAct: Equatable {
   case welcome
@@ -47,7 +47,7 @@ enum OnboardingAct: Equatable {
   }
 }
 
-/// The persistent layer under every page (OB10): a near-black ground, two
+/// The persistent layer under every page: a near-black ground, two
 /// drifting glow blobs in the act's hues, and a vignette. Slow movement
 /// always; Reduce Motion stills it entirely.
 struct OnboardingCanvas: View {

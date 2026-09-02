@@ -2,8 +2,9 @@ import Foundation
 
 /// Health-view-ready snapshot of one panel's exposure and window attribution.
 ///
-/// **OC11**: every value here reduces to measured relative exposure, what is on
-/// screen right now, or measured panel-time attributable to an app. This type
+/// **Relative exposure only**: every value here reduces to measured relative
+/// exposure, what is on screen right now, or measured panel-time
+/// attributable to an app. This type
 /// must never gain a lifespan figure, a predicted date or a risk score.
 public struct PanelHealthSummary: Sendable {
   public enum Confidence: Equatable, Sendable {
@@ -69,7 +70,7 @@ public struct PanelHealthSummary: Sendable {
   /// The heaviest apps by **panel-hours attributable to them**, not wall-clock
   /// hours the app was open: an app covering a quarter of the panel books
   /// fifteen minutes per hour. Copy must not say "Slack was open for 340 hours"
-  /// (OC11).
+  /// (the relative-exposure-only rule).
   ///
   /// Independent of `confidence`. Per-owner hours come from window observation,
   /// a separate pref needing no permission, so this can be populated while

@@ -4,7 +4,7 @@ import Foundation
 /// Cumulative light exposure per panel-native grid cell.
 ///
 /// The unit is arbitrary (luminance times seconds) because it is only ever
-/// compared against itself. OC11: it supports "3.2x this panel's average" and
+/// compared against itself. It supports "3.2x this panel's average" and
 /// nothing about lifespan.
 public struct ExposureMap: Equatable, Sendable, Codable {
   /// Always `PanelGrid.cellCount` long: `.empty` is the only way in from
@@ -114,7 +114,7 @@ public struct ExposureMap: Equatable, Sendable, Codable {
 /// Folds periodic luminance samples into an `ExposureMap`.
 public struct ExposureAccumulator: Sendable {
   /// 30 minutes at the 60 s cadence. Named so "is this map worth believing yet"
-  /// is one decision (OC17, OC19) rather than arithmetic on an empty array.
+  /// is one decision rather than arithmetic on an empty array.
   public static let minimumSamplesForAnalysis = 30
 
   public private(set) var map: ExposureMap

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The scan set piece (OB10): a light sweep, outlines tracing in one per
+/// The scan set piece: a light sweep, outlines tracing in one per
 /// display, then the cards resolve with real facts. Roughly two seconds,
 /// always click-through-able; Reduce Motion skips straight to the cards.
 struct OnboardingDetectionPage: View {
@@ -160,7 +160,7 @@ struct OnboardingDetectionPage: View {
     "Up to \(Int(display.refreshHz.rounded())) Hz"
   }
 
-  /// OB9: state what works; the display's own denial is its report, and unknown
+  /// State what works; the display's own denial is its report, and unknown
   /// is never called a failure. Unknown is never called verified either: a
   /// write-only display cannot confirm anything, so its line states what the app
   /// offers rather than what the display responded to.

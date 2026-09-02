@@ -1,7 +1,7 @@
 import Foundation
 
 /// One size Candela can render by mirroring a panel onto a virtual display,
-/// rather than one the panel enumerates (SS3).
+/// rather than one the panel enumerates.
 ///
 /// Both axes come out of `SyntheticSizeCatalog` even-rounded, because a virtual
 /// display's framebuffer is twice the logical size and an odd axis would put a
@@ -47,14 +47,14 @@ public struct SyntheticSizeDescriptor: Sendable, Equatable, Codable {
   }
 }
 
-/// The curated ladder of sizes Candela is willing to synthesize (SS3), and the
-/// precedence rule that keeps it out of revelation's way (SS2).
+/// The curated ladder of sizes Candela is willing to synthesize, and the
+/// precedence rule that keeps it out of revelation's way.
 ///
 /// Pure arithmetic over geometry: nothing here talks to CoreGraphics, so the
 /// whole ladder is testable without a panel.
 public enum SyntheticSizeCatalog {
-  /// Fixed by SS3. Free width-by-height entry is a filed non-goal, so this is
-  /// the whole space of sizes synthesis can offer.
+  /// Fixed rather than open-ended: free width-by-height entry is a filed
+  /// non-goal, so this is the whole space of sizes synthesis can offer.
   public static let stopPercents: [Int] = [95, 90, 85, 80, 75, 70, 65]
 
   /// How far a stop's aspect ratio may drift from native before it is dropped.
@@ -63,10 +63,10 @@ public enum SyntheticSizeCatalog {
   private static let aspectTolerance = 0.02
 
   /// The window inside which an existing HiDPI row is considered to already
-  /// serve a stop (SS2).
+  /// serve a stop.
   private static let precedenceTolerance = 0.02
 
-  /// Minor-axis floor in points (SS3). Below this a size stops being usable
+  /// Minor-axis floor in points. Below this a size stops being usable
   /// rather than merely large.
   private static let minorAxisFloor = 720
 
@@ -116,7 +116,7 @@ public enum SyntheticSizeCatalog {
 
   /// Re-find a stored choice in the ladder the current panel and rows generate.
   /// Regenerates rather than trusting the descriptor, so a size an older ladder
-  /// produced, or one SS2 precedence has taken over, resolves nil instead of
+  /// produced, or one the precedence rule has taken over, resolves nil instead of
   /// engaging something the catalog would no longer offer.
   public static func size(
     matching descriptor: SyntheticSizeDescriptor,

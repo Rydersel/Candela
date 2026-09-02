@@ -5,7 +5,7 @@ import Testing
 
 /// The shared world every synthesis suite drives: a real `DisplayModeCoordinator`
 /// over a real `SynthesisCoordinator`, a real preview session, a real engine and
-/// a real gate, with only the two hardware backends faked (AT3).
+/// a real gate, with only the two hardware backends faked.
 ///
 /// Shared rather than copied per suite: this fixture writes REAL prefs, and a
 /// drifted copy is a test that passes for the wrong reason.

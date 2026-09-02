@@ -30,7 +30,7 @@ struct CandelaApp: App {
     // `minWidth`/`minHeight` still hold the floor.
     .windowResizability(.contentMinSize)
 
-    // Display Health (OCR-A1) is deliberately NOT a scene. Adding a WindowGroup
+    // Display Health is deliberately NOT a scene. Adding a WindowGroup
     // for it changed plain launch behavior on this LSUIElement app: the settings
     // window opened where a control build opened nothing [MEASURED 2026-08-17],
     // and the suppressing API does not exist at the macOS 14 floor.

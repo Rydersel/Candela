@@ -47,7 +47,7 @@ struct ArrangementAttachPolicyTests {
     // Well below and to the right of display 1. The nearest position keeping any
     // shared edge is y = 999, where the two displays meet over a single point:
     // legal, and it looks like a misfire. Going flush with the nearer end gives
-    // the whole edge. This is why AR15 says NEAR rather than nearest, and the
+    // the whole edge. This is why the attach rule says NEAR rather than nearest, and the
     // landing here is 999 points off the strictly nearest legal position.
     let attachment = try #require(ArrangementAttachPolicy.attach(
       rect(5_000, 3_000, 1_000, 1_000), id: 2, in: pair, threshold: 80

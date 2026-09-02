@@ -6,7 +6,7 @@ import Testing
 /// Who is allowed to enter DDC service matching. A display Candela created never enters
 /// the pool, and that has to hold whoever calls and on hardware nobody has attached,
 /// which is why it is a pure policy rather than a clause inside `discover()`.
-@Suite("DDC candidate pool (VD3)")
+@Suite("DDC candidate pool")
 struct DDCCandidatePolicyTests {
   private func candidates(
     _ online: [CGDirectDisplayID],

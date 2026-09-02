@@ -115,7 +115,7 @@ enum DiagnosticsPageCopy {
     "\(AppInfo.productName) uses four commands: brightness, contrast, volume and mute. A display can advertise a command it ignores, or ignore one it advertises."
   }
 
-  /// Collapsed, and plain text rather than a browsable list (R12): it is the
+  /// Collapsed, and plain text rather than a browsable list: it is the
   /// wire's own words, kept for pasting into a bug report.
   static var rawDescriptionDisclosure: LocalizedStringKey {
     "What the display sent, exactly"
@@ -139,7 +139,7 @@ enum DiagnosticsPageCopy {
   /// three commands being turned off, or from the first read not having happened.
   ///
   /// Safe Mode is checked first because under it the `startupAction` getter
-  /// reports `.doNothing` whatever is stored (D11), so reading the pref first
+  /// reports `.doNothing` whatever is stored, so reading the pref first
   /// would report the pref rather than the session. Everything else falls through
   /// to a sentence that claims no cause.
   static func notAttempted(isSafeMode: Bool, readsBackAtStartup: Bool) -> LocalizedStringKey {
@@ -187,16 +187,16 @@ enum DiagnosticsPageCopy {
   /// the gates rather than picking one: which is holding is not visible from
   /// here, and all of them are necessary.
   ///
-  /// ONE consequence sentence (SO15); the conditions are a list on screen
+  /// ONE consequence sentence; the conditions are a list on screen
   /// (`requirements` below), with the prose kept as each row's accessibility
-  /// label (SO16).
+  /// label.
   static var watchedKeys: LocalizedStringKey {
     "\(AppInfo.productName) watches a family of keys only while a press could land on something, and keys it does not watch go straight to macOS."
   }
 
   /// What each family needs before its keys are watched. The visible half states
   /// only what holds in every mode; the mode-dependent corners live in the spoken
-  /// half (SO16), and the Keyboard pane states them in full.
+  /// half, and the Keyboard pane states them in full.
   static var keyWatchRequirements: [(title: String, needs: String, spoken: String)] {
     [
       (

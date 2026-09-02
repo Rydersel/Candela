@@ -6,7 +6,7 @@ import Testing
 /// What the controller does with `DDCWireHealth`, which applies reach it, and
 /// every route back. `DDCWireHealthTests` pins the counting rule itself; the two
 /// defects here are a demotion no route undoes, and one that fires on an HDR window.
-@Suite("DDC wire degradation (WD1, WD3, WD4)")
+@Suite("DDC wire degradation")
 @MainActor
 struct DDCWireDegradationTests {
   /// Drives the wire until `count` applies have failed. Distinct values on purpose:
@@ -30,7 +30,7 @@ struct DDCWireDegradationTests {
     #expect(!harness.controller.isWireUnresponsive)
   }
 
-  /// The MAG341C's shape, and why WD1 keys on writes: it answers every read with
+  /// The MAG341C's shape, and why the failure-counting rule keys on writes: it answers every read with
   /// zeros and honours every write. The read verdict is asserted beside the
   /// health to show they are separate facts.
   @Test func aWriteOnlyPanelWhoseWritesLandIsNeverDemoted() async {
@@ -81,7 +81,7 @@ struct DDCWireDegradationTests {
     #expect(!harness.controller.isWireUnresponsive)
   }
 
-  /// WD4 and D28. Pure-DDC configuration is where the shortcut shows: a
+  /// The full-re-evaluation rule and the reapply-after-pref-change rule. Pure-DDC configuration is where the shortcut shows: a
   /// `handleReconfigure` returns before applying anything, so a display demoted
   /// through that door keeps a slider that moves nothing.
   @Test func theTransitionRunsTheFullReEvaluationEvenInPureDDCMode() async {
@@ -104,7 +104,7 @@ struct DDCWireDegradationTests {
     #expect(harness.gamma.scales.last != 1.0)
   }
 
-  /// WD3, route one: a reconfiguration rebuilt the display's state, so the wire
+  /// The fresh-hearing rule, route one: a reconfiguration rebuilt the display's state, so the wire
   /// is asked again rather than staying demoted on writes made before it.
   @Test func aReconfigurationGivesTheWireAFreshHearing() async {
     let harness = Harness(withHDR: false)
@@ -119,7 +119,7 @@ struct DDCWireDegradationTests {
     #expect(harness.controller.brightnessPath == .combined(switchingValue: 0.5, backend: .gamma))
   }
 
-  /// WD3, route two: no replug and no relaunch, which is the whole difference
+  /// The fresh-hearing rule, route two: no replug and no relaunch, which is the whole difference
   /// from the implementation this design is specified against.
   @Test func wakeGivesTheWireAFreshHearing() async {
     let harness = Harness(withHDR: false)
@@ -134,7 +134,7 @@ struct DDCWireDegradationTests {
     #expect(harness.controller.brightnessPath == .combined(switchingValue: 0.5, backend: .gamma))
   }
 
-  /// WD3, route three, through the door somebody else opens: HDR switched on in
+  /// The fresh-hearing rule, route three, through the door somebody else opens: HDR switched on in
   /// System Settings and off again. A display must not be left demoted by a
   /// failure inside that window.
   @Test func anHDRRoundTripInSystemSettingsGivesTheWireAFreshHearing() async {
@@ -203,7 +203,7 @@ struct DDCWireDegradationTests {
     #expect(harness.controller.brightnessPath == .native)
   }
 
-  /// WD2's ordering, asserted through the engine so the pane cannot be told the
+  /// The turned-off-outranks-wire rule's ordering, asserted through the engine so the pane cannot be told the
   /// other story: a command the user turned off is reported as turned off.
   @Test func theUsersOwnSwitchStillOutranksTheWireInTheEngine() async {
     let harness = Harness(withHDR: false)
@@ -225,8 +225,8 @@ struct DDCWireDegradationTests {
 }
 
 /// The coalescer's half: which applies reach the health at all. Here rather than
-/// in the coalescer suite because the rule being pinned is WD1's, not the queue's.
-@Suite("What counts against the wire (WD1)")
+/// in the coalescer suite because the rule being pinned is the failure-counting rule's, not the queue's.
+@Suite("What counts against the wire")
 struct WireHealthEvidenceTests {
   @Test func aFailedDDCApplyCountsAgainstTheWire() async {
     let applier = RecordingApplier(scriptedResults: [false, false, false])

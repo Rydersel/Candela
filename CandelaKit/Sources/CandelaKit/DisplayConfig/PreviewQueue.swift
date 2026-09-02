@@ -14,7 +14,7 @@ import os
 /// `pending` and suspends, and a `mutating async` method on a struct stored in a
 /// class property holds exclusive access across the suspension.
 ///
-/// In CandelaKit rather than the app target: there is no app test target (D21),
+/// In CandelaKit rather than the app target: there is no app test target,
 /// so an app-target copy would be verifiable only by running the UI, while here
 /// it is pure plumbing with tests.
 public final class PreviewQueue: Sendable {

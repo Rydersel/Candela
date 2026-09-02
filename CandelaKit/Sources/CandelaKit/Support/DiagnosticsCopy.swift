@@ -31,8 +31,7 @@ public enum DiagnosticsCopy {
   // MARK: - Shared vocabulary
 
   /// A fact nothing has looked for yet. Distinct at every call site from a fact
-  /// that was looked for and came back absent, which is the whole of DT30 rule
-  /// (e) in three words.
+  /// that was looked for and came back absent.
   public static let notEnumerated = "Not enumerated yet"
 
   /// A tag the capabilities string does not carry. Not "None": the display's
@@ -51,10 +50,10 @@ public enum DiagnosticsCopy {
   /// this exact wording, so it is shipped documentation as well as copy.
   public static let wireTimingCheckLabel = "Unsupported-timing check"
 
-  /// Says what WE did and why, never what the display or macOS did (DT30 rule
-  /// (d)). Names no pref key: `wireTimingGuard` is a `defaults write` escape
-  /// hatch with no control in the interface (D26), so naming it tells the user
-  /// nothing they can act on and breaks D25.
+  /// Says what WE did and why, never what the display or macOS did. Names no
+  /// pref key: `wireTimingGuard` is a `defaults write` escape hatch with no
+  /// control in the interface, so naming it tells the user nothing they can
+  /// act on and breaks the rule against internal key names in UI copy.
   public static let wireTimingGuardOff = """
     Turned off by an advanced setting. Resolutions the display has no matching \
     timing for are offered again, and some displays scan those out letterboxed \
@@ -130,7 +129,7 @@ public enum DiagnosticsCopy {
   /// The identity-keys tooltip. Carries the IOReg PATH and deliberately not
   /// `ioregMatchScore`: that score reads 0 both when nothing matched and when
   /// the CoreDisplay dictionary could not be read at all, so any wording for 0
-  /// asserts one of two incompatible things. DT30 rule (g) wants the real number
+  /// asserts one of two incompatible things. This row wants the real number
   /// or none.
   public static func ioregPath(_ facts: DisplayHardwareFacts?) -> String {
     guard let facts else { return "The system port path for this display has not been read yet." }
@@ -149,7 +148,7 @@ public enum DiagnosticsCopy {
     key ?? notEnumerated
   }
 
-  /// Three distinct answers, and the distinction matters (DT30 rule (e)): "none
+  /// Three distinct answers, and the distinction matters: "none
   /// on this display" is a measurement, "not available" is a missing capability,
   /// and conflating them would report a capability gap as a fact about the
   /// display.
@@ -218,13 +217,14 @@ public enum DiagnosticsCopy {
 
   // MARK: - Reported capabilities
 
-  /// SO5 applied to capabilities: answered, answered-but-unreadable,
-  /// asked-and-unanswered, and never-asked are FOUR facts and each gets its own
-  /// sentence. Collapsing any pair lets the page accuse a display that was never
-  /// asked, or credit one whose answer we could not read.
+  /// The four-facts rule applied to capabilities: answered,
+  /// answered-but-unreadable, asked-and-unanswered, and never-asked are FOUR
+  /// facts and each gets its own sentence. Collapsing any pair lets the page
+  /// accuse a display that was never asked, or credit one whose answer we
+  /// could not read.
   ///
-  /// `parsedACommandList` is false when the description did not parse end to end
-  /// (D24), which is a DIFFERENT answer from "the display listed no codes".
+  /// `parsedACommandList` is false when the description did not parse end to end,
+  /// which is a DIFFERENT answer from "the display listed no codes".
   public static func capabilityAnswer(
     hasDescription: Bool,
     parsedACommandList: Bool,
@@ -243,7 +243,7 @@ public enum DiagnosticsCopy {
   }
 
   /// The four commands this app speaks, and which of them this display
-  /// advertises. Never a claim about what macOS hides (DT30 rule d), only about
+  /// advertises. Never a claim about what macOS hides, only about
   /// what the display itself listed. nil codes means the description did not
   /// parse, which is not an empty list.
   public static func advertisedCommands(_ codes: Set<UInt8>?, app: String) -> String {
@@ -317,8 +317,8 @@ public enum DiagnosticsCopy {
 
   // MARK: - Availability
   //
-  // DT30 rule (a) lives here: no value in this group may read just
-  // "Unavailable" or "Not supported". Every one of them names the thing that
+  // The typed-and-recorded rule lives here: no value in this group may read
+  // just "Unavailable" or "Not supported". Every one of them names the thing that
   // took the feature away, and every reason comes off a typed value rather than
   // being composed at the point of display.
 
@@ -340,11 +340,12 @@ public enum DiagnosticsCopy {
     }
   }
 
-  /// DT30 rule (b), the row that rule exists for. `.unknown` is NOT
+  /// The row the three-distinct-answers rule exists for. `.unknown` is NOT
   /// "unsupported": `.unsupported` is reachable ONLY from a description that
   /// parsed cleanly end to end and did not list the code, so flattening three
   /// states to two greys a working control on a display that merely stayed
-  /// silent. D24 resolves unknown to enabled, and this says that out loud.
+  /// silent. The volume-capabilities rule resolves unknown to enabled, and
+  /// this says that out loud.
   ///
   /// `support` is nil when nobody has asked yet, which is not `.unknown`: a
   /// stored `.unknown` means the probe ran and the display said nothing usable.
@@ -415,9 +416,9 @@ public enum DiagnosticsCopy {
   /// floor and Invert sends the top of the range. "All the way down" is the
   /// claim neither falsifies.
   ///
-  /// `muteSupport` is non-optional because D24 sends both nil and `.unknown` to
-  /// the dedicated command; the volume row's optional exists because the two
-  /// earn different sentences there.
+  /// `muteSupport` is non-optional because the volume-capabilities rule sends
+  /// both nil and `.unknown` to the dedicated command; the volume row's
+  /// optional exists because the two earn different sentences there.
   public static func muteAvailability(
     muteEnabled: Bool,
     volumeAvailable: Bool,
@@ -533,7 +534,7 @@ public enum DiagnosticsCopy {
   }
 
   /// Reads from the LAST ARMED config, not a freshly computed one. The two
-  /// differ exactly when a rearm failed, which is the case this row is for (B9).
+  /// differ exactly when a rearm failed, which is the case this row is for.
   public static func watchedKeys(families: [String], tapRunning: Bool) -> String {
     guard tapRunning else {
       return "None: the media-key tap is not running"
@@ -571,12 +572,12 @@ public enum DiagnosticsCopy {
   /// does a standalone display), so this claims only what that call can support.
   /// nil is the display not having been enumerated yet.
   ///
-  /// **`isSynthesized` outranks the flag, in all three of its states** (SS7). A
+  /// **`isSynthesized` outranks the flag, in all three of its states.** A
   /// panel showing a synthesized size IS a mirror slave to CoreGraphics while
   /// showing its own desktop: the pixels come from a virtual display Candela
   /// made for it, so "showing another display's contents" names a display the
   /// user does not have. The caller answers from the engine's pairing table,
-  /// which is the authority on synthesis topology (SS1).
+  /// which is the authority on synthesis topology.
   public static func mirroring(isMirrorSlave: Bool?, isSynthesized: Bool = false) -> String {
     if isSynthesized { return "Showing a synthesized size" }
     guard let isMirrorSlave else { return notEnumerated }

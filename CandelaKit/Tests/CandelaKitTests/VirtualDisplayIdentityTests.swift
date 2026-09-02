@@ -6,7 +6,7 @@ import Testing
 /// Identity for displays Candela creates. Distinctness here is by
 /// CONSTRUCTION, not by hashing: the collision it prevents is silent, and
 /// "probably distinct" is the wrong strength for that.
-@Suite("Virtual display identity (VD7)")
+@Suite("Virtual display identity")
 struct VirtualDisplayIdentityTests {
   /// The key is produced by the UNCHANGED `DisplayConfigIdentity.key`
   /// function; the format is frozen on-disk schema, so these are pinned
@@ -44,7 +44,7 @@ struct VirtualDisplayIdentityTests {
     #expect(VirtualDisplayIdentity.configIdentity(slot: 5).key == "ca1d-2005-5")
   }
 
-  /// SS6: slots 4 and 5 are engine-internal synthesis slots. Nothing
+  /// Slots 4 and 5 are engine-internal synthesis slots. Nothing
   /// user-facing may show or allocate them, and the two sub-ranges must
   /// together account for the whole family, or a slot exists that no rule
   /// governs.
@@ -72,7 +72,7 @@ struct VirtualDisplayIdentityTests {
     }
   }
 
-  /// Defensive rounding: S2 observed a real failure at an odd width that the
+  /// Defensive rounding: an earlier experiment observed a real failure at an odd width that the
   /// research pass could not reproduce as a parity effect. Kept because it
   /// costs nothing and the failure is still unexplained.
   @Test func normalizingRoundsBothAxesToEvenAndQuantizesRefresh() {
@@ -105,7 +105,7 @@ struct VirtualDisplayIdentityTests {
   }
 
   /// The handle carries the SPEC, because nothing is ever read back from a
-  /// live virtual display (VD5): `hiDPI` read back 2 after being set to 1,
+  /// live virtual display: `hiDPI` read back 2 after being set to 1,
   /// and `CGDisplayScreenSize` read 0.0 x 0.0 mm.
   @Test func aHandleCarriesTheNormalizedSpecAsItsTruth() {
     let spec = VirtualDisplaySpec(

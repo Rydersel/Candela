@@ -3,7 +3,8 @@ import CoreGraphics
 import Foundation
 import Testing
 
-/// The AR12 claim across a synthesized-size pick, end to end through the real
+/// The reconfiguration-gate claim across a synthesized-size pick, end to end
+/// through the real
 /// coordinators, the real preview session, the real engine and the real gate.
 ///
 /// `DisplayReconfigurationGateTests` characterises the gate itself and cannot
@@ -32,7 +33,7 @@ struct SynthesisGateTests {
     await fixture.revertAnyPreview()
   }
 
-  /// SS4: opted out, the picker holds no synthesized row at all. The ladder is
+  /// Opted out, the picker holds no synthesized row at all. The ladder is
   /// still arithmetically generable from this panel, so this is the opt-in
   /// doing the work rather than a panel with nothing to offer.
   @Test func anOptedOutPanelOffersNoSynthesizedRowAtAll() async {
@@ -163,7 +164,7 @@ struct SynthesisGateTests {
     #expect(!didOptOut, "and so must the opt-out, for the same reason")
     #expect(!didUnwind, "and the whole-app teardown, which reports it to its caller")
     #expect(fixture.synthesis.refusal?.reason == .busy)
-    // The half that matters most: SS11's ordering is only honoured if a refused
+    // The half that matters most: the ordering is only honoured if a refused
     // teardown leaves both keys exactly as it found them.
     #expect(prefs.offerSyntheticSizes)
     #expect(prefs.storedSyntheticSize == nil)
@@ -214,9 +215,9 @@ struct SynthesisGateTests {
     #expect(fixture.synthesis.freeSlots == 1, "and give its slot back")
   }
 
-  /// SS7 in the direction nothing consulted before: a synthesis engage over a
-  /// mirror set the USER built is refused, at the same seam every other refusal
-  /// is decided.
+  /// The synthesized-size carve-out in the direction nothing consulted before:
+  /// a synthesis engage over a mirror set the USER built is refused, at the
+  /// same seam every other refusal is decided.
   @Test func aUserMirrorSetRefusesASynthesizedSize() throws {
     let fixture = Fixture(mirroring: Self.secondPanelID)
     defer { fixture.forgetPrefs() }

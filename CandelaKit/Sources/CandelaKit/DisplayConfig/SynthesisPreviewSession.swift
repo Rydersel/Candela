@@ -17,7 +17,7 @@ public protocol SynthesisDriving: Sendable {
   func disengage(fromPhysical displayID: CGDirectDisplayID) async -> Result<Void, SynthesisFailure>
 
   /// What the engine holds for a physical display right now. The pairing table
-  /// is the authority on synthesis topology (SS1), so this is how a preview
+  /// is the authority on synthesis topology, so this is how a preview
   /// checks that what it is about to keep still exists.
   func pairing(forPhysical displayID: CGDirectDisplayID) async -> SynthesisPairing?
 }
@@ -60,7 +60,7 @@ public enum SynthesisPreviewRefusal: Error, Sendable, Equatable {
 ///   to name, and a fabricated `DisplayConfigError` code would disguise the
 ///   failure a person most needs told about.
 /// - `.committed` carries the pairing, because keeping a synthesized size is the
-///   moment the coordinator has something to persist (SS11).
+///   moment the coordinator has something to persist.
 /// - `.busy` exists at all, which no other preview session needs.
 ///
 /// The two "nothing happened" answers stay separate: `.stale` is final and
@@ -85,7 +85,7 @@ public enum SynthesisPreviewOutcome: Sendable, Equatable {
 }
 
 /// Preview, confirm, keep for a synthesized size, with a countdown that
-/// **defaults to disengaging** (SS10).
+/// **defaults to disengaging**.
 ///
 /// The same argument as `ModePreviewSession`: a size can leave a display
 /// unreadable, and then nobody can click "Keep", so the safe outcome is the one

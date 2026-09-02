@@ -2,8 +2,8 @@ import CandelaKit
 import CoreGraphics
 import Testing
 
-/// SS7's carve-out as the mirroring surfaces apply it, and SS12's naming
-/// fallback (AT10).
+/// The synthesized-size carve-out as the mirroring surfaces apply it, and the
+/// arrangement map's naming fallback.
 ///
 /// The fixture is the shape that produced the defects: a single physical panel
 /// with a synthesized size engaged, so the virtual display is a second online
@@ -98,7 +98,7 @@ struct MirroringPredicateTests {
   }
 }
 
-/// SS12: the arrangement map presents the physical panel for a synthesis pair,
+/// The arrangement map presents the physical panel for a synthesis pair,
 /// and the one string it must never show is the virtual display's name.
 @Suite("The arrangement map's name for a synthesis pair") @MainActor
 struct ArrangementPaneNamingTests {

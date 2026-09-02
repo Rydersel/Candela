@@ -10,8 +10,9 @@ import SwiftUI
 struct ResolutionSelection {
   let coordinator: DisplayModeCoordinator
   let displayID: CGDirectDisplayID
-  /// SO6, sampled at the click and carried in. Re-deriving it here would answer
-  /// for whatever was key when the row was drawn.
+  /// The key-settings-window test, sampled at the click and carried in.
+  /// Re-deriving it here would answer for whatever was key when the row was
+  /// drawn.
   let surface: DisplayModeCoordinator.PreviewSurface
 
   /// Keeps the refresh rate the display is already running, when the chosen
@@ -53,9 +54,9 @@ struct ResolutionSelection {
 /// the external hub and the built-in display's page.
 ///
 /// The density model's recommendation callout and the synthesized-sizes opt-in
-/// stay out: they are the hub's alone, and SS14 keeps synthesis away from the
-/// built-in. The synthesized-rate row IS here because it belongs to the refresh
-/// control it replaces.
+/// stay out: they are the hub's alone, and the synthesized-sizes design keeps
+/// synthesis away from the built-in. The synthesized-rate row IS here because
+/// it belongs to the refresh control it replaces.
 ///
 /// `@MainActor` because a `View`'s properties other than `body` are nonisolated
 /// under complete concurrency and these read main-actor types.
@@ -64,7 +65,7 @@ struct DisplaySizeRows: View {
   let catalog: DisplayModeCoordinator.Catalog
 
   @Environment(AppModel.self) private var model
-  /// SO6's "key settings window" test, read at the click that starts a preview.
+  /// The "key settings window" test, read at the click that starts a preview.
   @Environment(\.controlActiveState) private var controlActiveState
 
   private var displayID: CGDirectDisplayID { catalog.display.id }
@@ -122,11 +123,11 @@ struct DisplaySizeRows: View {
   }
 
   /// Static and internal so the app test bundle can assert on the words
-  /// without a window (AT10's row-model rule).
+  /// without a window (the row-model rule).
   ///
   /// A mark rides along only when it is a COST of choosing this item: the caps
-  /// warning (from the row's OUTCOME, not its catalog entry, SO18), the
-  /// recommendation, and "Rendered by Candela" (SS5), which stands a virtual
+  /// warning (from the row's OUTCOME, not its catalog entry), the
+  /// recommendation, and "Rendered by Candela", which stands a virtual
   /// display up. Notes about where a mode came from belong to the All Sizes
   /// page, where a row has the width; see `AllModesPage.rowBadge`.
   ///
@@ -163,7 +164,7 @@ struct DisplaySizeRows: View {
     if catalog.isDefaultSize(row.mode) {
       marks.append(DisplayModeCopy.defaultSize)
     }
-    // A cost, not a provenance note (SS5): picking this stands a virtual
+    // A cost, not a provenance note: picking this stands a virtual
     // display up, takes seconds, and shows in System Settings.
     if row.mode.isSynthesized {
       marks.append(SynthesisCopy.badge)
@@ -182,7 +183,7 @@ struct DisplaySizeRows: View {
     catalog.rows.first { catalog.isCurrentSize($0.mode) }?.id
   }
 
-  /// Prospective (SO18): the rates offered are the SELECTED size's. Quantized
+  /// Prospective: the rates offered are the SELECTED size's. Quantized
   /// before deduplication, because `refreshRates(in:)` dedupes raw doubles and
   /// would list 60 twice the day float noise reached it, while NTSC's genuine
   /// 59.9 survives quantization as its own entry.
@@ -314,7 +315,8 @@ struct RememberResolutionRow: View {
             setToCurrentButton(isRedundant: pinnedMatchesCurrent(stored))
             // Never disabled. This is the way out of a pin that cannot be
             // honoured, and a recovery control unavailable in the state it
-            // exists to recover from is the D29 rule 3 shape. Clearing during a
+            // exists to recover from is the shape the mute-strand rule forbids.
+            // Clearing during a
             // countdown is harmless: keeping the preview pins the mode the user
             // just accepted, not the forgotten one.
             Button("Forget") { coordinator.forgetStoredMode(on: displayID) }

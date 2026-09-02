@@ -4,7 +4,7 @@ import Testing
 
 /// Answers table reads from a dictionary, so a display can be made to refuse its
 /// own baseline. No display in the rig can be told to do that on demand, and
-/// SS15's companion leg is defined entirely by what happens when one does.
+/// the companion leg is defined entirely by what happens when one does.
 @MainActor
 private final class StubGammaDriver: GammaTableDriving {
   /// Displays that will report a table. Anything absent refuses.
@@ -31,7 +31,7 @@ private final class StubGammaDriver: GammaTableDriving {
   func enforceActivity() { enforcedCount += 1 }
 }
 
-@Suite("Gamma controller baselines (SS15)")
+@Suite("Gamma controller baselines")
 @MainActor
 struct GammaControllerTests {
   private static let panelID: CGDirectDisplayID = 2
@@ -46,8 +46,8 @@ struct GammaControllerTests {
   }
 
   /// A virtual display cannot be read back by the process that created it, so
-  /// the companion leg has no baseline to scale. SS15 still requires it to
-  /// receive the table, so the table is written against the straight ramp.
+  /// the companion leg has no baseline to scale. It still must receive the
+  /// table, so the table is written against the straight ramp.
   @Test func theCompanionLegWritesTheIdentityScaledTableWhenTheBaselineCannotBeCaptured() {
     let driver = StubGammaDriver()
     driver.screens = [Self.virtualID]
@@ -68,7 +68,7 @@ struct GammaControllerTests {
   /// The panel leg must NOT acquire the fallback. A display whose real table
   /// could not be read still has a colour profile, and writing a straight ramp
   /// over it would flatten that profile while reporting success: the honest
-  /// refusal (DT17) is the whole reason this leg returns a `Bool`.
+  /// refusal is the whole reason this leg returns a `Bool`.
   @Test func theOrdinaryLegStillRefusesADisplayWhoseBaselineCannotBeCaptured() {
     let driver = StubGammaDriver()
     driver.screens = [Self.panelID]

@@ -6,9 +6,9 @@ import Testing
 @Suite("Arrangement dock policy")
 struct ArrangementDockPolicyTests {
   /// `mirroredIDs` is non-empty on the odd ids, so every property below is
-  /// checked against a tile carrying something a move must not drop. AR6: mirror
-  /// slaves get no tile, and their masters must keep naming them across a
-  /// keyboard move, or the plan silently breaks the mirror set.
+  /// checked against a tile carrying something a move must not drop. The
+  /// mirror-slave rule: mirror slaves get no tile, and their masters must keep
+  /// naming them across a keyboard move, or the plan silently breaks the mirror set.
   private func tile(_ id: CGDirectDisplayID, _ rect: DisplayRect) -> ArrangementTile {
     ArrangementTile(
       id: id,
@@ -86,7 +86,7 @@ struct ArrangementDockPolicyTests {
             #expect(other == layout.tile(other.id))
           }
           // The moved tile keeps everything except its origin: size, identity,
-          // name, and the mirror slaves it is master of (AR6).
+          // name, and the mirror slaves it is master of.
           #expect(moved.tile(source.id) == source.moved(to: moved.tile(source.id)!.rect.origin))
         }
       }

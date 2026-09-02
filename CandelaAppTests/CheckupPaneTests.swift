@@ -5,7 +5,7 @@ import SwiftUI
 import Testing
 
 /// The document is what a person forwards to a seller and the pane is where a
-/// verdict would creep in (CK8), so both are read here rather than by eye.
+/// verdict would creep in, so both are read here rather than by eye.
 @Suite("Checkup pane copy and summary text")
 struct CheckupPaneTests {
   @Test func theSummaryTextOpensWithTheHeaderSentenceAndGroupsByFamily() throws {
@@ -38,7 +38,7 @@ struct CheckupPaneTests {
     #expect(!text.contains("—"))
   }
 
-  /// CK30: a run abandoned before the identity leg carries a placeholder
+  /// A run abandoned before the identity leg carries a placeholder
   /// identity, and printing it would report a serial and flags nothing read.
   @Test func aRunThatDidNotReadTheEDIDClaimsNothingFromIt() {
     let text = CheckupSummaryText.render(
@@ -136,7 +136,7 @@ struct CheckupPaneTests {
     #expect(ProvenanceCopy.intact.contains("record"))
   }
 
-  /// CK8 over the whole pane: nothing hands the display a result.
+  /// The no-verdict rule over the whole pane: nothing hands the display a result.
   @Test func noPaneCopyCarriesAnEmDashOrAVerdictOnTheDisplay() {
     for sentence in CheckupPaneCopy.allStringsForTest {
       let lowered = sentence.lowercased()
@@ -148,7 +148,7 @@ struct CheckupPaneTests {
     }
   }
 
-  /// Layer 2 of AT4: build the pane over a directory that does not exist and
+  /// Layer 2: build the pane over a directory that does not exist and
   /// assert only that pixels came out. Never `CheckupStore.defaultDirectory()`,
   /// or the test reads this machine's own history.
   @Test @MainActor func thePaneRendersWithNoStoredRuns() {

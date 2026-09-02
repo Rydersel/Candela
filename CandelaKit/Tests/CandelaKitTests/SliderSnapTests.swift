@@ -2,7 +2,7 @@ import Testing
 
 @testable import CandelaKit
 
-@Suite("Slider snapping and percent readout (fork SliderHandler, D26-trimmed)")
+@Suite("Slider snapping and percent readout (fork SliderHandler)")
 struct SliderSnapTests {
   @Test func stopsAreTheQuarterPositions() {
     // The fork's caption promises 0/25/50/75/100 while hardcoding `25` in one
@@ -59,7 +59,7 @@ struct SliderSnapTests {
   }
 
   @Test func theZeroFreeStopSetNeverSnapsAVolumeDragIntoAHardwareMute() {
-    // D29: `DDCValueController.apply` treats volume 0 as a MUTE event
+    // `DDCValueController.apply` treats volume 0 as a MUTE event
     // (VCP 0x8D = 1 when enableMuteUnmute). A 3-point capture window on
     // the `0` stop would turn the bottom 3 % of every volume drag into a
     // persistent hardware mute, so volume rows use this stop set.
@@ -97,7 +97,7 @@ struct SliderSnapTests {
   }
 
   @Test func aDecrementNeverReachesZeroOnAZeroFreeGrid() {
-    // D29 rule 4, and the test that would have caught the hardware defect: on
+    // The mute-strand rule's fourth clause, and the test that would have caught the hardware defect: on
     // the MAG's volume row a VoiceOver decrement walked 45/40/…/5/0 and wrote
     // VCP 0x8D, muting the display. Decrement is the ONLY way a VoiceOver user
     // can lower the volume, so no sequence of them may land on 0.
@@ -120,7 +120,7 @@ struct SliderSnapTests {
   @Test func aDecrementLeavesAValueAlreadyBelowTheGridWhereItIs() {
     // A muted row reads as 0 and a drag can leave a volume at 2%. Pushing
     // either UP to the floor would unmute the display as a side effect of
-    // asking for LESS, which is the same class of accident D29 exists for.
+    // asking for LESS, which is the same class of accident the mute-strand rule exists for.
     for toStops in [true, false] {
       for start in [0.0, 0.02] {
         #expect(
@@ -134,7 +134,7 @@ struct SliderSnapTests {
   }
 
   @Test func anIncrementStillRecoversFromZero() {
-    // D29 rule 3's other half: the row that reads 0 while muted has to be able
+    // The other half of the mute-strand rule's third clause: the row that reads 0 while muted has to be able
     // to climb back out from the same route that got stuck at the floor.
     #expect(
       SliderSnap.stepped(

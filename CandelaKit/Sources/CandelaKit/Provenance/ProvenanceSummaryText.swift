@@ -49,7 +49,7 @@ public enum ProvenanceSummaryText {
       ?? CheckupDisplayIdentity.noSerial
   }
 
-  /// "Hours of use", never "panel hours": SO14 keeps "panel" out of every
+  /// "Hours of use", never "panel hours": the copy rule keeps "panel" out of every
   /// string a person can read, type names and comments excepted.
   private static func hoursLines(_ section: ProvenanceSection<ProvenanceHours>) -> [String] {
     switch section {

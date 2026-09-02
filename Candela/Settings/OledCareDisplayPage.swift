@@ -2,16 +2,16 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// One display's OLED Care page, pushed from the pane's overview (OCR1):
-/// enrollment, the hero, the exposure findings, everything that dims (OCR2,
-/// never behind a second click), and the rows that lead on. An un-enrolled
-/// display's page is the enrollment pitch (OCR10), with no dead controls.
+/// One display's OLED Care page, pushed from the pane's overview:
+/// enrollment, the hero, the exposure findings, everything that dims
+/// (never behind a second click), and the rows that lead on. An un-enrolled
+/// display's page is the enrollment pitch, with no dead controls.
 ///
-/// The hero is glanceable only (OCR5); the map is a doorway into the Heat Map
+/// The hero is glanceable only; the map is a doorway into the Heat Map
 /// window, which owns the lens picker, window outlines and crosshair. This page
 /// pushes nothing and takes no navigation path of its own.
 ///
-/// Copy rule for every sentence in this file (OC11): software has exactly two
+/// Copy rule for every sentence in this file: software has exactly two
 /// levers against burn-in, reduce luminance and reduce time at luminance.
 /// Nothing here may claim more than that.
 @MainActor
@@ -70,7 +70,7 @@ struct OledCareDisplayPage: View {
 
       SettingsCardSection {
         // The same caption rides the hub's enrollment toggle, so the two
-        // surfaces cannot describe enrollment differently (SO15).
+        // surfaces cannot describe enrollment differently.
         SettingRow("Enrolling applies the recommended settings; nothing changes until this display has been idle for a while.") {
           Toggle("Enroll this display in OLED care", isOn: Binding(
             get: { prefs.oledCareEnrolled },
@@ -92,7 +92,7 @@ struct OledCareDisplayPage: View {
         }
       }
 
-      // OCR10's pitch: what enrolling would do, stated where the decision is.
+      // The enrollment pitch: what enrolling would do, stated where the decision is.
       // The numbers are the Recommended preset's; change them together or the
       // pitch lies.
       if !prefs.oledCareEnrolled {
@@ -120,10 +120,10 @@ struct OledCareDisplayPage: View {
         }
 
         SettingsCardSection(title: "More") {
-          // A sideways move, not a push (SC5): the controls live on the Health
+          // A sideways move, not a push: the controls live on the Health
           // pane, so this row changes the sidebar selection through the reveal
           // seam rather than owning navigation state. Chevron and preview stay,
-          // because it still leads somewhere (SO3).
+          // because it still leads somewhere.
           NavigationRow(
             title: "Health",
             value: measurementRowPreview,
@@ -139,7 +139,7 @@ struct OledCareDisplayPage: View {
           NavigationRow(
             title: "Heat Map",
             value: healthRowPreview,
-            // A window, not a push (OCR-A1): the settings window cannot resize
+            // A window, not a push: the settings window cannot resize
             // to a portrait display's map, and a content-sized window can.
             action: { actions.openDisplayHealth(persistenceKey) })
         }
@@ -150,7 +150,7 @@ struct OledCareDisplayPage: View {
     }
   }
 
-  // MARK: - Row previews (SO3)
+  // MARK: - Row previews
 
   /// Short forms only; the pages themselves carry the detail.
   private var measurementRowPreview: String {
@@ -169,7 +169,7 @@ struct OledCareDisplayPage: View {
 
   // MARK: - Hero
 
-  /// The page's opening image (OCR5): accumulated history as a picture beside
+  /// The page's opening image: accumulated history as a picture beside
   /// the same facts as rows, so the map stays decorative to VoiceOver. Honesty
   /// precedence is the health page's: Safe Mode, then the grant, then
   /// confidence. The whole map column is a button into the Heat Map window.
@@ -185,7 +185,7 @@ struct OledCareDisplayPage: View {
 
     HStack(alignment: .top, spacing: 20) {
       Button {
-        // Same doorway as the More row: the Heat Map's own window (OCR-A1).
+        // Same doorway as the More row: the Heat Map's own window.
         actions.openDisplayHealth(persistenceKey)
       } label: {
         VStack(alignment: .leading, spacing: 8) {
@@ -204,7 +204,7 @@ struct OledCareDisplayPage: View {
               glowStrength: 0.6,
               reticle: true)
             .overlay {
-              // The marked cell explains itself on the map (OCR8); the full
+              // The marked cell explains itself on the map; the full
               // multiple is one push away, so the tag is one word.
               OledHotspotTag(
                 cells: summary.cells,
@@ -222,7 +222,7 @@ struct OledCareDisplayPage: View {
         // A portrait display at the landscape width towers over the stat column
         // and pushes Dimming below the fold (measured on the rotated Dell at
         // 200 pt: the map ran ~355 pt tall in a 520 pt window). The hero is
-        // glanceable (OCR5); the reading surface is the Heat Map window.
+        // glanceable; the reading surface is the Heat Map window.
         .frame(maxWidth: aspect < 1 ? 130 : 300)
         .contentShape(Rectangle())
       }
@@ -271,7 +271,7 @@ struct OledCareDisplayPage: View {
     .padding(.vertical, 4)
   }
 
-  /// OCR10's hero-shaped blank: the display's real shape with nothing claimed
+  /// The enrollment pitch's hero-shaped blank: the display's real shape with nothing claimed
   /// about it, beside the one honest stat.
   @ViewBuilder private var unenrolledHero: some View {
     let aspect =
@@ -375,7 +375,7 @@ struct OledCareDisplayPage: View {
 
   /// What the engine is doing right now. `dimStates` is the coordinator's own
   /// published state, never a second opinion computed here; a mirrored display's
-  /// "paused" reading is the one OC13 requires to be visible.
+  /// "paused" reading is the one state that must stay visible.
   private var statusText: LocalizedStringKey {
     if model.isSafeMode { return "Paused for this session (Safe Mode)" }
     // Exhaustive, so a new engine state is a compile error here rather than a
@@ -384,7 +384,7 @@ struct OledCareDisplayPage: View {
     case .active: return "Not dimming"
     case .idleDim: return "Dimmed: the display has been idle"
     case .blackout: return "Screen off: the display has been idle"
-    // OC7 sub-ruling 4: a lock dim the policy refused is RECORDED and must
+    // A lock dim the policy refused is RECORDED and must
     // never be reported as dimmed. `lockDimSkips` carries only live refusals
     // (cleared the moment the dim engages), so reading it here cannot outlive
     // the state it describes.
@@ -448,7 +448,7 @@ struct OledCareDisplayPage: View {
   // MARK: - Blackout
 
   @ViewBuilder private var blackoutControls: some View {
-    // TWO sentences by design (OC15): a key wakes the blackout but is NOT
+    // TWO sentences by design: a key wakes the blackout but is NOT
     // discarded, and the copy must never promise it is.
     SettingRow("Goes fully black after a longer idle period; the click that wakes it is discarded, so nothing is clicked by accident. A key press wakes it too, but reaches whichever app you were using.") {
       Toggle("Turn the screen black after longer", isOn: Binding(
@@ -558,7 +558,7 @@ struct OledCareDisplayPage: View {
   ///
   /// The idle term rounds UP, unlike `minutes(_:)` which rounds to nearest for
   /// display. A non-whole-minute idle threshold (reachable with a
-  /// `defaults write`, D26) would otherwise put this floor up to 30 s UNDER the
+  /// `defaults write`) would otherwise put this floor up to 30 s UNDER the
   /// engine's, and the engine would silently clamp a value the stepper allowed.
   /// Rounding up can only overshoot, which the engine accepts unchanged.
   private var blackoutMinimumMinutes: Int {
@@ -733,7 +733,7 @@ struct OledCareDisplayPage: View {
     "\(Int((brightness * 100).rounded()))%"
   }
 
-  /// English only (D25), and singular matters: the idle threshold's floor is one
+  /// English only, and singular matters: the idle threshold's floor is one
   /// minute, so "1 minutes" would be on screen on any display tuned that low.
   private static func minutesPhrase(_ value: Int) -> String {
     value == 1 ? "1 minute" : "\(value) minutes"

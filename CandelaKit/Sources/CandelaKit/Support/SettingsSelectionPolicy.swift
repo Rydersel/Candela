@@ -31,7 +31,7 @@ public enum SettingsDetailPresentation<Page: Equatable & Sendable>: Equatable, S
   }
 
   /// What is pushed on screen, which is not the same as what is retained for
-  /// later (SO23). The window configurator re-runs on this number.
+  /// later. The window configurator re-runs on this number.
   public var pathDepth: Int {
     guard case let .display(_, path) = self else { return 0 }
     return path.count
@@ -65,7 +65,7 @@ public enum SettingsSelectionPolicy {
   /// Resolves what the detail column shows, in one answer the title, the content,
   /// the pushed path and the window configurator all read.
   ///
-  /// `retainedPath` is what the caller is HOLDING for that display (SO23), not what
+  /// `retainedPath` is what the caller is HOLDING for that display, not what
   /// it may show. A display not in `connectedKeys` presents nothing pushed and falls
   /// back to a pane. The caller's retained storage is untouched: presenting nothing
   /// is not forgetting, so the display coming back presents the same path again.
@@ -78,8 +78,8 @@ public enum SettingsSelectionPolicy {
     return .display(key: selectedDisplayKey, path: retainedPath)
   }
 
-  /// The key to re-select when a remembered display returns while the window is open
-  /// (SO9). `nil` unless it is among the arrivals AND the user is not already on a
+  /// The key to re-select when a remembered display returns while the window is open.
+  /// `nil` unless it is among the arrivals AND the user is not already on a
   /// display destination: a returning monitor must never yank them off one they
   /// chose in the meantime.
   public static func restoration(

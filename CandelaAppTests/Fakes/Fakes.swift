@@ -3,7 +3,7 @@ import CandelaKit
 import CoreGraphics
 import Foundation
 
-// Shared fakes for the app suite (AT3): tests never construct a hardware
+// Shared fakes for the app suite: tests never construct a hardware
 // service. Everything here answers without touching a wire, a panel, or
 // CoreAudio. Sibling test files add their own file-local helpers rather than
 // editing this one.
@@ -62,7 +62,7 @@ actor FakeHDR: HDRToggling {
   func repinFrames() {}
 }
 
-/// Holds no baselines, so SS15's `assumingLinearBaseline` leg takes the
+/// Holds no baselines, so the `assumingLinearBaseline` leg takes the
 /// protocol's forwarding default. A fake that DID hold baselines would have to
 /// implement it, and nothing would say so at compile time.
 @MainActor final class FakeGamma: GammaApplying {
@@ -133,8 +133,8 @@ enum TestFixtures {
   }
 
   /// A real DisplayState over fake hardware: real Kit controllers, fake wire.
-  /// `capabilities` feeds the D24 gate; nil means the transaction failed and
-  /// unknown resolves to enabled.
+  /// `capabilities` feeds the capabilities-denial gate; nil means the
+  /// transaction failed and unknown resolves to enabled.
   @MainActor static func displayState(
     id: CGDirectDisplayID = 7,
     name: String = "Test Display",
@@ -158,7 +158,7 @@ enum TestFixtures {
       writer: writer)
   }
 
-  /// A hardware-free AppModel (AT3): every injectable seam filled with a fake,
+  /// A hardware-free AppModel: every injectable seam filled with a fake,
   /// so no MonitorPanelService and no CoreAudioDeviceProvider is constructed.
   /// The display list stays empty until the `discovery` overload below fills it.
   @MainActor static func appModel(safeMode: Bool = false) -> AppModel {

@@ -1,10 +1,10 @@
 import CandelaKit
 import CoreGraphics
 
-/// SS7's carve-out, in one place. Several surfaces ask the same questions about
+/// The synthesis carve-out, in one place. Several surfaces ask the same questions about
 /// a mirror set, and a carve-out held in agreement by discipline has bitten this
 /// branch before. Pure and nameable so the answers can be pinned without a
-/// window (AT10); the views read these rather than re-deriving.
+/// window; the views read these rather than re-deriving.
 enum MirroringPredicates {
   /// True when this display is showing a synthesized size. The ONE predicate
   /// behind every carve-out: a set the app engaged to render a size is not

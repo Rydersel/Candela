@@ -4,7 +4,7 @@ import SwiftUI
 /// is wider than the glass, the way the machine actually closes.
 ///
 /// Takes the same parameters as `DisplayGlyph`: the built-in is drawn in both
-/// surfaces the glyphs serve, the setup flow and the settings window (SV9).
+/// surfaces the glyphs serve, the setup flow and the settings window.
 struct LaptopGlyph: View {
   /// Width over height as mounted.
   var aspect: Double

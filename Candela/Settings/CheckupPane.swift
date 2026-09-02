@@ -5,7 +5,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// Every user-visible string on the pane, in one place so the copy rules (no
-/// verdict on the display (CK8), no key names, no em dashes) can be checked at once.
+/// verdict on the display, no key names, no em dashes) can be checked at once.
 enum CheckupPaneCopy {
   static let title = "Checkup"
   static let subtitle =
@@ -64,7 +64,7 @@ enum CheckupHistoryScope {
   }
 }
 
-/// The Checkup pillar (CK28): the launcher, this display's past runs, and the
+/// The Checkup pillar: the launcher, this display's past runs, and the
 /// place a report somebody sends you is checked against its own hash. The pane
 /// never runs a check; "Run a checkup" opens the flow window through
 /// `SettingsActions`. `@MainActor` because stored and computed properties read
@@ -365,8 +365,8 @@ private struct CheckupHistoryRow: View {
     }
   }
 
-  /// CK29's name and the store's own encoder, so an export is byte-identical to
-  /// the stored file and `validate()` answers the same on both.
+  /// The export file's own naming and the store's own encoder, so an export
+  /// is byte-identical to the stored file and `validate()` answers the same on both.
   private func export() {
     let panel = NSSavePanel()
     panel.allowedContentTypes = [.json]

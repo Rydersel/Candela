@@ -1,7 +1,7 @@
 import Foundation
 
-/// Whether a display implements one VCP feature. Three states, never a Bool
-/// (D24): `unknown` is the honest answer to a failed or unintelligible read,
+/// Whether a display implements one VCP feature. Three states, never a Bool:
+/// `unknown` is the honest answer to a failed or unintelligible read,
 /// and it must resolve to *enabled*, because a false grey removes a working
 /// control with no visible reason while a false enable costs one pointless
 /// slider.
@@ -14,14 +14,14 @@ public enum VCPSupport: Sendable, Equatable, CaseIterable {
 /// Parsing for the DDC/CI Capabilities Request (VCP 0xF3): the wire frames the
 /// display answers with, and the MCCS capability string they reassemble into.
 ///
-/// The governing rule, from D24: capability strings are unreliable in the
+/// The governing rule: capability strings are unreliable in the
 /// field — monitors truncate them, omit codes they support, and advertise
 /// codes they ignore. **Every path that does not fully understand its input
 /// returns `.unknown`.** `.unsupported` is reachable only from a string whose
 /// vcp list parsed cleanly, end to end, and did not contain the code.
 public enum CapabilityString {
   public static func support(forVCP code: UInt8, in capabilities: String) -> VCPSupport {
-    // Balance check FIRST (D24's fail-to-.unknown rule). Without it,
+    // Balance check FIRST (the fail-to-.unknown rule). Without it,
     // "(vcp(02 10) 62))" parses "cleanly": body(ofTag:in:) stops at the first
     // depth-0 ')' and yields [02, 10], so a stray close-paren would make us
     // answer .unsupported — i.e. grey a working slider on the word of a monitor
@@ -36,7 +36,7 @@ public enum CapabilityString {
   /// Every feature code at depth 0 of the vcp list, or nil when the string is
   /// not fully understood.
   ///
-  /// Same D24 rule as `support(forVCP:in:)` and the same three gates in the
+  /// Same fail-to-.unknown rule as `support(forVCP:in:)` and the same three gates in the
   /// same order: balance check FIRST, whole-tag match at depth 1 (so a `vcp(`
   /// buried inside another tag's body is not mistaken for the list), and
   /// top-level codes only. Those are two separate depth counters, one over tags
@@ -62,7 +62,7 @@ public enum CapabilityString {
   ///
   /// nil when the tag is absent, nested, the string is unbalanced, or the group
   /// never closes. An empty STRING is a different answer from nil: the tag was
-  /// declared and its body is blank (DT30 rule e). Flattening the two reports
+  /// declared and its body is blank. Flattening the two reports
   /// "the display did not say" and "the display said nothing" as one fact.
   public static func tag(_ name: String, in capabilities: String) -> String? {
     guard isBalanced(capabilities) else { return nil }
@@ -108,7 +108,7 @@ public enum CapabilityString {
   /// Measured: that shape, and only that shape, was the entire
   /// `unknown -> .unsupported` class in the differential fuzz.
   ///
-  /// The same counter moves verdicts the other way round the D24 axis too.
+  /// The same counter moves verdicts the other way round the capabilities-denial axis too.
   /// `support(forVCP: 0x10, in: "(vcpname(vcp(10))vcp(20))")` is `.unsupported`,
   /// because the `10` sits inside `vcpname`'s body as a permitted VALUE and the
   /// real top-level list is `vcp(20)`. Correct, and worth writing down: a depth
@@ -120,7 +120,7 @@ public enum CapabilityString {
   /// returns `nil`.
   ///
   /// That `nil` is not free. `VolumeSliderPolicy` resolves it to enabled under
-  /// D24, but `DiagnosticsPage` reads the same `nil` as a statement about the
+  /// the capabilities-denial rule, but `DiagnosticsPage` reads the same `nil` as a statement about the
   /// DISPLAY rather than about our parser: `tag("mccs_ver"/"model"/"type", …)`
   /// renders "Not stated" about a panel that stated all three, and `codes(in:)`
   /// disclaims a vcp list the same page is showing verbatim.
@@ -131,7 +131,7 @@ public enum CapabilityString {
   /// 2026-08-04: 44 codes and `mccs_ver` "2.1" once trimmed, nil with the NUL].
   /// Fixed in the reassembly, where the wire's own noise is
   /// (`CapabilityPayload.string(from:)`), and deliberately NOT by loosening the
-  /// wrapper rule here: D24 would rather say nothing than guess at a wrapper,
+  /// wrapper rule here: the capabilities-denial rule would rather say nothing than guess at a wrapper,
   /// and the nine measured `unknown -> .unsupported` moves that rule prevents
   /// cost more than the bug it caused.
   ///
@@ -194,7 +194,7 @@ public enum CapabilityString {
   /// would be a claim about a string we do not actually understand.
   ///
   /// Surrounding whitespace is tolerated because it changes no meaning. Nothing
-  /// else is — D24 would rather say nothing than guess at a wrapper.
+  /// else is — the capabilities-denial rule would rather say nothing than guess at a wrapper.
   private static func outerGroupInterior(_ chars: [Character]) -> Range<Int>? {
     var start = 0
     var end = chars.count
@@ -229,7 +229,7 @@ public enum CapabilityString {
       // `UInt8("+1", radix: 16)` is 1 and a count-only guard passes a token that
       // is not a hex pair. `support(forVCP:in:)` would then answer .unsupported
       // for "(vcp(+1))" and grey a working control on the word of a provably
-      // malformed string, inverting D24.
+      // malformed string, inverting the capabilities-denial rule.
       //
       // `isASCII` is load-bearing alongside `isHexDigit`: the latter is true
       // for fullwidth forms like "１", which `UInt8(_:radix:)` then rejects.

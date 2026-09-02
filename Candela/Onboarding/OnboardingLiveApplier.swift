@@ -7,13 +7,13 @@ import Observation
 /// Two shipped facts fix the shape. An apply must ride the one path every
 /// resolution control uses (`ResolutionSelection` into
 /// `DisplayModeCoordinator.selectFromList`), so the real keep and revert
-/// countdown guards it (PD9: expiry reverts, never silently keeps). And the
+/// countdown guards it (expiry reverts, never silently keeps). And the
 /// shipped countdown's answering surface is fixed at preview start, never this
 /// window, so Setup renders its OWN Keep and Revert from the coordinator's
 /// observable preview state and answers with `confirm`/`revert` carrying the
 /// exact preview it rendered: an answer can only resolve what the user was
 /// looking at. The preview it starts therefore carries `.guidedSetup`, the
-/// surface no other one answers for (DM11).
+/// surface no other one answers for.
 ///
 /// This object reports into the model and owns no meaning of its own; the model
 /// decides what each report does to the flow.
@@ -104,7 +104,7 @@ final class OnboardingLiveApplier {
     sawPreview = false
     answerInFlight = false
     requestedAnswerBeforePreview = nil
-    // This flow OWNS the answer (DM11): the Setup page renders the countdown and
+    // This flow OWNS the answer: the Setup page renders the countdown and
     // both buttons itself, and no other surface offers an ANSWER for
     // `.guidedSetup`. The floating confirmation window is not presented, the
     // settings banner renders nothing even in a background window on this
@@ -230,8 +230,8 @@ final class OnboardingLiveApplier {
     if answerInFlight { return }
     if sawPreview {
       // Resolved without our answer: countdown expiry or the display's
-      // departure, and the coordinator's own handling of both is a revert
-      // (PD9). Reported rather than left counting.
+      // departure, and the coordinator's own handling of both is a revert.
+      // Reported rather than left counting.
       finishPending()
       flow?.applyReverted()
     } else if let failure = coordinator.startFailure, failure.displayID == pendingID {

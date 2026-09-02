@@ -44,7 +44,7 @@ final class MirroringCoordinator {
   /// value this object publishes.
   private var sample = MirrorTopology([])
 
-  /// The latest sample, stamped with the synthesis pairing (SS1). Read by every
+  /// The latest sample, stamped with the synthesis pairing. Read by every
   /// surface and every command here; never re-derived in a view.
   ///
   /// Computed, and that closes a race with teeth. The store's masters are noted
@@ -57,7 +57,7 @@ final class MirroringCoordinator {
   /// redraws instead of being missed.
   ///
   /// The UNION of the two: same table read at two moments, and either can know
-  /// first. Ambiguity resolves towards "this is synthesis", the failure the SS7
+  /// first. Ambiguity resolves towards "this is synthesis", the failure the synthesis
   /// carve-outs exist to prevent. A stale positive lasts until the next adopt,
   /// which any teardown produces.
   var topology: MirrorTopology {
@@ -78,7 +78,7 @@ final class MirroringCoordinator {
   /// slave was never staged. The honest statement is "some of it, and here is
   /// what is left".
   private(set) var lastPartialBreak: [CGDirectDisplayID] = []
-  /// The gate refused this request, and names who holds it (AR12). Not a
+  /// The gate refused this request, and names who holds it. Not a
   /// `MirrorRefusal` case: that enum answers about the TOPOLOGY, and this is no
   /// fact about the topology.
   private(set) var blockedBy: ReconfigurationClaimant?
@@ -105,7 +105,7 @@ final class MirroringCoordinator {
   /// the ex-slave gets a fresh shade. The call is unconditional because removing
   /// wholesale covers both.
   ///
-  /// **D28: the rebuild must be `reapplyAfterPrefChange()`.** Not
+  /// **The rebuild must be `reapplyAfterPrefChange()`.** Not
   /// `handleReconfigure(recapture:)`, which re-runs only the software leg and
   /// returns before applying anything in pure-DDC mode, and not
   /// `setBrightness(sameValue)`, which is memo-suppressed. A closure because it
@@ -115,7 +115,7 @@ final class MirroringCoordinator {
   @ObservationIgnored private let configurator: any DisplayConfiguring
   @ObservationIgnored private let store: MirrorTopologyStore
   @ObservationIgnored private let modes: DisplayModeCoordinator
-  /// AR12. Held from just before a mirror apply until nothing is outstanding.
+  /// The reconfiguration gate. Held from just before a mirror apply until nothing is outstanding.
   ///
   /// It does NOT replace the `modes.endOutstandingPreview()` await below: the
   /// gate refuses an OVERLAPPING preview, while that await orders this chain's
@@ -178,7 +178,7 @@ final class MirroringCoordinator {
     }
 
     #if DEBUG
-      // Screenshot validation only (DT6): posts a report card so layout,
+      // Screenshot validation only: posts a report card so layout,
       // contrast and truncation can be READ in an image. The confirmation window
       // cannot be produced on a single display, and the virtual-display rig
       // refuses to run while Candela runs.
@@ -228,7 +228,7 @@ final class MirroringCoordinator {
   }
 
   /// Re-samples, republishes, and hands back what was PUBLISHED, not what was
-  /// sampled. They differ by the synthesis pairing (SS1): a raw sample cannot
+  /// sampled. They differ by the synthesis pairing: a raw sample cannot
   /// tell a set the app engaged for a synthesized size from one the user asked
   /// for. Every command below decides from this value.
   @discardableResult
@@ -245,7 +245,7 @@ final class MirroringCoordinator {
     // notification, and every drawable-ID resolution reads the store.
     //
     // Written FIRST and read BACK, so what this publishes carries the synthesis
-    // pairing (SS1). On an un-stamped sample every SS7 carve-out predicate
+    // pairing. On an un-stamped sample every synthesis carve-out predicate
     // answers "ordinary mirror set".
     store.update(arrived)
     let stamped = store.topology()
@@ -294,7 +294,7 @@ final class MirroringCoordinator {
   /// The sample is taken LIVE rather than from the store, since a keypress must
   /// not depend on a notification having landed.
   ///
-  /// **A synthesized size comes down FIRST, through the engine** (SS13).
+  /// **A synthesized size comes down FIRST, through the engine.**
   /// `MirrorTopologyPolicy.toggle` would take a synthesis set apart with a
   /// null-master change, leaving the virtual display standing with nothing on
   /// it, a synthesis slot held, and the pairing table describing a set that no
@@ -362,7 +362,7 @@ final class MirroringCoordinator {
   /// **A sample that still shows a synthesis master answers nothing at all.**
   /// The caller verifies against the pairing table, which is empty for the whole
   /// of an engage and so can read "everything came down" over a machine that has
-  /// a synthesis set on it. SS13: no raw mirror change is staged over a standing
+  /// a synthesis set on it. No raw mirror change is staged over a standing
   /// synthesis set, and a decision made here would be exactly that.
   static func panicDecisionAfterUnwind(_ topology: MirrorTopology) -> MirrorToggleDecision? {
     guard topology.synthesisMasters.isEmpty else { return nil }
@@ -379,7 +379,7 @@ final class MirroringCoordinator {
   /// `MirrorTopologyPolicy.engage` stages a change for every other display in the
   /// sample, the synthesis VD included, so a user set built while a synthesized
   /// size is engaged would point the virtual display at the panel mirroring ONTO
-  /// it. SS13 generalised: no raw mirror change over a standing synthesis set.
+  /// it. The same rule, generalised: no raw mirror change over a standing synthesis set.
   func engage(master: CGDirectDisplayID) {
     let sample = resampleAndPublish()
     guard sample.synthesisMasters.isEmpty else {
@@ -395,16 +395,16 @@ final class MirroringCoordinator {
   /// display's own set, so nothing here stages a change against a synthesis
   /// member unless `member` is one.
   ///
-  /// When it IS one, the set comes down through the engine (SS13). No surface
+  /// When it IS one, the set comes down through the engine. No surface
   /// offers Stop Mirroring for a synthesis set, so this is the defensive half of
   /// the rule: it binds any Stop Mirroring affordance, not just today's.
   func disengage(containing member: CGDirectDisplayID) {
     let sample = resampleAndPublish()
     guard !sample.isSynthesisSet(containing: member) else {
       // Takes down every synthesis set, not just this one: the engine's only
-      // pref-free teardown is the all-sets one, and SS6 caps the pool small. A
+      // pref-free teardown is the all-sets one, and the virtual-display pool is capped small. A
       // per-display route belongs in `SynthesisCoordinator`, since its verified
-      // sequence (SS10) is the whole point of going through the engine.
+      // sequence is the whole point of going through the engine.
       unwindingSynthesis { _ in }
       return
     }
@@ -423,8 +423,7 @@ final class MirroringCoordinator {
   private var synthesis: SynthesisCoordinator? { modes.synthesis }
 
   /// Takes every synthesis set down through the engine, VERIFIES from the pairing
-  /// table that they are gone, and only then runs `body` against a fresh sample
-  /// (SS13).
+  /// table that they are gone, and only then runs `body` against a fresh sample.
   ///
   /// Verified against the pairing table, not the disengage's own return: the
   /// house rule about achieved state. `SynthesisCoordinator` re-reads the
@@ -527,7 +526,7 @@ final class MirroringCoordinator {
         if self.inFlight == 0 { self.isApplying = false }
       }
       self.dismissReport()
-      // AR12, asked before either apply arm, not for a refusal, which
+      // The reconfiguration gate, asked before either apply arm, not for a refusal, which
       // reconfigures nothing. Granted when we already hold it: a break that
       // supersedes an outstanding engage is supported by `applyDisengage`.
       switch decision {
@@ -682,7 +681,7 @@ final class MirroringCoordinator {
     guard let outstanding = await session.previewedTopology else {
       preview = nil
       stopCountdown()
-      // THE release (AR12), here rather than at each call site: this funnel
+      // THE release (the reconfiguration gate), here rather than at each call site: this funnel
       // already runs after every path that can end a preview. Unconditional,
       // since the gate refuses a release from a claimant not holding it.
       await gate.release(.mirroring)

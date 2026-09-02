@@ -14,7 +14,7 @@ public enum ModeMatch: Sendable, Equatable {
 /// Per-display stored mode, opt-in.
 ///
 /// Stores a DESCRIPTOR, never an `ioModeID`: IDs are reassigned across replug
-/// and a stored one would silently resolve to a different mode or none (DM6).
+/// and a stored one would silently resolve to a different mode or none.
 ///
 /// UserDefaults is documented thread-safe and it is the only stored property,
 /// hence the unchecked conformance, the same shape as `DisplayPrefs` and

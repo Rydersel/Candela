@@ -5,7 +5,7 @@ import Observation
 import os
 
 /// App-side owner of the mode-synthesis engine, its preview session, and the
-/// two per-display prefs behind synthesized sizes (SS4).
+/// two per-display prefs behind synthesized sizes.
 ///
 /// `pairings` is a SNAPSHOT this object holds, never a question asked of the
 /// engine. `ModeSynthesisEngine.engage` and `.disengage` are non-async actor
@@ -31,9 +31,9 @@ final class SynthesisCoordinator {
 
     /// `SynthesisCopy` owns the wording; this is the distinction it renders.
     enum Reason: Equatable {
-      /// SS14. The built-in panel is never a synthesis target in v1.
+      /// The built-in panel is never a synthesis target in v1.
       case builtIn
-      /// SS9. Engaging with HDR on risks the silent HDR drop measured on
+      /// Engaging with HDR on risks the silent HDR drop measured on
       /// mode changes.
       case hdrEngaged
       /// The display is in a mirror set the USER built. Synthesis mirrors the
@@ -57,15 +57,15 @@ final class SynthesisCoordinator {
       /// a caller that cannot tell "never" from "again in a moment" gets one
       /// of them wrong.
       case busy
-      /// AR12: another display-reconfiguring feature holds the gate.
+      /// Another display-reconfiguring feature holds the gate.
       case blocked(by: ReconfigurationClaimant)
       /// The engine's sequence failed. Every case names the step it stopped at.
       case engine(SynthesisFailure)
     }
   }
 
-  /// The engine's pairing table as of the last operation this object performed
-  /// (SS1). Ordered `physicalDisplayID`-ascending, as the engine returns it.
+  /// The engine's pairing table as of the last operation this object performed.
+  /// Ordered `physicalDisplayID`-ascending, as the engine returns it.
   private(set) var pairings: [SynthesisPairing] = []
 
   /// The last refusal, or nil. One value rather than one per display: it is
@@ -100,7 +100,7 @@ final class SynthesisCoordinator {
   /// Kept for one question this object answers for itself: which displays are
   /// attached right now. See `sweepDeparturesAfterEngage`.
   @ObservationIgnored private let configurator: any DisplayConfiguring
-  /// Where the pairing enters the app's topology (SS7). Stamped on the store
+  /// Where the pairing enters the app's topology. Stamped on the store
   /// because its other writer samples CoreGraphics alone and cannot know what
   /// the app engaged.
   @ObservationIgnored private let topologyStore: MirrorTopologyStore
@@ -109,18 +109,18 @@ final class SynthesisCoordinator {
   /// it (a display discovery has not seen, which is every virtual display).
   @ObservationIgnored var persistenceKey: (CGDirectDisplayID) -> String? = { _ in nil }
 
-  /// SS9's input, live. Wired by `AppModel` to the display's controller, which
+  /// The HDR-engaged guard's input, live. Wired by `AppModel` to the display's controller, which
   /// is the achieved state rather than the stored intent.
   @ObservationIgnored var isHDREngaged: (CGDirectDisplayID) -> Bool = { _ in false }
 
-  /// D27: called after either synthesis pref is written so the propagation
+  /// Called after either synthesis pref is written so the propagation
   /// seam hears about it whichever surface asked. The panel and the
   /// confirmation window have no `SettingsActions`.
   @ObservationIgnored var didWriteSynthesisPref: (PrefName, String) -> Void = { _, _ in }
 
   /// Re-enumerates one display's mode catalog.
   ///
-  /// The opt-in decides which ROWS the size picker holds (SS4) and the catalog
+  /// The opt-in decides which ROWS the size picker holds and the catalog
   /// is enumerated on demand, so without this the toggle changes nothing
   /// visible until the display id changes or a reconfiguration fires.
   @ObservationIgnored var didChangeOffer: (CGDirectDisplayID) -> Void = { _ in }
@@ -134,7 +134,7 @@ final class SynthesisCoordinator {
   /// that queue would wait on the operation doing the waiting.
   @ObservationIgnored var endOutstandingPreview: () async -> Bool = { true }
 
-  /// Gives the AR12 claim back THROUGH the coordinator's funnel, which releases
+  /// Gives the reconfiguration-gate claim back THROUGH the coordinator's funnel, which releases
   /// only when nothing is outstanding.
   ///
   /// Never `gate.release(.displayModes)` from here: synthesis shares
@@ -192,7 +192,7 @@ final class SynthesisCoordinator {
 
   // MARK: - Reading the snapshot
 
-  /// The virtual displays a synthesized size is mirrored onto right now (SS1).
+  /// The virtual displays a synthesized size is mirrored onto right now.
   var masterIDs: Set<CGDirectDisplayID> {
     Set(pairings.map(\.virtualDisplayID))
   }
@@ -225,12 +225,12 @@ final class SynthesisCoordinator {
     pairings.first { $0.physicalIdentityKey == identityKey }?.size
   }
 
-  /// How many of SS6's two synthesis slots are unused, as the snapshot sees it.
+  /// How many of the two synthesis slots are unused, as the snapshot sees it.
   var freeSlots: Int {
     max(0, VirtualDisplayIdentity.synthesisSlotRange.count - pairings.count)
   }
 
-  // MARK: - Prefs (SS4)
+  // MARK: - Prefs
 
   func offersSyntheticSizes(displayID: CGDirectDisplayID) -> Bool {
     prefs(for: displayID)?.offerSyntheticSizes ?? false
@@ -247,7 +247,7 @@ final class SynthesisCoordinator {
     persistenceKey(displayID).map { DisplayPrefs(persistenceKey: $0) }
   }
 
-  // MARK: - Guards (SS9, SS14)
+  // MARK: - Guards
 
   /// Why this display cannot take a synthesized size right now, or nil when it
   /// can. The order is the contract: hardware facts before the user's choices,
@@ -261,7 +261,7 @@ final class SynthesisCoordinator {
     return nil
   }
 
-  /// SS7's predicate in the direction nothing consulted before: this display is
+  /// The predicate in the direction nothing consulted before: this display is
   /// mirrored, and it is not one of OUR sets.
   ///
   /// The flag is CoreGraphics' own, so reading it alone would have every
@@ -286,7 +286,7 @@ final class SynthesisCoordinator {
 
   // MARK: - Preview (driven by DisplayModeCoordinator, always inside its queue)
 
-  /// Engages `size` as a preview. The caller holds the AR12 gate and has
+  /// Engages `size` as a preview. The caller holds the reconfiguration gate and has
   /// already ended every other outstanding preview.
   func beginPreview(
     _ size: SyntheticSize, onPhysical displayID: CGDirectDisplayID, identityKey: String
@@ -324,7 +324,7 @@ final class SynthesisCoordinator {
     record(outcome, for: displayID)
   }
 
-  // MARK: - Unattended engage (SS9, SS14; the launch and arrival path)
+  // MARK: - Unattended engage (the launch and arrival path)
 
   /// The reapply decision for one display and, on `.engage`, the engage itself.
   ///
@@ -396,7 +396,7 @@ final class SynthesisCoordinator {
 
   // MARK: - Persistence
 
-  /// Records a kept synthesized size. SS11's ordering hangs off this moment:
+  /// Records a kept synthesized size. The persist-after-verify ordering hangs off this moment:
   /// the engage has landed and been verified before anything is stored.
   ///
   /// `unwindWasIncomplete` is the one case where `.committed` is not evidence
@@ -420,11 +420,11 @@ final class SynthesisCoordinator {
     }
   }
 
-  // MARK: - Opt-in (SS11)
+  // MARK: - Opt-in
 
   /// Turns the per-display opt-in on or off.
   ///
-  /// Off tears down BEFORE the pref persists (SS11, the D29 ordering shape).
+  /// Off tears down BEFORE the pref persists (the mute-strand ordering shape).
   /// A pref written first would leave a synthesis set standing with the only
   /// rows that could take it down hidden behind the opt-in, so a failed
   /// disengage LEAVES THE DISPLAY OPTED IN.
@@ -448,7 +448,7 @@ final class SynthesisCoordinator {
   }
 
   /// A per-display settings reset's synthesis half: disengage first, then clear
-  /// BOTH keys (SS11 applies to reset paths in the same order). Returns false
+  /// BOTH keys (that ordering applies to reset paths too). Returns false
   /// when the teardown failed, in which case nothing was cleared.
   @discardableResult
   func reset(_ display: ConfiguredDisplay) async -> Bool {
@@ -508,7 +508,7 @@ final class SynthesisCoordinator {
     return true
   }
 
-  /// A picker-driven ordinary size choice over a COMMITTED set (SS10): the set
+  /// A picker-driven ordinary size choice over a COMMITTED set: the set
   /// comes down through the engine before any mode may touch the panel, which
   /// is otherwise a mirror slave the apply would land on invisibly. Returns
   /// false without touching anything when it refuses.
@@ -537,7 +537,7 @@ final class SynthesisCoordinator {
   /// The verified disengage both opt-out paths share.
   ///
   /// Returns false without touching anything when it refuses, which is what
-  /// keeps SS11's ordering honest: both callers write prefs only after this
+  /// keeps the persist-after-verify ordering honest: both callers write prefs only after this
   /// says the machine is clean.
   private func disengageForOptOut(
     _ display: ConfiguredDisplay, fromQueueContext: Bool = false
@@ -557,7 +557,7 @@ final class SynthesisCoordinator {
         return false
       }
     }
-    // AR12, before the reconfiguration: a refusal has to cost nothing, and a
+    // The reconfiguration gate, before the reconfiguration: a refusal has to cost nothing, and a
     // claim taken after the transaction is staged protects nobody.
     if let holder = await gate.claim(.displayModes).refusedBy {
       note(.blocked(by: holder), for: display.id)

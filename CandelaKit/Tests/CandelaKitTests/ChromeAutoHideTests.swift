@@ -33,7 +33,7 @@ struct ChromeAutoHideTests {
     let c = ChromeAutoHideController(writer: fake)
     #expect(c.menuBarAutoHide == true)
     #expect(c.dockAutoHide == false)
-    #expect(fake.writes == 0)   // OC10: reading never writes
+    #expect(fake.writes == 0)   // reading never writes
   }
 
   /// Both legs, or deleting either re-read passes the suite.
@@ -103,7 +103,7 @@ struct ChromeAutoHideTests {
     #expect(fake.writes == 1)
   }
 
-  /// D29 rule 1 for chrome: turning auto-hiding off must reach the system even when
+  /// The mute-strand rule's first clause, applied to chrome: turning auto-hiding off must reach the system even when
   /// nobody refreshed first. The cache moves only while the OLED Care pane is on screen,
   /// so a stale one swallowed the click meant to bring the menu bar back. No `refresh()`
   /// here on purpose.
@@ -185,7 +185,7 @@ struct MenuBarAutoHidePolicyTests {
   /// The strand invariant, and why one predicate serves both legs. A pessimistic read
   /// (hidden if either half says hidden) plus a write that skips the record cannot be
   /// undone: the OFF click writes the legacy key, changes nothing the read looks at, and
-  /// the switch snaps back, which D29 rule 3 forbids. Whatever the read consults, the
+  /// the switch snaps back, which the mute-strand rule's third clause forbids. Whatever the read consults, the
   /// write must be willing to write.
   @Test func theReadNeverConsultsARecordTheWriteWouldSkip() {
     for major in supportedMajorVersions {

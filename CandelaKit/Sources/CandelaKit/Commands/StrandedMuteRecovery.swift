@@ -22,11 +22,11 @@ public enum StrandedMuteOutcome: Sendable, Equatable {
   case alreadyRunning
 }
 
-/// The recovery from a hardware mute (D29 rule 3): the sequence behind the
+/// The recovery from a hardware mute (the mute-strand rule): the sequence behind the
 /// settings banner's unmute button.
 ///
 /// It lives here rather than in the pane because the ORDER is the rule, and a
-/// pane cannot be tested (there is no app test target, D21). The per-display
+/// pane cannot be tested (there is no app test target). The per-display
 /// reset runs the same discipline inline for its own reasons: it must also
 /// retire the mute strategy, and it may CHANGE the display's HDR because
 /// clearing settings is what that button is for. This one may not: it promises
@@ -42,7 +42,7 @@ public enum StrandedMuteRecovery {
 
   /// - Parameters:
   ///   - reopenRoutes: clears whatever closed the ordinary routes back (the
-  ///     availability prefs). Called FIRST and unconditionally, D29 rule 2:
+  ///     availability prefs). Called FIRST and unconditionally:
   ///     a recovery that cannot reach the panel today must still leave the
   ///     slider and the keys working for the moment it can.
   @MainActor

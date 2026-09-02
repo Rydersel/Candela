@@ -2,8 +2,8 @@ import Foundation
 
 /// Which software backend is carrying a software dimming leg.
 ///
-/// Cases are named for what the user sees, never for the pref behind them
-/// (D25): `avoidGamma` never reaches a label.
+/// Cases are named for what the user sees, never for the pref behind them:
+/// `avoidGamma` never reaches a label.
 public enum SoftwareDimmingBackend: Sendable, Equatable {
   /// The display's color profile (gamma table).
   case gamma
@@ -13,7 +13,7 @@ public enum SoftwareDimmingBackend: Sendable, Equatable {
 
 /// Why nothing is moving this display's brightness.
 ///
-/// Typed rather than a `String` (DT30 rule (a)): a reason composed in the view
+/// Typed rather than a `String`: a reason composed in the view
 /// drifts from the branch that produced it.
 public enum BrightnessPathBlock: Sendable, Equatable {
   /// DDC brightness is turned off and there is no software leg to fall back
@@ -28,7 +28,7 @@ public enum BrightnessPathBlock: Sendable, Equatable {
 /// Why a display CONFIGURED for a hardware leg is nevertheless running on the
 /// software leg alone.
 ///
-/// Typed for the same reason as `BrightnessPathBlock` (DT30 rule (a)), and
+/// Typed for the same reason as `BrightnessPathBlock`, and
 /// kept apart from it: a block means nothing responds, this means part of the
 /// range still does.
 public enum SoftwareOnlyReason: Sendable, Equatable {

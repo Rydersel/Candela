@@ -7,7 +7,7 @@ import Testing
 /// suppressions than the app performed and nothing failed. These tests are the
 /// reader: the failure mode is a plausible edit that drops a clause, which
 /// passes anything that only greps for a keyword.
-@Suite("Safe mode copy (D11)")
+@Suite("Safe mode copy")
 struct SafeModeCopyTests {
 
   private static let app = "Candela"

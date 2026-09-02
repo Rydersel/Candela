@@ -32,7 +32,7 @@ public struct ModeReapplyDecision: Sendable, Equatable {
   /// is reported, and the caller hands the arrival back
   /// (`DisplayArrivalTracker.release`) so a later event retries. `.doNothing`
   /// would mark the display handled, and since a display that never leaves is
-  /// never an arrival again (DM7), "not now" would mean "never until replug".
+  /// never an arrival again, "not now" would mean "never until replug".
   public let isDeferred: Bool
 
   public init(modeToApply: DisplayMode?, notice: ModeReapplyNotice?, isDeferred: Bool = false) {
@@ -55,7 +55,7 @@ public struct ModeReapplyDecision: Sendable, Equatable {
 /// wrong is found days later.
 public enum ModeReapplyPolicy {
   /// - Parameters:
-  ///   - isEnabled: the per-display opt-in (DM5). Part of this decision rather
+  ///   - isEnabled: the per-display opt-in. Part of this decision rather
   ///     than a call-site guard, so "a display nobody opted in for is never
   ///     moved" is a property under test here.
   ///   - isMirroringAnotherDisplay: the SLAVE of a mirror set

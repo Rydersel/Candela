@@ -82,7 +82,7 @@ struct DDCOverrideApplicationTests {
     let after = try #require(DDCOverrideValidation.applied(.value(12), to: base, field: .minimum))
     #expect(after.minDDCOverride == 12)
     #expect(after.maxDDCOverride == base.maxDDCOverride) // the sibling override is untouched
-    // The D26-cut prefs survive an edit made through the grid. The fork rewrote them on
+    // The escape-hatch prefs of a cut control survive an edit made through the grid. The fork rewrote them on
     // every widget touch (QUIRK 7/8), turning unset into an explicit value.
     #expect(after.curveIndex == base.curveIndex)
     #expect(after.remapCodes == base.remapCodes)
@@ -174,7 +174,7 @@ struct DDCOverrideCommitTests {
 
   /// nil means nothing to do, not only refused: a field left alone renders text that
   /// resolves to the stored value, and writing there re-applies dimming on every focus
-  /// change (D4).
+  /// change.
   @Test func textThatMeansTheStoredValueWritesNothing() {
     #expect(DDCOverrideValidation.committed("20", to: tuned, field: .minimum) == nil)
     #expect(DDCOverrideValidation.committed(" 80 ", to: tuned, field: .maximum) == nil)

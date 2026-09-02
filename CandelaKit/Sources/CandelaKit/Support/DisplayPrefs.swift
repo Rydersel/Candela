@@ -34,7 +34,7 @@ public enum PollingMode: Int, Sendable, CaseIterable {
 }
 
 /// Whether the panel's volume slider accepts input, overriding the automatic
-/// verdict in either direction (D24).
+/// verdict in either direction.
 ///
 /// The automatic signal is the display's own DDC/CI capabilities string: a clean
 /// parse with no VCP 0x62 is the ONLY thing that greys the slider on its own. A
@@ -63,7 +63,7 @@ public enum MultiKeyboardVolume: Int, Sendable, CaseIterable {
 }
 
 /// Menu-bar icon visibility. `externalOnly` was appended later as 3, so RAW ORDER is
-/// not UI ORDER: pickers must list the cases explicitly (D5).
+/// not UI ORDER: pickers must list the cases explicitly.
 public enum MenuIcon: Int, Sendable, CaseIterable {
   case show = 0
   case sliderOnly = 1
@@ -73,7 +73,7 @@ public enum MenuIcon: Int, Sendable, CaseIterable {
 
 /// Panel footer style.
 ///
-/// RESERVED AND INERT (D32): the key exists so the schema slot is claimed and can
+/// RESERVED AND INERT: the key exists so the schema slot is claimed and can
 /// never be reused, but no Candela code reads it. Documented as reserved, never as an
 /// escape hatch.
 public enum MenuItemStyle: Int, Sendable, CaseIterable {
@@ -139,7 +139,7 @@ public final class DisplayPrefs: @unchecked Sendable {
   private let defaults: UserDefaults
   private let persistenceKey: String
 
-  /// D11 safe-mode seam, injected at construction, never a global or a UserDefaults
+  /// Safe-mode seam, injected at construction, never a global or a UserDefaults
   /// lookup. It forces the startup-traffic getters only: every setter still writes
   /// through, so a pref changed during a safe-mode session takes effect on the next
   /// normal launch. Public so a construction site can be asserted rather than trusted.
@@ -179,7 +179,7 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(clampSwitchingPoint(newValue), forKey: key("combinedSwitchingPoint")) }
   }
 
-  // MARK: - OLED care (W3a)
+  // MARK: - OLED care
 
   // The defaults ARE the Recommended preset, so enrolling writes nothing but
   // `oledCareEnrolled` and an un-tuned display stays on the preset even as the
@@ -226,7 +226,7 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: key("oledTelemetry")) }
   }
 
-  /// Window geometry and owner-app observation (OC18). Needs no permission
+  /// Window geometry and owner-app observation. Needs no permission
   /// and is the degraded no-permission mode's only data source, so it defaults
   /// ON and stores inverted.
   public var oledWindowObservation: Bool {
@@ -354,7 +354,7 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: key("enableMuteUnmute")) }
   }
 
-  /// Logical mute flag. Persists under BOTH mute strategies (D3).
+  /// Logical mute flag. Persists under BOTH mute strategies.
   public var muted: Bool {
     get { defaults.bool(forKey: key("muted")) }
     set { defaults.set(newValue, forKey: key("muted")) }
@@ -378,7 +378,7 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: key("friendlyName")) }
   }
 
-  /// The panel skips this display's section entirely (D7).
+  /// The panel skips this display's section entirely.
   public var hideDisplay: Bool {
     get { defaults.bool(forKey: key("hideDisplay")) }
     set { defaults.set(newValue, forKey: key("hideDisplay")) }
@@ -386,9 +386,9 @@ public final class DisplayPrefs: @unchecked Sendable {
 
   /// Slower-paced DDC reads.
   ///
-  /// RESERVED AND INERT (D26, D32): the key exists so the schema slot is claimed, but
-  /// NOTHING in Candela reads it. The paced-read plumbing was never built, and D26 cut
-  /// the control.
+  /// RESERVED AND INERT: the key exists so the schema slot is claimed, but
+  /// NOTHING in Candela reads it. The paced-read plumbing was never built, and the
+  /// control was cut anyway.
   public var longerDelay: Bool {
     get { defaults.bool(forKey: key("longerDelay")) }
     set { defaults.set(newValue, forKey: key("longerDelay")) }
@@ -438,7 +438,7 @@ public final class DisplayPrefs: @unchecked Sendable {
 
   /// Mode to DDC read tries.
   ///
-  /// D11: safe mode issues no DDC reads, so the budget is zero whatever the stored
+  /// Safe mode issues no DDC reads, so the budget is zero whatever the stored
   /// mode. Unreachable today, since `startupAction` is already forced to `.doNothing`
   /// and only the `.read` path consults this. Kept because it survives any future
   /// call site that reads `pollingTries` directly.
@@ -486,9 +486,9 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: "showContrast") }
   }
 
-  /// What launch/reconfigure/wake does with saved DDC values (D5).
+  /// What launch/reconfigure/wake does with saved DDC values.
   ///
-  /// D11: under safe mode the GETTER reports `.doNothing`, which closes the startup
+  /// Under safe mode the GETTER reports `.doNothing`, which closes the startup
   /// and wake restores (`RestoreCoordinator` gates on `== .write`) and the volume and
   /// contrast readback (`DDCValueController` gates on `== .read`) for the session. The
   /// SETTER still writes the real value through, so a pref changed during a safe-mode
@@ -502,7 +502,7 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue.rawValue, forKey: "startupAction") }
   }
 
-  /// Which display(s) the volume keys hit (D4).
+  /// Which display(s) the volume keys hit.
   public var multiKeyboardVolume: MultiKeyboardVolume {
     get { MultiKeyboardVolume(rawValue: defaults.integer(forKey: "multiKeyboardVolume")) ?? .mouse }
     set { defaults.set(newValue.rawValue, forKey: "multiKeyboardVolume") }
@@ -513,7 +513,7 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue.rawValue, forKey: "menuIcon") }
   }
 
-  /// Reserved and inert; see `MenuItemStyle` (D32).
+  /// Reserved and inert; see `MenuItemStyle`.
   public var menuItemStyle: MenuItemStyle {
     get { MenuItemStyle(rawValue: defaults.integer(forKey: "menuItemStyle")) ?? .icon }
     set { defaults.set(newValue.rawValue, forKey: "menuItemStyle") }
@@ -534,14 +534,14 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue.rawValue, forKey: "multiKeyboardBrightness") }
   }
 
-  /// No UI (D26): shows the Health pane's model-comparison instrument, a soak-only
+  /// No UI: shows the Health pane's model-comparison instrument, a soak-only
   /// gauge kept off the shipped window until the exposure-model verdict is recorded.
   public var showModelComparison: Bool {
     get { defaults.bool(forKey: "showModelComparison") }
     set { defaults.set(newValue, forKey: "showModelComparison") }
   }
 
-  /// Reserved and inert (D32): nothing renders tick marks.
+  /// Reserved and inert: nothing renders tick marks.
   public var showTickMarks: Bool {
     get { defaults.bool(forKey: "showTickMarks") }
     set { defaults.set(newValue, forKey: "showTickMarks") }
@@ -587,7 +587,7 @@ public final class DisplayPrefs: @unchecked Sendable {
     return HUDPosition(rawValue: stored) ?? .topCenter
   }
 
-  /// How every indicator pill draws (KMR-A3), app-level like the two position keys.
+  /// How every indicator pill draws, app-level like the two position keys.
   /// Plain `integer(forKey:)` is correct here, unlike the positions: raw 0 IS the
   /// shipped default, so absent and default agree.
   public var hudStyle: HUDStyle {
@@ -595,7 +595,7 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue.rawValue, forKey: "hudStyle") }
   }
 
-  /// Hide the built-in display's panel section (D2).
+  /// Hide the built-in display's panel section.
   public var hideBuiltInDisplay: Bool {
     get { defaults.bool(forKey: "hideBuiltInDisplay") }
     set { defaults.set(newValue, forKey: "hideBuiltInDisplay") }
@@ -616,7 +616,7 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: "hideCombinedBrightness") }
   }
 
-  /// D26 escape hatch, with NO UI by design. Default ON, so the stored form is the
+  /// Escape hatch, with NO UI by design. Default ON, so the stored form is the
   /// override rather than the setting: an absent key means guarded.
   ///
   /// Off, the mode picker again offers revealed modes at refreshes the panel has no
@@ -655,13 +655,13 @@ public final class DisplayPrefs: @unchecked Sendable {
   }
 
   /// INVERTED on disk. The UI binds through `interceptAlternateBrightnessKeys`
-  /// below (D1).
+  /// below.
   public var disableAltBrightnessKeys: Bool {
     get { defaults.bool(forKey: "disableAltBrightnessKeys") }
     set { defaults.set(newValue, forKey: "disableAltBrightnessKeys") }
   }
 
-  // D1 binding-layer positives: checked in the UI is true here and "off" on disk.
+  // Binding-layer positives: checked in the UI is true here and "off" on disk.
 
   public var combinedBrightness: Bool {
     get { !disableCombinedBrightness }
@@ -737,14 +737,14 @@ public final class DisplayPrefs: @unchecked Sendable {
   }
 
   /// The slot definitions the reconciler consumes, keyed by slot. User slots
-  /// only: synthesis slots (SS6) carry no stored definition.
+  /// only: synthesis slots carry no stored definition.
   public func virtualSlotDefinitions() -> [Int: VirtualSlotDefinition] {
     Dictionary(
       uniqueKeysWithValues: VirtualDisplayIdentity.userSlotRange.map { ($0, virtualSlot($0)) }
     )
   }
 
-  /// VD15's second half: the reset calls this AFTER the live displays are destroyed
+  /// The reset calls this AFTER the live displays are destroyed
   /// and immediately before the domain wipe. Redundant with the wipe today,
   /// load-bearing for any future partial reset, and the ONLY place a stored uuid is
   /// removed. Field-by-field, so a newly added key needs its own line here.
@@ -759,7 +759,7 @@ public final class DisplayPrefs: @unchecked Sendable {
 
   /// The pane's Remove: the slot's whole stored definition goes, tile included. The
   /// caller unconfigures FIRST so the departing display is destroyed from a snapshot
-  /// that still described it (VD15's ordering).
+  /// that still described it.
   public func clearVirtualSlot(_ slot: Int) {
     for name in ["virtualSlotDefined", "virtualSlotConfigured", "virtualSlotName",
                  "virtualSlotWidth", "virtualSlotHeight", "virtualSlotHiDPI",
@@ -771,15 +771,15 @@ public final class DisplayPrefs: @unchecked Sendable {
   // MARK: - Synthesized sizes
 
   // Per-display, composed by `key(_:)` like every other per-display pref, so both keys
-  // end `".<persistenceKey>"`. Written through the D27 path.
+  // end `".<persistenceKey>"`. Written through the pref-propagation path.
   //
   // Read-only properties plus named write methods, the `ModePersistence` shape rather
-  // than the settable properties above. SS11 requires a verified engine disengage
+  // than the settable properties above. Synthesis requires a verified engine disengage
   // BEFORE the opt-in is persisted false, so these accessors only read and write their
   // own key: the ordering is the caller's, and an accessor with a side effect would
   // take that choice away from it.
 
-  /// Whether synthesized stops are offered for this display (SS4). Off until
+  /// Whether synthesized stops are offered for this display. Off until
   /// someone opts in: synthesis costs a virtual display and a mirror.
   public var offerSyntheticSizes: Bool {
     // `bool(forKey:)`, never `object(forKey:) as? Bool`: `defaults write …
@@ -816,7 +816,7 @@ public final class DisplayPrefs: @unchecked Sendable {
     defaults.set(data, forKey: key("storedSyntheticSize"))
   }
 
-  /// SO22: whether ANYTHING has ever been stored for this display, prefs, saved
+  /// Whether ANYTHING has ever been stored for this display, prefs, saved
   /// levels or tuning. Every per-display key ends `".<persistenceKey>"`, so an empty
   /// answer means the domain is genuinely fresh, which is what tells "first time
   /// seeing this display" apart from "its settings failed to restore". A suffix scan,

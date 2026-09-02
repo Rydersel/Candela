@@ -33,7 +33,7 @@ public struct ArrangementSeam: Sendable, Equatable {
 }
 
 public struct ArrangementInsertion: Sendable, Equatable {
-  /// Every display's origin, the displaced ones included (AR4).
+  /// Every display's origin, the displaced ones included.
   public let arrangement: DisplayArrangement
   public let seam: ArrangementSeam
   /// How far each display beyond the seam moved. Zero when the gap already held the
@@ -50,13 +50,14 @@ public struct ArrangementInsertion: Sendable, Equatable {
 /// Dropping a display onto the boundary between two others puts it there and moves
 /// the displays beyond that boundary out of its way.
 ///
-/// **One of AR7's two amendments** (invalid drops spring back, never auto-correct);
-/// the other is AR15's attach landing. AR7's argument is that macOS silently fixes
-/// overlaps to somewhere of its own choosing, which teaches the user that the map
-/// lies. An insert is not silent: covering a seam names one layout and no other, the
-/// guide is drawn on the seam the release will use, and AR8's countdown still
-/// defaults to revert. AR7 still governs every other overlap, including a display
-/// dropped squarely on top of another, where the intent really is ambiguous.
+/// **One of the spring-back rule's two amendments** (invalid drops spring back, never
+/// auto-correct); the other is the attach landing. The spring-back rule's argument is
+/// that macOS silently fixes overlaps to somewhere of its own choosing, which teaches
+/// the user that the map lies. An insert is not silent: covering a seam names one
+/// layout and no other, the guide is drawn on the seam the release will use, and the
+/// countdown still defaults to revert. The spring-back rule still governs every other
+/// overlap, including a display dropped squarely on top of another, where the intent
+/// really is ambiguous.
 ///
 /// Separate from `ArrangementSnapper` so a test can say which of the two decided a
 /// layout: the snapper moves one display, this moves several.
@@ -129,16 +130,16 @@ public enum ArrangementInsertPolicy {
 
     var arrangement = DisplayArrangement(tiles: moved)
 
-    // AR5 derives the main display from the tile at (0,0), so a push that moves that
-    // tile hands "main" to whichever display lands on the origin. Inserting to the
-    // LEFT of main would otherwise make the inserted display main, a change the user
-    // did not ask for and cannot see. Re-anchoring is a pure translation, so relative
-    // geometry is untouched. Only the insert path does this; an ordinary drag of the
-    // main display leaves no tile at the origin.
+    // The origin-is-main rule derives the main display from the tile at (0,0), so a
+    // push that moves that tile hands "main" to whichever display lands on the
+    // origin. Inserting to the LEFT of main would otherwise make the inserted
+    // display main, a change the user did not ask for and cannot see. Re-anchoring
+    // is a pure translation, so relative geometry is untouched. Only the insert path
+    // does this; an ordinary drag of the main display leaves no tile at the origin.
     //
-    // A baseline with NO tile at the origin skips AR14, and a push can then make some
-    // display main silently. Recorded rather than guarded: tiles come from
-    // `CGDisplayBounds`, whose space puts the main display's top-left at the origin,
+    // A baseline with NO tile at the origin skips the re-anchor step, and a push can
+    // then make some display main silently. Recorded rather than guarded: tiles come
+    // from `CGDisplayBounds`, whose space puts the main display's top-left at the origin,
     // and saved layouts round-trip those origins, so nothing reaches that state. If a
     // source of tiles that can omit the origin ever appears, this is the line.
     if let main = baseline.mainDisplayID {
@@ -151,8 +152,8 @@ public enum ArrangementInsertPolicy {
   /// The seam guide, in the coordinates the MAP is drawn in.
   ///
   /// Built from the baseline, not the insertion's arrangement: the canvas holds the
-  /// transform frozen on the baseline's bounds (AR2) while the insertion may have
-  /// been re-anchored by a whole-layout translation (AR14), so a guide taken from the
+  /// transform frozen on the baseline's bounds while the insertion may have
+  /// been re-anchored by a whole-layout translation, so a guide taken from the
   /// re-anchored layout would be drawn that translation away from the seam it names.
   ///
   /// - Parameter rendered: the dragged display's rect as the map is drawing it. The
@@ -206,8 +207,8 @@ public enum ArrangementInsertPolicy {
         // Candidacy is judged on the pre-snap rect but the display LANDS on the
         // snapped one, and snapping can move it up to the threshold on the other
         // axis. Where that ends the shared span, the guide would draw a solid line
-        // naming a boundary the release does not use, and AR13 rests on the guide
-        // being truthful. Askable here because the placed rect takes its other-axis
+        // naming a boundary the release does not use, and the guide has to stay
+        // truthful. Askable here because the placed rect takes its other-axis
         // coordinate from `snappedRect` unchanged.
         guard snappedRect.spansOverlap(with: near.rect, on: axis.other) else { continue }
 

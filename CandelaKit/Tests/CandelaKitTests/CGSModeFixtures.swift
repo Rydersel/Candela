@@ -83,7 +83,7 @@ enum CGSModeFixtures {
 
   static let dellNativePixels = (2160, 3840)
 
-  /// 300x400 is REAL. An intuited 320px floor rejected it (S6 §6).
+  /// 300x400 is REAL. An intuited 320px floor rejected it.
   static let dellSmallButReal = CGSModeDescriptor(
     modeNumber: 310, flags: 0x0020_0001,
     logicalWidth: 300, logicalHeight: 400,

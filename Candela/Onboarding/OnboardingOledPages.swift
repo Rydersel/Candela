@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// Designation (OB4): every external display as a selectable card, the name
+/// Designation: every external display as a selectable card, the name
 /// guess preselected and labeled as a guess. Nothing is enrolled here; the
 /// care page owns that.
 struct OnboardingOledSelectPage: View {
@@ -96,7 +96,7 @@ struct OnboardingOledSelectPage: View {
   }
 }
 
-/// Care (OB5): a miniature demonstration instead of prose, per-display
+/// Care: a miniature demonstration instead of prose, per-display
 /// protection, and the measurement choice with Screen Recording as the
 /// recommended path.
 struct OnboardingOledCarePage: View {
@@ -171,7 +171,7 @@ struct OnboardingOledCarePage: View {
     .tint(accent)
   }
 
-  /// OB5: measured is the recommended path; the estimate is the honest
+  /// Measured is the recommended path; the estimate is the honest
   /// fallback and says so.
   private var measurementChoice: some View {
     HStack(spacing: 12) {

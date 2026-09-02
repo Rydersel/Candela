@@ -3,7 +3,7 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// SO7's single banner placement: rendered above the hub root and above every
+/// This region's single banner placement: rendered above the hub root and above every
 /// pushed sub-page, so no page owns a banner. Everything is keyed to the
 /// destination display, so a preview on another display renders nothing here.
 ///
@@ -12,7 +12,7 @@ import SwiftUI
 @MainActor
 struct BannerRegion: View {
   let state: AppModel.DisplayState
-  /// SO6 allows ONE answerable surface, and the hub root keeps rendering behind
+  /// Only ONE answerable surface is allowed, and the hub root keeps rendering behind
   /// a pushed page. Both placements matched the same `displayID` and drew two
   /// answerable banners for one question. The pushed page wins; passive cards
   /// stay on both.
@@ -112,11 +112,11 @@ struct BannerRegion: View {
     )
   }
 
-  // MARK: - Countdown (SO6)
+  // MARK: - Countdown
 
   /// The settings window's only outstanding-preview surface. The form follows
   /// `preview.surface`: buttons when this window owns the answer, passive text
-  /// when the floating window does, nothing under guided setup (SO6).
+  /// when the floating window does, nothing under guided setup.
   @ViewBuilder private var countdownBanner: some View {
     if let preview = coordinator.preview, let form = countdownForm {
       switch form {
@@ -137,7 +137,8 @@ struct BannerRegion: View {
   enum CountdownForm: Equatable { case answerable, passive }
 
   /// Named rather than inline so the app test bundle can assert it: only one of
-  /// the three surfaces puts buttons on screen, which is the SO6 property.
+  /// the three surfaces puts buttons on screen, which is the
+  /// one-answerable-surface property.
   static func countdownForm(
     preview: DisplayModeCoordinator.Preview?, displayID: CGDirectDisplayID,
     ownsAnswerableCountdown: Bool
@@ -151,7 +152,7 @@ struct BannerRegion: View {
       // passive "reverting in 0 seconds" would be false.
       return preview.isCountingDown ? .passive : nil
     case .guidedSetup:
-      // Nothing at all (DM11). The setup window owns the answer, and this
+      // Nothing at all. The setup window owns the answer, and this
       // region can be on screen behind it in a background settings window: a
       // banner here would be a second answer to one question.
       return nil
@@ -190,7 +191,7 @@ struct BannerRegion: View {
   }
 
   /// A synthesized size that did not engage, or a teardown that did not finish
-  /// (SS9, and `SynthesisFailure.unwindIncomplete`). Here rather than beside the
+  /// (see `SynthesisFailure.unwindIncomplete`). Here rather than beside the
   /// opt-in row it answers, because the size can be picked from All Sizes, a
   /// pushed page a hub-root row never reaches. No `.help`: no refusal carries a
   /// diagnostic code, so the sentence is the whole answer.
@@ -214,7 +215,7 @@ struct BannerRegion: View {
     return refusal
   }
 
-  // MARK: - Reapply notices (SO8)
+  // MARK: - Reapply notices
 
   /// What reapply could not do, said on the display it could not do it to. An
   /// unplug does not clear it; only OK does, through the shared dismissal path.
@@ -240,13 +241,15 @@ struct BannerRegion: View {
     coordinator.report(for: displayID)
   }
 
-  // MARK: - Stranded mute recovery (SO4)
+  // MARK: - Stranded mute recovery
 
-  /// D29 rule 3: the explicit unmute affordance, never `.disabled`. It is the
+  /// A recovery control that is never disabled in the state it recovers from:
+  /// the explicit unmute affordance, never `.disabled`. It is the
   /// only route out of the strand, so it clears the prefs that closed the other
-  /// routes FIRST (D29 rule 2), then unmutes while the display's current mute
-  /// strategy is still in force. Rendered on the hub root and every sub-page
-  /// because the DDC toggle that causes the strand lives on Advanced (SO4).
+  /// routes FIRST (clearing availability prefs before the unmute), then unmutes
+  /// while the display's current mute strategy is still in force. Rendered on
+  /// the hub root and every sub-page because the DDC toggle that causes the
+  /// strand lives on Advanced.
   ///
   /// Two causes reach it and each needs its own sentence: copy naming the wrong
   /// cause sends the user to fix something that is not broken.
@@ -261,14 +264,14 @@ struct BannerRegion: View {
               .font(.callout.weight(.medium))
               .foregroundStyle(SettingsTheme.titleColor)
             Spacer()
-            // In flight the button gives way to a spinner. Not D29 rule 3's
-            // forbidden state (a recovery control disabled in the state it
+            // In flight the button gives way to a spinner. Not the forbidden
+            // state (a recovery control disabled in the state it
             // recovers from): these are the seconds it is doing the recovering.
             if recoveryPhase == .running {
               ProgressView().controlSize(.small)
             } else {
               // Primary: the only way out of the state this card exists for.
-              // Never `.disabled` (D29 rule 3).
+              // Never `.disabled`.
               Button(strandedMuteButtonTitle) {
                 Task { await recoverFromHardwareMute() }
               }
@@ -346,8 +349,8 @@ struct BannerRegion: View {
     return "\(cause) Muting used the display's own mute command, so no slider or key can undo it. This unmutes the display and sets its volume slider back to Enable automatically."
   }
 
-  /// Clears the prefs that closed the other routes FIRST, then unmutes (D29
-  /// rule 2). The other order is a silent no-op for the hardware-control cause:
+  /// Clears the prefs that closed the other routes FIRST, then unmutes.
+  /// The other order is a silent no-op for the hardware-control cause:
   /// `toggleMute` returns `isMuted` unchanged while `isAvailable` is false and
   /// the user believes they unmuted. The unmute drives the controller directly
   /// and consults no capability verdict, so the gates that created the second
@@ -365,10 +368,11 @@ struct BannerRegion: View {
     let outcome = await StrandedMuteRecovery.recover(
       volume: state.volume, hdrOwner: state.controller
     ) {
-      // D29 rule 2, and it runs whatever the display turns out to be doing.
-      // Clearing `audioSinkOverride` undoes an "Always disabled" choice and
-      // changes nothing on a display that denies the command, which is why the
-      // copy does not claim the slider returns. `enableMuteUnmute` is
+      // Clears availability prefs before the unmute, and it runs whatever the
+      // display turns out to be doing. Clearing `audioSinkOverride` undoes an
+      // "Always disabled" choice and changes nothing on a display that denies
+      // the command, which is why the copy does not claim the slider returns.
+      // `enableMuteUnmute` is
       // deliberately NOT touched: the display was muted under the strategy in
       // force, and the unmute has to send the same wire value.
       writer.writeAll([.forceSw, .unavailableDDC, .audioSinkOverride]) { prefs in
@@ -389,7 +393,7 @@ struct BannerRegion: View {
     }
   }
 
-  // MARK: - First sight (SO22)
+  // MARK: - First sight
 
   /// An empty pref domain is the honest test for "never configured": every
   /// per-display key carries the persistence key, so any history fails it.
@@ -422,7 +426,7 @@ struct BannerRegion: View {
   }
 }
 
-/// The answerable countdown banner (SO6 owner = the settings window), plus
+/// The answerable countdown banner (owned by the settings window), plus
 /// accessibility contract 8: focus lands on Keep, an announcement names the mode
 /// and the deadline, and the 10- and 3-second ticks re-announce. Return keeps and
 /// Escape reverts while this window is key. Same words as the floating

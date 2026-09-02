@@ -638,13 +638,13 @@ enum Regress {
 
   // MARK: - The driven checks
 
-  /// The panel every D28 constant was measured on. Matched by name fragment
+  /// The panel every combined-dimming constant was measured on. Matched by name fragment
   /// rather than by persistence key: the key is a hardware identity that moves
   /// with the cable, and these numbers belong to a panel, not to a port.
   static let magNameFragment = "MAG 341C"
 
   /// The panel whose capabilities string parsed cleanly with no volume command,
-  /// which is the only reason D24 ever greys a slider. Matched by name fragment
+  /// which is the only reason the capability-verdict rule ever greys a slider. Matched by name fragment
   /// for the same reason the write-only panel is: the verdict belongs to a
   /// monitor, not to a port.
   static let dellNameFragment = "U2725QE"
@@ -654,7 +654,7 @@ enum Regress {
   ///
   /// Read the combined one carefully. The identifier is the on-disk pref name
   /// `disableCombinedBrightness`, but the control it names is "Dim past the
-  /// display's minimum", the POSITIVE accessor over that inverted key (D1). So
+  /// display's minimum", the POSITIVE accessor over that inverted key. So
   /// value 1 means combined dimming is ON, and driving it to 0 turns it off.
   /// Backwards, every leg drives the opposite state and every call reports
   /// success.
@@ -1275,7 +1275,7 @@ enum Regress {
     return nil
   }
 
-  // MARK: D28, the combined-dimming propagation
+  // MARK: The combined-dimming propagation
 
   static func combinedDimmingCheck(
     instruments: RegressInstruments, preflight: Preflight, displays: [Display]
@@ -1659,7 +1659,7 @@ enum Regress {
     return check
   }
 
-  // MARK: D29, the mute strand proven by outcome
+  // MARK: The mute strand proven by outcome
 
   /// The two values the mute wire carries, as the write record spells them:
   /// 1 mutes and 2 unmutes. The record names no command byte and no display,
@@ -1669,7 +1669,7 @@ enum Regress {
   static let unmuteWireValue: UInt16 = 2
 
   /// The switch that makes the volume command unavailable, which is the
-  /// control D29 rule 1 governs. Composed the way the app composes it: the
+  /// control the mute-strand rule's first clause governs. Composed the way the app composes it: the
   /// on-disk pref name, the command, then the display's persistence key.
   static func volumeCommandIdentifier(_ persistenceKey: String) -> String {
     AppRegression.volumeCommandIdentifier(persistenceKey: persistenceKey)
@@ -1713,7 +1713,7 @@ enum Regress {
     )
   }
 
-  /// D29 rule 1, proven by OUTCOME rather than by log order.
+  /// The mute-strand rule's first clause, proven by OUTCOME rather than by log order.
   ///
   /// The write record carries a value and no command byte, and pref persistence
   /// is not logged, so the order inside the operation cannot be read from the
@@ -1812,7 +1812,7 @@ enum Regress {
     let mark = instruments.posterFailureMark
     // Every return from here down runs the unmute teardown first. The press is
     // what can leave this panel silent over 0x8D, and a return that reports why
-    // it could not finish while leaving the panel muted is the state D29 exists
+    // it could not finish while leaving the panel muted is the state the mute-strand rule exists
     // to prevent. `knownMuted: false` on both: nothing here established a mute,
     // so the teardown posts only where the pref says the panel is muted.
     guard instruments.postMediaKey("mute", count: 1) else {
@@ -2167,7 +2167,7 @@ enum Regress {
     }
   }
 
-  // MARK: D24 through the panel dump
+  // MARK: The capability verdict through the panel dump
 
   /// Where the deployed app is put back when its running path does not name a
   /// bundle, so a relaunch always has somewhere honest to aim.
@@ -2178,7 +2178,7 @@ enum Regress {
   /// The panel is the least observable surface in the app: an `NSMenu`-hosted
   /// hosting view publishes nothing to Accessibility and `screencapture` cannot
   /// reach the menu's tracking window. The dump is the only route to its
-  /// content, and it is compiled out of Release, so asserting D24 live means
+  /// content, and it is compiled out of Release, so asserting the capability verdict live means
   /// running a Debug build in the deployed one's place for a moment.
   ///
   /// Destructive twice over, which is why it needs `--apply` AND a Debug bundle
@@ -2299,7 +2299,7 @@ enum Regress {
     // The NEWEST dump's rows, never the window's. The window accumulates every
     // dump since launch, and the launch dump reports both panels unknown, so
     // handing the verdict the whole window selects the denying panel's
-    // pre-verdict row and convicts a healthy rig of a D24 regression.
+    // pre-verdict row and convicts a healthy rig of a capability-verdict regression.
     let rows = AppRegression.newestPanelDumpRows(fromLogLines: window.lines)
     let landed = AppRegression.panelDumpVerdictLanded(inLogLines: window.lines)
     // Both counts, and what the newest header promised, because a timeout has
@@ -2327,7 +2327,7 @@ enum Regress {
       // read, and a clause substituted for a number makes it unreadable.
       let promised = promisedRows.map { "\($0)" } ?? "an unstated number of"
       return setupMiss(
-        "no complete dump carried a volume verdict other than unknown within 20 s of launching \(running.described): the newest dump holds \(rows.count) of \(promised) rows, over \(windowDumpRows) dump rows in a \(instrumentedLines)-line window. The launch dump reports every panel unknown by construction and the capabilities verdict lands after it, so the D24 pair was never observable. With no dump rows anywhere in the window, the likeliest cause is a Release bundle behind --debug-app: the dump is compiled out of Release entirely, which looks exactly like this. With rows in the window over an incomplete newest dump, the store had not finished flushing it"
+        "no complete dump carried a volume verdict other than unknown within 20 s of launching \(running.described): the newest dump holds \(rows.count) of \(promised) rows, over \(windowDumpRows) dump rows in a \(instrumentedLines)-line window. The launch dump reports every panel unknown by construction and the capabilities verdict lands after it, so the capability-verdict pair was never observable. With no dump rows anywhere in the window, the likeliest cause is a Release bundle behind --debug-app: the dump is compiled out of Release entirely, which looks exactly like this. With rows in the window over an incomplete newest dump, the store had not finished flushing it"
       )
     }
 

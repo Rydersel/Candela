@@ -70,7 +70,7 @@ struct ArrangementDragInsertTests {
     #expect(guide.kind == .abut)
     #expect(guide.otherDisplayID == 1)
 
-    // Positive control: without the push this is the drop AR7 refuses. Moving
+    // Positive control: without the push this is the drop the overlap-refusal rule refuses. Moving
     // display 3 alone to the seam buries it in display 2.
     #expect(ArrangementRules.problems(
       in: row.moving(3, to: DisplayPoint(x: 1_000, y: 0))
@@ -138,7 +138,7 @@ struct ArrangementDragInsertTests {
 
     #expect(origin(proposal, 2) == DisplayPoint(x: 0, y: 0))
     #expect(proposal?.problems == [.overlap(1, 2)])
-    // AR7 stands here: a display dropped squarely on another names no layout,
+    // The overlap-refusal rule stands here: a display dropped squarely on another names no layout,
     // so there is nothing to land on and the canvas springs it home.
     #expect(proposal?.landing == nil)
     #expect(proposal?.commitment == nil)
@@ -183,7 +183,7 @@ struct ArrangementDragInsertTests {
   }
 
   @Test func aLegalDropOverASeamCommitsWhereItWasDropped() {
-    // AR3: what the canvas draws is what the release applies. This drop is legal
+    // The render-matches-commit rule: what the canvas draws is what the release applies. This drop is legal
     // exactly where the pointer left it AND strictly straddles a seam, so it is
     // where the two gestures collide. The insert branch used to run whether or
     // not the rendered layout had problems, and `commitment` prefers a landing
@@ -239,12 +239,12 @@ struct ArrangementDragInsertTests {
   }
 
   @Test func theSeamGuideIsDrawnInTheBaselineEvenWhenTheInsertReAnchors() throws {
-    // Every other insert fixture here lands on a layout AR14 did not re-anchor,
+    // Every other insert fixture here lands on a layout the main-anchor rule did not re-anchor,
     // so handing `ArrangementInsertPolicy.guide` the insertion's own arrangement
     // instead of the baseline left the whole suite green.
     //
     // This drop re-anchors: the dragged display is the one at the origin and the
-    // insert puts it elsewhere, so AR14 translates the whole layout back onto it.
+    // insert puts it elsewhere, so the main-anchor rule translates the whole layout back onto it.
     // The translation has a y component, which is what an x-seam guide's extent
     // is measured along, so here the two arrangements finally disagree.
     let baseline = ArrangementFixtures.arrangement([
@@ -261,7 +261,7 @@ struct ArrangementDragInsertTests {
     #expect(origin(proposal, 1) == DisplayPoint(x: 250, y: 500))
 
     let landing = try #require(proposal.landing)
-    // AR14: display 1 was main and still is, and the price is that every other
+    // The main-anchor rule: display 1 was main and still is, and the price is that every other
     // display's origin in the landed layout is 500 points up and 400 left of
     // where the map is drawing it.
     #expect(landing.arrangement.mainDisplayID == 1)

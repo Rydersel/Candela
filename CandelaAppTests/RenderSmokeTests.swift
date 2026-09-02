@@ -3,14 +3,14 @@ import CoreGraphics
 import SwiftUI
 import Testing
 
-// Layer 2 of AT4: build a covered surface with faked data, run it through
+// Layer 2: build a covered surface with faked data, run it through
 // `ImageRenderer`, and assert only that pixels came out at a plausible size.
 // Nothing here compares a pixel and nothing here commits a reference image.
 //
 // What this layer is for: a crash in `body` and a render that collapses to
 // nothing. Both are invisible to the row-model tests next door, which never
 // lay a view out, and both are the shapes a macOS update produces first
-// (AT9: the render path is measured locally and the CI run is its own
+// (the render path is measured locally and the CI run is its own
 // experiment).
 //
 // What it is NOT for: appearance. A surface can render at full size and look
@@ -67,7 +67,7 @@ struct RenderSmokeTests {
 
   /// The panel with nothing attached: the empty state, the footer, and the
   /// frame that sizes every other panel render. `AppModel` here is the
-  /// hardware-free fixture (AT3), so no service, no poller and no wire exists
+  /// hardware-free fixture, so no service, no poller and no wire exists
   /// while this runs.
   ///
   /// Size is the whole assertion, and on this surface it has to be. The panel
@@ -268,9 +268,9 @@ struct RenderSmokeTests {
 
   // MARK: - The menu-bar preview
 
-  /// The Menu Bar pane's preview, and SV13's faithfulness contract with it: the
-  /// depicted widgets follow the SYSTEM appearance, so the settings window's own
-  /// pinned-dark scheme must not reach them.
+  /// The Menu Bar pane's preview, and the design's faithfulness contract with
+  /// it: the depicted widgets follow the SYSTEM appearance, so the settings
+  /// window's own pinned-dark scheme must not reach them.
   ///
   /// The regression this catches shipped once. The grounds tracked the system
   /// through the appearance observer, but the labels resolved `.primary` and
@@ -296,7 +296,7 @@ struct RenderSmokeTests {
     let delta = maxChannelDelta(inDarkWindow, inLightWindow)
     #expect(
       delta.map { $0 <= Self.noiseTolerance } == true,
-      "the window's scheme must not reach the depicted widgets (SV13); max channel delta \(String(describing: delta))")
+      "the window's scheme must not reach the depicted widgets; max channel delta \(String(describing: delta))")
   }
 
   /// The positive control the case above is worth nothing without: two renders

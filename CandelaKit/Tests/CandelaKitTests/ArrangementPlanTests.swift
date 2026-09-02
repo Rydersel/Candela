@@ -131,7 +131,7 @@ final class FakeArrangementConfigurator: DisplayArrangementConfiguring, @uncheck
   }
 }
 
-@Suite("Arrangement plan (AR4, AR6)")
+@Suite("Arrangement plan")
 struct ArrangementPlanTests {
   // MARK: - What refuses to become a plan
 
@@ -239,7 +239,7 @@ struct ArrangementPlanTests {
     }
   }
 
-  // MARK: - AR4: a plan cannot be partial
+  // MARK: - A plan cannot be partial
 
   @Test func aPlanCoversEveryDisplay() throws {
     let baseline = DisplayArrangement(tiles: [
@@ -255,7 +255,7 @@ struct ArrangementPlanTests {
     #expect(plan.changes == moved.tiles.map { DisplayOriginChange(id: $0.id, origin: $0.rect.origin) })
   }
 
-  // MARK: - AR6: mirror slaves never appear in a plan
+  // MARK: - Mirror slaves never appear in a plan
 
   @Test func mirrorSlavesNeverAppearInAPlan() throws {
     let baseline = DisplayArrangement(tiles: [
@@ -268,7 +268,7 @@ struct ArrangementPlanTests {
   }
 
   /// A slave that also holds a tile is refused rather than filtered out: filtering leaves
-  /// display 9's origin unstated, the partial plan AR4 exists to make unrepresentable.
+  /// display 9's origin unstated, the partial plan the no-partial-plan rule exists to make unrepresentable.
   @Test func anArrangementGivingAMirrorSlaveATileIsRefused() {
     let baseline = DisplayArrangement(tiles: [
       ArrangementFixtures.tile(1, DisplayRect(x: 0, y: 0, width: 1920, height: 1080), mirroredIDs: [9]),

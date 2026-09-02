@@ -2,7 +2,7 @@ import CandelaKit
 import CoreGraphics
 import Testing
 
-/// SO6's one-answerable-surface property across all THREE owners (DM11).
+/// The one-answerable-surface property across all THREE owners.
 ///
 /// The guided setup flow borrowing `.settingsBanner` made a background settings
 /// window on the same display's page draw a second answerable banner for one

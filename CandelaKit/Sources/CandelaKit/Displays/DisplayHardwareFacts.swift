@@ -33,7 +33,7 @@ public struct DisplayHardwareFacts: Sendable, Equatable {
   /// The IORegistry entry path, which is the port and link path.
   public let ioDisplayLocation: String?
   /// 0…20 from `ioregMatchScore`: how confident the IOReg-to-CGDisplayID match
-  /// is. A number because DT30 rule (g) says a row stating a number states the
+  /// is. A number because a row stating a number states the
   /// real one.
   public let ioregMatchScore: Int
 
@@ -64,7 +64,7 @@ public struct DisplayHardwareFacts: Sendable, Equatable {
   /// `IOregService`'s string fields default to `""` and its serial to `0` rather
   /// than nil, so "declared nothing" and "declared blank" arrive identical.
   /// Translating here is what stops a row rendering "Transport: " with nothing
-  /// after it (DT30 rule e); a nil renders as an explicit "not reported".
+  /// after it; a nil renders as an explicit "not reported".
   static func from(
     service: Arm64DDC.IOregService,
     matchScore: Int,

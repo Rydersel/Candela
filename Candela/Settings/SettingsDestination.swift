@@ -5,7 +5,7 @@ import Foundation
 /// rather than a sidebar row that navigates nowhere. Same guarantee `PrefName`
 /// gives the propagation seam.
 enum PaneID: String, CaseIterable, Hashable {
-  // This is NOT the sidebar's order (SC1). Render order comes from
+  // This is NOT the sidebar's order. Render order comes from
   // `SettingsRegistry.sections`; `allCases` is only the id space.
   //
   // Raw values are the `CANDELA_DEBUG_SETTINGS` route ids: append, never
@@ -22,7 +22,7 @@ enum SettingsDestination: Hashable {
   case display(String)
 }
 
-/// A display destination's pushed sub-pages (SO1). Raw values are the
+/// A display destination's pushed sub-pages. Raw values are the
 /// `CANDELA_DEBUG_SETTINGS` sub-page ids; user-visible names live in `title`,
 /// shared by pushed pages, toolbar titles and VoiceOver so a rename cannot
 /// fork them.
@@ -38,11 +38,11 @@ enum DisplaySubPage: String, CaseIterable, Hashable {
   }
 }
 
-/// The OLED Care pane's pushed pages (OCR1), keyed by persistence key. All
+/// The OLED Care pane's pushed pages, keyed by persistence key. All
 /// elements of one presented path share one key: the switcher rewrites every
 /// element.
 ///
-/// Display Health is deliberately NOT a case (OCR-A1): it opens in its own
+/// Display Health is deliberately NOT a case: it opens in its own
 /// content-sized window, because a pushed page cannot resize the settings
 /// window to a portrait display's map.
 ///
@@ -64,7 +64,7 @@ enum OledCarePage: Hashable {
   }
 }
 
-/// The Keyboard pane's pushed pages (KMR11). No display key: neither page
+/// The Keyboard pane's pushed pages. No display key: neither page
 /// depends on connected hardware, so a departure never pops them.
 enum KeyboardPage: String, CaseIterable, Hashable {
   case modifiers = "mods"

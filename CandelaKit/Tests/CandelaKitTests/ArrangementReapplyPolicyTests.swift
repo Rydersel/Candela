@@ -165,7 +165,7 @@ struct ArrangementReapplyPolicyTests {
   @Test func bothSpellingsOfTheSignatureAgreeOnACompleteRead() {
     #expect(TopologySignature(online: attached) == TopologySignature(onScreen))
 
-    // And a mirror slave changes neither: it has no tile (AR6) and is filtered
+    // And a mirror slave changes neither: it has no tile and is filtered
     // out of the online list for the same reason.
     let mirrored = attached + [display(9, "mag", mirrors: 3)]
     let withMirror = DisplayArrangement(tiles: [
@@ -175,7 +175,7 @@ struct ArrangementReapplyPolicyTests {
     #expect(TopologySignature(online: mirrored) == TopologySignature(online: attached))
   }
 
-  // MARK: - Synthesized sizes (SS12)
+  // MARK: - Synthesized sizes
 
   /// The MAG showing a synthesized size: the virtual display (id 7) owns the
   /// desktop and the panel is its slave, so the panel holds no tile.
@@ -189,7 +189,7 @@ struct ArrangementReapplyPolicyTests {
 
   private var pairing: [CGDirectDisplayID: String] { [7: Self.identity("mag").key] }
 
-  /// SS12 at the arrival gate: engaging a size is not a set change. Without it every
+  /// The synthesis-substitution rule at the arrival gate: engaging a size is not a set change. Without it every
   /// display counts as arrived and the saved layout overwrites whatever the user last did.
   @Test func engagingASynthesizedSizeIsNotASetChange() {
     var arrivals = TopologyArrivalTracker()
@@ -256,7 +256,7 @@ struct ArrangementReapplyPolicyTests {
     if let layout { #expect(ArrangementRules.problems(in: layout).isEmpty) }
   }
 
-  // MARK: - The read-side trap (AR4)
+  // MARK: - The read-side trap
 
   /// `ArrangementSnapshot` skips a display whose `CGDisplayBounds` is unreadable, so it
   /// gets no tile and no origin. The plan stays structurally total while describing an
@@ -299,7 +299,7 @@ struct ArrangementReapplyPolicyTests {
   }
 
   /// A mirror slave is expected to have no tile: it has no independent origin, and
-  /// setting one removes it from the mirror set (AR6). Deferring on it restores nothing.
+  /// setting one removes it from the mirror set. Deferring on it restores nothing.
   @Test func aMirrorSlaveWithNoTileIsNotAnIncompleteRead() {
     let mirrored = attached + [display(9, "mag", mirrors: 3)]
     let withMirror = DisplayArrangement(tiles: [
@@ -324,7 +324,7 @@ struct ArrangementReapplyPolicyTests {
     #expect(decision.notice == nil)
     #expect(layout.tile(2)?.rect.origin == DisplayPoint(x: 0, y: 0))
     #expect(layout.tile(3)?.rect.origin == DisplayPoint(x: 1920, y: 0))
-    // AR4: the layout names every display that can hold a position, so the plan
+    // The no-partial-plan rule: the layout names every display that can hold a position, so the plan
     // built from it cannot leave one to the heuristic.
     #expect(Set(layout.tiles.map(\.id)) == Set(onScreen.tiles.map(\.id)))
   }
@@ -339,7 +339,7 @@ struct ArrangementReapplyPolicyTests {
     #expect(decision == .doNothing)
   }
 
-  /// AR11: two attached displays share an identity, so nothing says which saved position
+  /// The shared-identity refusal: two attached displays share an identity, so nothing says which saved position
   /// belongs to which screen. A coin flip that swaps them is worse than not restoring.
   @Test func aTwinCollisionIsRefusedAndReportedRatherThanGuessed() {
     let twins = [display(2, "mag"), display(3, "mag")]
@@ -395,7 +395,7 @@ struct ArrangementReapplyPolicyTests {
     }
   }
 
-  /// AR7 stays the backstop, reachable only for stored data that does not tile at the
+  /// The overlap-refusal rule stays the backstop, reachable only for stored data that does not tile at the
   /// sizes it recorded: hand-edited or corrupt, since a layout is only saved from one the
   /// machine achieved. It is also the case `expectsExactOrigins` turns the post-commit
   /// check off for, so sending it unattended commits a layout nobody chose, unwatched.

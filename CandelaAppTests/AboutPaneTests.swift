@@ -1,9 +1,9 @@
 import Foundation
 import Testing
 
-// The About page's one derived sentence (AT10). Pinned verbatim because the
+// The About page's one derived sentence. Pinned verbatim because the
 // never-checked line is the first thing a fresh install shows, and asserted
-// against a fixed clock so the formatter's en_US pin (D25) is under test: a
+// against a fixed clock so the formatter's en_US pin is under test: a
 // machine-locale run fails here rather than on a user's screen.
 @Suite("About pane copy") @MainActor
 struct AboutPaneTests {

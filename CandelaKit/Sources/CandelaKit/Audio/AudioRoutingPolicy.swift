@@ -1,4 +1,4 @@
-/// Pure volume-key routing decisions (D4/D8): no CoreAudio here, so every branch
+/// Pure volume-key routing decisions: no CoreAudio here, so every branch
 /// is unit-testable.
 public enum AudioRoutingPolicy {
   /// Fork DisplayManager.normalizedName: strip parens, spaces, and digits, so
@@ -9,7 +9,7 @@ public enum AudioRoutingPolicy {
 
   /// Per-display match against the default output device; `audioDeviceNameOverride`
   /// wins over the raw display name when non-empty. Recomputed at key time and never
-  /// cached at tap-arm time (D4), which is where the fork went stale.
+  /// cached at tap-arm time, which is where the fork went stale.
   public static func displayMatchesDevice(
     deviceName: String, rawDisplayName: String, nameOverride: String
   ) -> Bool {
@@ -22,7 +22,7 @@ public enum AudioRoutingPolicy {
   /// jack declares audio too, and DDC volume drives that jack.
   ///
   /// No production callers since volume-slider gating moved to the DDC capabilities
-  /// string (D24); kept with its tests.
+  /// string; kept with its tests.
   public static func displayHasAudioSink(
     rawDisplayName: String, nameOverride: String, outputDeviceNames: [String]
   ) -> Bool {
@@ -41,7 +41,7 @@ public enum AudioRoutingPolicy {
   /// caller's candidate pool for `mode`, minus everything the capability verdict
   /// (`VolumeSliderPolicy`) or the engine's availability switch rules out. Not "how
   /// many displays are attached". A keyboard-disabled display still counts, because
-  /// its press is swallowed on purpose (R1), and one display that can act keeps the
+  /// its press is swallowed on purpose, and one display that can act keeps the
   /// keys armed for the whole rig. A watched key is CONSUMED by the tap, so watching
   /// one while nothing can act takes the press away from macOS too and the key does
   /// nothing at all.

@@ -24,7 +24,7 @@ private func fixtureRow(
 
   @Test func magLadderFillsTheEmptyBand() {
     // Not a transcript of the MAG's revealed list: a stricter stand-in, with the
-    // rows packed into the top of the band so SS2 precedence has the most it can
+    // rows packed into the top of the band so the HiDPI-precedence rule has the most it can
     // take over. 1720x720 is the exact-2x rung the panel tops out at.
     let existing = [
       fixtureRow(2048, 858, hidpi: true), fixtureRow(1920, 804, hidpi: true),
@@ -220,7 +220,7 @@ private func fixtureRow(
 
   @Test func descriptorForAStopPrecedenceNowDropsResolvesNil() {
     // The stored size still generates arithmetically, but an existing HiDPI
-    // row has since taken it over, so SS2 removes it from the ladder and the
+    // row has since taken it over, so the HiDPI-precedence rule removes it from the ladder and the
     // stored choice must stop resolving.
     let descriptor = SyntheticSizeDescriptor(logicalWidth: 2580, logicalHeight: 1080)
     let resolved = SyntheticSizeCatalog.size(

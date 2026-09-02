@@ -29,7 +29,7 @@ public struct CoreGraphicsArrangementConfigurator: DisplayArrangementConfiguring
 
   public func apply(_ plan: ArrangementPlan, scope: DisplayConfigScope) throws -> DisplayArrangement {
     let config = try beginDisplayConfiguration()
-    // EVERY change, including displays already where the plan puts them (AR4).
+    // EVERY change, including displays already where the plan puts them.
     // displayplacer skips those to dodge a hang we have never measured, and the
     // cost of skipping is handing every unnamed display to CoreGraphics'
     // "as close as possible to its current location" heuristic.
@@ -85,7 +85,8 @@ public struct CoreGraphicsArrangementConfigurator: DisplayArrangementConfiguring
 /// from the configurator so the reading rules are testable without reconfiguring
 /// the machine.
 enum ArrangementSnapshot {
-  /// **AR6.** A mirror slave gets no tile: it has no independent position, and
+  /// **The mirror-slave rule.** A mirror slave gets no tile: it has no independent
+  /// position, and
   /// setting its origin would remove it from the mirror set. It rides on its
   /// master's `mirroredIDs` instead, so the UI can name it and no plan can carry it.
   ///
@@ -111,7 +112,7 @@ enum ArrangementSnapshot {
     })
   }
 
-  /// Display space is integral (AR1) and `CGDisplayBounds` is measured integral in
+  /// Display space is integral and `CGDisplayBounds` is measured integral in
   /// POINTS, not pixels, so the rounding converts rather than quantises. `nil` for
   /// anything that is not a finite rect, which is what an unknown display ID reports.
   private static func displayRect(_ rect: CGRect) -> DisplayRect? {

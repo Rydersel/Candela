@@ -4,7 +4,7 @@ import IOKit.hidsystem
 /// (subtype `NX_SUBTYPE_AUX_CONTROL_BUTTONS`) into a `MediaKeyPress`.
 ///
 /// Lives in the engine rather than the event-tap island so it can be tested:
-/// the app target has no test target (D21).
+/// the app target has no test target.
 ///
 /// Layout: bits 16...31 are the `NX_KEYTYPE_*` code, bits 8...15 the key state
 /// (`0xA` down, `0xB` up), bit 0 the auto-repeat flag.

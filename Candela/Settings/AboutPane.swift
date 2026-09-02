@@ -5,7 +5,7 @@ import SwiftUI
 /// `@MainActor` matches every other pane: on `View` only `body` is isolated,
 /// and both `SettingsActions` and `UpdaterModel` are `@MainActor` types.
 ///
-/// No Donate button and no project links (D26): every fork link points at a
+/// No Donate button and no project links: every fork link points at a
 /// project Candela is not.
 ///
 /// Sparkle owns every updater setting (`SUEnableAutomaticChecks` and friends
@@ -44,7 +44,7 @@ struct AboutPane: View {
       }
 
       SettingsCardSection(title: "Setup") {
-        // D14: the first-run flow stays findable after dismissal, and this is
+        // The first-run flow stays findable after dismissal, and this is
         // the only way back to it. "Setup" is the user-facing name; the
         // internal name "onboarding" never appears in the UI.
         SettingsActionRow(
@@ -97,7 +97,7 @@ struct AboutPane: View {
 
   // MARK: - Hero
 
-  /// The window's only float (SV8); `onboardingFloat` stills it under Reduce
+  /// The window's only float; `onboardingFloat` stills it under Reduce
   /// Motion.
   private var hero: some View {
     VStack(spacing: 10) {
@@ -162,7 +162,7 @@ struct AboutPane: View {
   /// only Sparkle's own window reports it.
   ///
   /// The locale is pinned because the app test target asserts these words
-  /// verbatim and the app ships English only (D25).
+  /// verbatim and the app ships English only.
   static func checkNowCaption(lastCheck: Date?, now: Date = .now) -> String {
     guard let lastCheck else {
       return "\(AppInfo.productName) hasn't checked for updates yet."

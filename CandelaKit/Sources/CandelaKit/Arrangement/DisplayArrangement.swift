@@ -7,7 +7,7 @@ public struct ArrangementTile: Sendable, Equatable, Identifiable {
   public let identity: DisplayConfigIdentity
   public let name: String
   public let rect: DisplayRect
-  /// Displays hardware-mirroring THIS one. They get no tile and no origin (AR6).
+  /// Displays hardware-mirroring THIS one. They get no tile and no origin.
   public let mirroredIDs: [CGDirectDisplayID]
 
   public init(
@@ -52,7 +52,8 @@ public struct DisplayArrangement: Sendable, Equatable {
     tiles.first { $0.id == id }
   }
 
-  /// AR5, derived and never stored: display space is *defined* with its origin at
+  /// The origin-is-main rule, derived and never stored: display space is *defined*
+  /// with its origin at
   /// the main display's top-left, so a stored flag could disagree with the geometry
   /// it describes.
   public var mainDisplayID: CGDirectDisplayID? {

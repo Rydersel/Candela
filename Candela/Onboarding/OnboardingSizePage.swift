@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// The recommended size for one display. RM11 copy: renders at a higher
+/// The recommended size for one display. The copy rule: renders at a higher
 /// resolution and scales the result, never "native HiDPI". Applying starts
-/// the keep and revert countdown (PD9) through the model's apply seam; this
+/// the keep and revert countdown through the model's apply seam; this
 /// page renders the seam's state and never owns a timer of its own.
 struct OnboardingSizePage: View {
   @Bindable var model: OnboardingFlowModel
@@ -62,7 +62,8 @@ struct OnboardingSizePage: View {
     // revert's return all animate; a plain VStack animates both directions.
     .animation(.spring(duration: 0.45), value: model.applyState)
     .onDisappear {
-      // An unanswered countdown must not outlive its page (OB7 keeps only
+      // An unanswered countdown must not outlive its page (the commit-on-advance
+      // rule keeps only
       // what was confirmed); the model reverts it and stops ticking.
       model.sizePageDisappeared()
     }
@@ -190,7 +191,7 @@ struct OnboardingSizePage: View {
     .padding(.horizontal, 60)
   }
 
-  /// The keep and revert bar, the safety shape the picker ships (PD9). The copy
+  /// The keep and revert bar, the safety shape the picker ships. The copy
   /// states the semantic: expiry reverts, so the size sticks only on Keep.
   private func countdownBar(seconds: Int) -> some View {
     VStack(spacing: 12) {

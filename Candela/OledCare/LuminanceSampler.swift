@@ -4,12 +4,12 @@ import Foundation
 import ScreenCaptureKit
 import os
 
-/// One-shot luminance sampling for the exposure map (OC16).
+/// One-shot luminance sampling for the exposure map.
 ///
 /// App-target island: ScreenCaptureKit is not on CandelaKit's allowed-import
 /// list, so Kit only ever receives the resulting array of floats.
 ///
-/// **One capture per call, never an `SCStream`** (OC16). Suspension is then the
+/// **One capture per call, never an `SCStream`**. Suspension is then the
 /// natural state between captures: no stream lifecycle to pause, resume or leak,
 /// and a display that stops qualifying simply stops being asked.
 ///
@@ -79,7 +79,7 @@ final class LuminanceSampler {
       return nil
     }
 
-    // OC16: our own overlays must not be sampled, or detection dimming feeds
+    // Our own overlays must not be sampled, or detection dimming feeds
     // back into the measurement it derives from: band dims region, region reads
     // cooler, band lifts, region reheats. `owningApplication` is nil for some
     // system windows, which are correctly kept.

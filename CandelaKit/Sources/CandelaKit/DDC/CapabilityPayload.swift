@@ -12,11 +12,11 @@
 /// is neither `)` nor whitespace, so the whole answer parsed to nil: no codes,
 /// no `mccs_ver`, and VCP 0x62 `.unknown` instead of `.unsupported`. That left
 /// the volume slider enabled on a panel that provably does not list the volume
-/// command (D24 resolves `.unknown` to enabled).
+/// command (the capabilities rule resolves `.unknown` to enabled).
 enum CapabilityPayload {
   /// `nil` when the bytes are not a capability string this code can hand on
   /// intact. Never "the display has no capabilities" — that distinction is the
-  /// whole of D24, and every caller's `nil` already means a failed read.
+  /// whole of the capabilities-denial rule, and every caller's `nil` already means a failed read.
   ///
   /// Trailing NULs are trimmed; a NUL anywhere else rejects the payload. A
   /// trailing NUL is a C string terminator, a transport artifact carrying no
@@ -24,7 +24,7 @@ enum CapabilityPayload {
   /// string the panel sent, and splicing the halves together hands the parser
   /// something that can parse CLEANLY, which is the only route to
   /// `.unsupported`, the one verdict that greys a control. Manufacturing a
-  /// denial out of a damaged read is what D24 forbids.
+  /// denial out of a damaged read is what the capabilities-denial rule forbids.
   ///
   /// Passing an interior NUL through is not safe either:
   /// `"(prot(monitor)\0vcp(10))"` clears every gate the parser has, because the

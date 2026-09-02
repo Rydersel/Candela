@@ -1,9 +1,9 @@
 import Foundation
 import Observation
 
-/// A decision the flow commits when the user advances past a page (OB7).
+/// A decision the flow commits when the user advances past a page.
 /// Fixture mode records these; live mode routes them through the app's existing
-/// write paths (OB6).
+/// write paths.
 enum OnboardingCommit: Equatable {
   case rename(displayKey: String, name: String)
   case applySize(displayKey: String, looksLikeWidth: Int, looksLikeHeight: Int)
@@ -27,7 +27,7 @@ enum OnboardingSizeChoice: Equatable {
 }
 
 /// The in-flow size apply, observable by the size page. One apply runs at a
-/// time. The semantics are the shipped keep and revert countdown's (PD9):
+/// time. The semantics are the shipped keep and revert countdown's:
 /// expiry REVERTS and the page stays on its choices; only an explicit keep
 /// resolves the apply and advances.
 enum OnboardingApplyState: Equatable, Sendable {
@@ -68,7 +68,7 @@ final class OnboardingFlowModel {
   private var deselectedOleds: Set<String> = []
 
   /// Per-display protection choice on the care page, default on for every
-  /// designated display (OB3).
+  /// designated display.
   var careEnabled: Set<String> {
     didSet {
       // Same rule as the designation set: a protection-off is a decision, and
@@ -85,24 +85,24 @@ final class OnboardingFlowModel {
   /// re-harvest that reseeded the toggle would enroll a display just declined.
   private var declinedCare: Set<String> = []
 
-  /// True when the user took the recommended measured path (OB5).
+  /// True when the user took the recommended measured path.
   var measuredTelemetry: Bool = true
   /// The size decision per display. A kept apply records `.recommended` or
   /// `.custom`; a revert (clicked or by expiry) records `.keepCurrent`. Set
   /// through the apply reports below, never directly by the countdown UI.
   var sizeChoices: [String: OnboardingSizeChoice] = [:]
   var renames: [String: String] = [:]
-  /// Finish-page toggle, default checked on a first run (OB13).
+  /// Finish-page toggle, default checked on a first run.
   var launchAtLogin: Bool
   /// Simulated grant state in fixture mode; live mode mirrors the real
   /// permission object instead.
   var accessibilityGranted: Bool
   var accessibilityRequested = false
 
-  /// The commit seam. Fixture mode records; live mode writes (OB6).
+  /// The commit seam. Fixture mode records; live mode writes.
   var onCommit: (OnboardingCommit) -> Void
-  /// Close the hosting window, recording completion (OB7 keeps everything
-  /// already committed).
+  /// Close the hosting window, recording completion (the commit-on-advance
+  /// rule keeps everything already committed).
   var onClose: () -> Void = {}
   /// Permission actions, injected: live mode binds `AccessibilityPermission`,
   /// the mock presenter simulates a grant so the page's states are clickable.
@@ -118,7 +118,7 @@ final class OnboardingFlowModel {
     onOpenAccessibilitySettings()
   }
 
-  /// OB5's ask, injected like the accessibility actions: live mode calls
+  /// The Screen Recording ask, injected like the accessibility actions: live mode calls
   /// `CGRequestScreenCaptureAccess`, the mock records the click.
   var onRequestScreenRecording: () -> Void = {}
   /// Achieved-state check for the Screen Recording grant, injected like the
@@ -153,8 +153,7 @@ final class OnboardingFlowModel {
   /// reports mean. `init` installs a fixture with the shipped semantics. Live
   /// wiring replaces all three closures with the shipped mode-apply path and
   /// answers its preview directly: the shipped banner's answering surface is
-  /// fixed at preview start and is never this window, so Setup renders its own
-  /// (DM11).
+  /// fixed at preview start and is never this window, so Setup renders its own.
   var onApplySize: (_ displayKey: String, _ looksLikeWidth: Int, _ looksLikeHeight: Int) -> Void
   var onKeepSize: () -> Void
   var onRevertSize: () -> Void
@@ -188,8 +187,8 @@ final class OnboardingFlowModel {
     designatedOleds = designated
     careEnabled = designated
     launchAtLogin = environment.isFirstRun ? true : environment.loginItemEnabled
-    // A re-run arrives at the prior telemetry decision (OB3 keeps the
-    // recommended measured default for a first run). Only an enrolled display's
+    // A re-run arrives at the prior telemetry decision (a first run keeps the
+    // recommended measured default). Only an enrolled display's
     // pref carries a decision; an unenrolled one holds the unwritten default and
     // must not flip the recommendation.
     //
@@ -235,7 +234,7 @@ final class OnboardingFlowModel {
     return display(forKey: key)?.name ?? key
   }
 
-  /// Commit the current page's decisions, then move forward (OB7). The last
+  /// Commit the current page's decisions, then move forward. The last
   /// page's advance closes the window.
   func advance() {
     // An unanswered countdown never rides an advance: revert it first, so
@@ -259,7 +258,7 @@ final class OnboardingFlowModel {
   }
 
   /// Skip Setup: close without committing the current page. Everything
-  /// already applied stays applied (OB7), and an unconfirmed preview is not
+  /// already applied stays applied, and an unconfirmed preview is not
   /// applied: it is reverted before the window goes.
   func skip() {
     if case .counting = applyState { revertSize() }
@@ -387,7 +386,7 @@ final class OnboardingFlowModel {
   }
 
   /// A kept apply: the display is already showing the size, so record the
-  /// choice for the commit record (OB7) and move on.
+  /// choice for the commit record and move on.
   func applyKept() {
     guard let pending = pendingApply else { return }
     applyTicker?.cancel()
@@ -396,7 +395,7 @@ final class OnboardingFlowModel {
     advance()
   }
 
-  /// A revert, clicked or by countdown expiry (PD9: expiry reverts, it never
+  /// A revert, clicked or by countdown expiry (expiry reverts, it never
   /// silently keeps). The page stays on its choices and the decision so far
   /// is keeping the current size.
   func applyReverted() {

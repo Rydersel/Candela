@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// The gate that decides when reapply may have an opinion (DM7). Split out of the
+/// The gate that decides when reapply may have an opinion. Split out of the
 /// coordinator so these timing cases can be stated at all: `ModeReapplyPolicy` sees
 /// one display at one instant and cannot reach them.
 @Suite("Display arrival tracker")

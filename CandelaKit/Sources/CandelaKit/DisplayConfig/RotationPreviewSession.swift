@@ -5,11 +5,12 @@ import Foundation
 ///
 /// **There is no commit step.** The other preview sessions apply at
 /// `kCGConfigureForAppOnly` and re-apply at session or permanent scope to make
-/// it stick. A rotation is already permanent the instant it is applied: RS7
-/// measured one outliving the process that set it, so there is no scope to
-/// promote out of. `confirm` writes nothing; only `revert` touches hardware.
+/// it stick. A rotation is already permanent the instant it is applied: an
+/// earlier experiment measured one outliving the process that set it, so
+/// there is no scope to promote out of. `confirm` writes nothing; only
+/// `revert` touches hardware.
 ///
-/// So **the countdown is not a backstop against a crash** (RT11). Kill the app
+/// So **the countdown is not a backstop against a crash**. Kill the app
 /// mid-preview and the display stays rotated. Survivable, because a rotated
 /// display stays readable and System Settings stays reachable, but nothing here
 /// may be written as though the app dying undoes anything.

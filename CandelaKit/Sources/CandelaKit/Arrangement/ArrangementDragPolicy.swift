@@ -6,7 +6,7 @@ import Foundation
 ///
 /// Kept apart from the proposal's own `arrangement`, which is where the display IS
 /// and has to track the pointer. One `propose` call returns both, so they cannot
-/// drift, which is what AR3 protects.
+/// drift, which is what the single-return contract protects.
 ///
 /// **Both gestures land rather than move live.** An insert that rearranged the map
 /// under the pointer was disorienting: displays the user was not touching slid about
@@ -27,14 +27,15 @@ public struct ArrangementLanding: Sendable, Equatable {
 
 /// What a drag is asking for, at one instant.
 ///
-/// **AR3.** It carries what to draw, what to apply, and whether applying it is
-/// legal, so a release computes nothing and commits the value that was on screen.
+/// **The single-return contract.** It carries what to draw, what to apply, and
+/// whether applying it is legal, so a release computes nothing and commits the
+/// value that was on screen.
 /// "It snapped somewhere other than the preview showed" then takes a caller that
 /// recomputes on purpose instead of falling out of two paths drifting.
 public struct ArrangementProposal: Sendable, Equatable {
   /// The dragged tile moved AND snapped, in the baseline's display space.
   public let arrangement: DisplayArrangement
-  /// The layout the drag started from (AR2's baseline, frozen for its duration).
+  /// The layout the drag started from, frozen for its duration.
   ///
   /// Carried so the proposal can answer whether it asks for anything, which
   /// `ArrangementPreviewSession.begin` needs to refuse a no-op. Comparing against the
@@ -48,8 +49,8 @@ public struct ArrangementProposal: Sendable, Equatable {
   /// middle display of a row strands the far one.
   public let problems: [ArrangementProblem]
   /// Where a release puts the display when `arrangement` itself cannot be committed.
-  /// `nil` for a drop with nothing to salvage: an overlap (AR7 springs those back),
-  /// or a layout of one display.
+  /// `nil` for a drop with nothing to salvage: an overlap (the canvas springs
+  /// those back), or a layout of one display.
   public let landing: ArrangementLanding?
 
   public init(
@@ -79,14 +80,15 @@ public struct ArrangementProposal: Sendable, Equatable {
   /// The landing wins when there is one, safe only because `propose` builds one only
   /// for drops the rendered arrangement cannot answer for. A landing that could also
   /// exist for a legal drop would commit something other than what the canvas drew,
-  /// which is the state AR3 makes unreachable. A landing equal to the baseline is no
-  /// commitment: the preview session refuses a no-op.
+  /// which is the state the single-return contract makes unreachable. A
+  /// landing equal to the baseline is no commitment: the preview session
+  /// refuses a no-op.
   public var commitment: DisplayArrangement? {
     if let landing { return landing.arrangement == baseline ? nil : landing.arrangement }
     return isValid && changesArrangement ? arrangement : nil
   }
 
-  /// The one question a drop has to ask. An overlap springs back (AR7), a no-op is
+  /// The one question a drop has to ask. An overlap springs back, a no-op is
   /// refused, and a drop into open space has somewhere to go.
   public var isCommittable: Bool { commitment != nil }
 }
@@ -103,12 +105,12 @@ public enum ArrangementDragPolicy {
   ///   - baseline: the arrangement as of drag **start**, never the live one.
   ///     `translation` is measured from the same instant, so feeding this function's
   ///     own output back in would apply the move again every frame.
-  ///   - transform: **frozen** at drag start (AR2). It is fitted to the arrangement's
+  ///   - transform: **frozen** at drag start. It is fitted to the arrangement's
   ///     bounds, which the dragged tile changes, so recomputing it here would rescale
   ///     the map under the pointer every frame. Taken as a parameter so it cannot.
   /// - Returns: `nil` only when `baseline` has no tile for `id`. An invalid proposal
   ///   is still RETURNED with `isValid == false`, because the user has to see where
-  ///   they are and AR7 has the canvas spring the tile back.
+  ///   they are and the canvas springs the tile back.
   public static func propose(
     dragging id: CGDirectDisplayID,
     by translation: CanvasPoint,
@@ -141,17 +143,17 @@ public enum ArrangementDragPolicy {
     let problems = ArrangementRules.problems(in: arrangement)
 
     // A landing exists ONLY when the rendered drop cannot be committed as it stands,
-    // so a drop legal exactly where the user let go commits there and nowhere else
-    // (AR3). Run the insert branch unguarded and a drop that was legal AND happened
+    // so a drop legal exactly where the user let go commits there and nowhere else.
+    // Run the insert branch unguarded and a drop that was legal AND happened
     // to straddle a seam renders clean, reddens nothing, then commits the display
     // somewhere the user never put it.
     var landing: ArrangementLanding?
     if !problems.isEmpty {
       // Decided from the PRE-snap rect and tried first, because ordinary snapping
       // cannot express an insert: it abuts the near display and lands on top of the
-      // far one, which AR7 would spring back. `ArrangementInsertPolicy` returns only
-      // legal layouts, so displays the user did not grab move only into a result they
-      // can keep.
+      // far one, which the canvas would spring back. `ArrangementInsertPolicy`
+      // returns only legal layouts, so displays the user did not grab move
+      // only into a result they can keep.
       if let insertion = ArrangementInsertPolicy.insertion(
            dragging: id, freeRect: moved, snappedRect: snapped.rect, into: baseline
          ),
@@ -162,15 +164,16 @@ public enum ArrangementDragPolicy {
         landing = ArrangementLanding(arrangement: insertion.arrangement, lines: [guide])
       }
       // A drop that leaves a display touching nothing gets a landing rather than a
-      // bare refusal. Overlaps that are not an insert still spring back under AR7: a
+      // bare refusal. Overlaps that are not an insert still spring back: a
       // display dropped squarely on another names no particular layout.
       //
-      // UNRESOLVED, recorded rather than fixed. AR14 re-anchors the insert path on
+      // UNRESOLVED, recorded rather than fixed. The insert path re-anchors on
       // the display that was main; this branch does not, so an attach landing that
-      // moves main off (0,0) commits a layout whose `mainDisplayID` is nil (AR5
-      // derives main from the tile at the origin). Inherited, not introduced: an
+      // moves main off (0,0) commits a layout whose `mainDisplayID` is nil (main
+      // is derived from the tile at the origin). Inherited, not introduced: an
       // ordinary legal drag of the main display already does this. Whether either
-      // should re-anchor is a question about AR5 and AR14 together.
+      // should re-anchor is a question about main derivation and the insert
+      // path's re-anchor together.
       else if problems.allSatisfy(\.isDisconnection),
               let attachment = ArrangementAttachPolicy.attach(
                 moved, id: id, in: baseline, threshold: threshold

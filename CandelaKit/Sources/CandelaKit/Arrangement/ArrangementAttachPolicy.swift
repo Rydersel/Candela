@@ -19,7 +19,7 @@ public struct ArrangementAttachment: Sendable, Equatable {
 /// macOS will not hold one. A drop into open space is not ambiguous, though, so it
 /// attaches rather than springing back; only the edge is in question.
 ///
-/// NEAR, not nearest (AR15). Each candidate's cross-axis coordinate is tidied first,
+/// NEAR, not nearest. Each candidate's cross-axis coordinate is tidied first,
 /// and only the tidied candidates are ranked by distance. A drop past the end of
 /// another display therefore goes flush rather than landing at the strictly nearest
 /// legal position, which would leave the two meeting over a single point.

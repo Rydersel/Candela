@@ -4,7 +4,7 @@ import SwiftUI
 
 /// The app-level pane: how `AppInfo.productName` starts and stops, how far it is
 /// allowed to dim, and whether it mirrors the built-in display. The startup and
-/// wake restore choice lives on Protection instead (SC6), with its pref and its
+/// wake restore choice lives on Protection instead, with its pref and its
 /// safe-mode visibility.
 ///
 /// Section order follows the HIG's reading-order and bottom-edge rules: people
@@ -50,7 +50,7 @@ struct GeneralPane: View {
       brightnessSection
       syncSection
     }
-    // D10: `SMAppService.mainApp.status` is the single source of truth, but a
+    // `SMAppService.mainApp.status` is the single source of truth, but a
     // live read is not a live render. `LoginItem.isEnabled` observes
     // `refreshToken`, which nothing outside this app bumps, so a login item
     // switched off in System Settings while this window sits elsewhere leaves the
@@ -64,10 +64,10 @@ struct GeneralPane: View {
         .keyboardShortcut(.defaultAction)
       Button("Reset All Settings", role: .destructive) { actions.performReset() }
     } message: {
-      // D12(a) and SO20: name what is destroyed, and what the reset DOES to the
+      // Name what is destroyed, and what the reset DOES to the
       // hardware on the way there. `runSettingsReset` turns HDR off, unmutes,
       // ends every lock dim and clears the hour counters before the wipe (its own
-      // D29 ordering). Where the user set HDR themselves that off lasts only for
+      // ordering). Where the user set HDR themselves that off lasts only for
       // the DURATION, so the copy says both or it promises an off that does not
       // hold. The stored levels are called out because on a write-only panel they
       // are the only record of where the display is, and the login item because
@@ -79,8 +79,8 @@ struct GeneralPane: View {
   // MARK: - Hero
 
   /// The page's one standing object: the app itself, with its login state read
-  /// off the same live `SMAppService` status the row below writes (D10). No
-  /// float; the About icon is the window's only one (SV8).
+  /// off the same live `SMAppService` status the row below writes. No
+  /// float; the About icon is the window's only one.
   private var statusStrip: some View {
     SettingsCard {
       HStack(spacing: 16) {
@@ -131,10 +131,10 @@ struct GeneralPane: View {
     SettingsCardSection(title: "Application") {
       SettingRow {
         // The system's own wording in System Settings, and Setup uses the
-        // identical string (D25: familiarity beats novelty).
+        // identical string (familiarity beats novelty).
         Toggle("Open at Login", isOn: Binding(
           get: { loginItem.isEnabled },
-          set: { loginItem.setEnabled($0) } // D10: the readback happens inside
+          set: { loginItem.setEnabled($0) } // the live-status rule: the readback happens inside
         ))
         .themedSwitch()
         // The mirror hooks hang on the toggle, the row that causes the failure
@@ -149,7 +149,7 @@ struct GeneralPane: View {
       }
       if let error = shownLoginError {
         // A failed register() leaves the toggle reading OFF (the lying checkbox
-        // D10 exists to fix), so the reason has to be visible or the control
+        // the live-status rule exists to fix), so the reason has to be visible or the control
         // looks broken. The symbol is not decoration: essential information is
         // never carried by colour alone.
         HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -196,15 +196,15 @@ struct GeneralPane: View {
 
   private var brightnessSection: some View {
     SettingsCardSection(title: "Brightness") {
-      // Names the outcome, with the mechanism in the caption (D25).
+      // Names the outcome, with the mechanism in the caption.
       SettingRow("Keeps dimming in software once a DDC-controlled display reaches its hardware minimum.") {
         Toggle("Dim past the display's minimum", isOn: Binding(
           get: { prefs.combinedBrightness },
           set: { enabled in
-          // D1: positive accessor over an inverted key. `combinedBrightness`
+          // Positive accessor over an inverted key. `combinedBrightness`
           // is `!disableCombinedBrightness`; the on-disk key keeps its name.
           prefs.combinedBrightness = enabled
-          // D4 + D28: a re-conversion of the SAME published value, not a reset.
+          // A re-conversion of the SAME published value, not a reset.
           // `.reapplyDimming` reaches
           // `BrightnessController.reapplyAfterPrefChange()`, which re-writes the
           // DDC register AND the software leg and tears down the abandoned
@@ -224,8 +224,8 @@ struct GeneralPane: View {
       // passes `allowZero:` on the software-only path too, where the whole slider
       // range IS the software leg, so disabling it there would lock a user out of
       // how dark that display can go. The caption carries the condition instead,
-      // spoken as part of the toggle's label rather than offered as a hint: SO15
-      // names the blank display as a safety case, and a11y contract 3 puts the
+      // spoken as part of the toggle's label rather than offered as a hint: the
+      // safety-copy convention names the blank display as a safety case, and a11y contract 3 puts the
       // safety sentences where a VoiceOver user cannot switch them off.
       SettingRow(safety: .blankDisplay, label: "Allow a fully dark display") { label in
         Toggle(label, isOn: Binding(

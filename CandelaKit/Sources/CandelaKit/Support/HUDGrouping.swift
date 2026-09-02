@@ -8,8 +8,8 @@ import CoreGraphics
 /// wrote that window N times and the last write won, so the pill carried whichever
 /// member happened to sort last [MEASURED on hardware].
 ///
-/// It lives here rather than in the AppKit island for the reason placement does
-/// (DT16): with no app test target (D21), app-side logic cannot be pinned.
+/// It lives here rather than in the AppKit island for the reason placement does:
+/// with no app test target, app-side logic cannot be pinned.
 public enum HUDGrouping {
   /// One pill: where it draws, which display it names, and how many others moved.
   public struct Pill: Equatable, Sendable {
@@ -36,7 +36,7 @@ public enum HUDGrouping {
   /// happened.
   ///
   /// It takes the whole topology rather than a resolution closure because a
-  /// synthesis set (SS1) wants the opposite naming answer. See the branch below.
+  /// synthesis set wants the opposite naming answer. See the branch below.
   ///
   /// A repeated ID is counted once: callers assemble this list from several step
   /// paths, and a duplicate would inflate the count for one display's single step.
@@ -60,7 +60,7 @@ public enum HUDGrouping {
           othersInSet: group.count - 1
         )
       }
-      // SS1: a synthesized size is a mirror set the APP engaged, and its master is
+      // A synthesized size is a mirror set the APP engaged, and its master is
       // a virtual display created to hold the framebuffer. The pill still has to be
       // drawn there, but naming or counting the master would announce a display the
       // user has never seen. A second real panel on the same framebuffer is one they
@@ -78,7 +78,7 @@ public enum HUDGrouping {
   }
 
   /// What follows the display's name on the pill. Both parts describe the ONE
-  /// display the pill names: the HDR marker is that display's live state (D6, the
+  /// display the pill names: the HDR marker is that display's live state (the
   /// liveness predicate, not the mode pref), and the count is how many others
   /// stepped without being named.
   public static func nameSuffix(isHDREngaged: Bool, othersInSet: Int) -> String? {

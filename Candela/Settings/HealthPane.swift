@@ -4,13 +4,13 @@ import CoreGraphics
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Health pillar's settings-side front door (SC4): what each display's
+/// The Health pillar's settings-side front door: what each display's
 /// record says, and the controls that decide what goes into it. The cards are
 /// summaries; the Heat Map window is the reading surface.
 ///
 /// Measurement and record only, never a dimming behavior (settled 2026-08-20):
 /// anything that changes what the screen looks like belongs on the display's
-/// OLED Care page (OCR2). Every pref written here is per-display (SC10).
+/// OLED Care page. Every pref written here is per-display.
 ///
 /// `@MainActor`: a `View`'s stored and computed properties are nonisolated
 /// under complete concurrency checking, and these read `AppModel` outside `body`.
@@ -47,13 +47,13 @@ struct HealthPane: View {
         measurementSection(for: scoped)
         collectedSection(for: scoped.display.persistenceKey)
         // Soak-only instrument, kept off the shipped window until the
-        // exposure-model verdict is recorded; the key is a D26 escape hatch.
+        // exposure-model verdict is recorded; the key is an escape hatch.
         if DisplayPrefs(persistenceKey: scoped.display.persistenceKey).showModelComparison {
           OledModelComparisonSection(persistenceKey: scoped.display.persistenceKey)
         }
       }
     }
-    // One-shot scope handoff from a link on another pane (SC4). Cleared on
+    // One-shot scope handoff from a link on another pane. Cleared on
     // adoption, so a later visit from the sidebar keeps this pane's own state.
     .onAppear {
       guard let pending = actions.pendingHealthScope else { return }
@@ -68,7 +68,7 @@ struct HealthPane: View {
 
   // MARK: - Safe Mode
 
-  /// D11's visibility rule. `OledCareCoordinator.start` returns at its safe-mode
+  /// Safe Mode's visibility rule. `OledCareCoordinator.start` returns at its safe-mode
   /// guard, so nothing here is measuring while the figures and the hours switch
   /// look live. Pane-level, because no per-control note covers the cards, the
   /// switch and the histogram at once.
@@ -104,7 +104,7 @@ struct HealthPane: View {
 
   // MARK: - Displays
 
-  /// One card per display, enrollment notwithstanding (SC4). Separate cards so
+  /// One card per display, enrollment notwithstanding. Separate cards so
   /// the sentence under them stands on the canvas rather than inside a card.
   private var displaysSection: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -134,7 +134,7 @@ struct HealthPane: View {
   // MARK: - Measurement
 
   /// The measurement controls, scoped to one named display. The switcher's
-  /// contract is `SubPageHeader`'s (SO23): a persistence key out, and nothing
+  /// contract is `SubPageHeader`'s: a persistence key out, and nothing
   /// here reaching into navigation state it does not own.
   @ViewBuilder private func measurementSection(for state: AppModel.DisplayState) -> some View {
     let key = state.display.persistenceKey
@@ -207,7 +207,7 @@ struct HealthPane: View {
   }
 
   /// How long this display ran at each brightness, and the share of
-  /// MASK-COULD-APPLY time spent in a protective dim (OC17's gate number).
+  /// MASK-COULD-APPLY time spent in a protective dim.
   ///
   /// The two do NOT share a denominator (ruled 2026-08-18): the bars cover every
   /// state, the percentage only the time the mask could act in. That is what the
@@ -241,8 +241,8 @@ struct HealthPane: View {
 
 // MARK: - One display's card
 
-/// A display's record at a glance, with an explicit button to the Heat Map
-/// (SC4): the destination is a separate window, which a whole-card tap does not
+/// A display's record at a glance, with an explicit button to the Heat Map:
+/// the destination is a separate window, which a whole-card tap does not
 /// promise. A display with no record names the enrollment coupling rather than
 /// hiding it; decoupling measurement from enrollment is filed as its own work.
 @MainActor
@@ -462,7 +462,7 @@ private struct MeasurementControls: View {
   }
 }
 
-/// "Hours of use", never "panel hours", in every visible string (SO14).
+/// "Hours of use", never "panel hours", in every visible string.
 ///
 /// The caption's second sentence is the honest limit of the number: macOS
 /// reports a DPMS-blanked panel as awake at full resolution, so soft standby is

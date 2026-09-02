@@ -118,7 +118,7 @@ struct PanelExposureSurface: View {
         } else {
           // Fixed opacities, not `.quaternary`/`.separator`: every surface this
           // draws on is theme-painted, so nothing here may resolve against the
-          // system appearance (SV2).
+          // system appearance.
           Rectangle().fill(Color.white.opacity(0.06))
         }
       }
@@ -181,7 +181,7 @@ struct PanelExposureSurface: View {
 }
 
 /// The card-size heat surface, shared by the OLED Care overview's cards and
-/// the Health pane's (SC4). One implementation, so the two surfaces cannot
+/// the Health pane's. One implementation, so the two surfaces cannot
 /// come to draw the same display's history at different shapes or sizes.
 struct PanelExposureMiniSurface: View {
   /// Panel-native cells; the surface re-orders for presentation itself.
@@ -190,7 +190,7 @@ struct PanelExposureMiniSurface: View {
   /// across a replug.
   let displayID: CGDirectDisplayID?
   /// False draws the blank frame. The map is drawn only from a `.measured`
-  /// history, never a stale or estimated picture presented as one (OC11).
+  /// history, never a stale or estimated picture presented as one.
   let showsMap: Bool
 
   /// The box the mini map fits inside, preserving aspect, so an ultrawide and a
@@ -210,7 +210,7 @@ struct PanelExposureMiniSurface: View {
     let size = CGSize(width: width, height: width / aspect)
     Group {
       if showsMap {
-        // No hottest-cell marker at this size (OCR8): the box would be an
+        // No hottest-cell marker at this size: the box would be an
         // unreadable speck, and the status line says it in words.
         PanelExposureSurface(
           cells: cells,
@@ -235,7 +235,7 @@ struct PanelExposureMiniSurface: View {
 }
 
 /// The words a summary card puts beside its mini map, shared by the OLED Care
-/// overview's cards and the Health pane's (SC4) so the two surfaces cannot
+/// overview's cards and the Health pane's so the two surfaces cannot
 /// report the same display's measurement differently.
 enum OledCareCardCopy {
   /// Hours of use, then what the measurement is doing. Honesty precedence is the
@@ -268,10 +268,10 @@ enum OledCareCardCopy {
   }
 }
 
-/// One display on the OLED Care overview. The WHOLE card is the navigation row
-/// (OCR3): no toggles, and it previews its page's value (SO3). The map is drawn
+/// One display on the OLED Care overview. The WHOLE card is the navigation row:
+/// no toggles, and it previews its page's value. The map is drawn
 /// only from a `.measured` history, never a stale or estimated picture presented
-/// as one (OC11), and the status line follows the health page's honesty
+/// as one, and the status line follows the health page's honesty
 /// precedence: Safe Mode, then a missing grant, then confidence.
 @MainActor
 struct OledCareDisplayCard: View {
@@ -354,7 +354,7 @@ struct OledCareDisplayCard: View {
       showsMap: prefs.oledCareEnrolled && summary.confidence == .measured)
   }
 
-  /// SO3's value preview, in words the data can support: the engine's own dim
+  /// The chevron row's value preview, in words the data can support: the engine's own dim
   /// state first (`dimStates` is the coordinator's published truth, never a
   /// second opinion computed here), then hours, then grant or confidence.
   private func statusLine(summary: PanelHealthSummary) -> String {
@@ -368,7 +368,7 @@ struct OledCareDisplayCard: View {
       switch model.oledCare.dimStates[persistenceKey] {
       case .active: parts.append("Not dimming")
       case .idleDim, .unfocusedDim: parts.append("Dimmed")
-      // OC7 sub-ruling 4: a refused lock dim is recorded, never reported as
+      // A refused lock dim is recorded, never reported as
       // dimmed.
       case .lockDim:
         parts.append(OledCareCopy.lockDimPreview(model.oledCare.lockDimSkips[persistenceKey]))
@@ -434,7 +434,7 @@ struct OledInlineNote: View {
 }
 
 /// The hottest-area marker's explanation, drawn ON the map, so the reticle
-/// `PanelExposureSurface` draws is never a bare legendless box (OCR8).
+/// `PanelExposureSurface` draws is never a bare legendless box.
 /// Decorative to VoiceOver: every fact it shows is also stated in words.
 struct OledHotspotTag: View {
   /// Panel-native cells; the tag re-orients the same way the surface does.
@@ -569,7 +569,7 @@ struct OledMeasuringDot: View {
 
 /// Time at brightness: one bar per stored level bucket, scaled to the busiest
 /// and colored through the shared ramp so dark-to-bright reads left-to-right.
-/// Seconds are real accumulated counts (OC20), not a model.
+/// Seconds are real accumulated counts, not a model.
 struct OledBrightnessHistogram: View {
   let secondsByBucket: [Double]
 

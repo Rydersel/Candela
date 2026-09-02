@@ -55,7 +55,7 @@ final class KeyActionExecutor {
         } else if !model.controlsAnyDisplay(in: affected) {
           // Nothing resolved AT ALL, so step every external: losing the
           // targeting beats losing the keypress. A resolved-but-disabled
-          // display does NOT come here; R1 has it swallow the press.
+          // display does NOT come here; it swallows the press by design.
           stepEveryControlledDisplay(isUp: isUp, isFine: isFine)
         }
       case .allExternal:
@@ -117,7 +117,7 @@ final class KeyActionExecutor {
     case let .stepContrast(isUp, isFine):
       // Contrast targets `.affected` like plain brightness (fork parity), with
       // the fallback BEFORE the isDisabled filter, so a resolved-but-disabled
-      // display swallows the press instead of triggering it (R1).
+      // display swallows the press instead of triggering it.
       let affected = keyTargets()
       var targets = affected.compactMap { id in model.displays.first { $0.id == id } }
       if targets.isEmpty { targets = model.displays }
@@ -153,9 +153,9 @@ final class KeyActionExecutor {
   /// Stepping the built-in is the last resort against that, and all three
   /// bottom-out routes meet here so no site can go dead on its own.
   ///
-  /// Deliberately NOT pushed into `stepBrightness`'s loop body: R1 rules that a
-  /// resolved-but-keyboard-disabled display SWALLOWS its press, and this must
-  /// fire only where nothing resolved at all.
+  /// Deliberately NOT pushed into `stepBrightness`'s loop body: the
+  /// keyboard-disable rule holds that a resolved-but-keyboard-disabled display
+  /// SWALLOWS its press, and this must fire only where nothing resolved at all.
   ///
   /// A machine with no built-in and no controlled external is still dead here.
   /// Only tap-side pass-through reaches that, and the tap was left alone: an
@@ -169,7 +169,7 @@ final class KeyActionExecutor {
     showBrightnessHUDs(for: [builtInStep])
   }
 
-  /// Volume-key targets: the candidates below, filtered by D24's verdict on
+  /// Volume-key targets: the candidates below, filtered by the capabilities probe's verdict on
   /// VCP 0x62. A panel that denies the register takes no volume key, the same
   /// way its slider takes no drag.
   private func resolveVolumeTargets() -> [AppModel.DisplayState] {
@@ -183,11 +183,11 @@ final class KeyActionExecutor {
     model.muteKeyEnabledStates(volumeKeyCandidates())
   }
 
-  /// Volume/mute candidate set per multiKeyboardVolume (D4), before any
+  /// Volume/mute candidate set per multiKeyboardVolume, before any
   /// per-display filter.
   ///
   /// The fallbacks live HERE and the filters at the two call sites above, which
-  /// is the R1 ordering: a display that resolves and then refuses swallows the
+  /// is the keyboard-disable ordering: a display that resolves and then refuses swallows the
   /// press, only one that never resolved reaches a fallback. Folding a filter in
   /// here would hand a refusing display's keypress to every other panel.
   private func volumeKeyCandidates() -> [AppModel.DisplayState] {
@@ -210,7 +210,7 @@ final class KeyActionExecutor {
   }
 
   private func showVolumeHUDs(_ stepped: [(state: AppModel.DisplayState, value: Double)]) {
-    // Fork hideOsd parity (R1): the pref gates VOLUME/MUTE pills only, never
+    // Fork hideOsd parity: the pref gates VOLUME/MUTE pills only, never
     // brightness or contrast, and the write itself still lands.
     //
     // Filtered BEFORE grouping so it stays per display: a suppressed display
@@ -229,11 +229,11 @@ final class KeyActionExecutor {
   /// display each pill reports; its count keeps a pill from implying the members
   /// it cannot name stood still.
   ///
-  /// D6: the HDR marker follows the badge's LIVENESS predicate
+  /// The HDR marker follows the badge's LIVENESS predicate
   /// (`isHDREngaged`), not the policy (`hdrMode`). One predicate, both surfaces.
   ///
-  /// Placement resolves HERE, not inside the island, which holds no judgement
-  /// (DT16): a mirrored panel is absent from `NSScreen.screens`, so an
+  /// Placement resolves HERE, not inside the island, which holds no judgement:
+  /// a mirrored panel is absent from `NSScreen.screens`, so an
   /// unresolved ID makes the island show nothing at all, silently, while the DDC
   /// write lands and the panel visibly changes.
   ///
@@ -286,7 +286,7 @@ final class KeyActionExecutor {
   }
 
   /// Re-read at every announcement, never cached: the indicator position and
-  /// style (KMR-A3) fan out to `.refreshUI` alone, so a pill drawn after either
+  /// style fan out to `.refreshUI` alone, so a pill drawn after either
   /// picker moves has to pick the new value up here.
   private var appPrefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
 
@@ -333,7 +333,7 @@ final class KeyActionExecutor {
   /// each caller answers that case differently.
   ///
   /// The anchor is expanded rather than used directly, and the expansion is
-  /// where a synthesized size is answered (SS1). While one is engaged the
+  /// where a synthesized size is answered. While one is engaged the
   /// physical panel has NO `NSScreen` and no entry in the active display list,
   /// so the pointer and `FocusedDisplay` both answer with the virtual display:
   /// the panel being pointed at is unreachable from AppKit geometry.
@@ -348,11 +348,11 @@ final class KeyActionExecutor {
   /// itself.
   ///
   /// Reads ONE sample from the topology store rather than re-querying
-  /// CoreGraphics per call site (DT13), and that store is where the synthesis
+  /// CoreGraphics per call site, and that store is where the synthesis
   /// pairing is stamped, so topology and pairing cannot come from two instants.
   ///
   /// These are STEP targets, so they stay RAW: no master is ever SUBSTITUTED
-  /// for the panel the user asked for. D29 leaves it UNVERIFIED whether a
+  /// for the panel the user asked for. It remains UNVERIFIED whether a
   /// slave's DDC is suppressed, and dropping the panel as unavailable would put
   /// VCP 0x8D out of reach and strand a hardware-muted display with no way
   /// back.

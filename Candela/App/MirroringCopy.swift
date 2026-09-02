@@ -71,8 +71,8 @@ enum MirroringCopy {
   }
 
   /// The caption for a display that is ITSELF `isAlwaysInMirrorSet`, and nothing
-  /// else. Named, never a bare grey (R8 generalised: no state carried by shape
-  /// alone).
+  /// else. Named, never a bare grey (the remove-rather-than-disable rule
+  /// generalised: no state carried by shape alone).
   ///
   /// NOT the sentence for `.setCannotBeBroken`, where it is false on two shapes.
   /// "This" resolves because both surfaces using it show one display's own row
@@ -182,8 +182,8 @@ enum MirroringCopy {
   }
 
   /// Why a control is dead WHILE a change applies: the reason, not what the
-  /// button does. A grey control with nothing attached is the defect R8 forbids,
-  /// transient greying included.
+  /// button does. A grey control with nothing attached is the defect the
+  /// remove-rather-than-disable rule forbids, transient greying included.
   static var applyInProgress: LocalizedStringKey {
     "Waiting for the last mirroring change to finish."
   }

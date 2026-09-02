@@ -70,7 +70,7 @@ struct RevealedModeLifecycleTests {
 
   // MARK: - Persistence
 
-  /// Descriptors carry geometry, never provenance (CR3). A revealed mode must
+  /// Descriptors carry geometry, never provenance. A revealed mode must
   /// therefore resolve out of a merged list after a replug.
   @Test func aRevealedModeRoundTripsThroughItsDescriptor() {
     let stored = revealed().descriptor

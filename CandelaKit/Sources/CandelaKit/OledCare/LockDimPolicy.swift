@@ -2,7 +2,7 @@ import Foundation
 
 /// Why a locked display was NOT hardware-dimmed.
 ///
-/// Typed and recorded rather than swallowed (DT30 rule (a)): lock dim shipped
+/// Typed and recorded rather than swallowed: lock dim shipped
 /// once as a mechanism that reported success while nothing reached the panel
 /// [MEASURED 2026-08-07]. A skip no surface can name is the same defect again.
 public enum LockDimSkip: Equatable, Sendable {

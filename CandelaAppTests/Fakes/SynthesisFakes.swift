@@ -3,7 +3,7 @@ import CoreGraphics
 import Foundation
 
 // The two backends a `SynthesisCoordinator` is built from, over one shared
-// world (AT3): tests reach the real engine, the real preview session and the
+// world: tests reach the real engine, the real preview session and the
 // real gate, and no CoreGraphics call is made.
 //
 // Stateful on purpose: `ModeSynthesisEngine` verifies achieved state at every

@@ -45,12 +45,12 @@ final class ArrangementCoordinator {
   /// re-derived in a view.
   private(set) var arrangement = DisplayArrangement(tiles: [])
   private(set) var preview: Preview?
-  /// AR7: the layout overlaps, or strands a display where nothing can reach it.
+  /// The layout overlaps, or strands a display where nothing can reach it.
   /// Empty means "no such refusal"; there is one refusal of this kind, so an enum
   /// with one case would be a type pretending to be a decision.
   private(set) var lastInvalidLayout: [ArrangementProblem] = []
   private(set) var lastFailure: DisplayConfigError?
-  /// The four-way gate refused this request, and names who holds it (AR12).
+  /// The four-way gate refused this request, and names who holds it.
   private(set) var blockedBy: ReconfigurationClaimant?
   /// The layout the machine was in before an apply that DIVERGED, kept so it can
   /// be offered back. See `noteRecoverableLayout`.
@@ -61,7 +61,7 @@ final class ArrangementCoordinator {
   /// Restore is unattended, so this is the ONLY way the user finds out. It
   /// survives until they dismiss it, or until a later restore pass has a newer
   /// outcome for the set attached then: it has to still be there the next time
-  /// they look. Nothing clears it on a departure alone (SO8); the comment in
+  /// they look. Nothing clears it on a departure alone; the comment in
   /// `displaysChanged` says why.
   ///
   /// One value rather than a per-display map: a layout is a fact about the whole
@@ -70,7 +70,7 @@ final class ArrangementCoordinator {
 
   @ObservationIgnored weak var confirmation: (any ArrangementConfirmationPresenting)?
   /// Called after a commit actually wrote `savedArrangements`, so the propagation
-  /// seam hears about it (D27) whichever surface answered. Owned here because a
+  /// seam hears about it whichever surface answered. Owned here because a
   /// view trusted to fan out by hand forgets the moment a second surface offers
   /// the same answer.
   @ObservationIgnored var didSaveArrangement: () -> Void = {}
@@ -78,7 +78,7 @@ final class ArrangementCoordinator {
   /// unwired coordinator looks unfinished in testing rather than plausibly right.
   @ObservationIgnored var displayName: (CGDirectDisplayID) -> String = { _ in "" }
 
-  /// The synthesis pairings as of now (SS1), so a layout is saved, looked up and
+  /// The synthesis pairings as of now, so a layout is saved, looked up and
   /// arrival-gated under the PANEL a synthesized size stands in for rather than
   /// under the virtual display that owns its picture. Without it, engaging a size
   /// orphans every saved layout for that set and reports the panel as missing.
@@ -89,7 +89,7 @@ final class ArrangementCoordinator {
   @ObservationIgnored var synthesisPairings: () -> [SynthesisPairing] = { [] }
 
   @ObservationIgnored private let configurator: any DisplayArrangementConfiguring
-  /// AR12. Held from just before the layout applies until nothing is outstanding.
+  /// The display-reconfiguration gate. Held from just before the layout applies until nothing is outstanding.
   /// Not defaulted: a per-coordinator default would compile, run, and exclude
   /// nobody.
   @ObservationIgnored private let gate: DisplayReconfigurationGate
@@ -201,7 +201,7 @@ final class ArrangementCoordinator {
 
   // MARK: - Sampling
 
-  /// The pairing in the spelling the persistence layer speaks (SS12): a synthesis
+  /// The pairing in the spelling the persistence layer speaks: a synthesis
   /// virtual display's ID against the identity key of the panel it stands in for.
   /// Built per use from the live pairing, never held.
   ///
@@ -239,8 +239,8 @@ final class ArrangementCoordinator {
     // reconfiguration would take the report away on the next resolution change,
     // which is not a set change and says nothing about it.
     //
-    // A layout for a display set that has changed cannot be restored as a whole
-    // (AR4), so offering it back would offer a button that can only fail.
+    // A layout for a display set that has changed cannot be restored as a whole,
+    // so offering it back would offer a button that can only fail.
     if let recoverableLayout,
        Set(recoverableLayout.tiles.map(\.id)) != Set(arrangement.tiles.map(\.id)) {
       self.recoverableLayout = nil
@@ -333,7 +333,7 @@ final class ArrangementCoordinator {
   ///
   /// Not the only writer of these five: `displaysChanged` also drops
   /// `recoverableLayout`, because a layout naming a display set that no longer
-  /// exists cannot be restored as a whole (AR4). The rule that does hold: every
+  /// exists cannot be restored as a whole. The rule that does hold: every
   /// write to any of them is followed by `syncConfirmation`.
   func dismissReport() {
     lastInvalidLayout = []
@@ -361,7 +361,7 @@ final class ArrangementCoordinator {
       return
     }
 
-    // AR7. macOS cannot be made to hold an overlapping or disconnected layout; it
+    // macOS cannot be made to hold an overlapping or disconnected layout; it
     // silently moves things somewhere of its own choosing, so an invalid request is
     // refused rather than sent. It is also the case
     // `ArrangementPlan.expectsExactOrigins` turns the post-commit check OFF for,
@@ -374,7 +374,7 @@ final class ArrangementCoordinator {
       return
     }
 
-    // AR12, asked BEFORE the apply so a refusal costs nothing: no transaction is
+    // The reconfiguration gate, asked BEFORE the apply so a refusal costs nothing: no transaction is
     // open and no display has moved. Granted when we already hold it, since a
     // second drop during a preview is supported and the session keeps the ORIGINAL
     // fallback across it.
@@ -429,7 +429,7 @@ final class ArrangementCoordinator {
       release(claimed)
       return
     }
-    // AR12, asked BEFORE anything is staged, so a refusal costs nothing. The guard
+    // The reconfiguration gate, asked BEFORE anything is staged, so a refusal costs nothing. The guard
     // above is what makes the release at the end ours: with no preview outstanding,
     // a claim taken here protects this pass alone.
     //
@@ -462,7 +462,7 @@ final class ArrangementCoordinator {
 
     if decision.isDeferred {
       // The layout read could not describe every attached display, so it cannot
-      // be acted on as a whole (AR4). The claims go back and the next topology
+      // be acted on as a whole. The claims go back and the next topology
       // event tries again with a machine that can answer.
       release(claimed)
     } else {
@@ -528,7 +528,7 @@ final class ArrangementCoordinator {
   // MARK: - The saved-layout opt-in
 
   /// Read live from prefs rather than mirrored into a stored bool, for the
-  /// reason `SMAppService.mainApp.status` is (D10): the settings reset wipes the
+  /// reason `SMAppService.mainApp.status` is: the settings reset wipes the
   /// whole domain, and a mirror would survive it.
   var isRestoringLayout: Bool { persistence.isRestoreEnabled }
 
@@ -539,8 +539,8 @@ final class ArrangementCoordinator {
   /// very reconnect it was turned on for. Turning it OFF leaves the saved layout
   /// alone: "forget this layout" and "stop restoring layouts" are separate answers.
   ///
-  /// The `savedArrangements` fan-out is announced from inside `saveIfRestoring`
-  /// (D27), not by the caller.
+  /// The `savedArrangements` fan-out is announced from inside `saveIfRestoring`,
+  /// not by the caller.
   func setRestoringLayout(_ restoring: Bool) {
     persistence.setRestoreEnabled(restoring)
     guard restoring else { return }
@@ -567,7 +567,7 @@ final class ArrangementCoordinator {
   /// in.
   private func saveIfRestoring() {
     guard persistence.isRestoreEnabled else { return }
-    // SS12: filed under the panel, never under the virtual display standing in
+    // Filed under the panel, never under the virtual display standing in
     // for it. A layout saved while a synthesized size stands has to survive the
     // size being dropped, and the virtual display does not.
     persistence.save(arrangement, substituting: synthesisSubstitutions)
@@ -621,7 +621,7 @@ final class ArrangementCoordinator {
     guard let outstanding = await session.previewedArrangement else {
       preview = nil
       stopCountdown()
-      // THE release (AR12). Here rather than at each call site because this funnel
+      // THE release. Here rather than at each call site because this funnel
       // already runs after every path that can end a preview. Unconditional: the
       // gate refuses a release from a claimant that is not holding it.
       await gate.release(.arrangement)

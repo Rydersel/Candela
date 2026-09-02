@@ -10,10 +10,10 @@ import Foundation
 ///
 /// Three cases rather than two, because the middle one is genuinely UNCERTAIN and must
 /// not be resolved by guessing. Pure and here rather than in the app target so the
-/// precedence below has a test (D21).
+/// precedence below has a test.
 public enum ArrangementReportSubject: Sendable, Equatable {
   /// Nothing was applied: a layout refused for overlapping or stranding a display
-  /// (AR7), a claim refused by the gate (AR12), a `begin` that failed without moving
+  /// (the spring-back rule), a claim refused by the gate, a `begin` that failed without moving
   /// anything, or a saved layout declined rather than attempted.
   case nothingChanged
 

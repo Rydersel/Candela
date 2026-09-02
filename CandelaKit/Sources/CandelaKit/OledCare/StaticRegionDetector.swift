@@ -12,10 +12,10 @@ import Foundation
 /// **It does NOT exclude a windowed video, and nothing here should claim it
 /// does.** Bounds stability is not content staticness, and a player holding a
 /// fixed rect for five minutes passes BOTH halves. Only `fullScreenOwner`
-/// protects, and only for a genuinely full-screen window. That is why OC18 calls
-/// geometry a prior and never a verdict, and why the caption promises exactly
-/// "full-screen video is never dimmed" and no more. A windowed player is a known
-/// gap.
+/// protects, and only for a genuinely full-screen window. That is why
+/// geometry is treated as a prior and never a verdict, and why the caption
+/// promises exactly "full-screen video is never dimmed" and no more. A
+/// windowed player is a known gap.
 ///
 /// "Persistently" is also weaker than it reads: `recentGrid` is ONE 60-second
 /// sample, not the accumulated map. Persistence comes from the staticness half
@@ -68,8 +68,8 @@ public struct StaticRegionDetector: Sendable {
   /// keep the cheap uniform-alpha path.
   ///
   /// No feathering here. The renderer magnifies 24×10 with a linear filter and
-  /// that is OC17's falloff; smoothing the nomination too would blur an edge
-  /// twice.
+  /// that is the wear mask's falloff; smoothing the nomination too would
+  /// blur an edge twice.
   public static func nominate(
     recentGrid: [Double],
     observation: WindowObservation,

@@ -2,7 +2,7 @@ import CandelaKit
 import SwiftUI
 
 /// A drawn slider, because the system slider ignores the window's lighting.
-/// Being drawn, it carries its own accessibility (SV6): a native `Slider`
+/// Being drawn, it carries its own accessibility: a native `Slider`
 /// stands in for the role, the value and the adjustable actions, and call sites
 /// supply the label.
 ///
@@ -10,7 +10,7 @@ import SwiftUI
 /// editing edges. Disabled means dimmed and inert on all three, which a drawn
 /// control has to say for itself; nothing greys it for us.
 ///
-/// **Never bind this to a volume value (D29 rule 4).** It has no zero-free
+/// **Never bind this to a volume value.** It has no zero-free
 /// grid, and volume 0 is a hardware mute over VCP 0x8D. A volume row keeps the
 /// panel's `DisplaySliderRow`, which steps over `SliderSnap.stopsWithoutZero`.
 struct ThemedSlider: View {

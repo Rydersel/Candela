@@ -8,7 +8,7 @@ import SwiftUI
 enum OledCareSuspensionReason: Equatable, CaseIterable {
   /// Mirroring the user set up.
   case mirrored
-  /// The mirror Candela engages to render a synthesized size (SS8).
+  /// The mirror Candela engages to render a synthesized size.
   case synthesizedSize
   case checkup
 }
@@ -17,7 +17,7 @@ enum OledCareSuspensionReason: Equatable, CaseIterable {
 /// itself: a lock dim that did not happen, and a pause whose cause the user may
 /// never have asked for.
 ///
-/// Shared rather than repeated (OC7 sub-ruling 4): a skip is "recorded, never
+/// Shared rather than repeated: a skip is "recorded, never
 /// reported as dimmed", and when two private switches kept that rule both
 /// surfaces printed "Dimmed" for a display the policy had refused.
 ///
@@ -37,7 +37,7 @@ enum OledCareCopy {
     }
   }
 
-  /// The OLED Care pane's status row for OC13's pause. One state under every
+  /// The OLED Care pane's status row for the mirror-set pause. One state under every
   /// reason, so the row names which rather than telling a user they mirrored
   /// something they did not. No arm ends in a period, matching every
   /// neighbouring status string.
@@ -75,7 +75,7 @@ enum OledCareCopy {
   /// What the two halves of the usage histogram count, said out loud because
   /// they do not count the same thing.
   ///
-  /// OC17's denominator is MASK-COULD-APPLY time: suspended seconds are excluded
+  /// The denominator is MASK-COULD-APPLY time: suspended seconds are excluded
   /// from the percentage, because a protective dim cannot apply during them. The
   /// bars exclude nothing, so without this a reader takes the percentage for a
   /// share of the bars.
@@ -83,7 +83,7 @@ enum OledCareCopy {
     "The bars cover every state this display was tracked in. The percentage covers only the time a protective dim could apply."
   }
 
-  /// The hub's SO3 value preview: two words, and it defers the reason to the
+  /// The hub's chevron-row value preview: two words, and it defers the reason to the
   /// pane exactly as "Paused" already does.
   static func lockDimPreview(_ skip: LockDimSkip?) -> String {
     skip == nil ? "Dimmed" : "Not dimmed"

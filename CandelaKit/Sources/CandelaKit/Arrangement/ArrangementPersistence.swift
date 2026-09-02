@@ -12,7 +12,7 @@ import Foundation
 /// The count survives the join, so a pair of identical panels signs `a+a`.
 ///
 /// Built from `DisplayArrangement.tiles`, which makes the mirror-slave exclusion
-/// structural: a slave gets no tile (AR6), so plugging a display into a mirror set
+/// structural: a slave gets no tile, so plugging a display into a mirror set
 /// does not change the signature and does not orphan the layout.
 ///
 /// What it does NOT claim: `ArrangementSnapshot` skips a display whose bounds are
@@ -44,14 +44,14 @@ public struct TopologySignature: Sendable, Hashable {
   /// that moved with it would make the whole set read as newly arrived on its return.
   public init(online displays: [ConfiguredDisplay]) {
     key = displays
-      .filter { !$0.isMirrorSlave } // AR6: no tile, no position, not part of the set
+      .filter { !$0.isMirrorSlave } // mirror slaves: no tile, no position, not part of the set
       .map(\.identity.key)
       .sorted()
       .joined(separator: "+")
   }
 
   /// The same read, with each synthesis virtual display signing as the PHYSICAL panel
-  /// it stands in for (SS12).
+  /// it stands in for.
   ///
   /// `substituting` maps a synthesis VD's display ID to the identity key of the panel
   /// it was engaged for. IDs are reassigned across a replug, so the map is handed in
@@ -68,7 +68,7 @@ public struct TopologySignature: Sendable, Hashable {
     key = displays
       .compactMap { display -> String? in
         if let physical = substituting[display.id] { return physical }
-        guard !display.isMirrorSlave else { return nil } // AR6, as above
+        guard !display.isMirrorSlave else { return nil } // the mirror-slave rule, as above
         return display.identity.key
       }
       .sorted()
@@ -118,8 +118,8 @@ public struct SavedArrangementEntry: Sendable, Equatable, Codable {
 ///
 /// Origins are kept exactly as read, which makes them main-relative for free: the
 /// global display space is *defined* with its origin at the main display's top-left
-/// (AR5), so the display at (0, 0) holds the menu bar. Normalising would lose which
-/// display that is.
+/// (the origin-is-main rule), so the display at (0, 0) holds the menu bar.
+/// Normalising would lose which display that is.
 public struct SavedArrangement: Sendable, Equatable, Codable {
   /// Versioned from v1 (§7.3) on top of `PrefsSchema`, because this descriptor's
   /// shape is the part most likely to move. A version the reader can refuse is what
@@ -134,9 +134,10 @@ public struct SavedArrangement: Sendable, Equatable, Codable {
     self.entries = entries
   }
 
-  /// `substituting` is SS12's map. It applies to the stored identities for the same
-  /// reason it applies to the key: a layout saved while a synthesized size stood would
-  /// otherwise name a virtual display that is gone the moment it is read back.
+  /// `substituting` is the synthesis-substitution map. It applies to the stored
+  /// identities for the same reason it applies to the key: a layout saved while a
+  /// synthesized size stood would otherwise name a virtual display that is gone the
+  /// moment it is read back.
   public init(_ arrangement: DisplayArrangement, substituting: [CGDirectDisplayID: String] = [:]) {
     self.init(entries: arrangement.tiles.map {
       SavedArrangementEntry(
@@ -159,8 +160,8 @@ public struct SavedArrangement: Sendable, Equatable, Codable {
 public enum ArrangementMatch: Sendable, Equatable {
   /// Carries the layout to apply: the STORED origins on the CURRENT footprints.
   case exact(DisplayArrangement)
-  /// **AR11.** Identity keys that each describe more than one attached display.
-  /// Nothing is applied; see `ArrangementPersistence.resolve`.
+  /// **The identity-ambiguity rule.** Identity keys that each describe more than one
+  /// attached display. Nothing is applied; see `ArrangementPersistence.resolve`.
   case ambiguous([String])
   /// The stored set is not the attached set. `missing` is stored and not
   /// attached, `extra` is attached and not stored.
@@ -216,8 +217,9 @@ public final class ArrangementPersistence: @unchecked Sendable {
   /// the set it is about" is a property of the type instead of a rule every caller has
   /// to follow. An empty arrangement stores nothing.
   ///
-  /// **SS12.** `substituting` reaches BOTH the key and the stored identities. Either
-  /// alone would file a layout under the panel while the entries named a display that
+  /// **The synthesis-substitution map.** `substituting` reaches BOTH the key and the
+  /// stored identities. Either alone would file a layout under the panel while the
+  /// entries named a display that
   /// exists only while the size does, which reads back as a different set. The map is
   /// runtime IDs, handed in with the sample; nothing here stores one.
   public func save(
@@ -243,8 +245,9 @@ public final class ArrangementPersistence: @unchecked Sendable {
 
   /// Matches a stored layout against the displays that can hold a position now.
   ///
-  /// **AR11, shipped behaviour rather than a fallback.** A layout restores only when
-  /// every display it names resolves to exactly ONE attached display. Two identical
+  /// **The identity-ambiguity rule, shipped behaviour rather than a fallback.** A
+  /// layout restores only when every display it names resolves to exactly ONE
+  /// attached display. Two identical
   /// panels produce one identity key for two screens (the MAG 341C reports serial 0,
   /// so a second unit collides with it) and nothing stored says which goes on the
   /// left. A coin flip that swaps the user's screens is worse than not restoring.
@@ -263,9 +266,10 @@ public final class ArrangementPersistence: @unchecked Sendable {
   /// to be the shape the origins were measured on. The three refusals are ordered by
   /// how far each gets, so the sentence the user reads names the first real problem.
   ///
-  /// **SS12**: `substituting` changes only what a tile is CALLED. The resolved tiles
-  /// keep their own display IDs, because the virtual display owns the desktop and is
-  /// the only member of the pair a plan may move (AR6).
+  /// **The synthesis-substitution map**: `substituting` changes only what a tile is
+  /// CALLED. The resolved tiles keep their own display IDs, because the virtual
+  /// display owns the desktop and is
+  /// the only member of the pair a plan may move.
   public static func resolve(
     _ saved: SavedArrangement, against current: DisplayArrangement,
     substituting: [CGDirectDisplayID: String] = [:]
@@ -279,8 +283,9 @@ public final class ArrangementPersistence: @unchecked Sendable {
     let attachedCounts = counts(current.tiles.map(identity))
     let storedCounts = counts(saved.entries.map(\.identity))
 
-    // AR11 first, and only about identities the LAYOUT names: an attached twin the
-    // layout says nothing about is a set difference, a different sentence and remedy.
+    // The identity-ambiguity rule first, and only about identities the LAYOUT names:
+    // an attached twin the layout says nothing about is a set difference, a
+    // different sentence and remedy.
     let ambiguous = storedCounts.keys.filter { (attachedCounts[$0] ?? 0) > 1 }.sorted()
     guard ambiguous.isEmpty else { return .ambiguous(ambiguous) }
 
@@ -343,7 +348,7 @@ public final class ArrangementPersistence: @unchecked Sendable {
     // Which edge the smaller substitute should keep is not recorded anywhere, so the
     // candidates are tried and the arrangement rules judge: first valid layout wins.
     // Two synthesis slots bound the search. When nothing validates, the origin-anchored
-    // layout goes forward and the caller's AR7 check speaks.
+    // layout goes forward and the caller's spring-back check speaks.
     var chosen: [String: (right: Bool, bottom: Bool)] = [:]
     if !resized.isEmpty {
       let identities = resized.sorted()
@@ -368,7 +373,8 @@ public final class ArrangementPersistence: @unchecked Sendable {
     }
 
     let tiles = tiles(anchors: chosen)
-    // AR4 on the read side. UNREACHABLE as the checks above stand (no identity names
+    // The whole-arrangement rule, on the read side. UNREACHABLE as the checks above
+    // stand (no identity names
     // two tiles and the multisets are equal), kept because what it guards is a partial
     // layout: a plan built from fewer tiles leaves the remainder's origins unset, and
     // CoreGraphics repositions any display a reconfiguration does not mention.

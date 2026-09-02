@@ -1,7 +1,7 @@
 /// How the on-screen indicator pill draws, app-level like its two position keys.
 /// Raw values are shipped on-disk schema: add cases, never renumber.
 ///
-/// The geometry each case names is pinned in KMR-A3 so the real pill and the Menu
+/// The geometry each case names is pinned so the real pill and the Menu
 /// Bar pane's preview draw the same thing from one definition.
 public enum HUDStyle: Int, Sendable, CaseIterable {
   /// The shipped look, styled after the native macOS pill: name label over an

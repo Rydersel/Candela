@@ -2,12 +2,12 @@ import CandelaKit
 import Foundation
 import SwiftUI
 
-/// Mode-naming copy shared by every surface. RM11 is a copy rule (never imply
+/// Mode-naming copy shared by every surface. Naming a size is a copy rule (never imply
 /// true native HiDPI at an arbitrary size), and a rule split across private
 /// helpers drifts the first time one is edited.
 enum DisplayModeCopy {
-  /// The plain size, with no hedge. RM11 rides on the tags of surfaces that
-  /// OFFER a size (SO14 vocabulary, one source in
+  /// The plain size, with no hedge. This rule rides on the tags of surfaces that
+  /// OFFER a size (the shared size vocabulary, one source in
   /// `DisplayModeCoordinator.Catalog.tags(for:isLowResolutionDuplicate:)`);
   /// surfaces that only NAME the mode in force carry the size alone.
   static func size(_ mode: DisplayMode) -> String {
@@ -27,12 +27,12 @@ enum DisplayModeCopy {
   }
 
   /// Marks an option this app's own enumeration found. States what WE did, not
-  /// what macOS hides: no API reports the Displays pane's list. No quality claim
-  /// (RM11): every one of these renders oversized and downsamples.
+  /// what macOS hides: no API reports the Displays pane's list. No quality claim:
+  /// every one of these renders oversized and downsamples.
   static var addedByApp: String { "Added by \(AppInfo.productName)" }
 
   /// The mark on the size the density model names for this panel. One word is
-  /// the whole claim (RM11): this display's physical size, never the mode's
+  /// the whole claim: this display's physical size, never the mode's
   /// quality and never HiDPI.
   static var recommended: String { "Recommended" }
 
@@ -75,7 +75,7 @@ enum DisplayModeCopy {
       : "Reverting to the previous resolution in \(seconds) seconds."
   }
 
-  /// The non-owning surface's whole rendering (SO6): status, plus where the
+  /// The non-owning surface's whole rendering: status, plus where the
   /// buttons are. A deadline with nowhere to answer reads as a countdown to
   /// nothing.
   static func passiveCountdown(_ seconds: Int) -> String {

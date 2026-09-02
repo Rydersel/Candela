@@ -3,17 +3,17 @@ import Foundation
 /// Where this mode came from.
 ///
 /// CoreGraphics and CGS share ONE mode-ID space (measured 2026-08-06 across
-/// three panels, 0 IDs absent, S6 §4), so those two are not a second identity,
+/// three panels, 0 IDs absent), so those two are not a second identity,
 /// only a routing tag. It deliberately does NOT reach `DisplayModeDescriptor`:
 /// the persisted form stays geometry-keyed so a mode that migrates between the
-/// two sources across an OS update still re-finds (CR3).
+/// two sources across an OS update still re-finds.
 public enum ModeProvenance: Sendable, Equatable, Hashable {
   /// `CGDisplayCopyAllDisplayModes`, applied with `CGConfigureDisplayWithDisplayMode`.
   case coreGraphics
   /// Revealed from the CGS mode list, applied with `CGSConfigureDisplayMode`.
   case coreGraphicsServices
   /// Not from any enumeration: a size Candela renders by mirroring the panel
-  /// onto a virtual display (SS5). It shares no ID space with the other two,
+  /// onto a virtual display. It shares no ID space with the other two,
   /// so its `ioModeID` is a sentinel from `DisplayMode.syntheticIoModeID` that
   /// is never handed to CoreGraphics or CGS, and applying it is the
   /// `ModeSynthesisEngine`'s job rather than a configuration transaction's.
@@ -23,7 +23,7 @@ public enum ModeProvenance: Sendable, Equatable, Hashable {
 /// One mode a display can run in.
 ///
 /// `ioModeID` is a RUNTIME handle only — it is not stable across replug, so it
-/// never persists. `DisplayModeDescriptor` is what gets stored (spec DM6).
+/// never persists. `DisplayModeDescriptor` is what gets stored.
 public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
   public let ioModeID: Int32
   /// What the user calls "looks like" — point dimensions.
@@ -82,7 +82,7 @@ public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
     }
   }
 
-  /// A size Candela renders rather than one the panel offers (SS5). Distinct
+  /// A size Candela renders rather than one the panel offers. Distinct
   /// from `isRevealed` in both mechanism and badge copy.
   public var isSynthesized: Bool {
     switch provenance {

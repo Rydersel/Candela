@@ -1,8 +1,8 @@
 import CandelaKit
 import SwiftUI
 
-/// Targeting & Precision, pushed from Keyboard (KMR6): the set-once controls.
-/// Every write goes pref then `prefDidChange` with a `PrefName` case (D27).
+/// Targeting & Precision, pushed from Keyboard: the set-once controls.
+/// Every write goes pref then `prefDidChange` with a `PrefName` case.
 ///
 /// `@MainActor` is load-bearing: `SettingsActions` is `@MainActor`, and a plain
 /// `struct … : View` has nonisolated properties under Swift 6 complete
@@ -89,7 +89,7 @@ struct KeyboardTargetingPage: View {
 
       SettingsCardDivider()
 
-      // D25: the fork's "Fine OSD scale for…" leaked internal vocabulary.
+      // The fork's "Fine OSD scale for…" leaked internal vocabulary.
       // "On-screen indicator" is the house term for the HUD.
       SettingRow("A key press normally moves one notch of the on-screen indicator, and holding Shift and Option moves a quarter of that. Turning these on swaps the two, so every press is fine by default.") {
         Toggle("Fine steps for volume", isOn: Binding(
@@ -104,7 +104,7 @@ struct KeyboardTargetingPage: View {
 
       SettingsCardDivider()
 
-      // A1 relitigated D26 for this one: it is a key-step setting and the
+      // Relitigated here: it is a key-step setting and the
       // decision behind it is one a person can make. `separateCombinedScale`
       // stays app-level and stays a documented `defaults write` key.
       // "A normal press" is load-bearing, not hedging: `DimmingMath.step`
@@ -125,7 +125,7 @@ struct KeyboardTargetingPage: View {
   // MARK: - Writes
   //
   // Every write goes pref → `prefDidChange`, and the name argument is a
-  // `PrefName` case, never a string (D27).
+  // `PrefName` case, never a string.
 
   /// Inert in the engine: the executor reads this live per press, so the row is
   /// `.refreshUI` alone. The call site still exists, because the page must not
@@ -144,7 +144,7 @@ struct KeyboardTargetingPage: View {
 
   /// No `.rearmTap` row, and that is correct rather than missing:
   /// `KeyRouterConfig` is built INSIDE the tap's press closure, so the fine
-  /// scale is read at event time on every press (fork bug 3, D2).
+  /// scale is read at event time on every press (fork bug 3).
   private func setFineScaleBrightness(_ fine: Bool) {
     prefs.useFineScaleBrightness = fine
     actions.prefDidChange(.useFineScaleBrightness)
@@ -160,7 +160,7 @@ struct KeyboardTargetingPage: View {
   /// (`SettingsActions.apply`), and `separateCombinedScale` is app-level, so
   /// `"app"` would match zero displays and silently swallow a future reapply
   /// row. `.refreshUI` alone today because `BrightnessController.step` reads the
-  /// pref at key time (D20).
+  /// pref at key time.
   private func setSeparateCombinedScale(_ separate: Bool) {
     prefs.separateCombinedScale = separate
     actions.prefDidChange(.separateCombinedScale)

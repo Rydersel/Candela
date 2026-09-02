@@ -1,4 +1,4 @@
-/// Does the panel's volume slider accept input for this display? (D24.)
+/// Does the panel's volume slider accept input for this display?
 ///
 /// Deliberately NOT a function of CoreAudio. "macOS sees no output device with
 /// this display's name" cannot be told apart from "this link carries no audio
@@ -30,7 +30,7 @@ public enum VolumeSliderPolicy {
   ///
   /// The keyboard half is the per-display "use the keys for this display" pref. A
   /// refusal here SWALLOWS the press: the key path must not treat it as "nothing
-  /// resolved" and spray every other display instead (R1).
+  /// resolved" and spray every other display instead.
   public static func acceptsVolumeKeys(
     isKeyboardDisabled: Bool, override: AudioSinkOverride, volumeSupport: VCPSupport
   ) -> Bool {
@@ -52,7 +52,7 @@ public enum VolumeSliderPolicy {
   /// display that denies 0x8D it is false, because the write degrades to the volume
   /// register; passing the pref would judge the key on a register nothing touches.
   ///
-  /// Refusing here does NOT put unmuting out of reach (D29 rule 3). Every route back
+  /// Refusing here does NOT put unmuting out of reach. Every route back
   /// drives the controller directly and consults no capability verdict.
   public static func acceptsMuteKey(
     isKeyboardDisabled: Bool,
@@ -72,15 +72,15 @@ public enum VolumeSliderPolicy {
   /// command (VCP 0x8D), or the volume register driven to 0.
   ///
   /// The pref asks for the dedicated command; the display's capabilities string can
-  /// refuse it, under the same D24 rule that greys the slider. A refusal DEGRADES
+  /// refuse it, under the same rule that greys the slider. A refusal DEGRADES
   /// this display to the strategy every display without a dedicated mute command
   /// already uses, which is why this answers "which register" rather than "may we
-  /// mute": a mute the app records and no register carries is the phantom state D24
-  /// exists to prevent.
+  /// mute": a mute the app records and no register carries is the phantom state the
+  /// capability-verdict rule exists to prevent.
   ///
   /// The verdict gates the MUTE direction only. Every unmute is ungated wherever it
   /// is written, because the verdict comes off a string the display supplied and can
-  /// arrive after the mute did (D29 rule 3).
+  /// arrive after the mute did.
   ///
   /// One definition for the engine's mute writes and for the mute key's gate, so a
   /// keypress and a slider crossing cannot disagree about the register.
@@ -104,7 +104,7 @@ public enum VolumeSliderPolicy {
   ///
   /// `commandIsAvailable` is the volume command's own availability, which `toggleMute`
   /// guards on under either strategy. False means no mute is written at all, so the
-  /// row's own unavailable sentence (SO5) applies instead.
+  /// row's own unavailable sentence applies instead.
   ///
   /// The consequence is worded as the LEVEL the degrade reaches, not a register value:
   /// the degrade goes out through `rawValue(for: 0)`, so a volume floor writes that
@@ -140,7 +140,7 @@ public enum VolumeSliderPolicy {
   ///
   /// So the per-display keyboard switch is left out, and it is the only thing left
   /// out: a display whose keyboard control the user turned off swallows its press
-  /// (R1), the same as for brightness, and must keep the keys watched.
+  /// the same as for brightness, and must keep the keys watched.
   ///
   /// `commandIsAvailable` is `DDCValueController.isAvailable` for the volume command:
   /// false when the per-command On switch is off, or when the display is forced to
@@ -188,7 +188,7 @@ public enum VolumeSliderPolicy {
   }
 
   /// `isEnabled` reads its argument as the verdict for the register in
-  /// question: D24's rule (a clean denial refuses, no evidence allows, the
+  /// question: the capability-verdict rule (a clean denial refuses, no evidence allows, the
   /// user's override outranks both) is per command, not specific to 0x62.
   /// Delegating keeps ONE copy of that rule for the slider and both key families.
   private static func acceptsKey(
@@ -204,7 +204,7 @@ public enum VolumeSliderPolicy {
   /// "<name> reports no volume control over DDC" for every grey, so a user who had
   /// turned the slider off themselves was told their monitor had refused, which sends
   /// them to check a cable. On a write-only panel it was false twice over: that
-  /// display reports nothing at all, and D24 resolves its unknown to ENABLED, so the
+  /// display reports nothing at all, and the capability-verdict rule resolves its unknown to ENABLED, so the
   /// only way it could grey was the override the sentence denied [MEASURED].
   public static func disabledReason(
     displayName: String, override: AudioSinkOverride, volumeSupport: VCPSupport

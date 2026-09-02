@@ -3,8 +3,8 @@ import CoreGraphics
 import SwiftUI
 import Testing
 
-// Whether the ambient auto-brightness row appears and what it shows (AT4
-// layer 1). The row exists only where macOS has a sensor to act on, and it
+// Whether the ambient auto-brightness row appears and what it shows.
+// The row exists only where macOS has a sensor to act on, and it
 // publishes only a state macOS reported.
 @Suite("Ambient brightness row") @MainActor
 struct AmbientBrightnessRowTests {

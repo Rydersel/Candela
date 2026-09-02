@@ -18,7 +18,7 @@ struct CGSModeRevelationGateTests {
     #expect(plausible(CGSModeFixtures.magRevealedNativeAt2x))
   }
 
-  /// S6 §6 — the calibration case. An intuited 320px floor rejected this.
+  /// An earlier experiment measured the calibration case: an intuited 320px floor rejected this.
   @Test func aSmallButRealModeIsPlausible() {
     #expect(
       CGSModeRevelation.isPlausible(
@@ -73,7 +73,7 @@ struct CGSModeRevelationMergeTests {
       guardsWireTiming: true)
   }
 
-  /// CR1 — the built-in trap. Same geometry, refresh 59 vs 60, SAME id.
+  /// The built-in trap: same geometry, refresh 59 vs 60, SAME id.
   /// Dedup on id drops it; dedup on geometry+refresh would duplicate it.
   @Test func aModeAlreadyInCoreGraphicsIsDroppedByIDDespiteRefreshDisagreeing() {
     let result = CGSModeRevelation.reveal(
@@ -121,7 +121,7 @@ struct CGSModeRevelationMergeTests {
     #expect(result.dropped.notHiDPI == 1)
   }
 
-  /// CR6 — 4:3 on a 2.39:1 panel would letterbox.
+  /// 4:3 on a 2.39:1 panel would letterbox.
   @Test func offAspectModesAreDropped() {
     let result = revealMag([CGSModeFixtures.magLegacy4x3])
     #expect(result.modes.isEmpty)
@@ -144,7 +144,7 @@ struct CGSModeRevelationMergeTests {
     #expect(result.dropped.implausible == 1)
   }
 
-  // MARK: Refresh borrowing (CR7)
+  // MARK: Refresh borrowing
 
   @Test func refreshIsBorrowedFromCoreGraphicsWhenWithinOneHz() {
     #expect(CGSModeRevelation.resolveRefresh(truncated: 59, against: [60.0, 120.0]) == 60.0)

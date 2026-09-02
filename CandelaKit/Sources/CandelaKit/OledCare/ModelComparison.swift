@@ -3,12 +3,12 @@ import Foundation
 /// Two exposure maps accumulated over the SAME instants: one from measured
 /// samples, one from the permission-free model.
 ///
-/// EM2 is the whole point. A pair books on both sides or on neither, so a grant
-/// outage or a skipped capture stops both maps together and the comparison can
-/// never read the permission's absence as a modelling error. Same unit as
-/// `ExposureMap`, with no brightness term on either side (EM13).
+/// Paired booking is the whole point. A pair books on both sides or on
+/// neither, so a grant outage or a skipped capture stops both maps together
+/// and the comparison can never read the permission's absence as a modelling
+/// error. Same unit as `ExposureMap`, with no brightness term on either side.
 public struct ModelComparison: Equatable, Sendable, Codable {
-  /// Both always `PanelGrid.cellCount` long, in panel-physical order (EM12).
+  /// Both always `PanelGrid.cellCount` long, in panel-physical order.
   /// `.empty` is the only way in from outside and decoding rejects any other
   /// length, so the statistics below can index without checking.
   public private(set) var measuredCells: [Double]
@@ -22,7 +22,8 @@ public struct ModelComparison: Equatable, Sendable, Codable {
     modelledCells: [Double](repeating: 0, count: PanelGrid.cellCount),
     pairCount: 0, firstPair: nil, lastPair: nil)
 
-  /// The top tenth of the grid: the region EM10 asks the two maps to agree on.
+  /// The top tenth of the grid: the region the comparison asks the two maps
+  /// to agree on.
   private static let decileCellCount = PanelGrid.cellCount / 10
 
   /// Books one paired instant, or refuses the pair whole.
@@ -49,7 +50,8 @@ public struct ModelComparison: Equatable, Sendable, Codable {
     grid.count == PanelGrid.cellCount && grid.allSatisfy { $0.isFinite && $0 >= 0 }
   }
 
-  /// The four figures of EM10, or nil while the answer would not be a verdict.
+  /// The four figures of the comparison, or nil while the answer would not
+  /// be a verdict.
   ///
   /// Nil below the sample floor, and nil when either map is flat: correlation
   /// against a map with no spread is arithmetic on noise, and a flat map's
@@ -202,8 +204,8 @@ public struct ModelComparison: Equatable, Sendable, Codable {
   }
 }
 
-/// The fixed statistics of EM10. Fixed in advance so the gate is judged on
-/// numbers chosen before the result was known.
+/// The fixed statistics of the comparison. Fixed in advance so the gate is
+/// judged on numbers chosen before the result was known.
 public struct ModelComparisonStats: Equatable, Sendable {
   /// Linear agreement across every accumulated cell pair.
   public var pearson: Double

@@ -2,7 +2,7 @@
   import Foundation
 
   /// Opens the settings window on a named destination so screenshot validation
-  /// (DT6) can reach a pane nothing else can: without an Accessibility grant
+  /// can reach a pane nothing else can: without an Accessibility grant
   /// nothing can click the sidebar from a script, and Candela has no URL scheme.
   ///
   /// The file and both call sites are inside `#if DEBUG`, so Release keeps no
@@ -13,12 +13,12 @@
   ///
   ///   CANDELA_DEBUG_SETTINGS=pane:<PaneID>
   ///   CANDELA_DEBUG_SETTINGS=pane:oledCare/<key|first>[/display|/health]
-  ///   CANDELA_DEBUG_SETTINGS=pane:keyboard/<KeyboardPage>   (KMR11)
+  ///   CANDELA_DEBUG_SETTINGS=pane:keyboard/<KeyboardPage>
   ///   CANDELA_DEBUG_SETTINGS=setup:mock   (guided setup over the rig fixture)
   ///   CANDELA_DEBUG_SETTINGS=display:<builtIn|first|key>[/<DisplaySubPage>]
   ///
-  /// `/health` opens the Display Health WINDOW over the display page; since
-  /// OCR-A1 it is not a pushed page.
+  /// `/health` opens the Display Health WINDOW over the display page; it is
+  /// not a pushed page.
   ///
   /// Both id spaces are CASE-SENSITIVE and camelCase: `pane:menuBar`, not
   /// `pane:menubar`. Valid ids come from the enums, and so does every rejection
@@ -47,10 +47,10 @@
     /// grant, so without this the pushed pages have no route to a screenshot.
     static var pendingOledPath: [OledCarePage]?
     /// Only ever set alongside `pane:keyboard`: same job as `pendingOledPath`
-    /// for the Keyboard pane's pushed pages (KMR11).
+    /// for the Keyboard pane's pushed pages.
     static var pendingKeyboardPath: [KeyboardPage]?
     /// Only ever set alongside `pane:oledCare/<key>/health`: Display Health is a
-    /// WINDOW (OCR-A1), not a pushed page, so the capture route opens it over the
+    /// WINDOW, not a pushed page, so the capture route opens it over the
     /// display page.
     static var pendingHealthWindowKey: String?
 
@@ -145,10 +145,10 @@
           // silently capture the display page.
           switch String(segments[2]) {
           case "display": break
-          // A window, not a page (OCR-A1): the display page stays behind it.
+          // A window, not a page: the display page stays behind it.
           case "health": healthWindowKey = key
           // Named rather than left to the default: capture scripts written
-          // before SC5 still ask for it, and "unknown page" would not say where
+          // earlier still ask for it, and "unknown page" would not say where
           // the controls went.
           case "measurement":
             return .rejected("the OLED Care measurement page retired; its controls are on the Health pane, so use 'pane:health'")

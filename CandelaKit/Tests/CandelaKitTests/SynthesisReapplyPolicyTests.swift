@@ -41,7 +41,7 @@ struct SynthesisReapplyPolicyTests {
     #expect(decide() == .engage(resolved))
   }
 
-  /// SS14. The built-in panel is not a synthesis target in v1, and a stored
+  /// The built-in panel is not a synthesis target in v1, and a stored
   /// size cannot arrive on one by any supported route, so this is the refusal
   /// that runs before the ones that would look at what was stored.
   @Test func theBuiltInPanelIsNeverATarget() {
@@ -74,7 +74,7 @@ struct SynthesisReapplyPolicyTests {
   }
 
   /// A stored size the catalog no longer produces: the panel changed, or an
-  /// existing HiDPI row has since taken the stop over under SS2. Distinct from
+  /// existing HiDPI row has since taken the stop over. Distinct from
   /// `nothingStored` because a size the user chose has stopped being on offer,
   /// which is worth saying out loud.
   @Test func aStoredSizeTheLadderNoLongerOffersIsStale() {
@@ -92,7 +92,7 @@ struct SynthesisReapplyPolicyTests {
     #expect(decide(alreadyEngaged: true) == .skip(.alreadyEngaged))
   }
 
-  /// SS7: a display already showing another's framebuffer cannot also mirror
+  /// The synthesis-vs-mirroring rule: a display already showing another's framebuffer cannot also mirror
   /// onto a virtual one, and the unattended path must never take apart a mirror
   /// set the person built. Answered by the same predicate that hides synthesis
   /// sets from the mirroring surfaces, so a synthesis set is not caught here.
@@ -100,13 +100,13 @@ struct SynthesisReapplyPolicyTests {
     #expect(decide(alreadyMirrored: true) == .skip(.alreadyMirrored))
   }
 
-  /// SS9. Mode changes were measured silently dropping HDR, so synthesis
+  /// Mode changes were measured silently dropping HDR, so synthesis
   /// refuses rather than engaging and finding out.
   @Test func hdrRefusesTheEngage() {
     #expect(decide(hdrEngaged: true) == .skip(.hdrEngaged))
   }
 
-  /// SS6 reserves exactly two slots for synthesis, so a third opted-in display
+  /// The two-slot synthesis family reserves exactly two slots for synthesis, so a third opted-in display
   /// has nowhere to put a virtual display.
   @Test func noFreeSlotRefusesTheEngage() {
     #expect(decide(freeSlots: 0) == .skip(.noFreeSlot))

@@ -18,7 +18,7 @@ import os
 ///   IDs reassign across a dock cycle with both displays still present
 ///   (MAG 3 to 2, Dell 2 to 3), so the ID-to-key resolution happens fresh on
 ///   every tick and an ID is only ever a rendering address.
-/// - **OC12, verified on the window server's side and on a LATER tick.** The
+/// - **Overlay verification happens on the window server's side and on a LATER tick.** The
 ///   server lags AppKit by a run-loop turn in BOTH directions (measured 6 to
 ///   9 ms), so verifying inline after a mutation reads the pre-mutation world.
 ///   A render that changed state marks the display and the FOLLOWING tick
@@ -28,10 +28,10 @@ import os
 ///   `repinFrames()` alone would pin an overlay to the wrong panel after an ID
 ///   swap. `displaysReconfigured()` calls `removeAll()` and the next render
 ///   recreates every wanted overlay under the fresh IDs.
-/// - **OC13: a mirror-set participant is `suspended`**: overlay removed, engine
+/// - **A mirror-set participant is `suspended`**: overlay removed, engine
 ///   paused, hours not accumulated. Membership comes from the app's one mirror
 ///   definition, `MirrorTopology.isInMirrorSet`, master included.
-/// - **SS8 carves synthesis out of the two counters, not out of the pause.** A
+/// - **Synthesis carves itself out of the two counters, not out of the pause.** A
 ///   mirror set Candela engaged to render a synthesized size is not mirroring
 ///   the user asked for (`MirrorTopology.isSynthesisSet`), and the panel behind
 ///   it is lit and being worn, so panel hours and the wear signal keep accruing.
@@ -67,17 +67,17 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// the display is locked and the dim was refused: a stale entry would be a
   /// sentence about a state the machine is no longer in.
   ///
-  /// Read through `OledCareCopy` by both surfaces that report lock dim. OC7
-  /// sub-ruling 4 is "recorded, never reported as dimmed", and a record no
+  /// Read through `OledCareCopy` by both surfaces that report lock dim. The
+  /// rule is "recorded, never reported as dimmed", and a record no
   /// surface reads satisfies only the first half.
   private(set) var lockDimSkips: [String: LockDimSkip] = [:]
 
-  /// The enrolled displays whose OC13 pause is a synthesis set rather than
+  /// The enrolled displays whose mirror-set pause is a synthesis set rather than
   /// mirroring the user asked for, by persistenceKey. Rebuilt whole every tick
   /// from the verdict the loop already made, so it cannot disagree with
   /// `dimStates` about why a display is paused.
   ///
-  /// v1 keeps the pause under a synthesized size (SS8), so the pane still reads
+  /// v1 keeps the pause under a synthesized size, so the pane still reads
   /// "paused"; this is what lets it name the right mirror.
   private(set) var synthesisSuspensions: Set<String> = []
 
@@ -101,7 +101,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     /// never identity. Refreshed from the live display list each tick.
     var lastDisplayID: CGDirectDisplayID?
     /// What we last asked the window server for (mirrors the overlay's own
-    /// applied state). nil = no overlay wanted. This is what OC12 verifies.
+    /// applied state). nil = no overlay wanted. This is what verification checks.
     var lastAppliedAlpha: Double?
     var lastAppliedBlackout = false
     var lastAppliedMask: OverlayMask.Oriented?
@@ -122,11 +122,11 @@ final class OledCareCoordinator: CheckupCareHolding {
     var nominatedMask: OverlayMask?
     /// Throttle for `refreshNominationGeometry`; nil until a mask first shows.
     var lastNominationRefreshAt: SuspendingClock.Instant?
-    /// OC12: the last render mutated window-server state; verify it on a
+    /// Verification marker: the last render mutated window-server state; verify it on a
     /// LATER tick than the one that mutated.
     var needsVerify = false
     /// Reconcile attempts against the CURRENT mismatch; zeroed on every new
-    /// mutation and on success. Bounds the OC12 loop; see `maxVerifyAttempts`.
+    /// mutation and on success. Bounds the reconcile loop; see `maxVerifyAttempts`.
     var verifyAttempts = 0
     var wasAwake = true
     var hoursLastTick: SuspendingClock.Instant?
@@ -145,11 +145,11 @@ final class OledCareCoordinator: CheckupCareHolding {
     /// A capture is out on the XPC round trip. Nothing else may issue one: two
     /// in flight would double-book the interval they both stand for.
     var sampleInFlight = false
-    /// USER mirror-set membership as of the last tick, for OC13's entry EDGE.
+    /// USER mirror-set membership as of the last tick, for the mirror-set pause's entry EDGE.
     /// The steady state is already handled (a mirrored display never
     /// qualifies); this exists so the observer's ageing state is dropped
     /// exactly once, when the panel stops showing what those ages describe.
-    /// A synthesis set is not membership for this purpose (SS8): the panel goes
+    /// A synthesis set is not membership for this purpose: the panel goes
     /// on showing those same windows, so the edge must not fire on an engage.
     var wasMirrored = false
     /// Whether THIS coordinator has a temporary dim outstanding on the
@@ -166,13 +166,13 @@ final class OledCareCoordinator: CheckupCareHolding {
 
   /// Poll cadence: slow while every enrolled display is `.active`/`.suspended`;
   /// fast while any dim is up by any delivery (the restore latency gate is
-  /// 100 ms) or an OC12 verification is pending. The predicate and both
+  /// 100 ms) or a verification is pending. The predicate and both
   /// durations live in `OledCareCadence`, under test.
   /// After this much CONTINUOUS settling the signal is ignored: the entry gate
   /// exists for a transition window measured in seconds, not for a latch that
   /// never cleared.
   private static let hdrSettleDeferralBound: Duration = .seconds(10)
-  /// OC12 reconcile bound ("log, don't loop" needs an actual number): at the
+  /// Reconcile bound ("log, don't loop" needs an actual number): at the
   /// fast cadence five attempts is ~500 ms, dozens of run-loop turns against a
   /// measured 6 to 9 ms server lag, so a mismatch still standing is structural
   /// (a departing display, a shield above us). Retrying forever would pin the
@@ -198,7 +198,7 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// Keyed by persistenceKey, created lazily and kept for the app's lifetime:
   /// hours are persistent facts about a panel, not about a connection.
   @ObservationIgnored private var trackers: [String: PanelHoursTracker] = [:]
-  /// OC20's wear signal, one per panel, keyed and reset exactly like `trackers`
+  /// The wear signal, one per panel, keyed and reset exactly like `trackers`
   /// because it measures the same thing about the same glass: how long, and now
   /// also at what level.
   @ObservationIgnored private var wearTrackers: [String: WearSignalTracker] = [:]
@@ -214,7 +214,7 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// The most recent window observation per display, for attribution in the
   /// health view. Tracked for the same reason as `accumulators`.
   private var latestObservations: [String: WindowObservation] = [:]
-  /// OC18's per-app attribution OVER TIME: panel-seconds each app has occupied,
+  /// The per-app attribution OVER TIME: panel-seconds each app has occupied,
   /// folded from the same observations `latestObservations` holds the latest of.
   /// Restored on first touch and kept for the app's lifetime, observation-
   /// tracked for `accumulators`' reason.
@@ -223,7 +223,7 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// double-book every observation, and this is persisted, so the bias never
   /// washes out.
   private var ownerHours: [String: OwnerHoursAccumulator] = [:]
-  /// EM2's paired modelled-vs-measured store, one per panel, restored on first
+  /// The paired modelled-vs-measured store, one per panel, restored on first
   /// touch and kept for the app's lifetime like `accumulators`, and
   /// observation-tracked for the same reason: the OLED Care pane's comparison
   /// section reads it.
@@ -273,7 +273,7 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// fallback: keyboard events skip a global monitor without an Accessibility grant.
   @ObservationIgnored private var inputMonitors: [Any] = []
   @ObservationIgnored private var sleepWakeObservers: [any NSObjectProtocol] = []
-  /// C1 latch. `runSettingsReset` suspends several times between
+  /// The restore latch. `runSettingsReset` suspends several times between
   /// `prepareForReset()` and the domain wipe, and an HDR-off IS a display
   /// reconfiguration, so the topology loop can fire mid-reset, re-read
   /// still-unwiped enrollment prefs and re-arm the overlays the reset just tore
@@ -288,7 +288,7 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// for this case: that one ends every display's dim and resets every hour
   /// counter, which a reset of one display has no business doing.
   @ObservationIgnored private var resettingDisplays: Set<String> = []
-  /// OC12 for removals issued OUTSIDE the per-display tick (reset,
+  /// Verification for removals issued OUTSIDE the per-display tick (reset,
   /// un-enrollment), where the per-display state that would carry the marker is
   /// deleted in the same breath. Keyed by the ID the window was closed under,
   /// value is attempts so far. Drained by the tick independently of `states`, so
@@ -412,7 +412,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     return tracker
   }
 
-  /// The proxy OC20 accumulates against: the fraction of full output the panel
+  /// The proxy the wear tracker accumulates against: the fraction of full output the panel
   /// is left at, composing the overlay's retained fraction with the brightness
   /// setting.
   ///
@@ -423,8 +423,8 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// the alpha path would book every locked hour at full brightness.
   ///
   /// Reasoned, not measured. It ignores the panel's EOTF and any local dimming,
-  /// which is why OC20 also stores the dim-state axis as an independent,
-  /// model-free answer to OC17's gate.
+  /// which is why the wear tracker also stores the dim-state axis as an independent,
+  /// model-free answer to the mask-could-apply gate.
   static func effectiveLevel(
     state: OledDimState, engine: IdleDimmingEngine, brightness: Double
   ) -> Double {
@@ -524,7 +524,7 @@ final class OledCareCoordinator: CheckupCareHolding {
 
   // MARK: - Entry points
 
-  /// D28 shape: synchronous, main-actor, the ONLY pref entry point. Rebuilds
+  /// The reapply-after-pref-change shape: synchronous, main-actor, the ONLY pref entry point. Rebuilds
   /// each enrolled display's config from prefs; a display whose enrollment
   /// turned off loses its overlay and its engine. `persistenceKey` scoping is
   /// deliberately not exploited: the reconcile walks the whole (small) display
@@ -554,7 +554,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     if driver != nil { tick() }
   }
 
-  /// D29 ordering, first statement of the reset path: overlays down and hour
+  /// The mute-strand ordering, first statement of the reset path: overlays down and hour
   /// counters reset while their objects are alive. The domain wipe never
   /// reaches the trackers (rebuildControllers doesn't touch this object), so
   /// a live tracker's debounced write-through would otherwise re-persist the
@@ -564,14 +564,14 @@ final class OledCareCoordinator: CheckupCareHolding {
     resetting = true
     // Before the state below is discarded, and before the domain is wiped: a
     // reset that clears the OLED prefs must not leave a display sitting at a dim
-    // level whose owner it just deleted (D29's ordering rule, in the brightness
+    // level whose owner it just deleted (the mute-strand rule's ordering, in the brightness
     // register instead of the mute one).
     //
     // FIRST of the two blocks: only this one leaves the panel visibly wrong if
     // it is skipped, and the telemetry teardown below is bookkeeping. Recovery
-    // before bookkeeping, the ordering D29 states for the mute strand.
+    // before bookkeeping, the ordering the mute-strand rule specifies.
     endAllLockDims()
-    // Sampling stops BEFORE the prefs are wiped, never after (D29's ordering on
+    // Sampling stops BEFORE the prefs are wiped, never after (the mute-strand rule's ordering on
     // this path). The wipe removes the exposure keys, so a live accumulator
     // surviving it would write the deleted map back on its next debounce. The
     // epoch bump does the same for a capture already in flight.
@@ -588,7 +588,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     latestObservations.removeAll()
     latestSamples.removeAll()
     latestWindows.removeAll()
-    // These removals delete the per-display state that would carry their OC12
+    // These removals delete the per-display state that would carry their verification
     // marker, so verification rides the pending list instead: a blackout window
     // whose close the server ignores must not become unwatched at the exact
     // moment the prefs describing it are wiped. IDs are current, since no
@@ -776,7 +776,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     clearSkip(for: key)
     if let id = state.lastDisplayID {
       overlay.remove(for: id)
-      // This removal deletes the state that would carry its OC12 marker, so the
+      // This removal deletes the state that would carry its verification marker, so the
       // verification rides the pending list: queued only when an overlay was up,
       // under an ID that was current when the window was driven. Un-enrollment
       // is not a reconfiguration, and that path clears this list before it
@@ -853,7 +853,7 @@ final class OledCareCoordinator: CheckupCareHolding {
       let id = displayState.id
       state.lastDisplayID = id
       let isMirrored = topology.displays.first { $0.id == id }?.isInMirrorSet ?? false
-      // SS8's carve-out, from the one synthesis predicate (SS7) over the
+      // The synthesis carve-out, from the one synthesis predicate over the
       // stamped store topology. `isMirrored` still drives the engine, so the
       // pause is unchanged; `isUserMirrored` is what the wear counters and the
       // observer's ageing state key on, because a panel rendering a synthesized
@@ -915,7 +915,7 @@ final class OledCareCoordinator: CheckupCareHolding {
       // system-sleep span as awake panel time, and SuspendingClock does not
       // advance while the machine is suspended. Display sleep WITHOUT system
       // sleep is handled by the awake gate. A display the USER mirrored
-      // accumulates nothing (OC13); a synthesis slave does accumulate (SS8),
+      // accumulates nothing; a synthesis slave does accumulate,
       // which is why the gate reads `isUserMirrored` and not the suspension.
       //
       // Known over-count, documented in the pane's caption rather than fixed: a
@@ -926,7 +926,7 @@ final class OledCareCoordinator: CheckupCareHolding {
       // measured: a press may instead deassert hot-plug detect, which is a real
       // departure and is already handled. macOS exposes no signal that
       // distinguishes a soft-standby panel, and the one signal Candela had, its
-      // own 0xD6 write, went with the power-off action A-15 cut.
+      // own 0xD6 write, went with the power-off action that was cut.
       let awake = CGDisplayIsAsleep(id) == 0
       if state.hoursTracking {
         if state.wasAwake, !awake { hoursTracker(for: key).noteStandby() }
@@ -935,10 +935,10 @@ final class OledCareCoordinator: CheckupCareHolding {
           hoursTracker(for: key).noteTick(
             displayAwake: true, secondsSinceLastTick: elapsed
           )
-          // OC20 rides the SAME gate and the SAME delta as panel hours, so the
+          // The wear tracker rides the SAME gate and the SAME delta as panel hours, so the
           // two counters cannot disagree about how long a panel was on. Under a
           // synthesized size the state IS `.suspended` and both counters run
-          // anyway (SS8), so the wear tracker's `.suspended` slot books the
+          // anyway, so the wear tracker's `.suspended` slot books the
           // seconds a panel spends lit behind Candela's own mirror.
           wearTracker(for: key).noteTick(
             dimState: newState,
@@ -951,8 +951,8 @@ final class OledCareCoordinator: CheckupCareHolding {
       state.wasAwake = awake
       state.hoursLastTick = now
 
-      // OC13's mirror-entry edge: drop the ageing state once, on the way in.
-      // Synthesis never crosses it (SS8), because the panel keeps showing the
+      // The mirror-set pause's mirror-entry edge: drop the ageing state once, on the way in.
+      // Synthesis never crosses it, because the panel keeps showing the
       // windows those ages describe, only at a different size. Entry-only, so a
       // disengage does not fire it.
       if isUserMirrored, !state.wasMirrored { forgetWindowObservation(for: key) }
@@ -969,7 +969,7 @@ final class OledCareCoordinator: CheckupCareHolding {
       // `states[key] = state` below.
       refreshNominationGeometry(for: key, state: &state, on: target, at: now)
 
-      // OC12 ordering: last tick's mutation is verified BEFORE this tick's
+      // Verification ordering: last tick's mutation is verified BEFORE this tick's
       // render, so the check runs a full tick after the change it is checking,
       // never inline against a window server that lags AppKit by a run-loop turn
       // in both directions. Bounded (I-1): one nudge per detected mismatch, then
@@ -1032,7 +1032,7 @@ final class OledCareCoordinator: CheckupCareHolding {
   ]
 
   /// Global monitor for input outside the app, local one for input delivered to
-  /// it: the blackout overlay accepts clicks (OC15), which never reach a global
+  /// it: the blackout overlay accepts clicks, which never reach a global
   /// monitor.
   private func armInputMonitor() {
     guard inputMonitors.isEmpty else { return }
@@ -1206,11 +1206,11 @@ final class OledCareCoordinator: CheckupCareHolding {
     // `.active` DOES compose: detection dimming is the one care feature that
     // runs while the user is working, so it can require an overlay in a state
     // whose own alpha is nil. Four cases do not, each for its own reason:
-    //   `.blackout`: OC17's rule, and there is no luminance left to spend.
-    //   `.suspended`: OC13, and suspended means suspended. `renominate` keeps
+    //   `.blackout`: the spatial axis's rule, and there is no luminance left to spend.
+    //   `.suspended`: mirror-set suspension, and suspended means suspended. `renominate` keeps
     //     refreshing the mask under a synthesized size (telemetry runs through
     //     that suspension), so the nomination is current but still not rendered.
-    //   `.lockDim`: delivered on the wire, not by the overlay (A-16 measured
+    //   `.lockDim`: delivered on the wire, not by the overlay (measured
     //     that a shielding window does not render above the lock screen), so a
     //     mask here would be an overlay nobody could see.
     //   assertion held: the same gate idle dimming has. A video player or a
@@ -1256,7 +1256,7 @@ final class OledCareCoordinator: CheckupCareHolding {
       // The window server actually moved (or will, a run-loop turn from now).
       // The mask is in this test because `write` re-orders the window on every
       // state change, mask included, so a mask-only change is still something
-      // OC12 has to verify landed.
+      // the reconcile has to verify landed.
       state.needsVerify = true
       state.verifyAttempts = 0
       state.lastAppliedAlpha = alpha
@@ -1303,7 +1303,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     case settling
   }
 
-  /// OC12 reconcile, one tick after a mutation. `.agreed` when the window
+  /// The reconcile, one tick after a mutation. `.agreed` when the window
   /// server agrees with the last render. On a missing wanted overlay the lever
   /// is `reassert(on:)` (NEVER a repeat apply, which is a no-op by construction
   /// against the overlay's memo) and re-verification waits for the NEXT tick:
@@ -1462,13 +1462,13 @@ final class OledCareCoordinator: CheckupCareHolding {
   }
 
   /// THE suspension verdict for telemetry, in one place and derived from the
-  /// engine's own published state: `.suspended` IS mirrored (OC13), and every
+  /// engine's own published state: `.suspended` IS mirrored, and every
   /// dim state is a panel that is not showing what a capture would measure.
   ///
   /// The one exception is a panel showing a synthesized size, decided by
   /// `OledTelemetryTarget` rather than here: telemetry is measurement, the panel
   /// is lit with no overlay over it, and its hours and wear signal already keep
-  /// running through that suspension (SS8). A user mirror stays out.
+  /// running through that suspension. A user mirror stays out.
   ///
   /// The lock is checked separately because lock dim is a PREF: a locked display
   /// with `oledLockDim` off sits at `.active` and is skipped regardless. Sleep
@@ -1508,7 +1508,7 @@ final class OledCareCoordinator: CheckupCareHolding {
   ///
   /// Nil, never a default, on a zero size or a rotation that is not a right
   /// angle: the first is a mid-reconfiguration reading and the second is one
-  /// this feature declines to describe (RT7) rather than round into a
+  /// this feature declines to describe rather than round into a
   /// scrambled wear history.
   // Internal, not private: the hero's ghost overlay maps window corners
   // through the same transform the accumulation paths use, one construction
@@ -1556,7 +1556,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     latestObservations[key] = observation
     latestWindows[key] = windows
 
-    // OC18's attribution over time. Booked at the NOMINAL interval for the
+    // The attribution over time. Booked at the NOMINAL interval for the
     // exposure path's reason: an observation stands for one sampling slot, and
     // the wall-clock gap since the last one can be an hour if the panel was
     // locked. No epoch check, unlike `finishExposureCapture`: this path is
@@ -1677,7 +1677,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     """)
   }
 
-  /// EM2: the modelled grid is booked only beside an accepted measured sample,
+  /// The modelled grid is booked only beside an accepted measured sample,
   /// so both sides of the comparison cover identical instants and a grant
   /// outage stops them together. Runs inside the accepted branch, so the
   /// epoch, pref, ID, transform and qualification re-checks have all passed.
@@ -1759,7 +1759,7 @@ final class OledCareCoordinator: CheckupCareHolding {
 
   // MARK: - The checkup's bookings
 
-  /// CK17: every showing is booked to the display's exposure record with its
+  /// Every showing is booked to the display's exposure record with its
   /// on-time, as a uniform grid. Booked as EMISSION, not a sample: `sampleCount`
   /// counts 60 s readings and the OLED Care page says so, so an eight-second
   /// showing must not advance it. The sampling path's telemetry and dim/mirror
@@ -1931,7 +1931,7 @@ final class OledCareCoordinator: CheckupCareHolding {
 
   /// The undebounced write: termination, system sleep, and a display leaving.
   ///
-  /// OC20's histogram rides the same three moments. It debounces on the same
+  /// The wear tracker's histogram rides the same three moments. It debounces on the same
   /// 60 s as panel hours, so without this a quit loses up to a minute per
   /// display per launch, which over a multi-week soak is a systematic
   /// undercount rather than noise.

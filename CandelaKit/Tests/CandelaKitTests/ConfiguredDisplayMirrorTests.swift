@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-@Suite("Mirror facts on a configured display (DT10)")
+@Suite("Mirror facts on a configured display")
 struct ConfiguredDisplayMirrorTests {
   /// The ambiguity both fields exist for: a standalone display and a master both report
   /// a null `mirrorsDisplay`, so `isInMirrorSet` separates them. Measured here, where an

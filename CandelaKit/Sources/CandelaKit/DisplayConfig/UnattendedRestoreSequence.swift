@@ -4,7 +4,7 @@ import Foundation
 /// the saved layout) run as ONE operation, in order, never overlapping an
 /// earlier call's.
 ///
-/// Both passes claim the same `DisplayReconfigurationGate` (AR12), and a refused
+/// Both passes claim the same `DisplayReconfigurationGate`, and a refused
 /// pass hands its arrival claims back and returns. Handing them back is right,
 /// since keeping them would mean "never", but it survives only if something
 /// calls the pass again, and what was relied on for that was the gate holder's

@@ -2,7 +2,7 @@ import Foundation
 
 /// Canvas space: the view's local coordinate space, origin top-left, y-**down**, in
 /// canvas points. Same handedness as display space, so the mapping is a uniform scale
-/// plus a translation with **no flip anywhere** (AR1).
+/// plus a translation with **no flip anywhere**.
 public struct CanvasSize: Sendable, Equatable {
   public var width: Double
   public var height: Double
@@ -65,7 +65,7 @@ public struct CanvasTransform: Sendable, Equatable {
 
   /// `headroom` reserves slack so a tile dragged outward has somewhere to go, applied
   /// to the **scale only**. Centring uses the true bounds, so freezing the transform
-  /// at drag start (AR2) changes nothing visually.
+  /// at drag start changes nothing visually.
   public static func fitting(
     _ bounds: DisplayRect,
     in canvas: CanvasSize,

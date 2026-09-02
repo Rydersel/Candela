@@ -97,7 +97,7 @@ public final class BrightnessController: PendingWireDraining {
 
   public private(set) var maxDDCValue: UInt16 = BrightnessController.assumedMaxDDC
 
-  /// What this display's brightness reads have proved (B3). Published so the
+  /// What this display's brightness reads have proved. Published so the
   /// diagnostics section can say "this display accepts commands but does not answer
   /// reads" rather than showing last-written values as though the panel had reported
   /// them.
@@ -122,12 +122,12 @@ public final class BrightnessController: PendingWireDraining {
   public private(set) var readEvidence: DDCReadEvidence = .notAttempted
 
   /// Whether this display's DDC wire has stopped carrying writes
-  /// (`DDCWireHealth`, WD1). An observable mirror of the health the coalescer
+  /// (`DDCWireHealth`). An observable mirror of the health the coalescer
   /// folds, because SwiftUI cannot re-render on a lock. `noteWireHealthChanged()`
   /// is the only writer, and it copies rather than decides.
   public private(set) var isWireUnresponsive = false
 
-  /// Whether `maxDDCValue` came from the PANEL or is the assumed default (B5).
+  /// Whether `maxDDCValue` came from the PANEL or is the assumed default.
   /// `maxDDCValue` defaults to 100, which is indistinguishable from a real read of
   /// 100, and on a write-only panel the assumption is always the true story. So the
   /// provenance is recorded beside the number rather than inferred from it.
@@ -147,7 +147,7 @@ public final class BrightnessController: PendingWireDraining {
   /// software routing, so every path-selection consumer (`applyPaths`, step's
   /// combined math, `handleReconfigure`) short-circuits through this one gate.
   ///
-  /// A CALL into the shared table (B1), not a second copy of it: the rule and its
+  /// A CALL into the shared table, not a second copy of it: the rule and its
   /// evidence live in `BrightnessPathPolicy.usesNative`.
   private var usesNative: Bool {
     BrightnessPathPolicy.usesNative(role: role, isHDRActive: cachedHDRActive)
@@ -165,7 +165,7 @@ public final class BrightnessController: PendingWireDraining {
   public var isHDREngaged: Bool { cachedHDRActive }
 
   /// What is actually driving this display's brightness right now: the same answer
-  /// `applyPaths` acts on, not a description of it (B1).
+  /// `applyPaths` acts on, not a description of it.
   ///
   /// Computed, not stored. Both invalidation signals already exist (`isHDREngaged` is
   /// observable, and any pref change bumps `prefsRevision`), while a stored mirror
@@ -301,7 +301,7 @@ public final class BrightnessController: PendingWireDraining {
   /// its continuation.
   @ObservationIgnored private var softwareLegToken: UInt64 = 0
 
-  /// The engine boundary (DT15). Consulted for anything that needs a display
+  /// The engine boundary. Consulted for anything that needs a display
   /// with a DESKTOP — the shade window and the gamma activity enforcer — and
   /// never for the DDC or gamma write targets, which stay the raw panel ID.
   @ObservationIgnored private let mirrorTopology: any MirrorTopologyProviding
@@ -324,18 +324,18 @@ public final class BrightnessController: PendingWireDraining {
   @ObservationIgnored private let wireSiblings: [any PendingWireDraining]
 
   /// Gamma-interference hook: invoked ONLY when the gamma backend, not the shade, is
-  /// about to apply and the software dedupe did not skip. The C1 clearing's
+  /// about to apply and the software dedupe did not skip. The restore-latch clearing's
   /// restore-to-1.0 bypasses it on purpose: it is a restore, not a dim, and must
   /// never be suspected as interference.
   @ObservationIgnored public var preGammaApplyHook: (@MainActor () -> Void)?
 
   /// True while this display's picture is coming from a size Candela renders
-  /// rather than from a mode the panel published (SS4). Injected because the
+  /// rather than from a mode the panel published. Injected because the
   /// pairing lives a layer up, in the app's synthesis coordinator, while the
   /// only door that can engage HDR is here.
   ///
-  /// It gates the engage arm of `setHDRMode`, which is the half SS9 left open:
-  /// SS9 refuses a synthesis engage while HDR is on, and nothing refused the
+  /// It gates the engage arm of `setHDRMode`, which is the half left open by the
+  /// rule that refuses a synthesis engage while HDR is on, and nothing refused the
   /// reverse. Defaulting to false keeps every existing caller and every test
   /// on the pre-gate behaviour.
   @ObservationIgnored public var isShowingSynthesizedSize: @MainActor () -> Bool = { false }
@@ -372,7 +372,7 @@ public final class BrightnessController: PendingWireDraining {
   /// every transition start (`beginHDRTransition`).
   @ObservationIgnored private var hdrTransitionGeneration: UInt64 = 0
   /// Init-time HDR cache refresh; tests await it before priming so two
-  /// refreshes can't interleave and double-run the C1 clearing.
+  /// refreshes can't interleave and double-run the restore-latch clearing.
   @ObservationIgnored private(set) var initialHDRRefresh: Task<Void, Never>?
   /// Test seam: observes every hardware submit before the coalescer's own
   /// duplicate-skip.
@@ -493,7 +493,7 @@ public final class BrightnessController: PendingWireDraining {
     guard !tuning.unavailableDDC else { return }
     // Fork parity: reads use only the FIRST remap code.
     //
-    // Three named outcomes (B3), so "the panel never replied" and "the panel replied
+    // Three named outcomes, so "the panel never replied" and "the panel replied
     // with zeros" do not collapse into the same silence. Only the second is the
     // MAG 341C's write-only signature, and the diagnostics pane has to say which
     // happened.
@@ -509,14 +509,14 @@ public final class BrightnessController: PendingWireDraining {
     }
     // `(0, 0)` and `max == 0` are FAILED reads, not a brightness of zero: the
     // MAG341C answers every read this way, and the fork's unvalidated read clobbers
-    // saved values to 0. Recorded rather than merely rejected (B3).
+    // saved values to 0. Recorded rather than merely rejected.
     guard result.max > 0 else {
       readEvidence = .allZeros
       return
     }
     readEvidence = .answered
     maxDDCValue = result.max
-    // B5: from here on `maxDDCValue` is the panel's own answer, not the 100
+    // From here on `maxDDCValue` is the panel's own answer, not the 100
     // default. Set only on the answered arm — every other exit leaves the
     // assumption standing, and says so.
     didReadMaxDDC = true
@@ -582,7 +582,7 @@ public final class BrightnessController: PendingWireDraining {
        !prefs.disableCombinedBrightness {
       value = DimmingMath.stepCombined(current: brightness, isUp: isUp, isFine: isFine)
     } else {
-      // D3: one shared 16-chiclet step for brightness/volume/contrast
+      // One shared 16-chiclet step for brightness/volume/contrast
       // (DimmingMath.stepValue). Fine is flat ±0.01, which is fork PARITY for plain
       // DDC externals (its calcNewValue path). It diverges from the fork only on the
       // native/forceSoftware paths, where the fork grid-snaps fine at 1/64 (0.0156 vs
@@ -598,8 +598,8 @@ public final class BrightnessController: PendingWireDraining {
   /// The four-way fork contract, decided synchronously from cached state:
   /// `cachedHDRActive` is never awaited on the drag path.
   ///
-  /// The BRANCH lives in `BrightnessPathPolicy` and this switches over its answer
-  /// (B1), which is what makes the diagnostics pane unable to drift from the engine:
+  /// The BRANCH lives in `BrightnessPathPolicy` and this switches over its answer,
+  /// which is what makes the diagnostics pane unable to drift from the engine:
   /// there is one table, and the engine is what runs it. The order the fork's
   /// contract depends on is preserved inside the policy; a `switch` here is order-free
   /// by construction.
@@ -720,7 +720,7 @@ public final class BrightnessController: PendingWireDraining {
 
   private func brightnessApplier(tuning: CommandTuning) -> any BrightnessApplying {
     #if DEBUG
-      // Nothing on the rig can make a live display's wire fail on demand (WD6).
+      // Nothing on the rig can make a live display's wire fail on demand.
       // Wraps the real applier rather than the writer, so only BRIGHTNESS fails
       // and a rig leg can tell a dead command from a dead cable.
       if DebugDDCFailure.isFailing(persistenceKey: boundPanelIdentity) {
@@ -779,10 +779,10 @@ public final class BrightnessController: PendingWireDraining {
     }
   }
 
-  /// The ONE door for "this display's wire changed its verdict" (WD4).
+  /// The ONE door for "this display's wire changed its verdict".
   ///
   /// A transition changes which legs carry the value, so it is a
-  /// dimming-affecting change under D28 and re-evaluates through
+  /// dimming-affecting change and re-evaluates through
   /// `reapplyAfterPrefChange`. A bare `handleReconfigure` or a same-value
   /// `setBrightness` would leave the display at its DDC floor with a scaled
   /// table over it until something replugged it.
@@ -799,7 +799,7 @@ public final class BrightnessController: PendingWireDraining {
     reapplyAfterPrefChange()
   }
 
-  /// WD3's reset, from every route that means the wire deserves a fresh
+  /// The wire-health reset, from every route that means the wire deserves a fresh
   /// hearing. A successful apply is the fourth route and needs no call here:
   /// the health clears itself on the outcome.
   private func resetWireHealth() {
@@ -809,7 +809,7 @@ public final class BrightnessController: PendingWireDraining {
 
   /// The app's wake handler calls this: the engine has no AppKit to observe
   /// `didWakeNotification` with, and a link rebuilt while the Mac slept has
-  /// told us nothing yet (WD3).
+  /// told us nothing yet.
   public func noteWake() {
     resetWireHealth()
   }
@@ -837,14 +837,14 @@ public final class BrightnessController: PendingWireDraining {
   /// re-engaged slot would scale a new display's table against a destroyed one's.
   private var lastGammaCompanionID: CGDirectDisplayID?
 
-  /// Every gamma write this controller makes, and the ONE place SS15's double
+  /// Every gamma write this controller makes, and the ONE place the synthesis double
   /// write is decided.
   ///
   /// While a synthesis set is engaged the panel and the virtual display holding its
   /// framebuffer are two display IDs with two transfer tables. Measured: the slave's
   /// table stores and reads back changed, and whether it reaches the glass is not
   /// decidable from software, because scanout comes from the master's framebuffer. So
-  /// both are written, which is what SS15 asks for.
+  /// both are written, which is what the synthesis pairing asks for.
   ///
   /// **This is not a free double write.** Zero, one or both tables may reach the
   /// glass, and software cannot tell which. Two LUTs in one scanout chain COMPOUND:
@@ -852,7 +852,7 @@ public final class BrightnessController: PendingWireDraining {
   /// pass checks for doubled dimming as much as for missing dimming, and it decides
   /// the final single routing.
   ///
-  /// Restricted to a SYNTHESIS set (SS1's pairing, never the mirror flags): in a
+  /// Restricted to a SYNTHESIS set (the synthesis pairing, never the mirror flags): in a
   /// mirror set the user built, the master is somebody else's desktop, and scaling its
   /// table would dim a display nobody asked about.
   ///
@@ -863,7 +863,7 @@ public final class BrightnessController: PendingWireDraining {
   /// Only the PANEL's write decides the return value. The companion can refuse for
   /// reasons that say nothing about the dimming, and letting that answer `landed`
   /// would clear the dedupe memo and re-attempt on every drag event: the live-lock
-  /// DT17's reporting rule exists to avoid.
+  /// the dedupe-memo rule exists to avoid.
   @discardableResult
   private func writeGammaScale(
     _ scale: Double, using gamma: any GammaApplying, enforcerOn drawable: CGDirectDisplayID
@@ -881,7 +881,7 @@ public final class BrightnessController: PendingWireDraining {
   ///
   /// The interference-accept path abandons gamma for the shade for good and has to
   /// restore what it scaled. It cannot write the island directly: under an engaged
-  /// synthesis pairing the dim wrote TWO tables (SS15), and a companion left scaled is
+  /// synthesis pairing the dim wrote TWO tables, and a companion left scaled is
   /// a virtual display holding a dark framebuffer no other door hands back. Public
   /// because the accept hook lives in the app target.
   ///
@@ -897,7 +897,7 @@ public final class BrightnessController: PendingWireDraining {
   /// the transform applies before any gamma or shade write. Deduped on the
   /// last-applied sw value.
   ///
-  /// DT17: the dedupe memo is written ONLY when the backend says the write landed.
+  /// The dedupe-memo rule: the dedupe memo is written ONLY when the backend says the write landed.
   /// Set before asking the backend, a shade that could not be created (a mirror slave
   /// has no `NSScreen`) dimmed nothing and then deduped every identical retry away
   /// forever, while the engine reported the value as applied.
@@ -915,7 +915,7 @@ public final class BrightnessController: PendingWireDraining {
     } else if let gamma = backends.gamma {
       preGammaApplyHook?()
       // The WRITE target stays the RAW panel ID; only the enforcer resolves, and
-      // an engaged synthesis set adds a second write (SS15, `writeGammaScale`).
+      // an engaged synthesis set adds a second write (`writeGammaScale`).
       landed = writeGammaScale(transformed, using: gamma, enforcerOn: drawable)
     } else {
       landed = true
@@ -932,7 +932,7 @@ public final class BrightnessController: PendingWireDraining {
     }
   }
 
-  /// C1 (MUST-HAVE): runs on EVERY transition into the native path,
+  /// The restore-latch clearing (MUST-HAVE): runs on EVERY transition into the native path,
   /// `setHDRMode(.alwaysOn)` and an externally-toggled HDR discovered by
   /// `noteHDRStateMayHaveChanged` alike. Without it the screen stays dimmed by a
   /// gamma table HDR ignores (gamma is broken under HDR) and the software dedupe
@@ -993,7 +993,8 @@ public final class BrightnessController: PendingWireDraining {
     // constitutively native already, and a call here would persist a meaningless mode
     // under the builtIn prefs key.
     guard role == .external else { return }
-    // SS9's missing half. HDR takes the data cable away, and a synthesized size is a
+    // The missing half of the synthesis-engage refusal. HDR takes the data cable
+    // away, and a synthesized size is a
     // mirror set standing on that same display, so engaging one over the other leaves
     // a combination nothing in the app has measured: the panel in HDR as a mirror
     // slave with the pairing still up.
@@ -1026,7 +1027,7 @@ public final class BrightnessController: PendingWireDraining {
     // switched off in System Settings under a stale `.alwaysOn` the button offers
     // "HDR On", and a mode-only guard would leave that click dead.
     //
-    // NOT preceded by a refresh, though the cache can be stale (R3). That was tried:
+    // NOT preceded by a refresh, though the cache can be stale. That was tried:
     // an await here is a suspension point BEFORE `beginHDRTransition` takes the
     // supersession token, and it broke the overlapping-transition guarantees. The
     // engage arm's own post-refresh re-check remains the answer to a stale cache.
@@ -1040,7 +1041,7 @@ public final class BrightnessController: PendingWireDraining {
         // HDR is already live (externally toggled while the mode was `.off`): no
         // setHDR and no settle window, since the state change already happened and a
         // 2 s window would gate the poller off for nothing. The generation bump at
-        // door entry (R3) supersedes any parked stale continuation; deliberately NOT
+        // door entry supersedes any parked stale continuation; deliberately NOT
         // `beginHDRTransition()`, because there is no re-mode and `settleInProgress`
         // stays untouched.
         clearSoftwareLeg()
@@ -1052,13 +1053,13 @@ public final class BrightnessController: PendingWireDraining {
           assertNativeEntryBrightness()
           return
         }
-        // Stale cache (R3): HDR was externally disabled between the panel's
+        // Stale cache: HDR was externally disabled between the panel's
         // last refresh and this call. Fall through to the normal engage arm
         // below — committing `.alwaysOn` without engaging (and with no
         // rollback) would persist a lying mode. clearSoftwareLeg re-runs
         // there harmlessly.
       }
-      // Entering the native path: C1 clearing, then engage HDR and hold the
+      // Entering the native path: restore-latch clearing, then engage HDR and hold the
       // poller off until the settle window ends.
       clearSoftwareLeg()
       beginHDRTransition()
@@ -1094,7 +1095,7 @@ public final class BrightnessController: PendingWireDraining {
         // Engage failed: the mode was committed optimistically above, so roll BOTH
         // the published mirror and the pref back, or a display that cannot engage HDR
         // persists a lying `.alwaysOn` across launches and the badge and menu
-        // misreport permanently. The C1 clearing already ran, so re-apply the current
+        // misreport permanently. The restore-latch clearing already ran, so re-apply the current
         // value through the normal path once the caches settle; without it the screen
         // is stranded un-dimmed under a low slider.
         //
@@ -1271,7 +1272,7 @@ public final class BrightnessController: PendingWireDraining {
   /// the cached mirror, which is right for a request a person made about a policy and
   /// wrong here. The mirror lags a System Settings toggle until the reconfigure lands,
   /// and in that window every input the mode door consults says "already off" while
-  /// the panel is in HDR: the request evaporates, the reset's own D29 unmute goes into
+  /// the panel is in HDR: the request evaporates, the reset's own mute-strand unmute goes into
   /// a register the monitor still has locked, and a write-only panel ACKs the loss. So
   /// the physical state is measured here, past the backend's cache.
   ///
@@ -1367,7 +1368,7 @@ public final class BrightnessController: PendingWireDraining {
   /// Puts back HDR that was live before a reset and that Candela did not turn on,
   /// recording no mode for it.
   ///
-  /// The reset paths drop HDR first so the DDC register is unlocked for the D29 unmute
+  /// The reset paths drop HDR first so the DDC register is unlocked for the mute-strand unmute
   /// below them. Whether the display stays out of HDR afterwards is the negotiable
   /// part, and the ruling is that it does not: a reset clears **Candela's** settings,
   /// and HDR the user engaged in System Settings was never one of them.
@@ -1377,7 +1378,7 @@ public final class BrightnessController: PendingWireDraining {
   /// `.off` under live HDR is the honest record, and the brightness path already
   /// handles it (`usesNative` routes native under externally-engaged HDR).
   ///
-  /// Otherwise the engage arm's machinery exactly: C1 clearing, the settle window with
+  /// Otherwise the engage arm's machinery exactly: restore-latch clearing, the settle window with
   /// the poller gated off, and the measured check. No rollback, because there is no
   /// mode to roll back to; a restore that does not take leaves the display where the
   /// disengage left it and says so.
@@ -1387,7 +1388,7 @@ public final class BrightnessController: PendingWireDraining {
   /// coalescer that drains on its own task, so the reset's unmute can still be in
   /// flight when this is called. Measured 2026-08-11: the queued writes reached the
   /// panel after the re-engage, the last more than a second later, and were swallowed
-  /// while the app recorded an unmuted display, which is the strand D29 exists to
+  /// while the app recorded an unmuted display, which is the strand the mute-strand rule exists to
   /// prevent. The queues come from the controller's wire rather than from the caller,
   /// because which queues share this register is a fact about the display, and a
   /// caller that has to remember it can forget.
@@ -1427,7 +1428,7 @@ public final class BrightnessController: PendingWireDraining {
       pathLog.error(
         "restoreExternalHDR did not take: display=\(self.displayID) was in HDR before the reset and is not now"
       )
-      // The C1 clearing above took the software leg down for an HDR entry that
+      // The restore-latch clearing above took the software leg down for an HDR entry that
       // did not happen, so the screen would otherwise sit un-dimmed under a low
       // slider. Same recovery as the engage-failure arm.
       applyPaths()
@@ -1492,7 +1493,7 @@ public final class BrightnessController: PendingWireDraining {
 
   /// Re-evaluates the cached HDR state; the topology loop calls it for every
   /// surviving display after `HDRToggling.displaysReconfigured()`. Detecting an
-  /// externally-toggled HDR entry runs the C1 clearing.
+  /// externally-toggled HDR entry runs the restore-latch clearing.
   ///
   /// The EXIT direction has no work here and is not missing: an HDR window closing is
   /// handled inside `refreshHDRCaches`, where the observation is made. That covers HDR
@@ -1517,7 +1518,7 @@ public final class BrightnessController: PendingWireDraining {
 
   /// Reconfigure re-apply: the WindowServer rebuilt display state, so re-capture the
   /// gamma baseline, re-pin shade frames, and re-run the software leg for the current
-  /// value. Skipped under the native path per C1. Ordering contract: the app-side loop
+  /// value. Skipped under the native path per the restore-latch clearing. Ordering contract: the app-side loop
   /// calls `resetAllGamma()` once per event BEFORE this, so the table is OS-owned.
   public func handleReconfigure(recapture: Bool = true) async {
     // recapture: false is the interference-accept path: at accept time the
@@ -1525,7 +1526,7 @@ public final class BrightnessController: PendingWireDraining {
     // curve in. The next real reconfiguration recaptures normally.
     if recapture {
       backends.gamma?.recaptureDefaultTable(on: displayID)
-      // SS15's companion leg makes the island hold a baseline for a display this
+      // The synthesis companion leg makes the island hold a baseline for a display this
       // controller does not own, and a synthesis disengage destroys that display
       // while CoreGraphics is free to reissue its ID. Dropping the baseline here
       // is what stops a re-engaged slot from scaling a new display's table
@@ -1537,12 +1538,13 @@ public final class BrightnessController: PendingWireDraining {
     }
     backends.shade?.repinFrames()
     lastAppliedSw = nil
-    // WD3: the WindowServer rebuilt this display's state, which is exactly the
+    // The wire-health reset: the WindowServer rebuilt this display's state, which is exactly the
     // moment a wire that stopped answering deserves to be asked again.
     let wasUnresponsive = isWireUnresponsive
     resetWireHealth()
     if wasUnresponsive, !usesNative {
-      // The transition already ran the full D28 re-evaluation, which covers the
+      // The transition already ran the full reapply-after-pref-change re-evaluation,
+      // which covers the
       // software leg below AND the register hand-back it cannot do. Re-running
       // the tail would write the same leg a second time, undimmed.
       return
@@ -1613,7 +1615,7 @@ public final class BrightnessController: PendingWireDraining {
     // never sets the flag and so never produces an edge.
     let wasObservedActive = observedHDRActive
     observedHDRActive = cachedHDRActive
-    // WD3's HDR route, on BOTH edges and in the one place that sees every one:
+    // The wire-health reset's HDR route, on BOTH edges and in the one place that sees every one:
     // most routes through an HDR window (System Settings, the display's own
     // controls) make no call of ours. Entering counts too, because a write
     // submitted just before the engage is stamped countable and then fails on
@@ -1754,10 +1756,10 @@ public final class BrightnessController: PendingWireDraining {
   ///
   /// WHAT RESETS ON A PANEL CHANGE:
   ///
-  /// - `didReadMaxDDC` (B5), or a display that replugs into a read-failing state keeps
+  /// - `didReadMaxDDC`, or a display that replugs into a read-failing state keeps
   ///   reporting "this maximum was read from the panel" on the strength of a read from
   ///   a previous binding.
-  /// - `readEvidence` (B3) back to `.notAttempted`, the floor: we have asked THIS
+  /// - `readEvidence` back to `.notAttempted`, the floor: we have asked THIS
   ///   panel nothing. Not a weakening of worst-wins, which folds within a pass and
   ///   across sibling controllers, neither of which survives a swapped monitor.
   /// - `maxDDCValue` back to `assumedMaxDDC`. Resetting the provenance flag and
@@ -1823,7 +1825,7 @@ public final class BrightnessController: PendingWireDraining {
   /// instead of sleeping a guessed length of time.
   private var isWireOpen: Bool { isEpochCurrent(epochProvider()) }
 
-  // MARK: - Startup/wake/quit restore (D5)
+  // MARK: - Startup/wake/quit restore
 
   /// Wake-restore prerequisite: without the memo reset, repeat passes are
   /// duplicate-skipped and never hit the wire.
@@ -1831,8 +1833,8 @@ public final class BrightnessController: PendingWireDraining {
     coalescer.resetDuplicateState()
   }
 
-  /// D5's "stored (= ever-touched)" gate for the restore pass's brightness leg (fork
-  /// isTouched, R4): true once a session ever published a value for this display.
+  /// The "stored (= ever-touched)" gate for the restore pass's brightness leg (fork
+  /// isTouched): true once a session ever published a value for this display.
   /// Fresh displays publish an ASSUMED default (1.0) over an empty store, and a
   /// restore pass must never write that. `AppModel.performRestorePass` checks this
   /// instead of reaching into the store. (A successful `.read` also persists, marking
@@ -1972,21 +1974,21 @@ public final class BrightnessController: PendingWireDraining {
   /// brightness leg). Routed through `applyPaths`, not a bare submit, so the echo slot
   /// stays honest for the poller; the software leg re-apply dedupes to a no-op.
   ///
-  /// Deliberately NOT gated on `hasStoredValue`: the R4 gate lives in
+  /// Deliberately NOT gated on `hasStoredValue`: the stored-value gate lives in
   /// `AppModel.performRestorePass`, which must skip this call for a display whose
   /// published value is still the assumed 1.0 default over an empty store.
   public func reassertHardware() {
     applyPaths()
   }
 
-  // MARK: - Settings re-apply (D28)
+  // MARK: - Settings re-apply
 
   /// Which software backend the CURRENT prefs select, if any. Pure DDC and the
   /// native path have no software leg at all, and that `.none` is exactly what
   /// `handleReconfigure`'s early `return` failed to act on.
   private enum SoftwareBackendChoice { case none, gamma, shade }
 
-  /// A projection of the same table (B1), so the rule is not copied a third time.
+  /// A projection of the same table, so the rule is not copied a third time.
   ///
   /// `.softwareOnly` must answer with its backend exactly as `.software` and
   /// `.combined` do: folding it into `.none` would strand a scaled gamma table
@@ -2021,7 +2023,7 @@ public final class BrightnessController: PendingWireDraining {
     }
   }
 
-  /// The ONE door for "a pref that affects dimming just changed" (D28).
+  /// The ONE door for "a pref that affects dimming just changed".
   ///
   /// `handleReconfigure(recapture:)` is NOT that door and must not be used for it: it
   /// re-runs the software leg only, and returns before applying anything in pure-DDC
@@ -2041,13 +2043,13 @@ public final class BrightnessController: PendingWireDraining {
   ///    combined-mode floor.
   ///
   /// The published `brightness` is untouched: a mode switch is a re-conversion of the
-  /// same perceptual value, never a reset to 100% (D4).
+  /// same perceptual value, never a reset to 100%.
   ///
   /// Deliberately does NOT recapture the gamma baseline: step 1 hands the table back
   /// at scale 1.0 whenever gamma is being abandoned, and a settings edit is not a
   /// WindowServer rebuild.
   ///
-  /// STILL SYNCHRONOUS, which D28 requires, but the software side may finish later
+  /// STILL SYNCHRONOUS, but the software side may finish later
   /// than the call returns.
   ///
   /// THE ORDERING, one rule and not two. The register write drains off-actor and takes
@@ -2144,7 +2146,7 @@ public final class BrightnessController: PendingWireDraining {
   ///
   /// - raise first and the intermediate state is a full-range register under the old,
   ///   brighter gamma table: at 90% that is raw 100 under gamma 1.0, a flash to full
-  ///   brightness for as long as the two writes are apart, which D4 forbids by name;
+  ///   brightness for as long as the two writes are apart;
   /// - raise second and the intermediate state is the old register under the new,
   ///   dimmer table, never brighter than either endpoint.
   ///
@@ -2161,7 +2163,8 @@ public final class BrightnessController: PendingWireDraining {
   /// Gated on `unavailableDDC` exactly as `restoreFullRangeDDC` is: a command the
   /// display has declared it does not support, or the user has switched off, is not
   /// one to write on the way out. That leaves the tuning grid's own Off switch able to
-  /// strand a display the same way this fixes, which is the shape of D29 rule 1 (undo
+  /// strand a display the same way this fixes, which is the shape of the
+  /// mute-strand rule's first part (undo
   /// the disabling effect BEFORE persisting the value that disables it) and belongs in
   /// that control, not here.
   private func handBackDDCLegIfAbandoned() {
@@ -2203,7 +2206,7 @@ public final class BrightnessController: PendingWireDraining {
     coalescer.duplicateResetCount()
   }
 
-  /// The last brightness target that actually reached this display's hardware (B4),
+  /// The last brightness target that actually reached this display's hardware,
   /// or nil if nothing has: nothing submitted, everything failed, or a reset
   /// invalidated what had landed.
   ///
@@ -2214,7 +2217,7 @@ public final class BrightnessController: PendingWireDraining {
     coalescer.lastAppliedTarget()
   }
 
-  /// Whether the most recent apply ATTEMPT on this display failed (B4). Without it
+  /// Whether the most recent apply ATTEMPT on this display failed. Without it
   /// "this monitor is ignoring us" is observable to the code and unsayable to the
   /// user: the applier's `Bool` decided whether to advance the duplicate memo and was
   /// then dropped.
@@ -2252,12 +2255,12 @@ actor BrightnessWriteCoalescer {
     let epoch: UInt64
     let generation: UInt64
     /// Whether live HDR was engaged, or its settle window open, when this write was
-    /// submitted (WD1). Such a failure is not counted against the wire: the register
+    /// submitted. Such a failure is not counted against the wire: the register
     /// is locked there, so it is expected and temporary.
     ///
     /// Stamped at SUBMIT because HDR state is main-actor cached and the drain runs off
     /// the actor. That is one wire transaction early, but every HDR transition resets
-    /// the health (WD3), so the gap cannot leave a failure counted.
+    /// the health, so the gap cannot leave a failure counted.
     var hdrExcluded = false
   }
 
@@ -2296,7 +2299,7 @@ actor BrightnessWriteCoalescer {
   /// drain captures `resets` before applying and only records the outcome if no reset
   /// intervened.
   ///
-  /// `lastFailed` rides in the same slot (B4): the LATEST attempt's outcome, not the
+  /// `lastFailed` rides in the same slot: the LATEST attempt's outcome, not the
   /// worst one, since a display that failed once and has worked ever since is working
   /// and a latched flag would send someone hunting a cable that is fine. It is a
   /// second field of the fact this lock already guards, written in the same critical
@@ -2345,18 +2348,18 @@ actor BrightnessWriteCoalescer {
     // accuse a freshly plugged panel of a fault the previous one had.
     // The health is deliberately NOT cleared here: this runs on every re-apply
     // and every dim step, where the hardware state is unknown but the WIRE's
-    // record is untouched. Its own routes are WD3's `resetWireHealth`.
+    // record is untouched. Its own routes are `resetWireHealth`.
     lastApplied.withLock { $0 = (nil, $0.resets + 1, false, $0.wireHealth) }
   }
 
-  /// WD3's reset: the next writes decide again. Nonisolated over the lock the
+  /// The wire-health reset: the next writes decide again. Nonisolated over the lock the
   /// health lives in, so the main-actor doors that own the reversibility routes
   /// can call it synchronously.
   nonisolated func resetWireHealth() {
     lastApplied.withLock { $0.wireHealth.reset() }
   }
 
-  /// The wire's current verdict (WD1). Nonisolated over the lock for the reason
+  /// The wire's current verdict. Nonisolated over the lock for the reason
   /// `lastApplyFailed()` is: path selection reads it on the drag path and must
   /// not hop onto the drain's actor to do it.
   nonisolated func wireHealth() -> DDCWireHealth {
@@ -2369,7 +2372,7 @@ actor BrightnessWriteCoalescer {
     lastApplied.withLock { $0.resets }
   }
 
-  /// The last target that actually reached hardware (B4). `nonisolated` over
+  /// The last target that actually reached hardware. `nonisolated` over
   /// the lock this memo already lives in — `duplicateResetCount()` is the
   /// precedent, not new machinery, and reading it must not require an
   /// executor hop into the drain's actor for what is a settings-pane refresh.
@@ -2381,7 +2384,7 @@ actor BrightnessWriteCoalescer {
     lastApplied.withLock { $0.target }
   }
 
-  /// Whether the most recent apply ATTEMPT failed (B4) — see `lastApplied`.
+  /// Whether the most recent apply ATTEMPT failed — see `lastApplied`.
   /// Distinct from `lastAppliedTarget() == nil`, which cannot separate "the
   /// write failed" from "we never wrote".
   nonisolated func lastApplyFailed() -> Bool {
@@ -2456,7 +2459,7 @@ actor BrightnessWriteCoalescer {
           // apply means the value landed on hardware we no longer trust, which the
           // `resets` captured in `memo` above detects.
           //
-          // The same guard covers the failure flag (B4), not just the target: a reset
+          // The same guard covers the failure flag, not just the target: a reset
           // that raced this apply means the failure was against the old wire, and
           // recording it afterwards would make a freshly rebound panel report a fault
           // it never had. Both fields move together, inside one critical section, or

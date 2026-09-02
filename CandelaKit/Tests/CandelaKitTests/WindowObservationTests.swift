@@ -94,7 +94,7 @@ struct WindowObservationTests {
 
   /// A video player holds a fixed rect while every pixel under it changes, so
   /// geometry alone WILL call it stationary. Correct for this type, and why
-  /// OC18 makes it a prior rather than a verdict. Pinned so nobody "fixes" it.
+  /// this makes it a prior rather than a verdict. Pinned so nobody "fixes" it.
   @Test func geometryCallsAStationaryVideoPlayerStationary() {
     var observer = WindowObserver()
     let start = Date(timeIntervalSince1970: 0)

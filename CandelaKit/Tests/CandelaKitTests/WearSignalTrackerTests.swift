@@ -3,7 +3,7 @@ import Testing
 
 @testable import CandelaKit
 
-@Suite("Wear signal tracking (OC20)")
+@Suite("Wear signal tracking")
 struct WearSignalTrackerTests {
 
   private func tracker(_ defaults: UserDefaults, _ key: String = "panel-a") -> WearSignalTracker {
@@ -27,7 +27,7 @@ struct WearSignalTrackerTests {
 
   /// Same seconds, different levels: the state total must not depend on which
   /// bucket they landed in, or the state axis stops being the model-free answer
-  /// OC17's gate needs.
+  /// the wear-signal gate needs.
   @Test func aStateTotalIsIndependentOfHowItsTimeSplitsAcrossBuckets() {
     let defaults = InMemoryDefaults()
     let t = tracker(defaults)
@@ -77,7 +77,7 @@ struct WearSignalTrackerTests {
     #expect(t.secondsByBucket()[8] == 150)
   }
 
-  // MARK: - OC17's gate
+  // MARK: - The wear-signal gate
 
   @Test func theGateIsTheShareOfTimeInAWeightableDimState() throws {
     let defaults = InMemoryDefaults()
@@ -91,7 +91,7 @@ struct WearSignalTrackerTests {
     #expect(abs(fraction - 0.3) < 1e-9)
   }
 
-  /// Blackout is excluded from the numerator: OC17's mask does not apply to it,
+  /// Blackout is excluded from the numerator: the wear-signal gate's mask does not apply to it,
   /// so counting it would overstate the case for the feature.
   @Test func blackoutIsNotWeightable() throws {
     let defaults = InMemoryDefaults()

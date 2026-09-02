@@ -25,10 +25,10 @@ import SwiftUI
 /// user just started. `MirrorConfirmationWindow` owns the question because it
 /// outlives this menu by construction.
 ///
-/// **Nothing here is persisted (DT20).** No `PrefName` case, no `PrefPropagation`
+/// **Nothing here is persisted.** No `PrefName` case, no `PrefPropagation`
 /// row, no `DisplayPrefs` write in this file.
 ///
-/// **D29 conditional.** Nothing here disables, greys or hides a volume, mute or
+/// **Mute-strand conditional.** Nothing here disables, greys or hides a volume, mute or
 /// DDC control on the basis of mirror state. Whether an active mirror suppresses
 /// a slave's DDC is UNVERIFIED.
 ///
@@ -53,12 +53,12 @@ struct PanelMirroringSection: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   /// The coordinator's sample, which since synthesis carries the engine's
-  /// pairing (SS1). Every predicate below is an SS7 carve-out site and answers
+  /// pairing. Every predicate below is a synthesis carve-out site and answers
   /// "ordinary mirror set" for everything on an un-stamped one.
   private var topology: MirrorTopology { coordinator.topology }
   private var isExpanded: Bool { expanded == PanelDisclosureID(displayID, .mirroring) }
 
-  /// True when this panel is showing a synthesized size (SS7). The ONE predicate
+  /// True when this panel is showing a synthesized size. The ONE predicate
   /// behind this file's carve-outs; it lives in `MirroringPredicates`, shared
   /// with the settings section and the display hero.
   private var isSynthesized: Bool {
@@ -87,8 +87,8 @@ struct PanelMirroringSection: View {
   /// The first is the panel's standing rule: one usable option is not a choice,
   /// so the control is ABSENT rather than present-and-dead. The popover has no
   /// room to say why a dead control is dead, and a grey row with no sentence
-  /// attached is what R8 forbids. Settings shows it in every state, disabled with
-  /// words, because there is room there.
+  /// attached is what that rule forbids. Settings shows it in every state,
+  /// disabled with words, because there is room there.
   ///
   /// The second gives the control to any display that is IN a set, even where the
   /// first clause would drop it. Without it, a rig of one unlocked display plus
@@ -179,7 +179,7 @@ struct PanelMirroringSection: View {
   @ViewBuilder private var actions: some View {
     if isLocked {
       actionRow(MirroringCopy.stopMirroring, enabled: false) {}
-      // Never a bare grey (R8 generalised: no state is carried by shape alone).
+      // Never a bare grey (the rule generalised: no state is carried by shape alone).
       PanelCaption(MirroringCopy.cannotBeUnmirrored, style: .secondary)
     } else if isInSet {
       actionRow(MirroringCopy.stopMirroring) {

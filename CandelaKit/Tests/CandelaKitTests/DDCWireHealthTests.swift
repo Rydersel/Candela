@@ -1,7 +1,7 @@
 import Testing
 @testable import CandelaKit
 
-@Suite("DDC wire health (WD1)")
+@Suite("DDC wire health")
 struct DDCWireHealthTests {
   @Test func aFreshWireIsTrusted() {
     let health = DDCWireHealth()

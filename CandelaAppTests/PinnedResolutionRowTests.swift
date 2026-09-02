@@ -1,7 +1,7 @@
 import CandelaKit
 import Testing
 
-// The second line under "Remember this resolution" (AT4 layer 1).
+// The second line under "Remember this resolution".
 //
 // Three states, and the middle one is the reason this is a named function
 // rather than an `if let` in `body`: "remembering is on and nothing is pinned"

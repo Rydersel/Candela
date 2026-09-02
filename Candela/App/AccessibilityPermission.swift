@@ -8,7 +8,7 @@ import Observation
 
 /// Tracks the Accessibility (TCC) grant the media-key event tap needs.
 ///
-/// D9: observed for the app's whole lifetime, reporting transitions in BOTH
+/// Observed for the app's whole lifetime, reporting transitions in BOTH
 /// directions. Waiting for the grant once is not enough: a re-sign drops it
 /// silently and the user can revoke it in System Settings. Either way the media
 /// keys die and nothing in the UI would say so.
@@ -95,8 +95,8 @@ final class AccessibilityPermission {
     RunLoop.main.add(timer, forMode: .common)
   }
 
-  /// Never invalidates the timer on success; latching is the defect D9 exists to
-  /// prevent.
+  /// Never invalidates the timer on success; latching is the defect this
+  /// tracking exists to prevent.
   private func recheck() {
     applyGranted(AXIsProcessTrustedWithOptions(nil))
   }

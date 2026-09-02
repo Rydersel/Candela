@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-@Suite("Prefs schema versioning (D13)")
+@Suite("Prefs schema versioning")
 struct PrefsSchemaTests {
   @Test func emptyDomainHasNoVersion() {
     #expect(PrefsSchema.storedVersion(in: InMemoryDefaults()) == nil)
@@ -17,7 +17,7 @@ struct PrefsSchemaTests {
 
   @Test func downgradeNeverWipes() {
     // A future version is left alone and no other key is touched; the app runs
-    // on its enum unknown-value fallbacks (D13). The fork wiped the whole domain.
+    // on its enum unknown-value fallbacks. The fork wiped the whole domain.
     let d = InMemoryDefaults()
     d.set(99, forKey: "prefsSchemaVersion")
     d.set(true, forKey: "showContrast")
@@ -60,7 +60,7 @@ struct PrefsSchemaTests {
   }
 
   @Test func anAbsentVersionIsLeftAbsent() {
-    // Absence of the key signals first run (D14). Onboarding completion records
+    // Absence of the key signals first run. Onboarding completion records
     // it, not this, so an interrupted first run re-onboards.
     let d = InMemoryDefaults()
     PrefsSchema.migrateIfNeeded(in: d)

@@ -348,7 +348,7 @@ struct DisplayPrefsTests {
     }
   }
 
-  // MARK: - M5 settings schema
+  // MARK: - Settings schema
 
   @Test func m5PerDisplayKeysComposeAndDefault() {
     let d = InMemoryDefaults()
@@ -462,7 +462,7 @@ struct DisplayPrefsTests {
 
   @Test func unknownStoredRawValuesFallBackRatherThanTrap() {
     // Raw 0 is a valid case for most of these enums, so the default-value assertions
-    // above never reach the `?? fallback`. D13's downgrade story rests on it.
+    // above never reach the `?? fallback`. The downgrade story rests on it.
     let d = InMemoryDefaults()
     for key in ["menuIcon", "menuItemStyle", "keyboardBrightness",
                 "keyboardVolume", "multiKeyboardBrightness",
@@ -529,7 +529,7 @@ struct DisplayPrefsTests {
   @Test func positiveAccessorsInvertAtTheBindingLayerOnly() {
     let d = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: d, persistenceKey: "PK")
-    // D1: unset reads as the fork default (ON), stored key stays inverted.
+    // Unset reads as the fork default (ON), stored key stays inverted.
     #expect(prefs.combinedBrightness)
     #expect(prefs.interceptAlternateBrightnessKeys)
 
@@ -554,7 +554,7 @@ struct DisplayPrefsTests {
 
   @Test func m5RawValuesNeverDrift() {
     // Per case, not per multiset: `case show = 0, hide = 1, sliderOnly = 2` also
-    // satisfies `allCases.map(\.rawValue) == [0, 1, 2, 3]`, and under D22 the
+    // satisfies `allCases.map(\.rawValue) == [0, 1, 2, 3]`, and the
     // case-to-value binding is the shipped on-disk schema.
     #expect(MenuIcon.show.rawValue == 0)
     #expect(MenuIcon.sliderOnly.rawValue == 1)
@@ -580,7 +580,7 @@ struct DisplayPrefsTests {
   }
 
   @Test func safeModeGatesStartupTrafficWithoutTouchingStoredPrefs() {
-    // D11: session-only hardware gate. One flag passed at construction, never a
+    // Session-only hardware gate. One flag passed at construction, never a
     // global and never a UserDefaults lookup buried in the engine.
     let d = InMemoryDefaults()
     let normal = DisplayPrefs(defaults: d, persistenceKey: "app")
@@ -611,7 +611,7 @@ struct DisplayPrefsTests {
     #expect(safe.pollingTries == 0)
   }
 
-  // MARK: - First-sight (SO22)
+  // MARK: - First-sight
 
   @Test func anEmptyDomainHasNoStoredValue() {
     withSuite { defaults in
@@ -630,7 +630,7 @@ struct DisplayPrefsTests {
     }
   }
 
-  // MARK: - OLED care (W3a)
+  // MARK: - OLED care
 
   @Test func oledDefaultsAreTheRecommendedPreset() {
     withSuite { defaults in
@@ -651,7 +651,7 @@ struct DisplayPrefsTests {
     }
   }
 
-  // MARK: - OLED care (W3b-1)
+  // MARK: - OLED care
 
   @Test func oledTelemetryDefaultsOffAndWindowObservationDefaultsOn() {
     withSuite { defaults in
@@ -757,7 +757,7 @@ struct DisplayPrefsTests {
       defaults.set(3600.0, forKey: "oledPanelSeconds.pk")
       defaults.set(120.0, forKey: "oledStandbySeconds.pk")
       defaults.set(true, forKey: "oledStandbyNoteDismissed.pk")
-      // OC20's histogram is the same shape of thing: wear data about the glass,
+      // The wear-tracking histogram is the same shape of thing: wear data about the glass,
       // reset by the coordinator alongside the hours tracker, never by this.
       defaults.set([Double](repeating: 1, count: 60), forKey: "oledWearSeconds.pk")
       defaults.set(1, forKey: "oledWearSchema.pk")
@@ -813,7 +813,7 @@ struct DisplayPrefsTests {
     }
   }
 
-  // MARK: - Synthesized sizes (SS4)
+  // MARK: - Synthesized sizes
 
   @Test func synthesisIsOffWithNothingStoredUntilItIsAskedFor() {
     withSuite { defaults in

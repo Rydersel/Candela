@@ -249,7 +249,7 @@ final class Harness {
     // matching `configure` under the forward-scan rule.
     readNative: (@Sendable (CGDirectDisplayID) -> Float?)? = nil,
     // The other queues on the controller's wire, built from the SAME prefs the
-    // controller gets (D11: one prefs object per display), which is why this is
+    // controller gets (one prefs object per display), which is why this is
     // a closure and not a list: a real sibling has to exist before the
     // controller does, and it cannot be built before the harness has made the
     // prefs. Empty by default, so only the tests that are about the wire pay it.
@@ -285,7 +285,7 @@ final class Harness {
 
   /// Makes the HDR caches deterministic: awaits the init-time refresh first so
   /// it cannot race a second refresh (both seeing `wasNative == false` would
-  /// double-run the C1 clearing), then re-reads the fake's current state.
+  /// double-run the restore-latch clearing), then re-reads the fake's current state.
   func prime() async {
     await controller.initialHDRRefresh?.value
     await controller.noteHDRStateMayHaveChanged()
@@ -334,7 +334,7 @@ struct PathSelectionTests {
     #expect(h.native.targets().last == .native(0.75))
     #expect(h.native.targets().allSatisfy { if case .native = $0 { true } else { false } })
     #expect(await h.ddc.recordedWrites().isEmpty)
-    // The only gamma write is the C1 clearing when the cache flipped active.
+    // The only gamma write is the restore-latch clearing when the cache flipped active.
     #expect(h.gamma.scales == [1.0])
   }
 
@@ -410,7 +410,7 @@ struct PathSelectionTests {
     #expect(shadeHookFires == 0)
   }
 
-  // MARK: C1 — native-entry clearing (MUST-HAVE)
+  // MARK: Native-entry clearing (MUST-HAVE)
 
   @Test func enteringAlwaysOnClearsSoftwareLegAndInvalidatesMemo() async {
     let h = Harness(settle: .milliseconds(5))
@@ -418,7 +418,7 @@ struct PathSelectionTests {
     h.controller.setBrightness(0.25) // gamma dim active (0.575)
     #expect(h.gamma.scales.count == 1 && approx(h.gamma.scales[0], 0.575))
     await h.controller.setHDRMode(.alwaysOn)
-    // C1: shade removed, gamma restored to 1.0.
+    // The restore latch: shade removed, gamma restored to 1.0.
     #expect(h.shade.removed.contains(Harness.displayID))
     #expect(approx(h.gamma.scales.last ?? -1, 1.0))
     let scalesAfterEntry = h.gamma.scales.count
@@ -427,7 +427,7 @@ struct PathSelectionTests {
     #expect(h.submitted.last == .native(0.25))
     #expect(h.gamma.scales.count == scalesAfterEntry)
     // Memo was invalidated at entry: after leaving HDR the same sw value
-    // re-applies instead of being dedupe-skipped (the recovery C1 protects).
+    // re-applies instead of being dedupe-skipped (the recovery the restore latch protects).
     await h.controller.setHDRMode(.off)
     #expect(approx(h.gamma.scales.last ?? -1, 0.575))
     #expect(await h.hdr!.recordedSetCalls() == [true, false])
@@ -444,10 +444,10 @@ struct PathSelectionTests {
     #expect(h.shade.removed.contains(Harness.displayID))
   }
 
-  // MARK: SS9's missing half
+  // MARK: The mirror-HDR exclusion's missing half
 
   /// A synthesized size is a mirror set standing on this display, and HDR takes
-  /// the data cable away. SS9 refuses the engage in one direction; this is the
+  /// the data cable away. The mirror-HDR exclusion refuses the engage in one direction; this is the
   /// other, and without it the panel ends up in HDR as a mirror slave with the
   /// pairing still up.
   @Test func alwaysOnIsRefusedWhileASynthesizedSizeIsShowing() async {
@@ -632,7 +632,7 @@ struct PathSelectionTests {
   }
 
   /// A restore that does not take leaves the display where the disengage left
-  /// it. What must NOT happen is the software leg staying down: the C1 clearing
+  /// it. What must NOT happen is the software leg staying down: the restore-latch clearing
   /// runs for an HDR entry that then did not happen, so without the recovery the
   /// screen sits at full brightness under a low slider.
   @Test func aRestoreThatDoesNotTakeStillGetsTheSoftwareLegBack() async {
@@ -1372,7 +1372,7 @@ struct PathSelectionTests {
     let scalesBefore = h.gamma.scales.count
     await h.controller.handleReconfigure()
     #expect(h.gamma.recaptured == [Harness.displayID])
-    #expect(h.gamma.scales.count == scalesBefore) // no re-apply under native (C1)
+    #expect(h.gamma.scales.count == scalesBefore) // no re-apply under native (the restore latch)
   }
 
   // MARK: separateCombinedScale stepping
@@ -1408,7 +1408,7 @@ struct PathSelectionTests {
   }
 }
 
-// MARK: - Settings re-apply (D28)
+// MARK: - Settings re-apply
 
 @MainActor
 @Suite("Re-apply after a pref change")
@@ -1432,7 +1432,7 @@ struct ReapplyAfterPrefChangeTests {
     // gamma table goes back to the OS baseline.
     #expect(h.submitted == [.ddc(raw: 0), .ddc(raw: 40)])
     #expect(h.gamma.scales.count == 2 && approx(h.gamma.scales[1], 1.0))
-    #expect(h.controller.brightness == 0.4) // D4: the value is preserved, never slammed to 1.0
+    #expect(h.controller.brightness == 0.4) // the value is preserved, never slammed to 1.0
   }
 
   @Test func switchingSoftwareBackendTearsDownTheAbandonedOne() async {
@@ -1524,7 +1524,7 @@ struct ReapplyAfterPrefChangeTests {
     // `handBackDDCLegIfAbandoned` skips a command the display has declared
     // unsupported or the user has switched off, exactly as `restoreFullRangeDDC`
     // does, so the register stays at the combined floor. Undoing that belongs in
-    // the tuning grid's own Off switch (D29 rule 1's shape: undo the disabling
+    // the tuning grid's own Off switch (the unmute-before-persist shape: undo the disabling
     // effect before persisting the value that disables it), not in a write to a
     // command just declared unavailable.
     #expect(h.submitted == [.ddc(raw: 0)])
@@ -1603,7 +1603,7 @@ struct DDCLegHandBackTests {
     // Full-range register, and the software leg on the raw value: swTransform(0.4).
     #expect(h.submitted == [.ddc(raw: 0), .ddc(raw: 100)])
     #expect(h.gamma.scales.count == 2 && approx(h.gamma.scales[1], 0.49))
-    #expect(h.controller.brightness == 0.4) // D4: the value is preserved
+    #expect(h.controller.brightness == 0.4) // the value is preserved
     // ORDERING: the table was already at its new value before the register rose.
     #expect(wireAtGammaTime == [.ddc(raw: 0)])
   }
@@ -1795,7 +1795,7 @@ struct RegisterDropOrderingTests {
 
     #expect(h.gamma.scales.count == 3 && approx(h.gamma.scales[2], 0.7875))
     #expect(landedAtGammaTime == landedBefore + 1) // the drop was already on the wire
-    #expect(h.controller.brightness == 0.375) // D4: the value is preserved
+    #expect(h.controller.brightness == 0.375) // the value is preserved
   }
 
   /// The invariant the hold exists for, at both sides of the switching point,
@@ -2251,7 +2251,7 @@ struct HDRModeEngageFailureTests {
   /// The `.alwaysOn` arm commits the mode optimistically before engaging. On
   /// `engaged == false` it must roll `hdrMode`/`prefs.hdrMode` back and re-apply the
   /// current value through the normal path, or a display that cannot engage HDR is
-  /// stranded un-dimmed (the C1 clearing already ran) with a lying `.alwaysOn`
+  /// stranded un-dimmed (the restore-latch clearing already ran) with a lying `.alwaysOn`
   /// persisted across launches.
   @Test func alwaysOnEngageFailureRollsBackModeAndReappliesSoftwareLeg() async {
     let h = Harness(settle: .milliseconds(5))
@@ -2263,7 +2263,7 @@ struct HDRModeEngageFailureTests {
     // Mode and pref rolled back to the previous mode.
     #expect(h.controller.hdrMode == .off)
     #expect(h.prefs.hdrMode == .off)
-    // C1 clearing ran (1.0), then the rollback re-applied the current value's
+    // The restore-latch clearing ran (1.0), then the rollback re-applied the current value's
     // software leg (0.575 again) — the screen is not stranded un-dimmed.
     #expect(h.gamma.scales.count == 3)
     #expect(approx(h.gamma.scales[1], 1.0))

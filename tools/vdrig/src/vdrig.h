@@ -114,7 +114,7 @@ static const VDRigIdentity kVDRigSlots[3] = {
 // So this is the narrowest separation that gets two displays on screen at once
 // while leaving DisplayConfigIdentity ambiguous, which is the condition the
 // twin spike exists to test. If a future macOS refuses even this, the mode is
-// dead and AR11's refuse-to-guess fallback is the answer by default.
+// dead and the refuse-to-guess fallback is the answer by default.
 //
 // Names differ so the spike has ground truth about which display is which; the
 // measurement above proves the name is not doing the separating.

@@ -1,7 +1,7 @@
 import Foundation
 
-/// What the panel renders, and in what order (D7). Pure, so it stays testable with
-/// no app test target (D21): the view supplies the projections.
+/// What the panel renders, and in what order. Pure, so it stays testable with
+/// no app test target: the view supplies the projections.
 public enum DisplayOrdering {
   /// The user's chosen name when they set one, the hardware name otherwise.
   /// Whitespace-only counts as unset: a hand-cleared field must not render as a
@@ -11,10 +11,10 @@ public enum DisplayOrdering {
     return trimmed.isEmpty ? hardwareName : trimmed
   }
 
-  /// Hidden displays removed, the rest ordered ASCENDING by title (D7).
+  /// Hidden displays removed, the rest ordered ASCENDING by title.
   ///
   /// Filtering and ordering are one call on purpose: split apart, the sort can
-  /// overwrite the filtered array and the filter never reaches the menu (D2).
+  /// overwrite the filtered array and the filter never reaches the menu.
   /// `localizedStandardCompare` puts "Display 2" before "Display 10". Ties keep
   /// discovery order, so two identically-named panels do not reshuffle between
   /// refreshes.
@@ -33,7 +33,7 @@ public enum DisplayOrdering {
       .map(\.element)
   }
 
-  /// SO21: two attached units that report no serial resolve to ONE persistence key,
+  /// Two attached units that report no serial resolve to ONE persistence key,
   /// so they share every pref and one name. A 1-based ordinal by list order is the
   /// only live fact telling their rows apart; `nil` means the key is unique.
   ///
@@ -54,12 +54,12 @@ public enum DisplayOrdering {
   }
 }
 
-/// Menu-bar icon visibility (D5). The mode is a user preference, but the status
+/// Menu-bar icon visibility. The mode is a user preference, but the status
 /// item's visibility is ALSO written from outside the app (⌘-dragging the icon off
 /// the bar hides it), so the two directions are separate decisions.
 public enum MenuIconPolicy {
   /// The order the modes are offered in. NOT `MenuIcon.allCases`: `externalOnly` was
-  /// appended as raw 3 but reads third, so raw order would reorder the popup (D5).
+  /// appended as raw 3 but reads third, so raw order would reorder the popup.
   public static let pickerOrder: [MenuIcon] = [.show, .sliderOnly, .externalOnly, .hide]
 
   /// `hasVisibleSlider` means the panel would render at least one display section.

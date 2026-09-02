@@ -23,7 +23,7 @@ public enum ModeSpeech {
   private static func grouped(_ n: Int) -> String {
     let f = NumberFormatter()
     f.numberStyle = .decimal
-    f.locale = Locale(identifier: "en_US")  // D25: English only, deterministic output
+    f.locale = Locale(identifier: "en_US")  // English only, deterministic output
     return f.string(from: NSNumber(value: n)) ?? String(n)
   }
 }

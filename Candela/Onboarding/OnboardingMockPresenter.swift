@@ -2,7 +2,7 @@
   import AppKit
   import SwiftUI
 
-  /// The real flow view over the rig fixture (OB11): commits recorded rather
+  /// The real flow view over the rig fixture: commits recorded rather
   /// than written, permission asks simulated so every page state is clickable.
   /// Presented only by the debug hook, so it compiles out of Release.
   @MainActor

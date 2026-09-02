@@ -4,7 +4,7 @@ import SwiftUI
 /// Display names for the DDC commands, in ONE place: the grid's row labels, its
 /// accessibility labels and the Advanced page's VCP Overrides group all name the
 /// same things. Never `DDCCommand.rawValue`: those raws are shipped on-disk
-/// schema (D22) that reads as English by coincidence.
+/// schema that reads as English by coincidence.
 enum DDCCommandCopy {
   /// Mid-sentence form, for accessibility labels and captions.
   static func name(_ command: DDCCommand) -> String {
@@ -35,16 +35,16 @@ enum DDCCommandCopy {
 }
 
 /// Per-command DDC tuning for one display: Enabled / Min / Max / Invert for
-/// brightness, volume and contrast (D26). The response curve and the hex
+/// brightness, volume and contrast. The response curve and the hex
 /// control-code remap live in the Advanced page's VCP Overrides sub-group (A1)
-/// below, and that page owns the section header and the SO12 traffic-block
+/// below, and that page owns the section header and its traffic-block
 /// explanation, so neither is drawn here.
 ///
 /// Every edit is a read-modify-write of ONE command's tuning; the modify half is
 /// `DDCOverrideValidation.committed` in CandelaKit, under test. The fork rewrote
 /// all 18 keys and forced brightness to 100% on any single edit (QUIRK 7); here
-/// nothing writes brightness at all, and the D20 seam re-applies the SAME
-/// published value through `reapplyAfterPrefChange()` (D4/D28), which is what
+/// nothing writes brightness at all, and the pref propagation seam re-applies the SAME
+/// published value through `reapplyAfterPrefChange()`, which is what
 /// makes an override take effect without waiting for the next slider drag.
 ///
 /// `@MainActor`: it stores a `@MainActor` `DisplayPrefWriter` and reads it from
@@ -88,9 +88,9 @@ struct CommandTuningGrid: View {
   /// `prefs.forceSoftware` missed live HDR (DDC is dead outright there) and
   /// contradicted the Diagnostics row, so one page gave two answers.
   ///
-  /// Disable, don't hide. The mute recovery D29 rule 3 requires for this state
-  /// lives on the hub and is never disabled; the Advanced page's DDC toggle, the
-  /// other way out, is gated only by live HDR for the same reason.
+  /// Disable, don't hide. The recovery control the mute-strand rule requires
+  /// for this state lives on the hub and is never disabled; the Advanced
+  /// page's DDC toggle, the other way out, is gated only by live HDR for the same reason.
   private var trafficBlock: DDCTrafficBlock? {
     DisplayCardPolicy.ddcTrafficBlock(
       for: state.controller.brightnessPath,
@@ -138,7 +138,7 @@ struct CommandTuningGrid: View {
           }
         }
       }
-      // Belt to the card-level disable `AdvancedPage` applies (SO12): the grid
+      // Belt to the card-level disable `AdvancedPage` applies: the grid
       // is what a traffic block voids, so it states the condition itself.
       .disabled(isInert)
       captions
@@ -188,7 +188,7 @@ struct CommandTuningGrid: View {
       fieldLabel: Text(accessibilityLabel(for: target)),
       width: fieldWidth
     )
-    // Keyed to the display: SO23's switcher can carry this page to another
+    // Keyed to the display: the display switcher can carry this page to another
     // display mid-typing, and a field that kept its text would commit one
     // display's number to another's pref.
     .id(state.display.persistenceKey)
@@ -210,7 +210,7 @@ struct CommandTuningGrid: View {
     Binding(
       get: { !prefs.tuning(for: command).unavailableDDC },
       set: { enabled in
-        // D29 rule 1: `toggleMute` refuses once `isAvailable` is false, so
+        // `toggleMute` refuses once `isAvailable` is false, so
         // unmute BEFORE disabling the volume command.
         if command == .volume, !enabled, state.volume.isMuted {
           _ = state.volume.toggleMute()
@@ -262,7 +262,7 @@ struct CommandTuningGrid: View {
   // MARK: - Captions
 
   @ViewBuilder private var captions: some View {
-    // SO12: `AdvancedPage` states the block's explanation once for the page.
+    // `AdvancedPage` states the block's explanation once for the page.
     // What stays here is the silence, because the captions below describe
     // controls that are doing nothing.
     if trafficBlock == nil {

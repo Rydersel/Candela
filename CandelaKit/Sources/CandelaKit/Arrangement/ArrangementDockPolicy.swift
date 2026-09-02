@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 
 /// Which way an arrow key asks a display to go, in **display space**: y-down, so
-/// `.up` is toward smaller y (AR1).
+/// `.up` is toward smaller y.
 public enum ArrangementDirection: Sendable, Equatable, Hashable, CaseIterable {
   case left, right, up, down
 

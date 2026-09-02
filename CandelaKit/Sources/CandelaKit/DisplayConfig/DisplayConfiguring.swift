@@ -225,7 +225,7 @@ public protocol DisplayConfiguring: Sendable {
 
   /// Whether the private CGS mode list is reachable on this OS.
   ///
-  /// **CR10**: false degrades to exactly the behaviour that shipped before
+  /// False degrades to exactly the behaviour that shipped before
   /// revelation existed. The public mode list, no error, no alert.
   var revealsHiddenModes: Bool { get }
 
@@ -242,28 +242,28 @@ public protocol DisplayConfiguring: Sendable {
 
   /// Whether this build can rotate displays at all.
   ///
-  /// **RT5**: a missing private symbol is a capability answer, not a crash. When
+  /// A missing private symbol is a capability answer, not a crash. When
   /// this is false every rotation control is absent.
   var canRotate: Bool { get }
 
   /// The display's current orientation, or nil if it reports something that is
-  /// not a right angle (RT7).
+  /// not a right angle.
   func rotation(of displayID: CGDirectDisplayID) -> DisplayRotation?
 
   /// Rotates ONE display and proves it happened.
   ///
-  /// **One display, never a batch (RT9).** There is no
+  /// **One display, never a batch.** There is no
   /// `SLSConfigureDisplayRotation`, so rotation cannot be staged into a
   /// `CGBeginDisplayConfiguration` transaction the way a mirror change can. N
   /// displays would be N independent calls, each able to fail alone, so the
   /// half-applied state stays unrepresentable by never offering the batch.
   ///
-  /// **Verifies the readback (RT8).** A `CGError` of 0 is not evidence: `-90`
-  /// and `360` both return success and change nothing (RS5). Throws
+  /// **Verifies the readback.** A `CGError` of 0 is not evidence: `-90`
+  /// and `360` both return success and change nothing. Throws
   /// `DisplayConfigError` if the call fails OR if the achieved rotation is not
   /// the requested one.
   ///
-  /// **Blocks (RS10).** Measured at 0.4 to 1.1s: the call does not return until
+  /// **Blocks.** Measured at 0.4 to 1.1s: the call does not return until
   /// the rotation has taken effect. Never call it on the main actor.
   func applyRotation(_ rotation: DisplayRotation, to displayID: CGDirectDisplayID) throws
 }

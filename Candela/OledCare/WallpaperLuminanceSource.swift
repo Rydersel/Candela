@@ -6,10 +6,10 @@ import ImageIO
 import os
 
 /// Per-cell luminance of a display's wallpaper, for the exposure model's
-/// uncovered-area backdrop (EM3).
+/// uncovered-area backdrop.
 ///
 /// App-target island: `NSWorkspace` and ImageIO stay out of Kit, which only ever
-/// receives the reduced grid (EM6). Reading the wallpaper needs no permission at
+/// receives the reduced grid. Reading the wallpaper needs no permission at
 /// all; the file is the user's own setting, not screen content.
 ///
 /// One approximation, deliberate: a dynamic (appearance-aware) wallpaper
@@ -121,7 +121,7 @@ final class WallpaperLuminanceSource {
 
   /// Panel-physical wallpaper luminance for `displayID`, or nil when the
   /// display has no resolvable screen or the wallpaper cannot be read. Nil is
-  /// the model's cue to fall back to the appearance prior (EM5); a zero grid
+  /// the model's cue to fall back to the appearance prior; a zero grid
   /// would instead assert a black wallpaper that was never observed.
   func panelGrid(
     for displayID: CGDirectDisplayID, appearanceIsDark: Bool,

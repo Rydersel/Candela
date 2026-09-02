@@ -132,7 +132,7 @@ public enum DisplayModeCatalog {
   /// CoreGraphics list plus whatever survived revelation's gates, not every mode
   /// the two enumerations named. The wire-timing guard filters here as well as in
   /// `curated`, rather than annotating, because a mode that scans out cropped is
-  /// not an option a full list owes anybody. The `wireTimingGuard` default (D26)
+  /// not an option a full list owes anybody. The `wireTimingGuard` default
   /// brings those back.
   public static func full(_ modes: [DisplayMode]) -> [DisplayMode] {
     modes.sorted {
@@ -177,7 +177,7 @@ public enum DisplayModeCatalog {
     return lhs.ioModeID < rhs.ioModeID
   }
 
-  /// What pressing a size row actually does (SO18).
+  /// What pressing a size row actually does.
   public struct SizeSelectionOutcome: Equatable, Sendable {
     /// The rate the display will end up running, quantized for display.
     public let appliedHz: Double
@@ -212,7 +212,7 @@ public enum DisplayModeCatalog {
   /// - Parameter currentHz: exactly what the applier reads,
   ///   `current?.refreshHz ?? row.mode.refreshHz`. A contract, not a hint: it is
   ///   the point the nearest-rate search measures from, so a wrong value produces
-  ///   a confident wrong prediction (the SO18 defect). `0` as a stand-in for
+  ///   a confident wrong prediction. `0` as a stand-in for
   ///   "unknown" makes every gap equal to the rate itself, so the search returns
   ///   the size's SLOWEST and `lowersCurrentRate` comes back `false`: wrong rate,
   ///   and the caps warning silently disabled. Any other placeholder judges the
@@ -287,7 +287,7 @@ public enum DisplayModeCatalog {
 
   /// The modes the full list tags "low resolution", by `ioModeID`.
   ///
-  /// SO14's inversion, and macOS's: where one logical size is offered both sharp
+  /// An inversion, and macOS's: where one logical size is offered both sharp
   /// and blurry, the BLURRY one is tagged. Tagging the sharp one "HiDPI" names an
   /// implementation detail and leaves the 1x mode looking like the plain choice
   /// when it is the compromised one.

@@ -1,4 +1,4 @@
-/// The closed set of pref names the settings UI may write (D27).
+/// The closed set of pref names the settings UI may write.
 ///
 /// Raw values ARE the on-disk key names, UNSUFFIXED: per-display prefs are
 /// named `forceSw`, never `forceSw.<pk>`, and per-command prefs are named
@@ -8,15 +8,15 @@
 ///
 /// A name belongs here when some pane writes it, or when a batch write needs its
 /// effects unioned in. Deliberate exclusions:
-/// - `muted`, `hdrMode`: engine state, not settings (D8/D22). `hdrMode` must go
+/// - `muted`, `hdrMode`: engine state, not settings. `hdrMode` must go
 ///   through `BrightnessController.setHDRMode`.
 /// - `menuItemStyle`, `showTickMarks`, `longerDelay`: reserved keys with no reader
-///   anywhere in Candela (D32). A row for them would be a lie.
+///   anywhere in Candela. A row for them would be a lie.
 /// - `oledPanelSeconds`, `oledStandbySeconds`, `oledStandbyNoteDismissed`: written by
 ///   the hours tracker, so engine state, same rule as `muted`.
 ///
-/// Prefs read at use rather than at write time are still cases (D27 makes a written
-/// pref a case); they fan out to `refreshUI` alone.
+/// Prefs read at use rather than at write time are still cases (a written
+/// pref must be a case); they fan out to `refreshUI` alone.
 public enum PrefName: String, Sendable, CaseIterable {
   // App-level: panel and menu-bar presentation
   case menuIcon, hideBuiltInDisplay, showContrast
@@ -30,7 +30,7 @@ public enum PrefName: String, Sendable, CaseIterable {
   // stable home of its own. Not a way to see both at once, which the island's
   // one-window-per-display keying rules out either way.
   case hudPositionBrightness, hudPositionVolume
-  // App-level: how every pill draws (KMR-A3). One key for all kinds, since the
+  // App-level: how every pill draws. One key for all kinds, since the
   // styles differ in anatomy rather than in per-kind meaning.
   case hudStyle
   // App-level: dimming
@@ -47,7 +47,7 @@ public enum PrefName: String, Sendable, CaseIterable {
   case pollingMode, pollingCount
   // Per-display: display configuration
   case rememberDisplayMode, storedDisplayMode
-  // Per-display: synthesized sizes (SS4). The opt-in that makes synthesized rows
+  // Per-display: synthesized sizes. The opt-in that makes synthesized rows
   // visible in the picker, and the stop the display is set to, stored as a JSON
   // descriptor the way `storedDisplayMode` is.
   case offerSyntheticSizes, storedSyntheticSize
@@ -77,9 +77,9 @@ public enum PrefName: String, Sendable, CaseIterable {
   case restoreArrangement, savedArrangements
   // Per-command (base names; `DisplayPrefs.setTuning` adds the `.<cmd>` part)
   case unavailableDDC, minDDCOverride, maxDDCOverride, curveDDC, invertDDC, remapDDC
-  // App-level: virtual display slots (VD14). Base names; `DisplayPrefs` composes the
+  // App-level: virtual display slots. Base names; `DisplayPrefs` composes the
   // real key with `.<slot>`. Only `virtualSlotConfigured` converges live displays,
-  // so editing a running slot never yanks a display under the user (VD17).
+  // so editing a running slot never yanks a display under the user.
   case virtualSlotConfigured, virtualSlotName, virtualSlotWidth, virtualSlotHeight
   case virtualSlotHiDPI, virtualSlotRefreshHz, virtualSlotRecreateAtLaunch, virtualSlotUUID
   // Whether the slot has a tile at all; Add/Remove write it alongside
@@ -87,7 +87,7 @@ public enum PrefName: String, Sendable, CaseIterable {
   case virtualSlotDefined
 }
 
-/// Engine work a pref edit fans out to (D20). The settings UI writes a pref,
+/// Engine work a pref edit fans out to. The settings UI writes a pref,
 /// then asks this table what must happen, never ad-hoc calls per control.
 public enum PrefEffect: Sendable, Hashable {
   /// Re-evaluate every view bound to this pref. EVERY known pref carries it:
@@ -95,7 +95,7 @@ public enum PrefEffect: Sendable, Hashable {
   /// not observable, so `AppModel.prefsRevision` is the only invalidation.
   case refreshUI
   case rearmTap // media-key tap config re-evaluation
-  case reapplyDimming // BrightnessController.reapplyAfterPrefChange() (D28)
+  case reapplyDimming // BrightnessController.reapplyAfterPrefChange()
   case rebuildPanel // this pref also changes what the menu-bar panel renders
   case updateStatusItem // status-item visibility re-evaluation
   case recheckPermissions // Accessibility prompt re-check
@@ -104,7 +104,7 @@ public enum PrefEffect: Sendable, Hashable {
   /// OLED care owns its own dimming leg and must not drag the DDC bus.
   case reapplyOledCare
   /// `AppModel.syncVirtualDisplays()`: run the reconciler and converge live
-  /// virtual displays to the slot prefs (VD14). Carried by
+  /// virtual displays to the slot prefs. Carried by
   /// `virtualSlotConfigured` alone.
   case syncVirtualDisplays
 }
@@ -129,7 +129,7 @@ public enum PrefPropagation {
       // `hideKeepAwake` is presentation alone: hiding the row while keep awake is ON
       // leaves the display awake, which the Menu Bar pane's caption says out loud.
       // `isDisabled` carries no `.rearmTap` deliberately: a display whose keyboard
-      // control is off swallows its press (R1) rather than handing it to macOS, so
+      // control is off swallows its press rather than handing it to macOS, so
       // it must leave the watched set alone.
       [.rebuildPanel]
 
@@ -145,12 +145,12 @@ public enum PrefPropagation {
       [.rebuildPanel, .rearmTap]
 
     case .rememberDisplayMode, .storedDisplayMode:
-      // Reapply happens at launch and reconnect only, never on the pref write itself
-      // (DM7): writing the pref must not yank the user's screen.
+      // Reapply happens at launch and reconnect only, never on the pref write itself:
+      // writing the pref must not yank the user's screen.
       []
 
     case .offerSyntheticSizes, .storedSyntheticSize:
-      // No display work on the write, the same answer the mode rows give. SS11 puts
+      // No display work on the write, the same answer the mode rows give. Synthesis puts
       // a VERIFIED engine disengage before the opt-in is written false, and the
       // engage before the stop is stored, so the sequencing is the caller's and a row
       // here would re-run it out of order.
@@ -164,14 +164,14 @@ public enum PrefPropagation {
       []
 
     case .virtualSlotConfigured:
-      // The one write that converges live virtual displays (VD14). The pane's
+      // The one write that converges live virtual displays. The pane's
       // Create, Apply and Remove buttons all end in this write.
       [.syncVirtualDisplays]
 
     case .virtualSlotName, .virtualSlotWidth, .virtualSlotHeight, .virtualSlotHiDPI,
          .virtualSlotRefreshHz, .virtualSlotRecreateAtLaunch, .virtualSlotUUID,
          .virtualSlotDefined:
-      // Field edits apply on the next Create or Apply (VD17), so `.refreshUI` alone
+      // Field edits apply on the next Create or Apply, so `.refreshUI` alone
       // is a deliberate answer rather than a missing one.
       []
 
@@ -226,7 +226,7 @@ public enum PrefPropagation {
          .oledUnfocusedDimEnabled, .oledUnfocusedDimSeconds, .oledUnfocusedDimLevel,
          .oledHoursTracking, .oledTelemetry, .oledWindowObservation,
          .oledDetectionDimming:
-      // `.reapplyOledCare` and NOT `.reapplyDimming` (D28): every pref here changes
+      // `.reapplyOledCare` and NOT `.reapplyDimming`: every pref here changes
       // what the care overlay renders, which is the app's own window, and none of
       // them touches the DDC or gamma leg. Adding `.reapplyDimming` would drive a
       // brightness write on a toggle that has nothing to say about brightness.

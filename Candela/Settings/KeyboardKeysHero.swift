@@ -1,12 +1,12 @@
 import CandelaKit
 import SwiftUI
 
-/// Pure derivation for the keycap hero (KMR3): every word and every lit key
+/// Pure derivation for the keycap hero: every word and every lit key
 /// comes from the same `KeyModePolicy` rules and prefs the engine reads, so the
 /// strip cannot disagree with what a key press does. Named rather than inline in
-/// `body` for the row-model tests (AT10).
+/// `body` for the row-model tests.
 enum KeyboardHeroModel {
-  // MARK: - Cluster annotations (KMR2)
+  // MARK: - Cluster annotations
 
   // Sentences with a verb, not noun phrases: the line says what the keys are
   // doing right now rather than captioning the feature (settled 2026-08-17).
@@ -43,7 +43,7 @@ enum KeyboardHeroModel {
     KeyModePolicy.watchesMediaKeys(brightnessMode) && accepted
   }
 
-  /// The good-news line (KMR3), shown only when the grant is held and a lit key
+  /// The good-news line, shown only when the grant is held and a lit key
   /// goes through the tap it names. Stays nil while the pane's warning section
   /// is warranted, so the two never say the same thing twice.
   static func showsAccessibilityLine(
@@ -52,7 +52,7 @@ enum KeyboardHeroModel {
     granted && KeyModePolicy.requiresAccessibility(brightness: brightnessMode, volume: volumeMode)
   }
 
-  // MARK: - Chevron previews (KMR4)
+  // MARK: - Chevron previews
 
   /// Static on purpose: the legend is fixed, so the row states its size rather
   /// than a value that could go stale.
@@ -122,7 +122,7 @@ enum KeyboardHeroModel {
   }
 }
 
-/// The Keyboard pane's hero (KMR2): key clusters annotated beneath with family,
+/// The Keyboard pane's hero: key clusters annotated beneath with family,
 /// mode and target. Lit keys are handled by Candela, grey ones pass to macOS,
 /// and lighting is never the only signal: each cluster is ONE accessibility
 /// element whose label is its sentence.

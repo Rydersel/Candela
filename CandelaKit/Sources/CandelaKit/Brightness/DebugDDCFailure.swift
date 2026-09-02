@@ -2,7 +2,7 @@
   import Foundation
 
   /// Makes one display's DDC brightness writes report failure, so wire
-  /// degradation can be provoked on a rig where every cable works (WD6). The
+  /// degradation can be provoked on a rig where every cable works. The
   /// alternatives are unplugging the data cable mid-session, or engaging HDR,
   /// which is the one case the feature must NOT react to.
   ///

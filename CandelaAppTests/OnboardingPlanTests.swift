@@ -1,8 +1,9 @@
 import Testing
 
-// The guided setup flow's derivation (OB2): pages come from the environment
+// The guided setup flow's derivation: pages come from the environment
 // snapshot plus the in-flow OLED designation, never from view logic. These
-// pins are the slim flow, the OB8 suppression, and the OB4 name guess.
+// pins are the slim flow, the upstream size-suggestion suppression, and the
+// name guess.
 @Suite("Onboarding plan derivation")
 struct OnboardingPlanTests {
   private func entry(
@@ -112,7 +113,7 @@ struct OnboardingPlanTests {
   }
 
   @Test func aRenameNeverFeedsTheGuess() {
-    // OB4: the guess reads the reported product name, not the friendly name.
+    // The guess reads the reported product name, not the friendly name.
     var display = entry(key: "dell", productName: "DELL U2725QE")
     display.name = "My OLED Desk Display"
     let env = environment([display])

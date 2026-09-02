@@ -27,7 +27,7 @@ public struct OledDimConfig: Equatable, Sendable {
   public private(set) var unfocusedDimBrightness: Double
 
   /// A brightness of 1 dims nothing and a brightness of 0 is a silent blackout,
-  /// one that would stay click-through unlike the real thing (OC15). Both are
+  /// one that would stay click-through unlike the real thing. Both are
   /// config errors.
   ///
   /// Public so the pane's sliders offer exactly the range the config accepts: a
@@ -185,9 +185,9 @@ public struct IdleDimmingEngine: Sendable {
       // A blacked-out display that gets locked drops to `.lockDim`, and that IS
       // ruling D (locking never brightens) rather than a violation of it.
       //
-      // The hold this replaces (A-3) kept `.blackout` so the panel would not
+      // The hold this replaces kept `.blackout` so the panel would not
       // rise to lock dim's lighter level. It could not: `.blackout` is delivered
-      // ONLY by an overlay, and A-16 measured that no overlay of ours renders
+      // ONLY by an overlay, and it was measured that no overlay of ours renders
       // above the lock screen, so the held blackout put the panel at the
       // FULL-BRIGHT lock screen. `.lockDim` goes on the wire, which the lock
       // screen cannot cover, so it is strictly darker.

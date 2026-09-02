@@ -78,8 +78,8 @@ struct OledTelemetryTargetTests {
     #expect(!target.samplingMayRun(dimState: .suspended))
   }
 
-  /// Every other suspension is a panel with our own overlay over it, which OC16
-  /// excludes from the capture, so what is measured is not what is emitted.
+  /// Every other suspension is a panel with our own overlay over it, which is
+  /// excluded from the capture, so what is measured is not what is emitted.
   @Test("the carve-out is for the suspension alone, not for the dim states")
   func dimStatesStayDisqualifiedEitherWay() {
     for topology in [engaged, userMirrored, unmirrored] {

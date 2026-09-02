@@ -1,9 +1,9 @@
 import CandelaKit
 import Foundation
 
-/// One report as plain text (CK31), in the diagnostics report's shape. The ONE
+/// One report as plain text, in the diagnostics report's shape. The ONE
 /// renderer, so two copies of a run never disagree. Nothing here grades the
-/// display (CK8).
+/// display.
 enum CheckupSummaryText {
   static func render(_ report: CheckupReport) -> String {
     // The subject line owns the product name, scenario and UTC day; deriving
@@ -24,7 +24,7 @@ enum CheckupSummaryText {
     return lines.joined(separator: "\n")
   }
 
-  /// CK30, measured claims only: the identity block exists only when the leg
+  /// Measured claims only: the identity block exists only when the leg
   /// read an EDID. An abandoned run carries a placeholder identity, and
   /// printing it would report a serial and flags nothing observed.
   private static func identityLines(_ report: CheckupReport) -> [String] {

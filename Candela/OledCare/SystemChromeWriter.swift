@@ -3,11 +3,11 @@ import CoreFoundation
 import Foundation
 import os
 
-/// The one place system chrome settings are touched (OC10: only the pane's
+/// The one place system chrome settings are touched (only the pane's
 /// toggles call the writes; enrollment suggests auto-hide and never applies it).
 /// The Dock path is a pref write plus a visible Dock restart, not the spike's
-/// Apple Events route, which would demand an Automation consent W3a must not
-/// add.
+/// Apple Events route, which would demand an Automation consent that must not
+/// be added.
 ///
 /// Both reads synchronize their domain first. `ChromeAutoHideController` assigns
 /// from a read-back after every write and polls while the pane is open, so a
@@ -102,8 +102,7 @@ final class SystemChromeWriter: ChromeWriting {
   /// Hidden if EITHER half says hidden, and the record only gets a vote where
   /// the write leg would also touch it. `MenuBarAutoHidePolicy` owns that for
   /// both legs so they cannot diverge: a read that consulted a record the write
-  /// skips would report ON, refuse to clear it, and strand the switch
-  /// (D29 rule 3).
+  /// skips would report ON, refuse to clear it, and strand the switch.
   func readMenuBarAutoHide() -> Bool {
     CFPreferencesAppSynchronize(kCFPreferencesAnyApplication)
     let effective = (CFPreferencesCopyValue(Self.menuBarKey, kCFPreferencesAnyApplication,
@@ -127,7 +126,7 @@ final class SystemChromeWriter: ChromeWriting {
   private static let menuBarHidingChangedNotification =
     Notification.Name("AppleInterfaceMenuBarHidingChangedNotification")
 
-  /// The S3 spike missed this because its only oracle was `NSScreen`'s menu-bar
+  /// An earlier experiment missed this because its only oracle was `NSScreen`'s menu-bar
   /// inset, which no longer moves at all on a secondary display (measured 0.0
   /// with the bar plainly visible). Screenshot the bar; do not trust the inset.
   private static func broadcastMenuBarHidingChanged() {

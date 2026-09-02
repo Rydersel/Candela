@@ -169,7 +169,7 @@ struct DisplayCardPolicyTests {
     #expect(DisplayCardPolicy.normalizedFriendlyName("Desk") == "Desk")
   }
 
-  /// WD2's ambiguity, and the one place it bites: greying the DDC grid here
+  /// The DDC wire-degradation ambiguity, and the one place it bites: greying the DDC grid here
   /// would caption a display nobody touched with "hardware control is off".
   @Test func aWireThatStoppedAnsweringDoesNotClaimHardwareControlWasTurnedOff() {
     #expect(DisplayCardPolicy.ddcTrafficBlock(

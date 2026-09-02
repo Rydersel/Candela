@@ -3,7 +3,7 @@ import CoreGraphics
 import Testing
 
 // Rows for All Sizes & Refresh Rates, derived from a catalog and asserted
-// without a window (AT4 layer 1, AT5).
+// without a window.
 //
 // The defect this exists to catch: enumeration and apply both worked and the
 // Kit suite was green, yet not one row in the picker was a revealed mode. Every

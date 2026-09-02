@@ -2,13 +2,13 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// EM9's gate instrument, as amended by OCR7: scores the estimated exposure
+/// The comparison gate's instrument: scores the estimated exposure
 /// model against the measured readings, beside the measurement controls and
 /// never inside the health view it might one day change. Shown once measurement
 /// is on or a stored comparison exists, so turning measurement off keeps the
 /// score.
 ///
-/// TEMPORARY (OCR7): delete this file, its `HealthPane` call site and the
+/// TEMPORARY: delete this file, its `HealthPane` call site and the
 /// `showModelComparison` key once the comparison-gate verdict is recorded.
 @MainActor
 struct OledModelComparisonSection: View {

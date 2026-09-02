@@ -88,7 +88,7 @@ public enum DimmingMath {
   }
 
   /// One keypress step for the plain 16-chiclet commands — volume, contrast,
-  /// and (per D3) brightness's default branch: ceil/floor snap in the
+  /// and brightness's default branch: ceil/floor snap in the
   /// direction of travel, 25% hysteresis, fine ±0.01 (fork
   /// `OtherDisplay.calcNewValue`, `half: false`).
   public static func stepValue(current: Double, isUp: Bool, isFine: Bool) -> Double {
@@ -137,7 +137,7 @@ public enum DimmingMath {
   }
 
   /// A 0…1 portion as a raw register value (fork `convValueToDDC`). Order is
-  /// load-bearing (D3): invert → clamp01 → curve → affine [minDDC, maxDDC] →
+  /// load-bearing: invert → clamp01 → curve → affine [minDDC, maxDDC] →
   /// clamp → truncating UInt16 (fork behavior: 0.004 of a 0…100 range is DDC
   /// 0) → optional volume floor. `floorNonZeroToOne` is the fork's "never let
   /// sound mute accidentally" rule — muting breaks some panels, so a non-zero

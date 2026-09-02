@@ -14,7 +14,7 @@ import ObjectiveC
 ///
 /// Three rules, each the lesson of a measured failure elsewhere in the repo:
 ///
-/// - **A skip is a reported fact, never a silent pass** (DT30's honesty rule).
+/// - **A skip is a reported fact, never a silent pass** (the honesty rule).
 ///   A write-only panel cannot exercise the DDC read path; the run says so.
 /// - **A run that demonstrates nothing is a failure.** Zero passing checks exit
 ///   non-zero even with zero failures.
@@ -104,7 +104,7 @@ public enum PlatformConformance {
 
   // MARK: - Pure verdicts (each red-tested in PlatformConformanceTests)
 
-  /// S6 §4: a CGS descriptor's `modeNumber` IS the index it was read at, and
+  /// A CGS descriptor's `modeNumber` IS the index it was read at, and
   /// the same ID space as `ioDisplayModeID`. If this drifts, every apply
   /// resolves to a different mode than the one asked for.
   public static func indexAgreement(pairs: [(index: Int, modeNumber: Int32)]) -> Outcome {
@@ -413,7 +413,7 @@ public enum PlatformConformance {
         ?? .pass("every display reports a valid rotation (\(readings.joined(separator: " ")))")
     ))
 
-    // RS5's measured no-ops. If a macOS update ever makes 360 or -90 a real
+    // An earlier experiment's measured no-ops. If a macOS update ever makes 360 or -90 a real
     // rotation, this run must find out rather than a user; the restore attempt
     // below is why it needs the operator's consent.
     guard applyDestructive else {

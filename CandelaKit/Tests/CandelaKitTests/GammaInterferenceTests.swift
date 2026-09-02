@@ -267,7 +267,7 @@ private struct Fixture {
   #expect(fixture.gamma.verifyCount == 2)
 }
 
-// MARK: - Per-display interference count (B7)
+// MARK: - Per-display interference count
 
 /// An accessor rather than the dictionary: a view has no business iterating displays
 /// it does not own. One global count let N displays trip the threshold on the first

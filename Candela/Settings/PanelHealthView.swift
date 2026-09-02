@@ -2,9 +2,9 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// One panel's accumulated exposure, in its own content-sized window (OC19,
-/// placement amended by OCR-A1): a pushed page cannot resize the settings window
-/// to a portrait display's map, and a content-sized window can. It owns the map
+/// One panel's accumulated exposure, in its own content-sized window: a pushed
+/// page cannot resize the settings window to a portrait display's map, and a
+/// content-sized window can. It owns the map
 /// instruments, the History / Right now lens, the window outlines and the
 /// crosshair readout, so the app has ONE surface for interrogating the map.
 ///
@@ -13,7 +13,7 @@ import SwiftUI
 /// card back, because two surfaces stating one measurement is how they come to
 /// disagree.
 ///
-/// Copy rule (OC11): software has two levers against OLED wear, reduce luminance
+/// Copy rule: software has two levers against OLED wear, reduce luminance
 /// and reduce time at luminance. Nothing here may translate a measurement into a
 /// lifespan, a date, a percentage of damage avoided or a score. Relative
 /// exposure is measured and therefore sayable; nothing else is.
@@ -92,7 +92,7 @@ struct PanelHealthView: View {
 
   /// This display's lighting, by its position among the connected externals: the
   /// sidebar's own rule, so this window and the page it was opened from are lit
-  /// alike (SV11).
+  /// alike.
   private var accent: SettingsAccent {
     guard
       let index = model.displays.firstIndex(where: {
@@ -111,7 +111,7 @@ struct PanelHealthView: View {
       deleteRow
     }
     .padding(20)
-    // Content-sized window (OCR-A1): this column's width and the sections'
+    // Content-sized window: this column's width and the sections'
     // heights decide the window's size, with the map capped below so a portrait
     // display cannot run it off the screen. Deliberately NO ScrollView: a
     // flexible scroll container reports no ideal height and collapses a
@@ -149,7 +149,7 @@ struct PanelHealthView: View {
   // MARK: - Chrome
 
   /// `SubPageHeader`'s switcher half without its title half: the window's title
-  /// bar already says Heat Map. Same callback contract (SO23): a persistence key
+  /// bar already says Heat Map. Same callback contract: a persistence key
   /// out, navigation meaning owned by the caller.
   @ViewBuilder private var switcherRow: some View {
     if displays.count > 1 {
@@ -246,7 +246,7 @@ struct PanelHealthView: View {
 
   // MARK: - Map
 
-  /// The map as an instrument (OCR5), drawn the way the monitor hangs on the
+  /// The map as an instrument, drawn the way the monitor hangs on the
   /// desk (`PanelExposureSurface` re-orders a rotated display's history for
   /// presentation; storage stays panel-native).
   ///
@@ -309,7 +309,7 @@ struct PanelHealthView: View {
           }
         }
         .overlay {
-          // The tag carries the whole finding here (OCR8), because this page IS
+          // The tag carries the whole finding here, because this page IS
           // the reading instrument. History lens only; the live lens marks
           // nothing.
           if surfaceMode == .history, let relative = summary.hottestRelative,
@@ -328,7 +328,7 @@ struct PanelHealthView: View {
               rotation: rotation)
           }
         }
-        // An EXPLICIT frame, not an aspect box (OCR-A1): under this window's
+        // An EXPLICIT frame, not an aspect box: under this window's
         // `preferredContentSize` hosting, a flexible frame plus `aspectRatio`
         // reports no ideal height and collapses to nothing [MEASURED 2026-08-17:
         // the window rendered every section except the map]. It sits OUTSIDE the
@@ -367,7 +367,7 @@ struct PanelHealthView: View {
     }
   }
 
-  /// The map's concrete size (OCR-A1): one formula for both orientations, the
+  /// The map's concrete size: one formula for both orientations, the
   /// height cap winning wherever it produces the narrower map. Explicit on
   /// purpose, because `preferredContentSize` hosting collapses flexible frames.
   private static func mapSize(aspect: CGFloat) -> CGSize {
@@ -508,12 +508,12 @@ struct PanelHealthView: View {
 
 // MARK: - Window root
 
-/// The Heat Map window's root (OCR-A1): resolves its persistence key against
+/// The Heat Map window's root: resolves its persistence key against
 /// the connected externals, keeps the switcher's list fresh, and closes the
 /// window when its display departs. Hosted by `DisplayHealthWindowPresenter` (an
 /// AppKit island; a `WindowGroup` measurably changed plain-launch behavior),
 /// which supplies both closures: `close` closes THIS window, and `rekey` tells
-/// the presenter the switcher repointed it, so the comparison workflow (SO23)
+/// the presenter the switcher repointed it, so the comparison workflow
 /// stays one window deep.
 @MainActor
 struct DisplayHealthWindowRoot: View {
@@ -559,7 +559,7 @@ struct DisplayHealthWindowRoot: View {
           }
       }
     }
-    // Dark-only (SV2), belt to the window's own `darkAqua`: every colour here
+    // Dark-only, belt to the window's own `darkAqua`: every colour here
     // comes from the theme layer and none has a light answer.
     .preferredColorScheme(.dark)
     .onChange(of: model.displays.map(\.display.persistenceKey), initial: true) { _, connected in

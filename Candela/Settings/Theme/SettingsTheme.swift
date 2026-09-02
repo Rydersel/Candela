@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The settings window's visual vocabulary (SV1, SV5).
+/// The settings window's visual vocabulary.
 ///
 /// Colors alias `OnboardingStyle`'s rather than copying them, so the two
 /// surfaces cannot drift apart one hex value at a time. Geometry and motion are
@@ -10,9 +10,9 @@ enum SettingsTheme {
   static let pageWidth: CGFloat = 620
   static let cardRadius: CGFloat = 9
 
-  /// Half of SV8's stated 0.25: at 0.25 the swap was still finishing when the
-  /// next click arrived. `canvasRelight` is halved with it, since the ratio is
-  /// what SV8 is really asking for.
+  /// Half of the visual redesign's stated 0.25: at 0.25 the swap was still
+  /// finishing when the next click arrived. `canvasRelight` is halved with it,
+  /// since the ratio is what the visual redesign is really asking for.
   static let selectionMotion: Animation = .easeInOut(duration: 0.125)
   /// Slower than the selection, so the light lags the click.
   static let canvasRelight: Animation = .easeInOut(duration: 0.35)
@@ -104,7 +104,7 @@ struct SettingsAccent: Equatable, Sendable {
       return SettingsAccent(
         accent: Color(red: 0.69, green: 0.76, blue: 0.90), secondary: neutral.secondary)
     }
-    // Both cool on purpose (SC8): warm light means CARE, and a display page is
+    // Both cool on purpose: warm light means CARE, and a display page is
     // somewhere you adjust a display rather than a care pillar.
     let hues = [
       Color(red: 0.36, green: 0.57, blue: 0.90),

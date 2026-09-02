@@ -23,7 +23,7 @@ public struct PreviewedArrangement: Sendable, Equatable {
   /// layout, not the requested one, because a request macOS adjusted did not
   /// necessarily move the menu bar where it was asked to.
   ///
-  /// Derived, never stored (AR5): a stored main is a second source of truth able to
+  /// Derived, never stored: a stored main is a second source of truth able to
   /// disagree with the geometry it describes. `nil` when the achieved layout has no
   /// tile at the origin, which the caller answers with the display the user dragged.
   public var confirmationDisplayID: CGDirectDisplayID? { achieved.mainDisplayID }
@@ -35,7 +35,7 @@ public struct PreviewedArrangement: Sendable, Equatable {
 }
 
 /// Preview → confirm → commit for a display arrangement, with a countdown that
-/// **defaults to revert** (AR8).
+/// **defaults to revert**.
 ///
 /// A SIBLING of `ModePreviewSession`, not a generalisation of it: that one is keyed
 /// on one display and one `DisplayMode`, and a layout is a fact about the whole set.
@@ -125,7 +125,8 @@ public actor ArrangementPreviewSession {
   ///
   /// The outcome recorded is `.reverted` because nothing is being KEPT. It does NOT
   /// claim the surviving displays moved back: they stay where the preview put them, at
-  /// `.preview` scope, because AR4 will not let a plan name only part of the live set.
+  /// `.preview` scope, because the whole-arrangement rule will not let a plan name
+  /// only part of the live set.
   @discardableResult
   public func discardIfTopologyChanged() -> Bool {
     dropIfUnrestorable(against: configurator.currentArrangement())
@@ -162,7 +163,7 @@ public actor ArrangementPreviewSession {
 
     guard let plan = ArrangementPlan(applying: wanted, to: live) else {
       // A no-op, a display set changed since `wanted` was computed, a mirror slave
-      // holding a tile (AR6), or an origin outside `Int32`.
+      // holding a tile, or an origin outside `Int32`.
       return .failure(DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue))
     }
 
@@ -257,7 +258,7 @@ public actor ArrangementPreviewSession {
     }
     guard let plan = ArrangementPlan(applying: outstanding.captured, to: live) else {
       // The sets match and the layouts differ, so this is a structural refusal of the
-      // CAPTURE itself: a captured tile whose display became a mirror slave (AR6), or
+      // CAPTURE itself: a captured tile whose display became a mirror slave, or
       // an origin outside `Int32`. No retry can fix a fallback that cannot be
       // expressed as a request, so it is dropped rather than held. Reported as failed,
       // never reverted: the previewed layout is still on screen at `.preview` scope.

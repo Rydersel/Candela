@@ -8,7 +8,8 @@ import SwiftUI
 /// are an appearance choice. Keyboard decides which display a press acts on;
 /// this decides where the answer is drawn.
 ///
-/// D26 cut the fork's menu-items-style popup and tick-marks toggle; D32 files
+/// An earlier cut removed the fork's menu-items-style popup and tick-marks
+/// toggle; the reserved-name convention files
 /// `menuItemStyle` and `showTickMarks` as reserved-and-inert, keeping the schema
 /// slots while nothing reads them and this pane writes neither. The fork's
 /// app-wide slider toggles are cut too: each display's own destination says the
@@ -24,14 +25,14 @@ struct AppMenuPane: View {
 
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
 
-  /// Scroll anchors for the preview's click-to-jump (KMR-A5). On the section
+  /// Scroll anchors for the preview's click-to-jump. On the section
   /// container, not a row: the jump should land the section heading at the top.
   private static let slidersSectionID = "menuBar.sliders"
   private static let indicatorsSectionID = "menuBar.indicators"
 
   var body: some View {
     // `menuIcon` is written from OUTSIDE this pane: ⌘-dragging the status item
-    // off the menu bar persists `.hide` (D5). Prefs are not observable, so the
+    // off the menu bar persists `.hide`. Prefs are not observable, so the
     // revision bump is the only thing that re-reads them and flips the popup.
     let _ = model.prefsRevision
     // The scaffold's reading variant: the page scrolls, and the preview's
@@ -72,9 +73,9 @@ struct AppMenuPane: View {
 
   // MARK: - Preview
 
-  /// The pane's subject, drawn (KMR7). The widgets are doorways (KMR-A5):
+  /// The pane's subject, drawn. The widgets are doorways:
   /// clicking one scrolls to the section that configures it. It depicts the real
-  /// widgets, not this window's look (SV13); only the frame is this window's.
+  /// widgets, not this window's look; only the frame is this window's.
   private func preview(proxy: ScrollViewProxy) -> some View {
     VStack(alignment: .leading, spacing: 8) {
       MenuBarPreviewView { target in
@@ -103,7 +104,7 @@ struct AppMenuPane: View {
         )) {
           // `MenuIconPolicy.pickerOrder`, never `MenuIcon.allCases`: raw order
           // is not reading order, so iterating allCases would silently reorder
-          // the popup (D5).
+          // the popup.
           ForEach(MenuIconPolicy.pickerOrder, id: \.self) { mode in
             Text(label(for: mode)).tag(mode)
           }
@@ -112,7 +113,7 @@ struct AppMenuPane: View {
         if prefs.menuIcon != .show {
           // Every mode but "Always" can leave the user with no icon and no way
           // in. `StatusItemController.applicationShouldHandleReopen` opens this
-          // window when the running app is opened again (SO24).
+          // window when the running app is opened again.
           SettingsCaption("Open \(AppInfo.productName) again from Applications to get back to these settings. You can quit it from General.")
         }
       }
@@ -143,7 +144,7 @@ struct AppMenuPane: View {
 
   /// The caption carries the consequence because the panel's own row cannot: a
   /// one-line row is what keeps the panel from resizing while its menu is open,
-  /// so the reach gets stated here (A-21).
+  /// so the reach gets stated here.
   private var keepAwakeRow: some View {
     SettingRow("Keep Display Awake stops the display sleeping until you turn it off or quit. While it is on, OLED care's idle dimming, blackout and unfocused dimming do not start. Hiding the row here does not turn it off.") {
       Toggle("Show Keep Display Awake in the menu bar", isOn: Binding(
@@ -205,7 +206,7 @@ struct AppMenuPane: View {
   }
 
   /// The caption must not promise a 0% stop on every slider: volume rows snap
-  /// on `SliderSnap.stopsWithoutZero` (D29), because landing on 0 is a mute in
+  /// on `SliderSnap.stopsWithoutZero`, because landing on 0 is a mute in
   /// `DDCValueController.apply` and, under `enableMuteUnmute`, a persistent VCP
   /// 0x8D hardware mute a cosmetic convenience must never cause.
   private var percentRow: some View {
@@ -289,8 +290,8 @@ struct AppMenuPane: View {
           .prefIdentifier(.hudPositionVolume)
         }
       }
-      // The preview shows both kinds at once so both positions stay visible
-      // (KMR-A5); this line stops that picture reading as what the screen does.
+      // The preview shows both kinds at once so both positions stay visible;
+      // this line stops that picture reading as what the screen does.
       SettingsCaption("On screen, the two kinds of indicator take turns in one window per display; the preview shows both so each position stays visible.")
     }
     .id(Self.indicatorsSectionID)
@@ -298,8 +299,8 @@ struct AppMenuPane: View {
 
   // MARK: - Labels
 
-  /// Reads as one sentence with the row label: "Indicator style: Match macOS"
-  /// (KMR-A3). Exhaustive, so a future `HUDStyle` case is a compile error
+  /// Reads as one sentence with the row label: "Indicator style: Match macOS".
+  /// Exhaustive, so a future `HUDStyle` case is a compile error
   /// rather than a blank row.
   private func label(for style: HUDStyle) -> LocalizedStringKey {
     switch style {
@@ -321,7 +322,7 @@ struct AppMenuPane: View {
   }
 
   /// Reads as one sentence with the row label: "Show the menu bar icon: When an
-  /// external display is connected" (D25). Exhaustive, so a future `MenuIcon`
+  /// external display is connected". Exhaustive, so a future `MenuIcon`
   /// case is a compile error rather than a blank row.
   private func label(for mode: MenuIcon) -> LocalizedStringKey {
     switch mode {

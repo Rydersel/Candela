@@ -27,7 +27,7 @@ public enum CheckupPlan {
     public let pregraded: CheckupVerdict?
   }
 
-  /// D24 holds here: support exists only where the capabilities string says so.
+  /// Support exists only where the capabilities string says so.
   /// A DDC service that answers reads with zeros, or not at all, is write-only.
   public static func panelClass(
     capabilities: String?, hasDDCService: Bool, isBuiltIn: Bool

@@ -3,7 +3,7 @@ import Foundation
 
 /// Which displays count as having just ARRIVED.
 ///
-/// DM7 as a rule rather than scattered bookkeeping: reapply at launch and
+/// A rule rather than scattered bookkeeping: reapply at launch and
 /// reconnect, never continuously. Reapply must fire when a display shows up and
 /// must NOT fire again until it leaves, because a reconfiguration event is also
 /// what the user changing resolution in System Settings produces. A pass that

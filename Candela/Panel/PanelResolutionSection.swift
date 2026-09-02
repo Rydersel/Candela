@@ -83,7 +83,7 @@ struct PanelResolutionSection: View {
               PanelModeRow(
                 // Tagged and marked, like every other surface that OFFERS a
                 // size to choose from: the size label is bare, so these words
-                // are the whole of RM11 here.
+                // are the whole of the copy rule here.
                 //
                 // Width, measured at 280 pt: "1440 × 2560 (HiDPI, Scaled)" on
                 // the Dell fit with room to spare, and the row truncates rather
@@ -204,7 +204,7 @@ struct PanelResolutionSection: View {
   }
 
   /// A synthesized size that did not engage, or a teardown that did not finish
-  /// (SS9, and `SynthesisFailure.unwindIncomplete`).
+  /// (`SynthesisFailure.unwindIncomplete`).
   ///
   /// The panel can pick a synthesized stop: `badgedSize` marks it and the rows
   /// above apply it like any other size. So the refusal has to be answerable
@@ -234,7 +234,7 @@ struct PanelResolutionSection: View {
   /// What reapply could not do on this display, at launch or when it
   /// reconnected. Nobody was watching then, so this is the first moment the user
   /// can be told, and it stays until they dismiss it or pick a resolution
-  /// themselves. An unplug does not take it away (SO8).
+  /// themselves. An unplug does not take it away.
   @ViewBuilder private var reapplyReport: some View {
     if let report {
       PanelReportRow(

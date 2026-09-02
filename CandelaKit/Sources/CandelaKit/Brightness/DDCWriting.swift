@@ -4,7 +4,7 @@ public protocol DDCWriting: Sendable {
   func read(command: UInt8) async -> (current: UInt16, max: UInt16)?
   /// The display's MCCS capability string (VCP 0xF3), reassembled from its
   /// fragments. `nil` means the TRANSACTION failed — never read that as "this
-  /// display has no capabilities" (D24: unknown resolves to enabled).
+  /// display has no capabilities" (unknown resolves to enabled).
   func readCapabilityString() async -> String?
 }
 

@@ -1,9 +1,9 @@
 import Testing
 @testable import CandelaKit
 
-/// The full 3 × 3 of D24's resolution table, written exhaustively so every cell
+/// The full 3 × 3 of the volume-denial rule's resolution table, written exhaustively so every cell
 /// is an explicit assertion rather than an implication.
-@Suite("Volume slider enablement (D24)")
+@Suite("Volume slider enablement")
 struct VolumeSliderPolicyTests {
   @Test func overrideWinsOverEveryCapabilityVerdict() {
     for support in [VCPSupport.supported, .unsupported, .unknown] {
@@ -72,7 +72,7 @@ struct VolumeSliderPolicyTests {
     }
   }
 
-  /// SO14: hardware is always "display" in copy, never "panel".
+  /// Hardware is always "display" in copy, never "panel".
   @Test func noReasonCallsTheHardwareAPanel() {
     for override in [AudioSinkOverride.auto, .forceNone, .forcePresent] {
       for support in [VCPSupport.supported, .unsupported, .unknown] {
@@ -145,9 +145,9 @@ struct VolumeSliderPolicyTests {
 /// The keyboard half of the same verdict. Measured 2026-08-11: four volume-up
 /// presses with the pointer on the DELL U2725QE walked its stored volume 0.5 to
 /// 0.75 and sent four DDC 0x62 writes, all ACKed, to a display whose own
-/// capabilities string parses cleanly with no 0x62 and whose slider D24 therefore
+/// capabilities string parses cleanly with no 0x62 and whose slider the volume-denial rule therefore
 /// greys. The HUD reported a rising volume that existed only in the pref.
-@Suite("Volume and mute keys obey the same denial as the slider (D24)")
+@Suite("Volume and mute keys obey the same denial as the slider")
 struct VolumeKeyAcceptanceTests {
   /// The bug. A display that lists no volume command takes no volume key.
   @Test func aParsedDenialSwallowsVolumeKeys() {
@@ -156,7 +156,7 @@ struct VolumeKeyAcceptanceTests {
   }
 
   /// Every DDC read on the MAG returns zeros, so its capabilities never resolve
-  /// better than `.unknown` while its 3.5 mm jack works. D24 greys on a clean
+  /// better than `.unknown` while its 3.5 mm jack works. The volume-denial rule greys on a clean
   /// denial only, so a gate keyed on "no positive evidence" kills its keys.
   @Test func noEvidenceIsNotADenial() {
     #expect(VolumeSliderPolicy.acceptsVolumeKeys(
@@ -234,7 +234,7 @@ struct MuteKeyAcceptanceTests {
   }
 
   /// The MAG rule on the second register: a write-only panel can never read
-  /// better than `.unknown` for 0x8D either, and D24 never greys on absence of
+  /// better than `.unknown` for 0x8D either, and the volume-denial rule never greys on absence of
   /// evidence. Both strategies must keep taking the key.
   @Test func noEvidenceIsNotADenialOnEitherRegister() {
     for dedicated in [true, false] {
@@ -266,8 +266,8 @@ struct MuteKeyAcceptanceTests {
   /// The delegation pin again, one register over: with the keyboard enabled and
   /// the dedicated command in force, the mute key's verdict IS `isEnabled` read
   /// against 0x8D's support, for every input. Same structure, so the same
-  /// single copy of D24's rule.
-  @Test func theMuteKeyReachesD24sVerdictOnItsOwnRegister() {
+  /// single copy of the volume-denial rule.
+  @Test func theMuteKeyReachesTheCapabilitiesVerdictOnItsOwnRegister() {
     for override in [AudioSinkOverride.auto, .forceNone, .forcePresent] {
       for support in [VCPSupport.supported, .unsupported, .unknown] {
         #expect(
@@ -302,7 +302,7 @@ struct DedicatedMuteCommandTests {
       prefEnabled: true, override: .auto, muteSupport: .unsupported))
   }
 
-  /// D24's other half, and the MAG's whole case: absence of evidence never
+  /// The volume-denial rule's other half, and the MAG's whole case: absence of evidence never
   /// takes a command away.
   @Test func noEvidenceKeepsTheDedicatedCommand() {
     #expect(VolumeSliderPolicy.usesDedicatedMuteCommand(
@@ -318,9 +318,9 @@ struct DedicatedMuteCommandTests {
       prefEnabled: true, override: .forceNone, muteSupport: .supported))
   }
 
-  /// One copy of D24's rule: with the pref on, the strategy IS `isEnabled`
+  /// One copy of the volume-denial rule: with the pref on, the strategy IS `isEnabled`
   /// read against 0x8D's verdict, for every input.
-  @Test func theStrategyReachesD24sVerdictOnTheMuteRegister() {
+  @Test func theStrategyReachesTheCapabilitiesVerdictOnTheMuteRegister() {
     for override in [AudioSinkOverride.auto, .forceNone, .forcePresent] {
       for support in [VCPSupport.supported, .unsupported, .unknown] {
         #expect(
@@ -416,7 +416,7 @@ struct DegradedMuteReasonTests {
 
   /// The MAG 341C, and the reason the caption cannot key off the verdict alone:
   /// every read on that panel returns zeros, so its mute verdict is permanently
-  /// `.unknown`, D24 keeps the dedicated command, and 0x8D really does carry the
+  /// `.unknown`, the volume-denial rule keeps the dedicated command, and 0x8D really does carry the
   /// mute. A caption here would be false.
   @Test func noEvidenceLeavesTheRowAloneOnTheOverrideToo() {
     #expect(VolumeSliderPolicy.degradedMuteReason(
@@ -441,7 +441,7 @@ struct DegradedMuteReasonTests {
   }
 
   /// With the volume command switched off nothing mutes at all, and the row
-  /// already carries its own sentence saying so (SO5). A caption promising that
+  /// already carries its own sentence saying so. A caption promising that
   /// muting writes the volume register would contradict it one line down.
   @Test func anUnavailableCommandSaysNothingAboutWhereAMuteLands() {
     for override in AudioSinkOverride.allCases {
@@ -455,8 +455,8 @@ struct DegradedMuteReasonTests {
     }
   }
 
-  /// House copy rules, and SO15: one consequence, so one sentence. SO14 retires
-  /// "panel" from visible copy, and no em dashes anywhere a person can read.
+  /// House copy rules: one consequence, so one sentence. The word "panel" is retired
+  /// from visible copy, and no em dashes anywhere a person can read.
   @Test func everyStatusIsOneSentenceInTheHouseVoice() {
     for override in AudioSinkOverride.allCases {
       for support in VCPSupport.allCases {
@@ -504,7 +504,7 @@ struct VolumeKeyArmingTests {
     #expect(VolumeSliderPolicy.armsVolumeKeys(commandIsAvailable: true, override: .forcePresent, volumeSupport: .unsupported))
   }
 
-  /// R1, and why arming is not simply `acceptsVolumeKeys`. A display whose
+  /// The per-display swallow rule, and why arming is not simply `acceptsVolumeKeys`. A display whose
   /// keyboard control is off SWALLOWS its press, as it does for brightness, so
   /// it keeps the keys watched while acting on nothing. The two verdicts
   /// disagree here on purpose.
@@ -560,7 +560,7 @@ struct VolumeKeyArmingTests {
   }
 
   /// Dead-key rig (b): a software-dimmed display's capabilities still read
-  /// `.unknown`, which D24 resolves to enabled, so it armed the whole rig and
+  /// `.unknown`, which the volume-denial rule resolves to enabled, so it armed the whole rig and
   /// then refused every press. Its DDC volume traffic is off, so it arms nothing.
   @Test func aSoftwareDimmedDisplayWithNoVerdictArmsNothing() {
     #expect(!VolumeSliderPolicy.armsVolumeKeys(

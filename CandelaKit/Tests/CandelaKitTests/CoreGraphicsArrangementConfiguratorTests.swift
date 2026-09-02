@@ -26,12 +26,12 @@ struct CoreGraphicsArrangementConfiguratorTests {
     #expect(arrangement.tiles.map(\.id) == [1, 2])
     #expect(arrangement.tile(2)?.rect == DisplayRect(x: 1800, y: -271, width: 3440, height: 1440))
     #expect(arrangement.tile(1)?.name == "Built-in Display")
-    // AR5: main is derived from the geometry, so reading it back must find the
+    // The origin-derives-main rule: main is derived from the geometry, so reading it back must find the
     // display CoreGraphics puts at the origin.
     #expect(arrangement.mainDisplayID == 1)
   }
 
-  /// AR6. The slave has no independent position — its pixels come from the
+  /// The mirror-slave rule. The slave has no independent position — its pixels come from the
   /// master — and setting its origin would silently break the mirror set.
   @Test func aMirrorSlaveGetsNoTileAndIsRecordedOnItsMaster() {
     let arrangement = ArrangementSnapshot.arrangement(

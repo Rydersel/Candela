@@ -3,8 +3,8 @@ import CoreGraphics
 import SwiftUI
 import Testing
 
-// The words and the rows synthesized sizes put on screen (SS4/SS5/SS9),
-// asserted without a window (AT4 layer 1, AT5).
+// The words and the rows synthesized sizes put on screen,
+// asserted without a window.
 //
 // Nothing here may name a refresh rate and nothing here may claim sharpness.
 // Both rules are scans below rather than a review habit.
@@ -39,7 +39,7 @@ struct SynthesisCopyTests {
       """)
   }
 
-  /// The two source marks stay distinguishable (SS5): one marks a mode our
+  /// The two source marks stay distinguishable: one marks a mode our
   /// enumeration FOUND, the other a size this app renders.
   @Test func theSynthesizedBadgeIsDistinctFromTheRevealedOne() {
     #expect(SynthesisCopy.badge == "Rendered by Candela")
@@ -47,8 +47,9 @@ struct SynthesisCopyTests {
     #expect(SynthesisCopy.badge != DisplayModeCopy.addedByApp)
   }
 
-  /// "display", never "panel": SO14 retired the word from visible copy while
-  /// leaving it in the type vocabulary this property is named from.
+  /// "display", never "panel": the naming rule retired the word from visible
+  /// copy while leaving it in the type vocabulary this property is named
+  /// from.
   @Test func theRateColumnStatesTheRuleRatherThanAFigure() {
     #expect(SynthesisCopy.keepsPanelRefresh == "Keeps the display's refresh rate")
   }
@@ -104,7 +105,7 @@ struct SynthesisCopyTests {
     }
   }
 
-  /// RM11 and the camera gate: this feature sells size granularity, never
+  /// The camera gate: this feature sells size granularity, never
   /// sharpness. Supersampling reads SOFTER on standard-PPI glass, so every word
   /// below would be a claim we measured to be false.
   @Test func noSentenceClaimsSharpness() {
@@ -117,9 +118,10 @@ struct SynthesisCopyTests {
     }
   }
 
-  /// SO14 over everything this feature can put on screen: hardware is always a
-  /// "display". The type vocabulary keeps the word (`keepsPanelRefresh` is still
-  /// called that); only the sentences give it up.
+  /// The panel-retirement rule applies over everything this feature can put on
+  /// screen: hardware is always a "display". The type vocabulary keeps the
+  /// word (`keepsPanelRefresh` is still called that); only the sentences give
+  /// it up.
   @Test func noSentenceSaysPanel() {
     for entry in everyString() {
       #expect(!entry.text.lowercased().contains("panel"), "\(entry.site) says panel: \(entry.text)")
@@ -165,7 +167,8 @@ struct SynthesisCopyTests {
   /// what clears it. Silence here leaves a virtual display up with no account
   /// of it anywhere a person can read.
   ///
-  /// It must not promise that quitting is enough. S1 5A measured the exception:
+  /// It must not promise that quitting is enough. An earlier experiment
+  /// measured the exception:
   /// while the virtual display is the only ACTIVE display, macOS keeps it, and
   /// it outlived both the owning object's release and a SIGKILL of its owner.
   /// So the hedge and the second route are pinned, not just the first sentence.
@@ -179,7 +182,7 @@ struct SynthesisCopyTests {
     #expect(!text.contains("quitting Candela removes it"))
   }
 
-  /// SS7's refusal in the direction nothing consulted before. It names no
+  /// The refusal in the direction nothing consulted before. It names no
   /// mechanism the app made up and picks no side of the set: the reason fires
   /// for the display showing another one and for the one being shown.
   @Test func theMirrorRefusalNamesTheSetAndTheOneThingToDo() {
@@ -234,7 +237,7 @@ struct SynthesisCopyTests {
 
   // MARK: - The rows a synthesized stop produces
 
-  /// The curated list is the merged one (SS4), so a synthesized stop is a row
+  /// The curated list is the merged one, so a synthesized stop is a row
   /// in it: marked, and with the rate column stating the rule rather than the
   /// 0 sentinel it carries.
   @Test func aSynthesizedRowIsMarkedAndNamesNoRate() throws {
@@ -284,7 +287,7 @@ struct SynthesisCopyTests {
     text.range(of: "(^|[^0-9])0 (Hz|hertz)", options: .regularExpression) != nil
   }
 
-  /// SS4's All clause. The All list enumerates what the DISPLAY reports, and a
+  /// The All clause. The All list enumerates what the DISPLAY reports, and a
   /// synthesized stop is in no enumeration, so it has no row there and no size
   /// group of its own.
   @Test func theAllListHoldsNoSynthesizedRow() {
@@ -351,9 +354,9 @@ struct SynthesisCopyTests {
 }
 
 /// A MAG-shaped panel with the real stop ladder on it: the fixtures come from
-/// `SyntheticSizeCatalog` rather than being hand-written, so a change to SS3's
-/// percentages or to SS2's precedence is visible here rather than pinned to a
-/// list this file made up.
+/// `SyntheticSizeCatalog` rather than being hand-written, so a change to the
+/// catalog's percentages or to its precedence is visible here rather than
+/// pinned to a list this file made up.
 @MainActor
 private enum SynthesisFixtures {
   static let native = mode(5, 3440, 1440, 3440, 1440, hz: 175, isNative: true)

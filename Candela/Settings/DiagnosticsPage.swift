@@ -8,29 +8,29 @@ import UniformTypeIdentifiers
 /// and the two report actions. It leads with a plain-English verdict so "is this
 /// working?" is answered before the rows start.
 ///
-/// The feature is the HONESTY RULES (DT30), not the rows:
+/// The feature is the HONESTY RULES, not the rows:
 /// - every "unavailable" row states a REASON drawn from a typed value;
 /// - an unanswered display is reported as UNANSWERED, never as unsupported;
 /// - a write-only panel is NAMED, with the consequence stated plainly;
 /// - we never claim what macOS hides, only what our own curation did;
 /// - "not measured yet" (nil) is never rendered as "no answer" (empty);
-/// - internal key names never reach copy (D25).
+/// - internal key names never reach copy.
 ///
 /// The sentences those rules govern are not here: every row's value comes from
 /// `DiagnosticsCopy` in CandelaKit, where each distinction is pinned by a test,
 /// and every caption from `DiagnosticsPageCopy`. This file holds which rows
 /// exist, for which display, and which facts each one is handed.
 ///
-/// It renders under the BUILT-IN display too (DT45). Every row about a data
+/// It renders under the BUILT-IN display too. Every row about a data
 /// cable, an EDID or a DDC answer is OMITTED there rather than rendered against
 /// a fact that never arrives: `DisplayDiscovery` is external-only, so
 /// "Connection: not enumerated yet" would be a permanent promise of an answer,
-/// the shape DT30 rule (e) forbids.
+/// the shape the honesty rules forbid.
 ///
 /// `@MainActor` is load-bearing: a `View`'s properties other than `body` are
 /// nonisolated under complete concurrency, and this one reads main-actor types.
 ///
-/// The page WRITES NO PREF (DT31), so D29 does not bind it. It binds the moment
+/// The page WRITES NO PREF, so the mute-strand rule does not bind it. It binds the moment
 /// a control that can disable a command is added.
 @MainActor
 struct DiagnosticsPage: View {
@@ -83,7 +83,7 @@ struct DiagnosticsPage: View {
 
       // Every row here is about a DDC answer and the built-in never gives one,
       // so rendering it there would put "Not asked yet" under a heading
-      // promising an answer that cannot arrive (DT30 rule (e)). The built-in's
+      // promising an answer that cannot arrive. The built-in's
       // DDC story is stated once, in Brightness Control.
       if !isBuiltIn {
         SettingsCardSection(title: "Reported Capabilities") {
@@ -187,7 +187,7 @@ struct DiagnosticsPage: View {
     identityKeysRow
   }
 
-  /// Where this display's resolutions came from. DT30 rule (d): this describes
+  /// Where this display's resolutions came from: this describes
   /// OUR OWN enumeration. Both counts are ours, and neither asserts why macOS
   /// omitted anything.
   @ViewBuilder private var resolutionSourceRows: some View {
@@ -216,7 +216,7 @@ struct DiagnosticsPage: View {
     }
   }
 
-  /// The third source (SS4/SS5), silent unless this display's opt-in is on: a
+  /// The third source, silent unless this display's opt-in is on: a
   /// count of 0 under an opt-in nobody turned on reads as a feature that looked
   /// and found nothing. A whole line rather than a label and a value, because
   /// its two facts (that sizes are offered, and how many) only mean anything
@@ -310,7 +310,7 @@ struct DiagnosticsPage: View {
     // to a display using it. Two claims it could not otherwise support. The
     // counter is touched only inside `checkBeforeApply`, which runs before a
     // GAMMA apply, so a display on another path keeps a permanent 0 that
-    // rendered as "None this session": omit rather than blank (DT45). And
+    // rendered as "None this session": omit rather than blank. And
     // `resetCounter()` fires on EVERY display reconfiguration, so "this session"
     // told a user who had watched a conflict, then woken the Mac, of none.
     if usesGammaLeg, let monitor = model.gammaInterference {
@@ -342,7 +342,7 @@ struct DiagnosticsPage: View {
 
   private var capabilities: String? { model.capabilityString[persistenceKey] }
 
-  /// nil means the description did not parse end to end (D24), which is a
+  /// nil means the description did not parse end to end, which is a
   /// DIFFERENT answer from "the display listed no codes". A partially parsed
   /// list must never be shown as though it were the display's advertised list.
   private var advertisedCodes: Set<UInt8>? {
@@ -447,7 +447,7 @@ struct DiagnosticsPage: View {
 
   // MARK: - Availability
 
-  /// DT30 rule (a), enforced in `DiagnosticsCopy`: no row here reads just
+  /// The honesty rules, enforced in `DiagnosticsCopy`: no row here reads just
   /// "Unavailable", every one names the thing that took the feature away, and
   /// every reason comes off a typed value.
   ///
@@ -550,7 +550,7 @@ struct DiagnosticsPage: View {
           valueText(watchedKeysText)
         }
         // The conditions are a list, so they render as one rather than as a
-        // paragraph nobody finishes (SO15/SO16).
+        // paragraph nobody finishes.
         ForEach(DiagnosticsPageCopy.keyWatchRequirements, id: \.title) { requirement in
           KeyRequirementRow(
             title: requirement.title, needs: requirement.needs, spoken: requirement.spoken
@@ -595,8 +595,8 @@ struct DiagnosticsPage: View {
     SettingsCardDivider()
 
     LabeledContent("Mirroring") {
-      // SS7: a synthesis set is not user mirroring, though the CG flag says it
-      // is. The pairing table is the authority (SS1) and decides here; without
+      // A synthesis set is not user mirroring, though the CG flag says it
+      // is. The pairing table is the authority and decides here; without
       // it the row claims a display shows another's contents while it is showing
       // its own picture at a size this app renders.
       valueText(DiagnosticsCopy.mirroring(
@@ -607,7 +607,7 @@ struct DiagnosticsPage: View {
     synthesizedActiveRow
   }
 
-  /// The engaged pairing, from the ENGINE's own table (SS1), never a CG mirror
+  /// The engaged pairing, from the ENGINE's own table, never a CG mirror
   /// flag or a mode readback: the engage tail re-times the slave, so a
   /// synthesis-engaged display reports its own native mode [MEASURED
   /// 2026-08-18]. It adds the slot, which is what tells two engaged displays
@@ -628,7 +628,7 @@ struct DiagnosticsPage: View {
   }
 
   /// Reads the LAST ARMED config, not a freshly computed one: the two differ
-  /// exactly when a rearm failed, which is the case this row is for (B9).
+  /// exactly when a rearm failed, which is the case this row is for.
   private var watchedKeysText: String {
     DiagnosticsCopy.watchedKeys(
       families: watchedKeyFamilies, tapRunning: model.lastArmedTapConfig != nil)
@@ -705,7 +705,7 @@ struct DiagnosticsPage: View {
 private struct KeyRequirementRow: View {
   let title: String
   let needs: String
-  /// The prose this row replaced, kept whole for VoiceOver (SO16). It carries
+  /// The prose this row replaced, kept whole for VoiceOver. It carries
   /// the mode-dependent corners the visible half deliberately leaves out.
   let spoken: String
 

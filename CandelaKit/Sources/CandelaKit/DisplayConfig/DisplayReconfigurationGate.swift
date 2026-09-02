@@ -3,10 +3,10 @@ import Foundation
 /// The things in this app that reconfigure displays, and therefore the things
 /// that must not do it at the same time.
 ///
-/// **Four cases, not three (AR12).** All four open a
+/// **Four cases, not three.** All four open a
 /// `CGBeginDisplayConfiguration`-shaped transaction or its `SkyLight` equivalent,
 /// and all four leave an unanswered preview standing for up to thirty seconds.
-/// The pairing the amendment exists for is the least obvious one: a resolution
+/// The pairing the fourth case exists for is the least obvious one: a resolution
 /// change during an arrangement preview alters the very tile sizes the layout was
 /// computed from, so the layout on screen stops being the layout that was asked
 /// about.
@@ -38,11 +38,10 @@ public enum ReconfigurationClaimOutcome: Sendable, Equatable {
   }
 }
 
-/// At most one display reconfiguration is outstanding at a time (AR10, amended
-/// by AR12).
+/// At most one display reconfiguration is outstanding at a time.
 ///
-/// **The decision lives here, in the engine, because there is no app test target
-/// (D21).** An exclusion rule that only exists as `if` statements spread across
+/// **The decision lives here, in the engine, because there is no app test
+/// target.** An exclusion rule that only exists as `if` statements spread across
 /// four `@MainActor` coordinators cannot be tested at all, and the failure it
 /// guards against, a stranded claim, deadlocks every display feature in the app at
 /// once. What stays in the app target is the wiring: who claims, when, and what

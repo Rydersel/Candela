@@ -185,9 +185,9 @@ struct SynthesisTailTests {
 
   // MARK: - What the surfaces read
 
-  /// SS1 over the readback. The re-time leaves `current` naming a real published
-  /// row, so every "what is running" reader goes through `onScreen` and every no-op
-  /// guard sees nil.
+  /// The readback rule: the re-time leaves `current` naming a real published
+  /// row, so every "what is running" reader goes through `onScreen` and every
+  /// no-op guard sees nil.
   @Test func theOnScreenSizeIsTheStopRatherThanTheReadback() async throws {
     let fixture = Fixture()
     defer { fixture.forgetPrefs() }
@@ -308,8 +308,8 @@ struct SynthesisTailTests {
 
   // MARK: - An ordinary size over a committed set
 
-  /// SS10 through the picker: the set comes down through the engine before any mode
-  /// touches the display, and the gate comes back afterwards.
+  /// The rule through the picker: the set comes down through the engine
+  /// before any mode touches the display, and the gate comes back afterwards.
   @Test func anOrdinaryPickOverACommittedSetTakesTheSetDown() async throws {
     let fixture = Fixture()
     defer { fixture.forgetPrefs() }

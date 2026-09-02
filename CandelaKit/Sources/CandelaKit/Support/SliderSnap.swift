@@ -1,8 +1,8 @@
 import Foundation
 
 /// Slider snapping and the percentage readout, the two panel slider options that
-/// survive D26. Tick marks are cut: `showTickMarks` keeps its key so the name is not
-/// reused, but nothing renders it, and D32 files it as reserved-and-inert, NOT as a
+/// survived the cut. Tick marks are cut: `showTickMarks` keeps its key so the name is not
+/// reused, but nothing renders it, and it is filed as reserved-and-inert, NOT as a
 /// `defaults write` escape hatch.
 ///
 /// One type for both because they describe the same scale.
@@ -11,7 +11,7 @@ public enum SliderSnap {
   public static let stops: [Double] = [0, 0.25, 0.5, 0.75, 1]
 
   /// The same stops with `0` removed, for controls where landing on 0 is a STATE
-  /// change rather than a value (D29): `DDCValueController.apply` reads volume 0 as a
+  /// change rather than a value: `DDCValueController.apply` reads volume 0 as a
   /// mute event and, under `enableMuteUnmute`, writes VCP 0x8D = 1, a persistent
   /// hardware mute that survives relaunch and wake restore. A snapping convenience
   /// must not cause that; a user who wants silence can still drag all the way to 0.
@@ -45,7 +45,7 @@ public enum SliderSnap {
   /// strictly beyond `value` in the direction of travel, so a 62.5% slider steps to
   /// 60/65 rather than 57.5/67.5.
   ///
-  /// **The zero-free grid is D29's enforcement point on this route.** With
+  /// **The zero-free grid is the mute-strand rule's enforcement point on this route.** With
   /// `stopsWithoutZero` (the volume rows) 0 is not a grid point, so a decrement stops
   /// at the lowest one there is. Volume 0 is a hardware mute over VCP 0x8D, and
   /// decrement is the ONLY way a VoiceOver user can lower the volume. `snapped`

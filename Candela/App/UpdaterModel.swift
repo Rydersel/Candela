@@ -8,7 +8,7 @@ import Sparkle
 /// and friends live in our defaults domain but are Sparkle's schema, not
 /// `PrefName` cases), so the toggle below writes through to the updater rather
 /// than persisting anything of our own: the same one-source-of-truth shape as
-/// launch-at-login (D10). `automaticallyChecksForUpdates` is a stored mirror
+/// launch-at-login. `automaticallyChecksForUpdates` is a stored mirror
 /// ONLY because `@Observable` cannot invalidate a view from a computed property
 /// over foreign storage.
 @MainActor @Observable

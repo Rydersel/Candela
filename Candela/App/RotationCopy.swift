@@ -9,7 +9,7 @@ enum RotationCopy {
   /// section, where this word carries the topic.
   static var label: LocalizedStringKey { "Rotation" }
 
-  /// The system's own wording. D25: familiarity beats novelty, and "Portrait"
+  /// The system's own wording: familiarity beats novelty, and "Portrait"
   /// and "Landscape" would be a second vocabulary for the same values, wrong for
   /// an already-portrait panel.
   static func angle(_ rotation: DisplayRotation) -> LocalizedStringKey {
@@ -66,7 +66,7 @@ enum RotationCopy {
     "The display did not rotate, and nothing was changed."
   }
 
-  /// The RT8 case, worth its own sentence: macOS accepted the change, reported
+  /// This case, worth its own sentence: macOS accepted the change, reported
   /// success, and the display did not move. "It failed" is the wrong shape of
   /// statement for a call that returned no error.
   static var resolveFailure: LocalizedStringKey {

@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// The verified engage/disengage sequence and its reverse unwind (SS1, SS10).
+/// The verified engage/disengage sequence and its reverse unwind.
 ///
 /// Everything runs against the shared fake world, so every step is observable:
 /// the call log records the ORDER of the mirror change and the virtual-display
@@ -16,7 +16,7 @@ extension Result {
   }
 }
 
-@Suite("Mode synthesis engine (SS1, SS10)")
+@Suite("Mode synthesis engine")
 struct ModeSynthesisEngineTests {
   /// The rig's ultrawide, at the refresh the mirror was measured preserving.
   private static let physical: CGDirectDisplayID = 2
@@ -111,7 +111,7 @@ struct ModeSynthesisEngineTests {
     #expect(await engine.pairings().map(\.slot) == [4, 5])
   }
 
-  /// The family is two slots wide (SS6), so a third physical has nowhere to go.
+  /// The family is two slots wide, so a third physical has nowhere to go.
   /// It must be told that, not handed a slot outside the range.
   @Test func aThirdEngageIsRefusedForWantOfASlot() async {
     let world = world()
@@ -407,7 +407,7 @@ struct ModeSynthesisEngineTests {
     #expect(world.onlineVirtualDisplayIDs == [FakeSynthesisWorld.virtualDisplayID(slot: 4)])
   }
 
-  /// SS10's last disengage step. The mirror came off, the virtual display went
+  /// The unwind-ordering rule's last disengage step. The mirror came off, the virtual display went
   /// away, and the panel is still on the synthesized geometry: the size is
   /// still on the glass, so the teardown did not finish whatever the topology
   /// now says.
@@ -433,7 +433,7 @@ struct ModeSynthesisEngineTests {
     ])
   }
 
-  /// The half of SS10's last step a rendered-size comparison cannot see: the engage
+  /// The half of the unwind-ordering rule's last step a rendered-size comparison cannot see: the engage
   /// tail re-times the slave onto its own mode, so from two seconds after an engage
   /// the panel already reports its own geometry and that comparison can no longer
   /// be entered by any input.

@@ -67,7 +67,7 @@ struct VirtualDisplayHostTests {
   }
 
   /// Both bounds, and both must sit OUTSIDE the whole family: the host's
-  /// guard is the one site that spans user and synthesis slots alike (SS6),
+  /// guard is the one site that spans user and synthesis slots alike,
   /// so an in-family slot here would stand a real display, ungated, and mint
   /// its permanent colour profile as a side effect of running the suite.
   @Test func slotsOutsideTheRangeAreRefused() {
@@ -81,7 +81,7 @@ struct VirtualDisplayHostTests {
                         uuid: UUID(), appearanceTimeout: 0.1) == .failure(.capExceeded))
   }
 
-  /// SS6: the guard spans the family, so a synthesis slot is accepted by the
+  /// The guard spans the family, so a synthesis slot is accepted by the
   /// host even though nothing user-facing offers it. Checked WITHOUT calling
   /// create: standing a display is the gated suite's business.
   @Test func synthesisSlotsAreInsideTheHostsRange() {

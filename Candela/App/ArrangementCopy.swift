@@ -41,7 +41,7 @@ enum ArrangementCopy {
     return "\(layout) The menu bar is on \(mainDisplayName)."
   }
 
-  /// AR7. Says what has to move rather than "invalid", which tells the user
+  /// Says what has to move rather than "invalid", which tells the user
   /// nothing they can act on.
   ///
   /// `Text`, not `LocalizedStringKey`: the named variants interpolate a display's
@@ -113,7 +113,7 @@ enum ArrangementCopy {
   ) -> Text {
     switch notice {
     case .ambiguousIdentity:
-      // AR11. Deliberately does NOT name the displays: the refusal exists
+      // Deliberately does NOT name the displays: the refusal exists
       // because two of them are indistinguishable, so naming one would be the
       // guess this refuses to make.
       Text("Two of your displays report the same identity, so \(AppInfo.productName) cannot tell which saved position belongs to which. The arrangement was left as it is.")

@@ -1,6 +1,6 @@
 import Foundation
 
-/// CK9: one protocol per family, a live implementation and a fake for each.
+/// One protocol per family, a live implementation and a fake for each.
 /// Runners return claims, not Bools, because a claim carries its evidence. A
 /// DDC ACK or a configuration return grades nothing; each live runner re-reads achieved state.
 public protocol CheckupCapabilitiesRunning: Sendable {

@@ -15,7 +15,7 @@ import CoreGraphics
 /// that merely ENTERED the pool can be handed a physical panel's `IOAVService`:
 /// DDC writes on the physical bus attributed to a synthetic display, and
 /// `persistenceKey(from:)` would give both the physical monitor's EDID UUID, so
-/// the two would share stored brightness (VD3).
+/// the two would share stored brightness.
 ///
 /// NOT implemented by extending `Arm64DDC.checkIfDummy`, which hardcodes one AOC
 /// model. It is not a general "not a real panel" filter and must not become one:

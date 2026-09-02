@@ -1,6 +1,6 @@
 import Testing
 
-// The flow model's apply seam and its state machine (PD9): an apply opens a
+// The flow model's apply seam and its state machine: an apply opens a
 // keep and revert countdown, expiry REVERTS and the page stays, only an
 // explicit keep records the choice and advances, and the `.applySize` commit
 // is a record of a kept apply, never a trigger. Everything runs over the
@@ -236,7 +236,7 @@ struct OnboardingFlowModelTests {
     #expect(model.applyState == .counting(secondsRemaining: 15))
   }
 
-  // MARK: - The flow's edges (OB7)
+  // MARK: - The flow's edges
 
   @Test func skipMidCountdownRevertsBeforeClosing() {
     let model = modelOnSizePage()
@@ -369,7 +369,7 @@ struct OnboardingFlowModelTests {
     #expect(model.screenRecordingGranted)
   }
 
-  // MARK: - Telemetry prefill (OB3 on a first run, the stored pref after)
+  // MARK: - Telemetry prefill (default first run, stored pref after)
 
   @Test func aReRunSeedsTheMeasurementChoiceFromTheEnrolledDisplaysPref() {
     // A returning user who chose Estimated arrives with the pref false on

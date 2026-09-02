@@ -144,7 +144,7 @@ struct AppRegressionTests {
     #expect(AppRegression.ddcWriteValues(fromLogLines: [line]) == [100])
   }
 
-  // MARK: - D28, both directions (the Session 3 numbers)
+  // MARK: - The reapply-after-pref-change shape, both directions (the Session 3 numbers)
 
   @Test func aDeadFloorWriteMakesTheGammaReadingsMeanNothing() {
     let outcome = AppRegression.combinedToggleVerdict(
@@ -157,7 +157,7 @@ struct AppRegressionTests {
     #expect(detail(outcome).contains("floor"))
   }
 
-  @Test func aGammaThatNeverReleasesIsTheD28Failure() {
+  @Test func aGammaThatNeverReleasesIsTheReapplyFailure() {
     let outcome = AppRegression.combinedToggleVerdict(
       gammaAtFloor: 0.7875, ddcFloorWriteSeen: true,
       gammaAfterOff: 0.7875, ddcValuesAfterOff: [37],
@@ -553,7 +553,7 @@ struct AppRegressionTests {
         == "unavailableDDC.volume.PK1")
   }
 
-  // MARK: - D29, proven by outcome
+  // MARK: - The mute-strand rule, proven by outcome
 
   @Test func withoutTheMuteControlTheUnmuteProvesNothing() {
     let outcome = AppRegression.muteStrandVerdict(
@@ -698,7 +698,7 @@ struct AppRegressionTests {
     #expect(window.ddcWritesAfterWake == 0)
   }
 
-  // MARK: - D24 through the panel dump
+  // MARK: - The capabilities-denial rule through the panel dump
 
   private static let magRow =
     "2026-08-17 11:02:03.100 Df Candela[9:1] [com.rydersel.Candela:panel] panel.row display=\"MAG 341C OLED\" volumeSlider=shown volumeEnabled=yes volumeSupport=unknown"
@@ -721,7 +721,7 @@ struct AppRegressionTests {
   }
 
   @Test func aGreyedSliderOnTheWriteOnlyPanelFails() {
-    // D24 greys on the monitor's own denial. The write-only panel answers no
+    // The slider greys on the monitor's own denial. The write-only panel answers no
     // capabilities at all, so its verdict is unknown and its slider stays
     // enabled; greying it would be the app inventing a denial.
     let greyedMAG = Self.magRow
@@ -751,7 +751,7 @@ struct AppRegressionTests {
     #expect(isFail(outcome))
   }
 
-  @Test func theMeasuredD24PairPasses() {
+  @Test func theMeasuredCapabilitiesPairPasses() {
     let outcome = AppRegression.panelDumpVerdict(
       dumpLines: [Self.magRow, Self.dellRow], noVarDumpLineCount: 0,
       magTitleFragment: "MAG 341C", dellTitleFragment: "U2725QE")
@@ -785,7 +785,7 @@ struct AppRegressionTests {
 
   /// The rows the denying panel writes before and after its verdict lands. The
   /// pass=1 row is not a degraded copy of the pass=2 one: it is the app's
-  /// honest not-yet-knowing, and it looks exactly like the D24 regression this
+  /// honest not-yet-knowing, and it looks exactly like the capabilities-denial regression this
   /// check exists to catch.
   private static let dellBeforeVerdict = dumpRow(
     title: "DELL U2725QE", volumeSupport: "unknown")
@@ -855,7 +855,7 @@ struct AppRegressionTests {
     // The defect this segmentation exists for, pinned so it cannot come back.
     // The window accumulates both dumps, so a search for the first line naming
     // the panel finds its pass=1 row, whose slider is enabled on an unknown
-    // verdict: the shape of a D24 regression, on a rig where D24 is intact.
+    // verdict: the shape of a capabilities-denial regression, on a rig where the capabilities-denial rule is intact.
     let outcome = AppRegression.panelDumpVerdict(
       dumpLines: AppRegression.panelDumpRows(fromLogLines: Self.twoPassWindow),
       noVarDumpLineCount: 0, magTitleFragment: "MAG 341C", dellTitleFragment: "U2725QE")

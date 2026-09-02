@@ -20,7 +20,7 @@ struct OnboardingDisplayInput {
   /// reports 2160x3840. `entry(for:)` turns this into panel-native.
   var reportedNativePixelWidth: Int?
   var reportedNativePixelHeight: Int?
-  /// nil is a real answer (RT7), not a missing reading: a display reporting an
+  /// nil is a real answer, not a missing reading: a display reporting an
   /// angle this app declines to describe is drawn upright rather than guessed
   /// at.
   var rotationDegrees: Int?
@@ -40,7 +40,7 @@ struct OnboardingDisplayInput {
   /// The rate on the glass. Only a fallback here, for a display nothing has
   /// enumerated yet.
   var currentRefreshHz: Double
-  /// The stored D24 verdict. nil for an ABSENT entry, meaning the capabilities
+  /// The stored capabilities-probe verdict. nil for an ABSENT entry, meaning the capabilities
   /// probe has not run, which is not a denial.
   var volumeSupport: VCPSupport?
   /// The density model's correction, nil whenever it abstained.
@@ -150,7 +150,7 @@ enum OnboardingEnvironmentBuilder {
     return (width * width + height * height).squareRoot() / 2.54
   }
 
-  /// D24. An absent verdict means the capabilities probe has not run, and such
+  /// The capabilities-probe verdict. An absent verdict means the capabilities probe has not run, and such
   /// a display is fully usable, so it reads the same as a probe that ran and
   /// failed: unknown, never a denial. Only a cleanly parsed capabilities string
   /// that lacks the volume register is the display declining.
@@ -162,11 +162,11 @@ enum OnboardingEnvironmentBuilder {
     }
   }
 
-  /// OB8, decided here rather than in `OnboardingPlan`: a display with no
+  /// Decided here rather than in `OnboardingPlan`: a display with no
   /// suggestion gets no size page at all, so the flow never asks a person to
   /// confirm what is already correct.
   ///
-  /// The conditions match the settings hub's recommendation callout (PD8), so
+  /// The conditions match the settings hub's recommendation callout, so
   /// the two surfaces cannot disagree about whether a display has anything to
   /// correct.
   ///
@@ -232,7 +232,7 @@ enum OnboardingLiveEnvironment {
       displays: inputs,
       accessibilityGranted: model.accessibility.isGranted,
       loginItemEnabled: loginItem.isEnabled,
-      // D13's marker: an unwritten schema version is the only record that this
+      // The schema marker: an unwritten schema version is the only record that this
       // launch is the first one.
       isFirstRun: PrefsSchema.storedVersion(in: defaults) == nil
     )

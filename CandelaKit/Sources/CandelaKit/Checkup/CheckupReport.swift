@@ -4,7 +4,7 @@ public struct CheckupDisplayIdentity: Codable, Equatable, Sendable {
   public let identityKey: String
   public let vendorID: UInt32
   public let modelID: UInt32
-  /// The literal "no serial reported" when the display reports none (CK6).
+  /// The literal "no serial reported" when the display reports none.
   public let serial: String
   public let manufactureWeek: Int?
   public let manufactureYear: Int?
@@ -90,7 +90,7 @@ public struct CheckupReport: Codable, Equatable, Sendable {
   /// Showings per field id; the cap is CheckupPlan.maxShowingsPerField.
   public var showings: [String: Int]
   public var exposureBookingID: String?
-  /// CK16: fields whose lower edge carried the instruction strip because the
+  /// Fields whose lower edge carried the instruction strip because the
   /// target was the only display. A reader must know which fields were not the whole panel.
   public var partiallyOccludedFields: [String]
 

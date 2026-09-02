@@ -64,7 +64,7 @@ struct ExposureModelCompositingTests {
     }
   }
 
-  /// The two modes are interchangeable at baseline (MP13), so nothing else here
+  /// The two modes are interchangeable at baseline, so nothing else here
   /// notices if the shipped default flips. Which branch ships is a decision.
   @Test("the shipped default composites by the clamped sum")
   func baselinePinsItsCompositingMode() {

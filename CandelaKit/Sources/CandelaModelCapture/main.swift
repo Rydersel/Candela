@@ -248,7 +248,7 @@ enum CaptureAttribution {
     guard !known.isEmpty else {
       // `DisplayDiscovery` returns only external DDC-capable panels, so a virtual
       // display and the built-in have no entry. They are still good capture surfaces:
-      // EM13 makes the measured side the composited framebuffer, not emitted light.
+      // The measured side is the composited framebuffer, not emitted light.
       return [
         AttributionTarget(
           id: surface, key: "cgdisplay-\(surface)", name: "display \(surface)",

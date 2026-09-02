@@ -1,18 +1,18 @@
 import Foundation
 
 /// Accumulated panel-on time for one display, split by dim state and by how
-/// bright the panel was left (OC20).
+/// bright the panel was left.
 ///
 /// Ships before the two features that consume it, because neither can start
-/// accumulating until this exists: OC17's effect-size gate (what fraction of
-/// panel-on time is spent in a wear-weightable dim state) and the
+/// accumulating until this exists: the wear mask's effect-size gate (what
+/// fraction of panel-on time is spent in a wear-weightable dim state) and the
 /// modelled-vs-measured comparison (what drive level the panel actually ran at).
 /// `PanelHoursTracker` answers neither.
 ///
 /// **Both axes are load-bearing and neither derives from the other.** The state
-/// axis answers OC17's gate as a count of seconds, with nothing in it that can
-/// be wrong. The level axis is what a wear model integrates, and it carries a
-/// proxy caveat the state axis does not (see `noteTick`).
+/// axis answers the wear mask's gate as a count of seconds, with nothing in
+/// it that can be wrong. The level axis is what a wear model integrates, and
+/// it carries a proxy caveat the state axis does not (see `noteTick`).
 ///
 /// **A histogram rather than an integral, deliberately.** `sum(level * dt)` is
 /// smaller and is exactly what a linear wear model wants, which is the objection
@@ -44,9 +44,9 @@ public final class WearSignalTracker {
     "active", "idleDim", "blackout", "lockDim", "unfocusedDim", "suspended",
   ]
 
-  /// The states OC17's mask would apply to. Blackout is excluded because there
-  /// is no luminance left to redistribute; `active` and `suspended` because
-  /// nothing is dimming.
+  /// The states the wear mask would apply to. Blackout is excluded because
+  /// there is no luminance left to redistribute; `active` and `suspended`
+  /// because nothing is dimming.
   static let wearWeightableStates: Set<OledDimState> = [.idleDim, .lockDim, .unfocusedDim]
 
   static var slotCount: Int { stateOrder.count * bucketCount }
@@ -156,14 +156,14 @@ public final class WearSignalTracker {
     return WearHistogram(stateNames: Self.stateNames, levelBuckets: Self.bucketCount, seconds: rows)
   }
 
-  /// **OC17's effect-size gate, as one number.** The share of
+  /// **The wear mask's effect-size gate, as one number.** The share of
   /// MASK-COULD-APPLY time spent in a state the wear mask would apply to.
   ///
   /// The denominator is a ruling, not an artifact of the arithmetic: suspended
   /// seconds are excluded because the mask cannot apply during them, so counting
   /// them measures the gate against time it was never eligible to act in.
   ///
-  /// Suspended time is real, and under synthesis it is common (SS8): a
+  /// Suspended time is real, and under synthesis it is common: a
   /// synthesized size mirrors the panel onto a virtual display, and OLED care
   /// keeps booking that panel's time as `.suspended` rather than stopping the
   /// clock. It belongs in the histogram, not in this ratio.

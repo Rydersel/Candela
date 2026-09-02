@@ -44,7 +44,7 @@ enum MirrorFixtures {
   /// display 5's framebuffer, with the pairing naming 5 as a synthesis master.
   ///
   /// `masterReportsFlags` is measured: the rig's VD master DOES report
-  /// `CGDisplayIsInMirrorSet`. SS1 makes the pairing the authority anyway, so
+  /// `CGDisplayIsInMirrorSet`. The injected pairing is the authority anyway, so
   /// `false` is the case that has to work too.
   static func synthesisPair(masterReportsFlags: Bool = true) -> MirrorTopology {
     MirrorTopology(
@@ -68,7 +68,7 @@ extension Result where Failure == DisplayConfigError {
   }
 }
 
-@Suite("Mirror topology reconstruction (DT13)")
+@Suite("Mirror topology reconstruction")
 struct MirrorTopologyTests {
   @Test func aSetIsReconstructedByGroupingOnTheMasterEachSlaveNames() {
     let topology = MirrorFixtures.mirroredTrio
@@ -108,7 +108,7 @@ struct MirrorTopologyTests {
 
   /// A stale or empty sample must never INVENT a target. Returning the
   /// display's own ID is exactly today's behaviour, which then fails its
-  /// `NSScreen` lookup and is reported as a failure (DT17) rather than guessed.
+  /// `NSScreen` lookup and is reported as a failure rather than guessed.
   @Test func anUnknownDisplayResolvesToItselfRatherThanToAGuess() {
     #expect(MirrorTopology([]).drawableDisplayID(for: 42) == 42)
     #expect(MirrorFixtures.mirroredTrio.drawableDisplayID(for: 42) == 42)
@@ -159,7 +159,7 @@ struct MirrorTopologyTests {
   /// The same intersection on the one accessor whose result is ACTED ON. A phantom
   /// master can never have an `NSScreen`, so returning it would refuse gamma
   /// dimming for that panel forever, and since the software leg clears its dedupe
-  /// memo on failure (DT17), forever means once per drag event with a log line
+  /// memo on failure, forever means once per drag event with a log line
   /// each. The raw ID at least resolves when the sample was merely stale about
   /// mirroring.
   @Test func aDrawableTargetIsNeverADisplayThisSampleDoesNotContain() {
@@ -194,9 +194,9 @@ struct MirrorTopologyTests {
     #expect(targets == [2])
   }
 
-  // MARK: - Synthesis sets (SS1, SS7)
+  // MARK: - Synthesis sets
 
-  /// SS7: a synthesis set is not user mirroring. It stays a mirror set in every
+  /// The synthesis-vs-mirroring rule: a synthesis set is not user mirroring. It stays a mirror set in every
   /// CoreGraphics sense; the carve-out is about what the app OFFERS, so the raw
   /// accessors are deliberately unchanged.
   @Test func aSetWhosePairingNamesItsMasterIsASynthesisSetAndNotUserMirroring() {
@@ -210,7 +210,7 @@ struct MirrorTopologyTests {
     #expect(topology.setMembers(containing: 2) == [2, 5])
   }
 
-  /// The other half of SS7: the predicate answers about ONE set, so a set the
+  /// The other half of the synthesis-vs-mirroring rule: the predicate answers about ONE set, so a set the
   /// user built is untouched even on a machine that also has a synthesis set.
   @Test func aGenuineMirrorSetIsUntouchedByTheSynthesisCarveOut() {
     let user = MirrorFixtures.mirroredTrio
@@ -233,7 +233,7 @@ struct MirrorTopologyTests {
     #expect(!mixed.isSynthesisSet(containing: 1))
   }
 
-  /// SS1: the injected pairing is consulted BEFORE the CG flags, so the pair
+  /// The injected pairing is consulted BEFORE the CG flags, so the pair
   /// expands together whether or not the VD master reports `CGDisplayIsInMirrorSet`.
   /// It was measured to, and nothing here depends on that holding.
   @Test func eitherMemberOfASynthesisSetExpandsToThePairWithoutTheCGMirrorFlags() {

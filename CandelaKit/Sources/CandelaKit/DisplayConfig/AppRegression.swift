@@ -14,7 +14,7 @@ import Foundation
 /// that then came out wrong. A check whose failure mode is silence is not a
 /// check.
 public enum AppRegression {
-  // MARK: - The measured constants the D28 verdict asserts
+  // MARK: - The measured constants the reapply-after-pref-change verdict asserts
 
   /// Session 3's numbers, measured on the write-only ultrawide at stored
   /// brightness 0.375 with combined dimming on. They are this panel's, at that
@@ -142,7 +142,7 @@ public enum AppRegression {
     return .pass("the log window returned \(lineCount) lines")
   }
 
-  // MARK: - D28, both directions
+  // MARK: - Combined dimming propagation, both directions
 
   /// Combined dimming propagates in both directions: the pref change has to
   /// re-run both legs, so turning it off releases the software floor AND sends
@@ -404,7 +404,7 @@ public enum AppRegression {
     )
   }
 
-  // MARK: - D29, proven by outcome
+  // MARK: - The mute-strand rule, proven by outcome
 
   /// The mute strand, by OUTCOME rather than by log order. The write log
   /// carries the value but not the command byte, and pref persistence is not
@@ -530,7 +530,7 @@ public enum AppRegression {
     )
   }
 
-  // MARK: - D24 through the panel dump
+  // MARK: - The capabilities-denial rule through the panel dump
 
   /// A volume slider is greyed only by the monitor's own denial. The
   /// write-only panel answers no capabilities at all, so its verdict is
@@ -625,7 +625,7 @@ public enum AppRegression {
   /// the whole window for the line naming a panel therefore finds that panel's
   /// PRE-VERDICT row: on a healthy rig the denying panel reads there as
   /// `volumeEnabled=yes volumeSupport=unknown`, which is the exact shape of the
-  /// D24 regression this check exists to catch. Segmenting is what stops a
+  /// capabilities-denial regression this check exists to catch. Segmenting is what stops a
   /// correct wait from being spent on the wrong rows.
   ///
   /// Cut positionally at the last header, because that is the only boundary the
@@ -666,7 +666,7 @@ public enum AppRegression {
   /// every panel `unknown` by construction; a run that judged it would convict
   /// the denying panel of the app's own not-yet-knowing. Waiting on a verdict
   /// rather than on the pass counter is deliberate: the counter says how many
-  /// dumps have happened, and what the D24 pair needs is one that knows.
+  /// dumps have happened, and what the capabilities-denial pair needs is one that knows.
   ///
   /// Asked of the newest segment rather than of the window, for two halves of
   /// one reason. A landed verdict in an OLDER dump would end a wait whose rows

@@ -5,7 +5,7 @@ import os
 
 /// `WindowListing` over `CGWindowListCopyWindowInfo`, the permission-free half
 /// of the telemetry. It reports geometry and owning application only, never a
-/// window title (OC18), so the degraded no-Screen-Recording mode still
+/// window title, so the degraded no-Screen-Recording mode still
 /// attributes exposure to an app.
 ///
 /// **Coordinate spaces, the one thing that is silently wrong if it is wrong.**
@@ -100,7 +100,7 @@ struct CGWindowListSource: WindowListing {
     }
     // Our dim overlays are ordinary on-screen windows. Left in, they read as a
     // full-screen region owned by Candela covering the panel: the
-    // measures-its-own-effect failure OC16 prevents, by way of the window list.
+    // measures-its-own-effect failure this exclusion prevents, by way of the window list.
     guard ownerPID != ourPID else { return nil }
 
     guard let windowID = (entry[kCGWindowNumber as String] as? NSNumber)?.uint32Value,

@@ -10,7 +10,7 @@ import Observation
   func writeDockAutoHide(_ on: Bool)
 }
 
-/// Design rules (OC10): reflect live state, never write silently, and only an
+/// Design rules: reflect live state, never write silently, and only an
 /// explicit toggle writes. Enrollment in OLED care suggests auto-hide, never
 /// applies it. Kit tests use a fake writer and must never toggle the dev
 /// machine's real menu bar.
@@ -45,7 +45,8 @@ import Observation
   //
   // Both decide against a LIVE read, never the cached value, which refreshes
   // only while the OLED Care pane is on screen. Guarding on a stale cache turns
-  // the user's click into a silent no-op. D29 rule 1 applied to chrome: the
+  // the user's click into a silent no-op. The mute-strand rule's first clause
+  // applied to chrome: the
   // control must restore the state from every state it can be reached from.
   public func setMenuBarAutoHide(_ on: Bool) {
     let current = writer.readMenuBarAutoHide()

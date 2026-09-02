@@ -332,7 +332,7 @@ struct CheckupFieldInstructionPage: View {
     model.claims.first { $0.id == CheckupCheckID.field(kind) }
   }
 
-  /// CK21's copy, and only on the field the control rides: a miss is a fact
+  /// The plant-miss copy, and only on the field the control rides: a miss is a fact
   /// about what is resolvable from where the person is sitting.
   private var plantNote: String? {
     guard kind == CheckupFlowModel.plantedField, let record = model.plantRecord,
@@ -377,7 +377,7 @@ struct CheckupFieldShowingPage: View {
   }
 }
 
-/// CK22's confirmation: the same field with nothing planted on it, so a mark
+/// The confirmation re-show: the same field with nothing planted on it, so a mark
 /// still on screen belongs to the panel.
 struct CheckupSecondDotPage: View {
   @Bindable var model: CheckupFlowModel
@@ -432,7 +432,7 @@ struct CheckupSummaryPage: View {
     // The document's own first line is the header sentence, so the scaffold
     // does not print it a second time above it.
     CheckupPageScaffold(title: CheckupCopy.summaryTitle, subtitle: nil) {
-      // CK31: the page shows the document itself, the same text Copy summary
+      // The page shows the document itself, the same text Copy summary
       // and the export carry, so there is only one shape of the report to read.
       if let report = model.report {
         Text(verbatim: CheckupSummaryText.render(report))

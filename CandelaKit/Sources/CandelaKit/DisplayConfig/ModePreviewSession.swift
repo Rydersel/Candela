@@ -16,7 +16,7 @@ public struct PreviewedMode: Sendable, Equatable {
 /// Preview, confirm, commit, with a countdown that defaults to revert.
 ///
 /// A mode can leave a display unreadable, and then nobody can click "Keep", so
-/// the safe outcome is the one that happens when nobody answers (DM4).
+/// the safe outcome is the one that happens when nobody answers.
 /// `.preview` scope is a second backstop: `kCGConfigureForAppOnly` reverts if
 /// the app dies. An actor because the countdown and the answer race.
 ///

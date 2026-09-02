@@ -3,11 +3,11 @@ import Foundation
 /// Turns raw CGS descriptors into modes worth showing someone.
 ///
 /// Foundation only by design: every decision here stays testable against
-/// captured fixtures, and the adapter reading the descriptors makes none (CR8).
+/// captured fixtures, and the adapter reading the descriptors makes none.
 public enum CGSModeRevelation {
   // MARK: - Gate constants
   //
-  // CALIBRATED FROM CAPTURED DATA, NOT INTUITED (CR4). The Dell publishes a
+  // CALIBRATED FROM CAPTURED DATA, NOT INTUITED. The Dell publishes a
   // real 300x400 mode; a guessed 320px floor rejected it during the spike.
 
   public static let minimumLogicalAxis = 256
@@ -18,13 +18,13 @@ public enum CGSModeRevelation {
   /// want, so this is a ceiling that includes it rather than excludes it.
   public static let maximumNativePixelMultiple = 4
   /// A revealed mode must be HiDPI. We are not second-guessing CoreGraphics'
-  /// omission of 1x modes (CR5).
+  /// omission of 1x modes.
   public static let minimumHiDPIDensity = 1.5
-  /// Fractional tolerance against the panel's own aspect (CR6).
+  /// Fractional tolerance against the panel's own aspect.
   public static let aspectTolerance = 0.02
 
   /// Why descriptors were dropped. Counted rather than discarded so a filter
-  /// that starts eating everything shows up in diagnostics (CR11).
+  /// that starts eating everything shows up in diagnostics.
   public struct DropCounts: Sendable, Equatable {
     public var alreadyKnown = 0
     public var unusable = 0
@@ -83,7 +83,7 @@ public enum CGSModeRevelation {
 
   /// CGS reports refresh as a truncated integer, so 59.9998 arrives as 59. A
   /// CoreGraphics value is adopted only within 1 Hz, otherwise the integer
-  /// stands: showing "59 Hz" beats inventing precision we do not have (CR7).
+  /// stands: showing "59 Hz" beats inventing precision we do not have.
   /// Ties break toward the larger candidate so set iteration order cannot
   /// change the result.
   public static func resolveRefresh(truncated: Int, against candidates: [Double]) -> Double {
@@ -143,7 +143,7 @@ public enum CGSModeRevelation {
     var revealed: [DisplayMode] = []
 
     for descriptor in cgs {
-      // 1. Already published by CoreGraphics. Dedup on ID ONLY (CR1).
+      // 1. Already published by CoreGraphics. Dedup on ID ONLY.
       if knownIDs.contains(descriptor.modeNumber) {
         counts.alreadyKnown += 1
         continue
@@ -153,19 +153,19 @@ public enum CGSModeRevelation {
         counts.unusable += 1
         continue
       }
-      // 3. Could this mode physically exist? Guards a layout shift (CR4).
+      // 3. Could this mode physically exist? Guards a layout shift.
       if !isPlausible(
         descriptor, nativePixelWidth: nativePixelWidth, nativePixelHeight: nativePixelHeight)
       {
         counts.implausible += 1
         continue
       }
-      // 4. HiDPI only (CR5).
+      // 4. HiDPI only.
       if descriptor.density < minimumHiDPIDensity {
         counts.notHiDPI += 1
         continue
       }
-      // 5. Aspect-correct only (CR6).
+      // 5. Aspect-correct only.
       guard nativeAspect > 0,
         abs(descriptor.aspectRatio - nativeAspect) / nativeAspect <= aspectTolerance
       else {

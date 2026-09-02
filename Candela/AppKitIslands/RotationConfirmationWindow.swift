@@ -5,9 +5,10 @@ import SwiftUI
 
 /// The "Keep this orientation?" surface, the third caller of `ConfirmationPanel`.
 ///
-/// RT12: it goes on the display it rotated, resolved through `drawableDisplayID`,
-/// so a rotated mirror slave asks on its master. RS3 measured that rotation swaps
-/// the display's bounds, and this window centres itself in `visibleFrame`.
+/// It goes on the display it rotated, resolved through `drawableDisplayID`,
+/// so a rotated mirror slave asks on its master. An earlier experiment
+/// measured that rotation swaps the display's bounds, and this window
+/// centres itself in `visibleFrame`.
 @MainActor
 final class RotationConfirmationWindow: RotationConfirmationPresenting {
   private let coordinator: RotationCoordinator
@@ -101,7 +102,7 @@ struct RotationConfirmationView: View {
         ConfirmationCaption(RotationCopy.applyFailure)
           .help("CoreGraphics error \(failure.cgErrorCode)")
       }
-      // AR12's gate said no. Nothing was applied, so this is neither a refusal
+      // The reconfiguration gate said no. Nothing was applied, so this is neither a refusal
       // about the display nor a failed apply.
       if let blockedBy = coordinator.blockedBy {
         ConfirmationCaption(ReconfigurationCopy.blocked(by: blockedBy))

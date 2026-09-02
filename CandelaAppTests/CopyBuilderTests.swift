@@ -3,9 +3,9 @@ import CoreGraphics
 import SwiftUI
 import Testing
 
-// Direct assertions over the app target's copy builders (AT5), plus the two
+// Direct assertions over the app target's copy builders, plus the two
 // suite-wide scans that make house rules mechanical rather than review habits:
-// no em dash anywhere, and no visible "panel" (SO14). `SynthesisCopy`'s own
+// no em dash anywhere, and no visible "panel". `SynthesisCopy`'s own
 // pins, and the scans only that feature needs, live in `SynthesisCopyTests`.
 //
 // Every builder is read through `String(describing:)`. `Text` reflects to its
@@ -148,8 +148,9 @@ struct CopyBuilderTests {
     let ambiguous = render(
       ArrangementCopy.restoreNotice(.ambiguousIdentity(["a", "b"]), name: Self.bothNamed))
     #expect(ambiguous.contains("report the same identity"))
-    // AR11 refuses BECAUSE two displays are indistinguishable, so naming one
-    // would be the guess the refusal exists to avoid.
+    // The ambiguous-identity restore refuses BECAUSE two displays are
+    // indistinguishable, so naming one would be the guess the refusal exists
+    // to avoid.
     #expect(!ambiguous.contains("MAG 341C"))
 
     #expect(
@@ -359,7 +360,7 @@ struct CopyBuilderTests {
     let rows = DiagnosticsPageCopy.keyWatchRequirements
     #expect(rows.count == 3)
     #expect(rows.map(\.title) == ["Brightness keys", "Volume keys", "Mute key"])
-    // SO16: the visible half states what holds in every mode, the spoken half
+    // The visible half states what holds in every mode, the spoken half
     // carries the corners, so neither may be empty and they must differ.
     for row in rows {
       #expect(!row.needs.isEmpty)
@@ -389,7 +390,7 @@ struct CopyBuilderTests {
     #expect(DisplayModeCopy.countdown(15) == "Reverting to the previous resolution in 15 seconds.")
     #expect(DisplayModeCopy.passiveCountdown(1) == "Reverting in 1 second. Answer in the confirmation window.")
     #expect(DisplayModeCopy.passiveCountdown(9).contains("9 seconds"))
-    // SO6: the passive line always points at where the buttons are.
+    // The passive line always points at where the buttons are.
     #expect(DisplayModeCopy.passiveCountdown(9).contains("Answer in the confirmation window"))
   }
 
@@ -589,7 +590,8 @@ struct CopyBuilderTests {
     #expect(rendered.count == ReconfigurationClaimant.allCases.count)
     #expect(Set(rendered).count == rendered.count)
     for sentence in rendered {
-      // AR12: name the holder and hand the user their next move.
+      // The reconfiguration gate: name the holder and hand the user their
+      // next move.
       #expect(sentence.contains("Finish that first."))
       #expect(sentence.contains(AppInfo.productName))
     }
@@ -682,9 +684,10 @@ struct CopyBuilderTests {
     #expect(Set(spoken).count == OledCareSuspensionReason.allCases.count)
   }
 
-  /// OC17's denominator is MASK-COULD-APPLY time (ruled 2026-08-18) and the
-  /// histogram beside it covers every state. Pinned because a caption that lost
-  /// either scope leaves the two numbers looking like a share of each other.
+  /// The wear fraction's denominator is MASK-COULD-APPLY time (ruled
+  /// 2026-08-18) and the histogram beside it covers every state. Pinned
+  /// because a caption that lost either scope leaves the two numbers looking
+  /// like a share of each other.
   @Test func theWearFractionCaptionNamesBothScopes() {
     #expect(OledCareCopy.wearFractionScope == """
       The bars cover every state this display was tracked in. \
@@ -700,7 +703,8 @@ struct CopyBuilderTests {
     }
   }
 
-  /// SO14 over every builder rather than over one feature's. Hardware is always
+  /// The panel-retirement rule applies over every builder rather than over one
+  /// feature's. Hardware is always
   /// a "display" in visible copy; the type and comment vocabulary keeps the
   /// word, and none of that is read here.
   @Test func noBuilderSaysPanel() {
@@ -1163,7 +1167,7 @@ struct CopyBuilderTests {
   }
 
   /// nil is a sample too: it is the case both lock-dim builders treat as "the
-  /// dim happened", and the one the OC7 defect printed for a refusal.
+  /// dim happened", and the one a past defect printed for a refusal.
   private static let allLockDimSkips: [LockDimSkip?] =
     [nil, .nothingDrivesBrightness, .outsideSoftwareBand, .alreadyAtTarget]
 

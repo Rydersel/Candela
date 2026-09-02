@@ -30,7 +30,7 @@ final class ShadeOverlay: ShadeRendering {
 
   @discardableResult
   func setShadeAlpha(_ alpha: Double, on displayID: CGDirectDisplayID) -> Bool {
-    // DT17: `false` when no shade could be created is what stops the engine
+    // `false` when no shade could be created is what stops the engine
     // memoising a dimming that never happened. The fork returns void here, so a
     // mirrored display stopped dimming with nothing propagated anywhere.
     guard let shade = self.shade(for: displayID) else {
@@ -87,8 +87,8 @@ final class ShadeOverlay: ShadeRendering {
   }
 
   private func createShade(on displayID: CGDirectDisplayID) -> NSWindow? {
-    // The ID is ALREADY RESOLVED to a drawable display by `BrightnessController`
-    // (DT15), so a mirror set has ONE shade and it sits on the master, where the
+    // The ID is ALREADY RESOLVED to a drawable display by `BrightnessController`,
+    // so a mirror set has ONE shade and it sits on the master, where the
     // pixels are. The fork framed shades under the raw ID but set alpha under
     // the resolved one, so a mirrored slave grew a shade nothing ever dimmed.
     guard let screen = OverlayWindow.screen(for: displayID) else {

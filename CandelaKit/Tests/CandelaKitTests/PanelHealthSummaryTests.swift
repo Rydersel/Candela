@@ -191,7 +191,7 @@ struct PanelHealthSummaryTests {
   }
 
   /// Panel-time, not wall-clock: an app on a quarter of the panel through the
-  /// same hour books a quarter of it (OC11 — the label must not overstate).
+  /// same hour books a quarter of it (the label must not overstate).
   @Test func aQuarterPanelOwnerBooksAQuarterOfThatHour() throws {
     var owners = [String?](repeating: nil, count: PanelGrid.cellCount)
     for index in 0..<(PanelGrid.cellCount / 4) { owners[index] = "Notes" }

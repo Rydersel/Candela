@@ -297,7 +297,7 @@ struct OledDimmingTests {
 
   /// Dim levels were unclamped through the whole chain, from pref accessor to
   /// overlay alpha. A 0.0 dim is a no-op and a 1.0 dim is an unannounced blackout
-  /// that does not swallow its waking click (OC15): both are config errors, so the
+  /// that does not swallow its waking click: both are config errors, so the
   /// config is where they die.
   @Test func dimBrightnessesClampToUsableRange() {
     let tooBright = config(level: 1.0, unfocusedLevel: 4.2)
@@ -427,7 +427,7 @@ struct OledDimmingTests {
     #expect(e.tick(signals(idle: 305)) == .idleDim)  // measured from it, not the wake
   }
 
-  /// RULING D, restated for the delivery A-16 measured: a blacked-out display that
+  /// RULING D, restated for the measured delivery of lock dimming on the wire: a blacked-out display that
   /// gets locked drops to `.lockDim`.
   ///
   /// Holding `.blackout` kept the panel off lock dim's lighter level in name only.

@@ -26,7 +26,7 @@ public struct MirrorTopology: Sendable, Equatable {
   public let displays: [ConfiguredDisplay]
 
   /// The virtual displays a synthesized size is currently mirrored ONTO, as the
-  /// mode-synthesis engine's pairing table names them (SS1).
+  /// mode-synthesis engine's pairing table names them.
   ///
   /// Injected, never derived: nothing in a CoreGraphics sample says whether a
   /// mirror set is a size the app engaged or a mirror the user asked for, and the
@@ -103,13 +103,13 @@ public struct MirrorTopology: Sendable, Equatable {
 
   /// The synthesis master of the set `displayID` belongs to, or nil when it
   /// belongs to no synthesis set. Where the pairing is read for a PER-DISPLAY
-  /// question (SS7), so no site reimplements the walk. `userVisibleMirrorSets`
+  /// question, so no site reimplements the walk. `userVisibleMirrorSets`
   /// reads `synthesisMasters` directly instead, because it filters a list of
   /// masters rather than asking about one display.
   ///
   /// Flag-free by construction. It asks the injected pairing about the display
   /// itself, then about the master the display NAMES, and consults neither
-  /// `isInMirrorSet` nor `isMirrorMaster`: SS1 makes the pairing the authority,
+  /// `isInMirrorSet` nor `isMirrorMaster`: the pairing is the authority,
   /// and a VD master that reported no mirror flag would otherwise be invisible to
   /// every carve-out that depends on this.
   ///
@@ -132,7 +132,7 @@ public struct MirrorTopology: Sendable, Equatable {
   }
 
   /// True when `displayID` is in a mirror set the APP engaged to serve a
-  /// synthesized size, rather than one the user asked for (SS7).
+  /// synthesized size, rather than one the user asked for.
   ///
   /// The single predicate behind every `isMirrorSlave`-keyed carve-out. The raw
   /// accessors stay honest about CoreGraphics: a synthesis set really is a
@@ -144,7 +144,7 @@ public struct MirrorTopology: Sendable, Equatable {
   }
 
   /// The mirror sets the app may present, list, or offer to break: every set on
-  /// the machine except the ones synthesis engaged (SS7).
+  /// the machine except the ones synthesis engaged.
   ///
   /// One entry per set, master first and then its slaves `id`-ascending, which
   /// is `expand`'s shape; the sets themselves are ordered by master ID. Slaves
@@ -166,7 +166,7 @@ public struct MirrorTopology: Sendable, Equatable {
   /// master's HUD.
   ///
   /// **A SYNTHESIS SET EXPANDS FROM EITHER END**, and is asked about before the
-  /// CG flags are (SS1). An ordinary set expands only from its master, the
+  /// CG flags are. An ordinary set expands only from its master, the
   /// display a pointer can be over; the physical panel of an engaged synthesis
   /// set is exactly the display a person points at and it carries the DDC the
   /// step is written over, so expanding it to itself alone would step the panel
@@ -192,14 +192,14 @@ public struct MirrorTopology: Sendable, Equatable {
   /// `displayID`: itself when it is drawable, its MASTER when it is a mirror
   /// slave, and, deliberately, itself again when this sample does not contain it.
   ///
-  /// A mirrored panel is ABSENT from `NSScreen.screens` (measured: the S2 probe's
-  /// `backingScale 0.0` is its "no screen matched" sentinel, not a zero scale on
+  /// A mirrored panel is ABSENT from `NSScreen.screens` (measured: an earlier
+  /// probe's `backingScale 0.0` is its "no screen matched" sentinel, not a zero scale on
   /// a present screen), so a Swift lookup returns nil. Anything that needs a
   /// screen asks this first.
   ///
   /// The unknown case returns the input UNCHANGED because a stale or empty
   /// topology must never invent a target: that fallback fails its `NSScreen`
-  /// lookup and is REPORTED (DT17) rather than guessed at.
+  /// lookup and is REPORTED rather than guessed at.
   ///
   /// INTERSECTED WITH THE SAMPLE, for the same reason `setMembers(containing:)`
   /// is and `master(of:)` deliberately is not. `master(of:)` reports an absent
@@ -247,7 +247,7 @@ public enum MirrorToggleDecision: Sendable, Equatable {
   ///
   /// Without this field the outcome is indistinguishable from a total break, and
   /// a caller reports "mirroring off" over a set the user is still looking at.
-  /// That is the T3 defect, success reported while nothing changed, re-created
+  /// That is the defect, success reported while nothing changed, re-created
   /// one layer up, so the type refuses to express it.
   case disengage(changes: [MirrorChange], residualMembers: [CGDirectDisplayID])
   /// Nothing to do, and a REASON.
@@ -318,7 +318,7 @@ public enum MirrorRefusal: Sendable, Equatable {
 /// The pure decision, shaped like `ModeReapplyPolicy`: static funcs over plain
 /// values, returning what to do and what to say, with the caller doing the
 /// CoreGraphics. Foundation and CoreGraphics only, no AppKit and no SwiftUI,
-/// which is what lets all of its coverage live in the Kit's test target (D21).
+/// which is what lets all of its coverage live in the Kit's test target.
 ///
 /// **Two break paths, deliberately different in SCOPE.** `toggle` is the
 /// hotkey's panic button and clears EVERY mirror set on the machine;
@@ -332,7 +332,7 @@ public enum MirrorTopologyPolicy {
   /// back, not a negotiation about which set they meant. The UI's
   /// `disengage(_:containing:)` is the one-set operation.
   ///
-  /// Evaluated top to bottom, first match wins (spec §6.2.3, rows T1–T5).
+  /// Evaluated top to bottom, first match wins (spec §6.2.3).
   public static func toggle(_ topology: MirrorTopology) -> MirrorToggleDecision {
     guard topology.displays.count >= 2 else { return .refused(.onlyOneDisplay) }
 

@@ -1,11 +1,11 @@
 import CandelaKit
 import SwiftUI
 
-/// The modifier-combination legend, a reference page pushed from Keyboard
-/// (KMR5): nothing here is a control, which is the hub-vs-subpage cut (SO2).
+/// The modifier-combination legend, a reference page pushed from Keyboard:
+/// nothing here is a control, which is the hub-vs-subpage cut.
 /// Always reachable; when the brightness keys are not watched it says the
 /// combinations are inactive rather than describing behavior that is not
-/// happening (the D11 defect class).
+/// happening.
 ///
 /// `@MainActor`: `AppModel` is main-actor and a `View`'s computed properties
 /// are nonisolated under complete concurrency checking.
@@ -29,7 +29,7 @@ struct KeyboardModifierKeysPage: View {
           inactiveNote
           SettingsCardDivider()
         }
-        // SO16: the sentence IS the accessibility label.
+        // The sentence IS the accessibility label.
         ModifierLegendRow(
           title: "Built-in display",
           modifiers: ["⌃"], suffix: "+ brightness key",
@@ -62,7 +62,7 @@ struct KeyboardModifierKeysPage: View {
       }
 
       // The page's scope, stated once: media-key handling only, the fine-step
-      // modifiers, and the custom-shortcut exemption (KMR5).
+      // modifiers, and the custom-shortcut exemption.
       SettingsCaption("These combinations work while the keyboard's brightness keys are handled by \(AppInfo.productName). Holding Shift and Option with any adjustment makes a fine step. Custom shortcuts carry their own modifiers, and none of these rules apply to them.")
     }
   }
@@ -80,9 +80,9 @@ struct KeyboardModifierKeysPage: View {
 }
 
 /// One modifier combination and what it does, glyphs drawn as keycap chips in
-/// the hero's vocabulary (KMR5).
+/// the hero's vocabulary.
 ///
-/// ONE accessibility element (SO16): the label is the whole sentence, so the
+/// ONE accessibility element: the label is the whole sentence, so the
 /// glyphs are never spelled out character by character. At accessibility text
 /// sizes the combination drops onto its own line rather than truncating, the
 /// same `ViewThatFits` measurement `NavigationRow` uses.

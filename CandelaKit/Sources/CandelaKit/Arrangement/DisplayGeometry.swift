@@ -1,7 +1,7 @@
 import Foundation
 
 /// A point in **display space**: integral, y-**down**, origin at the top-left of
-/// the main display (AR1). This is `CGDisplayBounds`' space, never
+/// the main display. This is `CGDisplayBounds`' space, never
 /// `NSScreen.frame`'s y-up one: mixing the two draws a display above its neighbour
 /// on the map and below it in reality.
 public struct DisplayPoint: Sendable, Equatable, Hashable {
@@ -17,7 +17,7 @@ public struct DisplayPoint: Sendable, Equatable, Hashable {
 }
 
 /// A display's rect in display space. Integers make equality exact, kill float
-/// drift in snapping, and match `CGConfigureDisplayOrigin`'s `int32_t` (AR1).
+/// drift in snapping, and match `CGConfigureDisplayOrigin`'s `int32_t`.
 ///
 /// **`let`, so `init`'s clamp cannot be undone.** A negative width silently breaks
 /// `overlaps`, `touches` and `union`, and every validity and snapping decision rests

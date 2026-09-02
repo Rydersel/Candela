@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 
 /// One instant's worth of permission-free evidence about what a display is
-/// showing (EM3). Closed by design: window geometry, system appearance, and the
+/// showing. Closed by design: window geometry, system appearance, and the
 /// wallpaper's own pixels. Per-app luminance priors are absent because the
 /// comparison could not tell a bad prior from a bad model.
 public struct ExposureModelInputs: Sendable {
@@ -14,7 +14,7 @@ public struct ExposureModelInputs: Sendable {
   /// nothing, which is why sorting this array destroys results silently.
   public var windows: [WindowSnapshot]
   /// `PanelGrid.cellCount` values in panel-physical order, or nil when the
-  /// wallpaper could not be read. Kit never loads images (EM6): the app target
+  /// wallpaper could not be read. Kit never loads images: the app target
   /// downsamples and hands over floats.
   public var wallpaperCells: [Double]?
   public var appearanceIsDark: Bool
@@ -51,8 +51,9 @@ public struct ExposureModelParameters: Equatable, Sendable {
   /// Window layer to luminance. The defensible half of the luminance term: the
   /// Dock and the menu bar are known chrome whose brightness tracks appearance.
   public var layerPriors: [Int: Double]
-  /// Owning app to luminance. The half EM5 warned about, since a bad prior and
-  /// a bad model look alike; only held-out validation makes it mean anything.
+  /// Owning app to luminance. The half already flagged as risky, since a bad
+  /// prior and a bad model look alike; only held-out validation makes it mean
+  /// anything.
   public var appPriors: [String: Double]
   public var compositing: Compositing
   /// Admit system chrome (the Dock, the menu bar) from BELOW `includedLayers`,
@@ -106,18 +107,18 @@ public struct ExposureModelParameters: Equatable, Sendable {
 /// permission, so it can be compared against the Screen Recording measurement
 /// that keeps dying with the grant.
 ///
-/// **Everything here is estimated and must be called that (EM7).** Never a
+/// **Everything here is estimated and must be called that.** Never a
 /// measurement, never a health claim; its only consumer is the paired
 /// comparison that decides whether the estimate can be trusted at all.
 ///
-/// **No brightness term (EM13).** The measured capture reads the composited
+/// **No brightness term.** The measured capture reads the composited
 /// framebuffer and brightness applies downstream of it, so both sides of the
 /// comparison are content luminance in `0...1`.
 public enum ExposureModel {
   /// Covered-area content luminance under light appearance.
   ///
-  /// **Unmeasured guess, and the comparison is the instrument that judges it
-  /// (EM5).** Light-appearance content is mostly near-white with dark text and
+  /// **Unmeasured guess, and the comparison is the instrument that judges
+  /// it.** Light-appearance content is mostly near-white with dark text and
   /// chrome, so this sits below 1. Tuning it from the soak re-runs the gate
   /// verdict afterwards, which is why tuning is not circular.
   public static let lightAppearancePrior = 0.7
@@ -127,7 +128,7 @@ public enum ExposureModel {
   /// content is dark grey with light text, not black.
   public static let darkAppearancePrior = 0.12
 
-  /// Window layers that count as content coverage (EM4).
+  /// Window layers that count as content coverage.
   ///
   /// Ordinary app windows and their panels. Excludes two families for opposite
   /// reasons: below zero is the desktop backdrop, which fills the screen and
@@ -150,7 +151,7 @@ public enum ExposureModel {
   public static let includedLayers: ClosedRange<Int> = 0...25
 
   /// Estimated content luminance per panel-native cell, always exactly
-  /// `PanelGrid.cellCount` values in `0...1` (EM12: panel-physical, through the
+  /// `PanelGrid.cellCount` values in `0...1` (panel-physical, through the
   /// same transform the measured path uses).
   ///
   /// Both compositing branches share one approximation: two windows covering

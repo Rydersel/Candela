@@ -9,7 +9,7 @@ import Foundation
 /// `revert()`'s job, on a person's say-so.
 ///
 /// `RotationPreviewSession` deliberately does NOT use this. A rotation is
-/// already permanent when applied (RS7), so it has no commit step and no armed
+/// already permanent when applied (measured), so it has no commit step and no armed
 /// flag: its clock is `remaining > 0` alone.
 struct PreviewCountdown: Equatable {
   private(set) var remaining = 0

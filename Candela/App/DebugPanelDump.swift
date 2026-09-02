@@ -97,7 +97,7 @@
         ("hdrSupported", yesNo(controller.supportsHDR)),
         ("hdrMode", controller.hdrMode == .off ? "off" : "alwaysOn"),
         // The verdict and the caption, from the same accessors the row's body
-        // calls (WD5): the only way a rig leg can assert a degraded panel says so.
+        // calls: the only way a rig leg can assert a degraded panel says so.
         ("wireUnresponsive", yesNo(controller.isWireUnresponsive)),
         ("brightnessReason", quoted(model.brightnessSliderCompactReason(state) ?? "none")),
       ]
@@ -144,7 +144,7 @@
     private static func yesNo(_ flag: Bool) -> String { flag ? "yes" : "no" }
 
     /// Absent reads as unknown, as every consumer of these dictionaries resolves
-    /// it (D24), so the dump cannot report a fourth state nothing acts on.
+    /// it, so the dump cannot report a fourth state nothing acts on.
     private static func support(_ verdict: VCPSupport?) -> String {
       switch verdict ?? .unknown {
       case .supported: "supported"

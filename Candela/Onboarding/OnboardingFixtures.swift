@@ -2,7 +2,7 @@
   import Foundation
 
   /// The real rig as a committed snapshot, so the mock flow is clickable end to
-  /// end with no pref writes and no display changes (OB11). Update it when the
+  /// end with no pref writes and no display changes. Update it when the
   /// rig changes, or the mock stops matching what a run actually shows.
   enum OnboardingFixtures {
     static var rig: OnboardingEnvironment {

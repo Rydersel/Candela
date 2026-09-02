@@ -1,7 +1,7 @@
 import CandelaKit
 import SwiftUI
 
-/// The lit opening of a display's page (SV9): the display drawn as an object,
+/// The lit opening of a display's page: the display drawn as an object,
 /// the identity block under it, and the live levels on their own card.
 ///
 /// The glyph earns its place by being functional (A4). It carries the display's
@@ -16,10 +16,11 @@ import SwiftUI
 /// visible slider would be a silently dead one) and the consequence caption (its
 /// sentences are about HDR routing and DDC readback, and on a constitutively
 /// native panel `.macOSDrivesBrightness` is normal life, not "HDR is live"). It
-/// draws as a laptop rather than a monitor on a stand (SV9).
+/// draws as a laptop rather than a monitor on a stand.
 ///
 /// It writes no pref: both sliders go through the engine's own controllers, the
-/// path the menu bar's sliders use, so D27 has nothing to govern here.
+/// path the menu bar's sliders use, so the shared pref-write path has
+/// nothing to govern here.
 ///
 /// `@MainActor` is load-bearing: a `View`'s properties other than `body` are
 /// nonisolated under complete concurrency, and these read main-actor types.
@@ -84,7 +85,7 @@ struct DisplayHeroView: View {
   // MARK: - Header
 
   /// The glyph and the identity block as one centered lockup with the hero's own
-  /// deadspace (SV9); everything below runs at the window's tightened spacing.
+  /// deadspace; everything below runs at the window's tightened spacing.
   private var header: some View {
     VStack(spacing: 12) {
       glyph
@@ -122,7 +123,7 @@ struct DisplayHeroView: View {
     }
   }
 
-  /// Never fully black (SV9): an unlit face reads as a broken page rather than
+  /// Never fully black: an unlit face reads as a broken page rather than
   /// as a dim display.
   private var glyphLit: Double { 0.18 + 0.82 * state.controller.brightness }
 
@@ -145,7 +146,7 @@ struct DisplayHeroView: View {
   /// `MirrorTopology` is the one definition of "mirrored" in this app, and this
   /// reads it the way `MirroringSection` does, never a second opinion.
   ///
-  /// A synthesis set is not mirroring the user did (SS7), so the badge stays off
+  /// A synthesis set is not mirroring the user did, so the badge stays off
   /// for one: the Mirroring row below reads "Not mirrored" there, and a badge
   /// would be the only claim of its kind on the page with nothing explaining it.
   private var isMirroring: Bool {
@@ -197,7 +198,7 @@ struct DisplayHeroView: View {
 
   /// `2560 × 1440 · 60 Hz`, with `(max 175 Hz)` only when this size does offer
   /// something faster. Absent until the catalog arrives: "not enumerated yet" is
-  /// not a fact about the display. No "HiDPI" and no "Scaled" (SO14), because
+  /// not a fact about the display. No "HiDPI" and no "Scaled", because
   /// this line NAMES the mode in force rather than offering a size to choose.
   private var modeCaption: String? {
     guard let mode = currentMode else { return nil }
@@ -251,9 +252,9 @@ struct DisplayHeroView: View {
   //
   // The menu bar's own slider component, bound to the same controllers, not a
   // second control over one model. Only the container is this window's; the rows
-  // are the panel's, D29 rule 4 included.
+  // are the panel's, including the rule against snapping a volume slider to 0.
 
-  /// The levels on their own card, in the page's section vocabulary (SV14).
+  /// The levels on their own card, in the page's section vocabulary.
   private var levels: some View {
     SettingsCardSection(title: "Levels") {
       levelRow(label: "Brightness", caption: consequenceSentence) { brightnessSlider }
@@ -320,8 +321,8 @@ struct DisplayHeroView: View {
     )
   }
 
-  /// The panel's own `ValueSliderRow`, so D29 rule 4 (a muting row never snaps
-  /// to 0) is DERIVED from the muted glyph in one place rather than passed by
+  /// The panel's own `ValueSliderRow`, so the rule that a muting row never snaps
+  /// to 0 is DERIVED from the muted glyph in one place rather than passed by
   /// hand here. `hideVolumeSlider` is deliberately NOT read: it governs the menu
   /// bar's row, and this page is where you go to change it.
   private var volumeSlider: some View {
@@ -334,7 +335,7 @@ struct DisplayHeroView: View {
       mutedSystemImage: "speaker.slash.fill"
     )
     .disabled(!model.volumeSliderEnabled(state))
-    // D24: never greyed by CoreAudio. The monitor's own denial is only ONE of
+    // Never greyed by CoreAudio. The monitor's own denial is only ONE of
     // the two causes, so the reason comes from the policy that decided.
     .help(model.volumeSliderDisabledReason(state, displayName: name) ?? "")
   }
@@ -406,8 +407,9 @@ struct DisplayHeroView: View {
     }
   }
 
-  /// SO25: a remembered value is never presented with a measurement's
-  /// confidence. HDR gets two sentences, the bigger caption budget SO15 allows.
+  /// A remembered value is never presented with a measurement's
+  /// confidence. HDR gets two sentences, the bigger caption budget the
+  /// caption rule allows.
   private var consequenceSentence: String? {
     switch consequence {
     case .hdrEngaged:

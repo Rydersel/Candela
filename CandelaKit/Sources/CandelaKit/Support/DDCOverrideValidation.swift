@@ -2,7 +2,7 @@ import Foundation
 
 /// Validation for the Displays pane's per-command min/max DDC overrides, the one
 /// part of the tuning grid with real logic, so it lives here under test rather
-/// than inline in the view (D21).
+/// than inline in the view.
 ///
 /// Two fork behaviors are deliberately not reproduced:
 ///
@@ -85,7 +85,7 @@ public enum DDCOverrideValidation {
   /// purpose: text that does not parse or falls outside `range`, and text that
   /// resolves to the value already stored. Either way the field snaps back to
   /// `text(for:)` and no pref is written, so a focus change through a box nobody
-  /// typed in costs nothing (D4).
+  /// typed in costs nothing.
   ///
   /// One function, because a field commits on Return AND on losing focus. Two
   /// routes parsing their own text is how a looser second validation gets in:

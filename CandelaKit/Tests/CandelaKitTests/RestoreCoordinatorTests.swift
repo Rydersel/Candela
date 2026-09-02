@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-@Suite("Restore coordinator (D5)")
+@Suite("Restore coordinator")
 @MainActor
 struct RestoreCoordinatorTests {
   private func makeCoordinator(
@@ -65,7 +65,7 @@ struct RestoreCoordinatorTests {
   }
 
   @Test func aNewerWakeSupersedesTheOlderChain() async {
-    // Timing bounds per F6: supersede at the first observed pass and keep the
+    // Timing bounds: supersede at the first observed pass and keep the
     // old chain's interval wide so a CI stall cannot fit a full double-run.
     let (coordinator, counter) = makeCoordinator(
       action: .write, soberDelay: .milliseconds(1), repeatInterval: .milliseconds(50), repeatCount: 10
@@ -137,7 +137,7 @@ struct ControllerRestoreTests {
     controller.reassertHardware() // same target → duplicate-skipped
     await controller.waitForPendingWrites()
     #expect((await fake.recordedWrites()).count == 1)
-    controller.resetWriteMemo() // the D5 wake-pass prerequisite
+    controller.resetWriteMemo() // the wake-pass prerequisite
     controller.reassertHardware()
     await controller.waitForPendingWrites()
     #expect((await fake.recordedWrites()).count == 2)
@@ -145,7 +145,7 @@ struct ControllerRestoreTests {
   }
 
   @Test func hasStoredValueIsTheEverTouchedGate() {
-    // D5's ever-touched gate for the restore pass. A fresh display publishes
+    // The ever-touched gate for the restore pass. A fresh display publishes
     // the assumed default 1.0 over an EMPTY store, and writing that on restore
     // is full blast on an OLED at night.
     let defaults = InMemoryDefaults()

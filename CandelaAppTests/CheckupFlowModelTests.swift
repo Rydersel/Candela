@@ -3,7 +3,7 @@ import Foundation
 import CoreGraphics
 import Testing
 
-/// The checkup state machine over fakes (CK25): no panel, no window, no wire.
+/// The checkup state machine over fakes: no panel, no window, no wire.
 @MainActor
 @Suite("Checkup flow model")
 struct CheckupFlowModelTests {
@@ -145,7 +145,7 @@ struct CheckupFlowModelTests {
     #expect(presenter.holds.count == CheckupFieldKind.protocolOrder.count * 2 + 2)
   }
 
-  /// CK27's abandon runs mid-field, and the field's hold has to come down with
+  /// An abandon runs mid-field, and the field's hold has to come down with
   /// it: nothing else is left to release it.
   @Test func abandoningMidFieldReleasesTheCareHold() async {
     let presenter = FakePresenter()
@@ -388,8 +388,8 @@ struct CheckupFlowModelTests {
     #expect(flow.claims.filter { $0.family == .capabilities }.count == 1)
   }
 
-  /// CK16: once per field however many times it was shown, and never on a run
-  /// with somewhere else to put the instructions.
+  /// The instructions strip shows once per field however many times it was
+  /// shown, and never on a run with somewhere else to put the instructions.
   @Test func aOneDisplayRunRecordsWhichFieldsCarriedTheStrip() async throws {
     let flow = CheckupFlowModel(
       environment: environment(presenter: FakePresenter(), entry: entry(only: true)))

@@ -115,7 +115,7 @@ struct OnboardingLiveEnvironmentTests {
   }
 
   @Test func anUndescribableRotationIsDrawnUpright() {
-    // RT7: nil is a real answer, not a missing reading.
+    // nil is a real answer, not a missing reading.
     let entry = OnboardingEnvironmentBuilder.entry(for: Self.input(
       nativePixels: (3440, 1440), rotation: nil, looksLike: (3440, 1440)))
 
@@ -182,7 +182,7 @@ struct OnboardingLiveEnvironmentTests {
       .diagonalInches == nil)
   }
 
-  // MARK: - Volume (D24)
+  // MARK: - Volume
 
   @Test func anAdvertisedVolumeRegisterWorks() {
     #expect(OnboardingEnvironmentBuilder.entry(for: Self.input(volume: .supported))
@@ -207,7 +207,7 @@ struct OnboardingLiveEnvironmentTests {
       .volume == .unknown)
   }
 
-  // MARK: - Size suggestion (OB8)
+  // MARK: - Size suggestion
 
   private static let ladder = [
     Self.row(2560, 1440),

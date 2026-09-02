@@ -4,12 +4,12 @@ import Foundation
 public enum CheckupFieldKind: String, Codable, CaseIterable, Sendable {
   case black, red, green, blue, gray7, gray50, ramp, white, witness
 
-  /// The field order the flow shows them in; white is last and shortest (CK17).
+  /// The field order the flow shows them in; white is last and shortest.
   public static let protocolOrder: [CheckupFieldKind] = [.black, .red, .green, .blue, .gray7, .gray50, .ramp, .white]
 
   public var capSeconds: Int { self == .white ? 10 : 20 }
 
-  /// Pixel fields carry the plant; the others are ungraded attestations (CK23).
+  /// Pixel fields carry the plant; the others are ungraded attestations.
   public var carriesPlant: Bool {
     switch self {
     case .black, .red, .green, .blue, .white: true
@@ -49,7 +49,7 @@ public enum CheckupField {
     Double(min(pixelWidth / 2, pixelHeight)) * 0.75
   }
 
-  /// Linear luminance for the exposure booking (CK17). Witness and ramp are not
+  /// Linear luminance for the exposure booking. Witness and ramp are not
   /// flat, so theirs depends on the geometry `image()` draws at this size.
   public static func luminance(of kind: CheckupFieldKind, pixelWidth: Int, pixelHeight: Int) -> Double {
     func linear(_ v: UInt8) -> Double {

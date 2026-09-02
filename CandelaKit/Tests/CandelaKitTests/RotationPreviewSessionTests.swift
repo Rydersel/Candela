@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-@Suite("Rotation preview session (RT8, RT10, RT11)")
+@Suite("Rotation preview session")
 struct RotationPreviewSessionTests {
   private func request(
     _ display: CGDirectDisplayID = 2,
@@ -31,7 +31,7 @@ struct RotationPreviewSessionTests {
     #expect(await session.isCountingDown)
   }
 
-  /// A rotation is already permanent when applied (RS7), so confirming writes
+  /// A rotation is already permanent when applied (measured), so confirming writes
   /// nothing. Re-applying would be a second blocking second-long call.
   @Test func confirmingWritesNothingBecauseTheRotationIsAlreadyPermanent() async {
     let fake = FakeConfigurator()

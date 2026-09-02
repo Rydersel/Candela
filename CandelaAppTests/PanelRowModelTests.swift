@@ -154,7 +154,7 @@ struct PanelRowModelTests {
     #expect(PanelView.showsVolumeSlider(commandIsAvailable: true, hideVolumeSlider: false))
   }
 
-  // MARK: - D24, the volume capability verdict
+  // MARK: - The volume capability verdict
 
   @Test func aCleanCapabilitiesStringWithoutVCP62GreysTheSlider() {
     // The Dell's shape: parsed end to end, and 62 is not in the list.
@@ -310,7 +310,7 @@ struct PanelRowModelTests {
     #expect(visible.map(\.display.persistenceKey) == ["row-model-shown"])
   }
 
-  // MARK: - The HDR button's refusal (SS9's missing half)
+  // MARK: - The HDR button's refusal
 
   @Test func theHDRButtonExplainsItselfWhileASynthesizedSizeIsShowing() {
     let reason = PanelView.hdrRefusalReason(
@@ -336,8 +336,9 @@ struct PanelRowModelTests {
     ) == nil)
   }
 
-  /// The sentence is the mirror of SS9's own refusal, and it names neither the
-  /// mechanism nor a display: the panel row it sits under has the name.
+  /// The sentence is the mirror of the synthesized-size refusal, and it names
+  /// neither the mechanism nor a display: the panel row it sits under has the
+  /// name.
   @Test func theRefusalNamesTheMoveThatClearsIt() {
     let copy = SynthesisCopy.hdrBlockedBySynthesizedSize
     #expect(copy.contains("HDR"))
@@ -345,7 +346,7 @@ struct PanelRowModelTests {
     #expect(!copy.contains("—"))
   }
 
-  // MARK: - Brightness row reason (WD5)
+  // MARK: - Brightness row reason
 
   /// Drives the wire until the display is demoted, or gives up. A bounded wait
   /// rather than a sleep: the verdict lands on a task the last write wakes.

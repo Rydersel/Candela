@@ -109,7 +109,7 @@ struct ArrangementDragPolicyTests {
     )
 
     // Returned with the overlapping position: the tile has to render where the
-    // pointer is. AR7 springs it back at the canvas, not here.
+    // pointer is. The overlap-refusal rule springs it back at the canvas, not here.
     #expect(proposal != nil)
     #expect(originOf(proposal, 2) == DisplayPoint(x: 500, y: 0))
     #expect(proposal?.problems == [.overlap(1, 2)])
@@ -175,7 +175,7 @@ struct ArrangementDragPolicyTests {
   }
 
   @Test func theTransformIsUsedAsGivenAndNeverRefitted() {
-    // AR2: refitting mid-drag rescales the map under the pointer every frame. This
+    // The fixed-transform rule: refitting mid-drag rescales the map under the pointer every frame. This
     // scale is not the one `fitting` produces here, so a refit changes the answer.
     let canvas = CanvasSize(width: 560, height: 320)
     let refitted = CanvasTransform.fitting(pair.bounds, in: canvas, margin: 14)

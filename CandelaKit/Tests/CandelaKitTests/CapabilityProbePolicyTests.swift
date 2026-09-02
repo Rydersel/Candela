@@ -1,9 +1,9 @@
 import Testing
 @testable import CandelaKit
 
-/// D21: the probe-eligibility rule is branching logic, so it lives in the Kit with
+/// The probe-eligibility rule is branching logic, so it lives in the Kit with
 /// tests rather than inside `AppModel`, which has no test target.
-@Suite("Capability probe eligibility (D24/D21)")
+@Suite("Capability probe eligibility")
 struct CapabilityProbePolicyTests {
   @Test func probesOnlyWhenNothingIsCachedAndNothingIsInFlight() {
     #expect(CapabilityProbePolicy.shouldProbe(cached: nil, inFlight: false, hdrEngaged: false))

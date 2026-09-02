@@ -4,7 +4,7 @@ import CandelaKit
 /// The field on the target display: borderless, shielding level, pointer out of
 /// the way. On a one-display run the flow window is unreachable behind a
 /// shielding-level field, so a strip at the bottom carries the instruction,
-/// countdown and answers, and CK16 records those fields as partially occluded.
+/// countdown and answers, and the occlusion record marks those fields as partially occluded.
 @MainActor
 final class CheckupFieldWindow: CheckupFieldPresenting {
   /// Tall enough for the instruction over a row of answers: on a one-display

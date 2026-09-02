@@ -33,7 +33,7 @@ public final class GammaInterferenceMonitor {
   private(set) var interferenceCounts: [CGDirectDisplayID: Int] = [:]
 
   /// How many times another app has taken THIS display's color profile back
-  /// this session (B7), so the pane can say why the offer appeared, or that a
+  /// this session, so the pane can say why the offer appeared, or that a
   /// fight is going on below the threshold.
   ///
   /// An accessor rather than a public dictionary: a display nobody clobbered

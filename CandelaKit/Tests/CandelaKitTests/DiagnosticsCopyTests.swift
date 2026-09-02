@@ -96,7 +96,7 @@ struct DiagnosticsCopyTests {
         == "Assumed 100: the display did not report one")
   }
 
-  /// A read maximum reports the REAL number, whatever it is (DT30 rule (g)).
+  /// A read maximum reports the REAL number, whatever it is.
   @Test func aReadMaximumReportsTheNumberTheDisplayGave() {
     #expect(
       DiagnosticsCopy.brightnessScale(
@@ -106,7 +106,7 @@ struct DiagnosticsCopyTests {
 
   /// The display denying volume and a setting turning it off need different
   /// sentences because they have different fixes. `.unsupported` is reachable only
-  /// from a description that parsed cleanly and listed no VCP 0x62 (D24), so it
+  /// from a description that parsed cleanly and listed no VCP 0x62, so it
   /// must never be worded so a display that merely stayed silent could wear it.
   @Test func theDisplayDenyingVolumeIsNotASettingTurningItOff() {
     #expect(
@@ -135,7 +135,7 @@ struct DiagnosticsCopyTests {
         == "Unavailable: hardware control is turned off for this display")
   }
 
-  /// D24 out loud: unknown resolves to ENABLED, so the sentence says why the
+  /// The volume-denial rule out loud: unknown resolves to ENABLED, so the sentence says why the
   /// control stays on. The two `.unknown` arms stay separate because only one of
   /// its producers is silence, and "this display sent no answer" contradicts a
   /// description shown three rows above.
@@ -314,8 +314,8 @@ struct DiagnosticsCopyTests {
     }
   }
 
-  /// No row in Availability may read a bare "Unavailable" or "Not supported"
-  /// (DT30 rule (a)). Every one names what took the feature away.
+  /// No row in Availability may read a bare "Unavailable" or "Not supported".
+  /// Every one names what took the feature away.
   @Test func noAvailabilityAnswerIsABareUnavailable() {
     var answers: [String] = [
       DiagnosticsCopy.brightnessAvailability(.unavailable(.ddcTurnedOffWithNoSoftwareLeg)),
@@ -692,9 +692,10 @@ struct DiagnosticsCopyTests {
     #expect(DiagnosticsCopy.mirroring(isMirrorSlave: false) == "Showing its own contents")
   }
 
-  /// SS7: a synthesized size is not the user mirroring anything. The pairing
-  /// outranks the mirror flag in all three of its states, not-enumerated included,
-  /// because the engine's table is the authority on synthesis topology (SS1).
+  /// The synthesis-vs-mirroring rule: a synthesized size is not the user mirroring
+  /// anything. The pairing outranks the mirror flag in all three of its states,
+  /// not-enumerated included, because the engine's table is the authority on
+  /// synthesis topology.
   @Test func aSynthesizedSizeIsNeverReportedAsAnotherDisplaysContents() {
     #expect(
       DiagnosticsCopy.mirroring(isMirrorSlave: true, isSynthesized: true)
@@ -756,7 +757,7 @@ struct DiagnosticsCopyTests {
         == "Assumed 100: Lumen has not asked this display for its scale")
   }
 
-  /// SO14: hardware is always a "display" in user-visible copy. The type and
+  /// Hardware is always a "display" in user-visible copy. The type and
   /// comment vocabulary still says panel; the strings do not.
   @Test func noProducedStringSaysPanel() {
     for produced in Self.everySentence() {
@@ -772,7 +773,7 @@ struct DiagnosticsCopyTests {
     }
   }
 
-  /// Internal key names never reach copy (D25). The availability sentences are
+  /// Internal key names never reach copy. The availability sentences are
   /// derived from `forceSw` and `unavailableDDC`, so those two leak first.
   @Test func noProducedStringLeaksAPrefKeyName() {
     for produced in Self.everySentence() {

@@ -13,8 +13,8 @@ final class RecordingGamma: GammaApplying {
     case apply(Double)
   }
 
-  /// False models a display that will not take a gamma table (DT17's
-  /// honest-failure reporting).
+  /// False models a display that will not take a gamma table (honest-failure
+  /// reporting).
   var succeeds = true
   /// False models another app having taken the table (the f.lux case).
   var intact = true

@@ -2,12 +2,12 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// The Protection pillar (SC6): the policies that guard a display's
+/// The Protection pillar: the policies that guard a display's
 /// configuration. The startup and wake restore choice, and under it a read-only
 /// summary of what Remember-size promises on each display. The Remember control
 /// itself stays on that display's page, so the pref keeps one write surface.
 ///
-/// Nothing unbuilt is listed (SC6): a greyed row for a feature nobody can turn
+/// Nothing unbuilt is listed: a greyed row for a feature nobody can turn
 /// on is a promise the app cannot keep.
 ///
 /// `@MainActor`: a `View`'s non-`body` properties are nonisolated under complete
@@ -73,7 +73,7 @@ struct ProtectionPane: View {
       // pane's `DisplayPrefs` is built without the safe-mode flag, so it reports
       // what is on disk rather than the `.doNothing` the engine is running on.
       // Right for a settings control, but also a control describing behavior
-      // that is not happening, so safe mode has to be visible right here (D11).
+      // that is not happening, so safe mode has to be visible right here.
       //
       // Safe mode's scope must NEVER be written as "no DDC commands" in either
       // branch: sliders and keys still work and still send DDC.
@@ -93,9 +93,9 @@ struct ProtectionPane: View {
     }
   }
 
-  /// The active state D11 requires to be visible, as a notice inside the card
-  /// rather than an always-on paragraph: the full scope is shown HERE, in the
-  /// state it describes.
+  /// The active state the safe-mode gate requires to be visible, as a notice
+  /// inside the card rather than an always-on paragraph: the full scope is
+  /// shown HERE, in the state it describes.
   ///
   /// The words are `SafeModeCopy`'s, and every surface that describes safe mode
   /// reads that one exhaustive list: the launch alert and the Diagnostics row
@@ -115,7 +115,7 @@ struct ProtectionPane: View {
   /// than a silently missing caption.
   ///
   /// Static and nameable rather than computed over `prefs`, so the test bundle
-  /// can assert the mapping without a window (AT10): a caption stuck on the wrong
+  /// can assert the mapping without a window: a caption stuck on the wrong
   /// option describes a restore that will not happen.
   static func startupCaption(for action: StartupAction) -> LocalizedStringKey {
     switch action {
@@ -128,7 +128,7 @@ struct ProtectionPane: View {
   // MARK: - Remembered sizes
 
   /// One read-only row per display, showing what Remember-size promises there
-  /// and pushing the page that owns the control (SC6, SO3). Read-only is the
+  /// and pushing the page that owns the control. Read-only is the
   /// point: a pref with two write surfaces has two places to get it wrong.
   private var rememberedSizesSection: some View {
     SettingsCardSection(title: "Remembered Sizes") {
@@ -197,7 +197,7 @@ struct ProtectionPane: View {
     let spokenValue: String
   }
 
-  /// The summary's whole derivation, pure so the test bundle reaches it (AT10).
+  /// The summary's whole derivation, pure so the test bundle reaches it.
   /// The numbering comes from `DisplayOrdering`, the sidebar's own helper, so a
   /// numbered name means the same display in both lists.
   static func rememberedSizeRows(_ inputs: [RememberedSizeInput]) -> [RememberedSizeRow] {

@@ -193,7 +193,7 @@ struct ArrangementSnapperTests {
 
   @Test func aSnapThatProducesAnOverlapIsStillApplied() {
     // The snapper does not judge: undoing a snap because it overlaps is the silent
-    // auto-correction AR7 forbids. The rules report it and the drop is refused instead.
+    // auto-correction the overlap-refusal rule forbids. The rules report it and the drop is refused instead.
     let source = ArrangementFixtures.tile(2, ArrangementFixtures.rect(0, 0, 100, 100))
     let result = ArrangementSnapper.snap(
       ArrangementFixtures.rect(28, 28, 50, 50), id: 1, against: [source], threshold: 8

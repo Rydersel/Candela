@@ -10,7 +10,7 @@ struct ModeReapplyPolicyTests {
   private var faster: DisplayMode { DisplayModeFixtures.mode(2, logical: (2560, 1440), pixels: (5120, 2880), hz: 120) }
   private var smaller: DisplayMode { DisplayModeFixtures.mode(3, logical: (1920, 1080), pixels: (3840, 2160), hz: 60) }
 
-  /// DM5. The stored descriptor is only half the gate; a display whose owner
+  /// The stored descriptor is only half the gate; a display whose owner
   /// never opted in must not be moved even when a perfect match is sitting
   /// there.
   @Test func aDisplayNobodyOptedInForIsNeverMoved() {

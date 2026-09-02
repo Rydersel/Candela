@@ -17,12 +17,12 @@ extension EnvironmentValues {
   }
 }
 
-/// OLED Care's overview (OCR1): one card per external display, then the global
+/// OLED Care's overview: one card per external display, then the global
 /// screen-chrome switches. Everything per-display lives on that display's pushed
 /// page; this root answers "how are my displays doing" and holds only what is
-/// global (OCR4).
+/// global.
 ///
-/// Copy rule for every sentence in this file (OC11): software has exactly two
+/// Copy rule for every sentence in this file: software has exactly two
 /// levers against burn-in, reduce luminance and reduce time at luminance.
 /// Nothing here may claim more than that, and the chrome trade-off is stated
 /// rather than sold.
@@ -47,7 +47,7 @@ struct OledCarePane: View {
     // thing that re-reads them after a write, the pushed pages included.
     let _ = model.prefsRevision
     SettingsPageScaffold {
-      // The two levers (OC11) at header weight, with the claim bounded in the
+      // The two levers at header weight, with the claim bounded in the
       // same breath: the only two ways software can. "Enrolled" is load-bearing,
       // because care runs on enrolled displays and on no others.
       SettingsPageHeader(
@@ -122,7 +122,7 @@ struct OledCarePane: View {
     }
   }
 
-  /// D11's rule: say exactly what Safe Mode suppresses, where it changes what a
+  /// Safe Mode's rule: say exactly what Safe Mode suppresses, where it changes what a
   /// control means. `OledCareCoordinator.start` returns at its safe-mode guard
   /// BEFORE the driver loop is built, so the dimming loop, the hours counter, the
   /// sampler and the window observer are all inert. The chrome switches are
@@ -146,7 +146,7 @@ struct OledCarePane: View {
 
   // MARK: - Screen chrome (global)
 
-  /// Global, and on the root (OCR4): system-wide rather than per-display, and
+  /// Global, and on the root: system-wide rather than per-display, and
   /// the strongest lever in the pane. Hiding the menu bar and the Dock stops
   /// driving those pixels rather than merely dimming them.
   @ViewBuilder private var chromeSection: some View {

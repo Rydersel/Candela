@@ -5,7 +5,7 @@ import os
 /// Synchronous, nonisolated access to the latest mirror topology, for callers
 /// that cannot await one.
 ///
-/// **The engine resolves the ID; the islands stay simple (DT16).** A mirror
+/// **The engine resolves the ID; the islands stay simple.** A mirror
 /// SLAVE is absent from `NSScreen.screens` altogether, so the one-line
 /// `NSScreen.screens.first { $0.displayID == id }` the app's AppKit islands share
 /// returns nil for it. Two of them failed SILENTLY while recording success:
@@ -48,7 +48,7 @@ public protocol MirrorTopologyProviding: Sendable {
 ///
 /// A store nobody has updated holds an EMPTY topology, whose
 /// `drawableDisplayID` is the identity function. An unwired engine therefore
-/// degrades to a lookup that fails and is REPORTED (DT17) rather than to a crash
+/// degrades to a lookup that fails and is REPORTED rather than to a crash
 /// or a guess.
 ///
 /// It has TWO writers in the app target, and they write the same kind of value
@@ -90,7 +90,7 @@ public final class MirrorTopologyStore: MirrorTopologyProviding, Sendable {
   /// exists to close would otherwise walk straight back in here.
   ///
   /// **The synthesis pairing is re-stamped here and the sample's own is
-  /// ignored** (SS1). Both writers build their sample from
+  /// ignored**. Both writers build their sample from
   /// `configurator.displays()`, and a CoreGraphics sample cannot tell a mirror
   /// set the app engaged to serve a synthesized size from one the user asked
   /// for. Stamping at the door rather than at each construction is what stops
@@ -105,7 +105,7 @@ public final class MirrorTopologyStore: MirrorTopologyProviding, Sendable {
   }
 
   /// The virtual displays a synthesized size is mirrored onto right now, from
-  /// the engine's pairing table (SS1). Held here rather than passed at every
+  /// the engine's pairing table. Held here rather than passed at every
   /// `MirrorTopology(...)` because the app has two topology writers and neither
   /// can see the engine.
   public func noteSynthesisMasters(_ ids: Set<CGDirectDisplayID>) {

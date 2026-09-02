@@ -2,7 +2,7 @@ import CandelaKit
 import SwiftUI
 
 /// The checkup window's root. No Skip and no Cancel, deliberately: closing the
-/// window is the exit, and the controller saves it as an abandoned run (CK27).
+/// window is the exit, and the controller saves it as an abandoned run.
 struct CheckupFlowView: View {
   @Bindable var model: CheckupFlowModel
   /// The field's last tap. The field is on another display and the answer

@@ -1,29 +1,29 @@
 import CandelaKit
 import SwiftUI
 
-/// Where a click on one of the preview's widgets takes the pane (KMR-A5):
+/// Where a click on one of the preview's widgets takes the pane:
 /// each widget scrolls to the section that configures it.
 enum MenuBarPreviewJump {
   case sliders
   case indicators
 }
 
-/// The Menu Bar pane's live preview (KMR7): a miniature desktop showing what
+/// The Menu Bar pane's live preview: a miniature desktop showing what
 /// Candela puts on screen right now, so every control on the pane changes
 /// something visible.
 ///
-/// Fidelity (KMR8): each miniature is drawn at half scale from the real source
+/// Fidelity: each miniature is drawn at half scale from the real source
 /// rather than from imagination, the panel from `PanelView`/`CandelaSlider`, the
 /// pill from `BrightnessHUD`, the icon from `StatusItemController`. The real
 /// pill sits on `.hudWindow` material and this window is opaque by rule, so the
 /// grounds here are opaque colors matched per appearance instead.
 ///
-/// Honesty (KMR9, amended by KMR-A5): everything shown comes from the policies
+/// Honesty: everything shown comes from the policies
 /// the real widgets consult, and every bar shows the controllers' LIVE values.
 /// Both pills are depicted so both position choices stay visible; on screen the
 /// two kinds take turns in one window per display, which the pane's footer says.
 ///
-/// Doorways, not dead furniture (KMR-A5, superseding KMR10's no-hit-targets
+/// Doorways, not dead furniture (superseding the earlier no-hit-targets
 /// clause): the widgets are buttons whose labels name their destination, and
 /// the scenery stays decorative and hidden from accessibility.
 ///
@@ -71,7 +71,7 @@ struct MenuBarPreviewView: View {
       anchorColumn(.topCenter, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
       anchorColumn(.topRight, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
     }
-    // SV13 covers the INK as well as the grounds: every adaptive color inside a
+    // The system-appearance exception covers the INK as well as the grounds: every adaptive color inside a
     // widget resolves against the environment's color scheme, and this window
     // pins that dark, so on a light-mode system the panel and pills drew light
     // with white text on them. The literal whites below are NOT covered and must
@@ -86,7 +86,7 @@ struct MenuBarPreviewView: View {
     // smaller content just leaves ground.
     .frame(height: 300)
     .frame(maxWidth: .infinity)
-    // The frame is the settings window's (SV13): the widgets inside it keep
+    // The frame is the settings window's: the widgets inside it keep
     // the real look, and only what surrounds them is themed.
     .clipShape(RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous))
     .overlay(
@@ -98,7 +98,7 @@ struct MenuBarPreviewView: View {
 
   // MARK: - Anchor columns
 
-  /// The pills anchored at one position, in stack order (KMR-A5: brightness
+  /// The pills anchored at one position, in stack order (brightness
   /// above volume when they share an anchor).
   private func pillKinds(at position: HUDPosition) -> [HUDType] {
     var kinds: [HUDType] = []
@@ -109,7 +109,7 @@ struct MenuBarPreviewView: View {
 
   /// One position's stack: its pills, and at top right the panel beneath them.
   /// The true z-overlap is illegible at miniature scale, so the corner stacks
-  /// instead (KMR-A2).
+  /// instead.
   @ViewBuilder
   private func anchorColumn(
     _ position: HUDPosition, externals: [AppModel.DisplayState],
@@ -348,7 +348,7 @@ struct MenuBarPreviewView: View {
 
   // MARK: - Indicator pill miniatures
 
-  /// Lighter than the first pass (KMR-A4): the native pill's material reads
+  /// Lighter than the first pass: the native pill's material reads
   /// brighter than `.hudWindow` did.
   private var pillGround: Color {
     systemAppearance.isDark
@@ -356,7 +356,7 @@ struct MenuBarPreviewView: View {
   }
 
   /// A LIGHT edge, never a dark one: the black-reading `separatorColor` border
-  /// is one of the deltas KMR-A4 names against the native pill.
+  /// is one of the deltas the revision names against the native pill.
   private var pillHairline: Color {
     systemAppearance.isDark ? .white.opacity(0.22) : .black.opacity(0.08)
   }
@@ -386,7 +386,7 @@ struct MenuBarPreviewView: View {
     return ("Display", 0.5, false)
   }
 
-  /// The selected `HUDStyle` at half scale (KMR-A3), from the spec's pinned
+  /// The selected `HUDStyle` at half scale, from the spec's pinned
   /// geometry. One definition in the spec, two implementations (here and
   /// `BrightnessHUD`), reconciled side by side.
   @ViewBuilder
@@ -437,7 +437,7 @@ struct MenuBarPreviewView: View {
   }
 
   /// Match macOS: continuous fill, with the native track's tick dots hinted on
-  /// the unfilled portion (KMR-A4).
+  /// the unfilled portion.
   private func continuousTrack(value: Double) -> some View {
     GeometryReader { geo in
       ZStack(alignment: .leading) {
@@ -457,7 +457,7 @@ struct MenuBarPreviewView: View {
     }
   }
 
-  /// Segmented (KMR-A3): the spec's segment count and gaps, halved here.
+  /// Segmented: the spec's segment count and gaps, halved here.
   private func segmentedTrack(value: Double) -> some View {
     let filled = Int((min(max(value, 0), 1) * 16).rounded())
     return HStack(spacing: 2 * Self.s) {
@@ -482,8 +482,8 @@ struct MenuBarPreviewView: View {
   }
 }
 
-/// The pill's shared chrome (KMR-A3): every style differs inside the pill, not
-/// around it. The light hairline and softened shadow are KMR-A4's direction.
+/// The pill's shared chrome: every style differs inside the pill, not
+/// around it. The light hairline and softened shadow are the revision's direction.
 private struct PillChrome: ViewModifier {
   let radius: CGFloat
   let ground: Color
@@ -500,7 +500,7 @@ private struct PillChrome: ViewModifier {
 
 /// Whether the system is drawing in dark, live. The preview depicts widgets
 /// that follow the system appearance while this window is pinned dark, so it
-/// cannot read the window's color scheme (SV13). KVO rather than an activation
+/// cannot read the window's color scheme. KVO rather than an activation
 /// notification, which would miss a flip made while the window is open.
 @MainActor
 @Observable
@@ -522,7 +522,7 @@ private final class SystemAppearance {
   }
 }
 
-/// The preview widgets' doorway affordance (KMR-A5): lift, not tint, so the
+/// The preview widgets' doorway affordance: lift, not tint, so the
 /// hover survives an unfocused window. Scale is skipped under Reduce Motion; the
 /// shadow deepens either way, a non-moving cue.
 private struct LiftButton<Content: View>: View {

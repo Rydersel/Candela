@@ -2,7 +2,7 @@ import CoreAudio
 import Foundation
 import os
 
-/// Minimal CoreAudio wrapper (D4): SimplyCoreAudio is archived, and this is all
+/// Minimal CoreAudio wrapper: SimplyCoreAudio is archived, and this is all
 /// Candela needs from it.
 public final class CoreAudioDeviceProvider: AudioDeviceProviding, Sendable {
   private let handlerLock = OSAllocatedUnfairLock<(@Sendable () -> Void)?>(initialState: nil)
@@ -11,7 +11,7 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, Sendable {
   /// Change-refreshed snapshot: the blocking HAL read runs on the listener queue at
   /// change time (and lazily on the first read), never on the MainActor re-arm path,
   /// because coreaudiod is most likely to stall exactly when the default-output
-  /// listener fires. D4's "recompute at key time" governs the display MATCH SET, not
+  /// listener fires. The "recompute at key time" rule governs the display MATCH SET, not
   /// the device fetch. Outer nil = never fetched; inner nil = no device.
   private let snapshot = OSAllocatedUnfairLock<AudioOutputDevice??>(initialState: AudioOutputDevice??.none)
   /// Second change-refreshed snapshot, same rules as `snapshot`: the device

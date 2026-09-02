@@ -9,18 +9,18 @@ import SwiftUI
 struct SettingsPaneDescriptor: Identifiable {
   let id: PaneID
   /// Plain `String`, not `LocalizedStringKey`: the toolbar needs one, and
-  /// there is no catalog (D25).
+  /// there is no catalog.
   let title: String
   let symbol: String
   /// What the canvas, the sidebar row and every tint on the page read. A pair
-  /// because the canvas lights from two sources (SV8).
+  /// because the canvas lights from two sources.
   let accent: SettingsAccent
   let content: () -> AnyView
 }
 
 /// One group of sidebar rows, in render order.
 ///
-/// No header plus `gapAbove` is a quiet break rather than a peer section (SC1):
+/// No header plus `gapAbove` is a quiet break rather than a peer section:
 /// the utility rows at the bottom get air, not a promotion.
 struct SettingsSidebarSection: Identifiable {
   /// Drawn exactly as written. Nil draws no kicker.
@@ -39,7 +39,7 @@ struct SettingsSidebarSection: Identifiable {
 /// sidebar, the shell and the selection logic are untouched.
 @MainActor
 enum SettingsRegistry {
-  /// The ONE source of sidebar render order (SC1); ⌘1 onward index the same
+  /// The ONE source of sidebar render order; ⌘1 onward index the same
   /// flattened list. `PaneID.allCases` is deliberately not consulted: raw
   /// values are on-disk schema and can only be appended to, so order lives here
   /// where it costs nothing to change.
@@ -53,8 +53,8 @@ enum SettingsRegistry {
     SettingsSidebarSection(header: nil, gapAbove: true, panes: [.about]),
   ]
 
-  /// Nameable so a test can pin the order against SC1's list rather than a
-  /// screenshot.
+  /// Nameable so a test can pin the order against the render-order list
+  /// rather than a screenshot.
   static var paneOrder: [PaneID] { sections.flatMap(\.panes) }
 
   static var panes: [SettingsPaneDescriptor] {
@@ -119,7 +119,7 @@ enum SettingsRegistry {
         content: { AnyView(KeyboardPane()) }
       )
     // The CARE panes share one warm hue family so the section reads as one
-    // identity (SC8), anchored on OLED Care's amber.
+    // identity, anchored on OLED Care's amber.
     case .health:
       SettingsPaneDescriptor(
         // A trace, not a heart: what this pane shows is a record over time.

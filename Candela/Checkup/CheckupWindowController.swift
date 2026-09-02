@@ -56,7 +56,7 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
     }
   }
 
-  /// CK27: the target going away ends the run as incomplete, with the leg it
+  /// The target going away ends the run as incomplete, with the leg it
   /// was in named on the report. Forwarded from the app's topology loop.
   func displayDisconnected(_ id: CGDirectDisplayID) {
     model?.displayDisconnected(id)
@@ -120,7 +120,7 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
   }
 
   /// The field covers the target, so the flow window belongs on another display
-  /// when there is one; otherwise the field's strip carries the controls (CK16).
+  /// when there is one; otherwise the field's strip carries the controls.
   /// Called as the field goes up, not at pick time: a window that jumped while
   /// the person was still choosing read as a random move.
   private func moveOffTarget(_ entry: CheckupDisplayEntry) {
@@ -162,7 +162,7 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
     return window
   }
 
-  /// CK27: closing abandons the run, and an abandoned run is still saved as
+  /// Closing abandons the run, and an abandoned run is still saved as
   /// incomplete. On the summary there is nothing left to abandon.
   func windowShouldClose(_: NSWindow) -> Bool {
     if model?.page != .summary {

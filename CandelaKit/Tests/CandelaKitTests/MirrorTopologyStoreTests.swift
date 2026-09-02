@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-@Suite("Mirror topology distribution (DT15)")
+@Suite("Mirror topology distribution")
 struct MirrorTopologyStoreTests {
   /// An unwired engine must degrade to TODAY's behaviour, not to a crash and
   /// not to a guess: the default store holds an empty topology whose

@@ -11,7 +11,7 @@ import SwiftUI
 @MainActor
 struct AdvancedPage: View {
   let state: AppModel.DisplayState
-  /// The sub-page display switcher's menu (SO23) and its callback. Navigation
+  /// The sub-page display switcher's menu and its callback. Navigation
   /// state belongs to `SettingsRootView`; this page only reports the choice.
   let displays: [(key: String, name: String)]
   let onSwitch: (String) -> Void
@@ -25,14 +25,14 @@ struct AdvancedPage: View {
   /// The traffic block as the caption renders it, one update behind
   /// `trafficBlock`: the engine changes the block outside any transaction, so
   /// this mirror is what animates the explanation in and out. Only the caption
-  /// reads it, so SO12's greying stays instant.
+  /// reads it, so the greying stays instant.
   @State private var shownTrafficBlock: DDCTrafficBlock?
 
   private var persistenceKey: String { state.display.persistenceKey }
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: persistenceKey) }
   /// The gates this page's sections hang off (`disableCombinedBrightness`,
   /// `startupAction`) are app-level; the startup control lives on the
-  /// Protection pane (SC6).
+  /// Protection pane.
   private var appPrefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
   private var writer: DisplayPrefWriter {
     DisplayPrefWriter(persistenceKey: persistenceKey, actions: actions)
@@ -42,7 +42,7 @@ struct AdvancedPage: View {
   /// about which display is the built-in.
   private var isBuiltIn: Bool { model.builtIn?.id == state.id }
 
-  /// SO23's switcher, minus the built-in: this page has no built-in content,
+  /// The sub-page switcher, minus the built-in: this page has no built-in content,
   /// and `SubPageHeader` does not filter, so the filter happens here.
   ///
   /// The built-in's own entry stays when it IS the display being shown. A
@@ -83,7 +83,7 @@ struct AdvancedPage: View {
     }
   }
 
-  // MARK: - DDC traffic blocking (SO12)
+  // MARK: - DDC traffic blocking
 
   /// Why no DDC command is reaching this display, if none is. Read from the
   /// engine's own path, so this page cannot disagree with Diagnostics or with
@@ -98,7 +98,7 @@ struct AdvancedPage: View {
   private var isBlocked: Bool { trafficBlock != nil }
 
   /// Stated ONCE, at the foot of Control Method, above the sections the block
-  /// greys out (SO12). The copy lives on `SafetySentence` because the HDR half
+  /// greys out. The copy lives on `SafetySentence` because the HDR half
   /// is also spoken in the hardware-control toggle's label, the one control a
   /// block greys BEFORE a VoiceOver user reaches this caption.
   ///
@@ -115,7 +115,8 @@ struct AdvancedPage: View {
       // A safety row (accessibility contract 3): under live HDR this toggle
       // greys BEFORE the explanation at the foot of the section, so a VoiceOver
       // user would otherwise hear "dimmed" with no reason. The sentence rides in
-      // the label and is never repeated as a caption; SO12 states it once.
+      // the label and is never repeated as a caption; the block explanation
+      // states it once.
       SettingRow(
         safety: .hdrBlock(trafficBlock),
         label: "Use hardware (DDC) control",
@@ -124,7 +125,7 @@ struct AdvancedPage: View {
         Toggle(label, isOn: Binding(
           get: { !prefs.forceSoftware },
           set: { useDDC in
-            // D29 rule 1: unmute BEFORE persisting the disabling value.
+            // Unmute BEFORE persisting the disabling value.
             // `toggleMute` guards on `isAvailable`, which `forceSoftware`
             // clears, so turning DDC control off on a 0x8D-muted display strands
             // it muted with no route back from inside the app.
@@ -135,7 +136,7 @@ struct AdvancedPage: View {
           }
         ))
         // Gated ONLY by live HDR, never by `.hardwareControlOff`, which IS this
-        // toggle being off. Greying it there would be D29 rule 3 exactly: the
+        // toggle being off. Greying it there would be exactly the forbidden shape: the
         // recovery control disabled in the state it recovers from, with no other
         // route back inside the app.
         .themedSwitch()
@@ -149,7 +150,7 @@ struct AdvancedPage: View {
         Toggle("Dim with a screen overlay", isOn: Binding(
           get: { prefs.avoidGamma },
           set: { overlay in
-            // D28: `.reapplyDimming` reaches `reapplyAfterPrefChange()`, which
+            // `.reapplyDimming` reaches `reapplyAfterPrefChange()`, which
             // TEARS DOWN the abandoned backend before re-applying. Without that,
             // the shade and the gamma table both stay engaged and the display
             // sits at roughly their product until a topology change.
@@ -204,12 +205,12 @@ struct AdvancedPage: View {
         .padding(.vertical, 6)
       vcpOverrides
     }
-    // SO12: the whole section greys together, and the one explanation for it is
+    // The whole section greys together, and the one explanation for it is
     // rendered above, in Control Method.
     .disabled(isBlocked)
   }
 
-  /// SO13's promoted per-command decisions. NOT a `DisclosureGroup`: a
+  /// The promoted per-command decisions. NOT a `DisclosureGroup`: a
   /// disclosure toggles from its chevron glyph and never from its label text
   /// (measured), so it would hide these fields from most people who look at it.
   @ViewBuilder private var vcpOverrides: some View {
@@ -230,7 +231,7 @@ struct AdvancedPage: View {
         label: "\(DDCCommandCopy.title(command)) response curve",
         selection: curveBinding(command)
       ) {
-        // The engine's fine 1–9 range stays a `defaults write` key (SO13). 0
+        // The engine's fine 1–9 range stays a `defaults write` key. 0
         // (unset) and 5 are both linear in `DimmingMath.curveMultiplier`, so a
         // display carrying the fork's explicit 5 reads as Linear and is NOT
         // rewritten unless the user picks something else.
@@ -244,7 +245,7 @@ struct AdvancedPage: View {
         }
       }
       // Belt, per control: one left live under a traffic block would take a
-      // write that reaches nothing (SO12).
+      // write that reaches nothing.
       .disabled(isBlocked)
       .prefIdentifier(.curveDDC, command: command, persistenceKey: persistenceKey)
 
@@ -264,7 +265,7 @@ struct AdvancedPage: View {
         )
         .settingsEditableContent()
         // Keyed to the display, for the reason the tuning grid's fields are:
-        // SO23's switcher can carry this page onto another display mid-edit.
+        // the switcher can carry this page onto another display mid-edit.
         .id(persistenceKey)
         .disabled(isBlocked)
         .prefIdentifier(.remapDDC, command: command, persistenceKey: persistenceKey)
@@ -274,11 +275,12 @@ struct AdvancedPage: View {
 
   // MARK: - Combined Dimming
 
-  /// Greys with the other sections under SO12, with no carve-out. The handoff
+  /// Greys with the other sections, with no carve-out. The handoff
   /// point is reachable only from `.combined` and `.softwareOnly`, and both
   /// blocked states route elsewhere: `.hardwareControlOff` to `.software`,
   /// `.macOSDrivesBrightness` to `.native`. A live control here would be the
-  /// "looks functional while `ddcTrafficBlock` voids it" case SO12 forbids.
+  /// "looks functional while `ddcTrafficBlock` voids it" case the greying
+  /// rule forbids.
   @ViewBuilder private var combinedDimmingSection: some View {
     SettingsCardSection(title: "Combined Dimming") {
       if appPrefs.combinedBrightness {
@@ -286,8 +288,7 @@ struct AdvancedPage: View {
           VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
               // `ThemedSlider` carries no value labels, so the ends are
-              // composed beside it. They name a DIRECTION, never a number
-              // (SO13).
+              // composed beside it. They name a DIRECTION, never a number.
               Text("Earlier")
                 .settingsText(SettingsTheme.faintColor)
                 .accessibilityHidden(true)
@@ -297,7 +298,7 @@ struct AdvancedPage: View {
                 // The engine's integer detents, which is also the grid a
                 // keyboard or VoiceOver step lands on.
                 step: 1,
-                // SO13: the stored integer never renders, in the readout OR to
+                // The stored integer never renders, in the readout OR to
                 // VoiceOver, which would otherwise announce the raw position.
                 accessibilityValueText: crossoverDescription
               )
@@ -323,7 +324,7 @@ struct AdvancedPage: View {
           .disabled(isBlocked) // belt, as on the VCP fields
         }
       } else {
-        // SO11: the effective state read-only, with an inline enabler here,
+        // The effective state read-only, with an inline enabler here,
         // never a disabled control whose enabler lives on another page.
         LabeledContent("Combined dimming", value: "Off")
         SettingsCardDivider()
@@ -354,7 +355,7 @@ struct AdvancedPage: View {
   }
 
   /// Written straight through, no drag draft: `step: 1` plus the repeat guard
-  /// runs the D28 re-apply once per detent, while the handle is still under the
+  /// runs the `reapplyAfterPrefChange()` pass once per detent, while the handle is still under the
   /// pointer. A draft committed on `onEditingChanged` would leave the pref and
   /// the handle disagreeing for keyboard and VoiceOver adjustments, which report
   /// no editing session.
@@ -370,7 +371,7 @@ struct AdvancedPage: View {
   }
 
   /// The handoff position in words: "Default" at the centre, a direction and a
-  /// distance either side, never the stored number (SO13).
+  /// distance either side, never the stored number.
   private var crossoverDescription: String {
     let point = prefs.combinedSwitchingPoint
     if point == 0 { return "Default" }
@@ -382,7 +383,7 @@ struct AdvancedPage: View {
   @ViewBuilder private var readingValuesSection: some View {
     SettingsCardSection(title: "Reading Values From the Display") {
       if readbackNeverAnswered {
-        // SO25: state the verdict, don't offer escalation. Retrying a panel
+        // State the verdict, don't offer escalation. Retrying a panel
         // that has proved it never answers is not a decision worth presenting.
         SettingsCaption(verbatim: "This display has never answered a read. Values are tracked as last written.")
       } else if appPrefs.startupAction == .read {
@@ -401,7 +402,7 @@ struct AdvancedPage: View {
           .disabled(isBlocked)
           .prefIdentifier(.pollingMode, persistenceKey: persistenceKey)
         }
-        // D11: safe mode suppresses the startup readback, so a retry policy
+        // Safe mode suppresses the startup readback, so a retry policy
         // shown as live would describe behavior that is not happening.
         // `appPrefs` ignores the safe-mode flag on purpose: the picker shows the
         // PERSISTED choice, which is right for a setting.
@@ -424,7 +425,7 @@ struct AdvancedPage: View {
           .prefIdentifier(.pollingCount, persistenceKey: persistenceKey)
         }
       } else {
-        // SO11 again, the same shape as Combined Dimming above.
+        // The same read-only-with-an-inline-enabler shape as Combined Dimming above.
         LabeledContent("Startup readback", value: "Off")
         SettingsCardDivider()
         SettingRow("A global setting: applies to every display.") {
@@ -468,7 +469,7 @@ struct AdvancedPage: View {
       // The destructive ROLE stays on the alert's confirm button, not on the
       // button that only opens the alert. The style reads `isEnabled` itself.
       // Never disabled by `isBlocked`: under `.hardwareControlOff` this button
-      // is the scoped way back out (D29 rule 3).
+      // is the scoped way back out.
       Button("Restore Advanced Defaults…") { confirmingRestore = true }
         .buttonStyle(SettingsDangerButtonStyle())
         .accessibilityLabel("Restore Advanced Defaults…")
@@ -477,17 +478,17 @@ struct AdvancedPage: View {
           Button("Restore", role: .destructive) { restoreAdvancedDefaults() }
           Button("Cancel", role: .cancel) {}
         } message: {
-          // SO20: names the scope in plain terms, including the unmute.
+          // Names the scope in plain terms, including the unmute.
           Text("This turns hardware control and the volume indicator back on for \(state.display.name), switches software dimming back from a screen overlay to the color profile, clears its command tuning, control codes and response curves, and returns the dimming handoff and readback retries to their defaults. A display left muted in hardware is unmuted too, unless it is in HDR mode. Nothing else about this display changes.")
         }
     }
   }
 
-  /// Scoped repair (SO20): every pref this page can write and nothing else.
+  /// Scoped repair: every pref this page can write and nothing else.
   /// `enableMuteUnmute` stays untouched, because the strategy the display was
   /// muted under has to STILL be in force for the unmute to send the right value.
   ///
-  /// ORDER (D29 rule 2): clear the availability prefs FIRST, in the batch, and
+  /// ORDER: clear the availability prefs FIRST, in the batch, and
   /// unmute SECOND. The other order is a silent no-op: `toggleMute` returns
   /// unchanged while `isAvailable` is false, and the user believes they unmuted.
   private func restoreAdvancedDefaults() {

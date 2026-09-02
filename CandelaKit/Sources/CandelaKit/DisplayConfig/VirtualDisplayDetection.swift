@@ -6,15 +6,15 @@ import Foundation
 /// another app's virtual display, or one of ours?
 ///
 /// One lookup on a dictionary the app already fetches elsewhere, so it adds NO
-/// new private-API dependency (VD3). Measured 1 for every CGVirtualDisplay and 0
+/// new private-API dependency. Measured 1 for every CGVirtualDisplay and 0
 /// for the built-in, including from a second process that created none of them,
 /// which is what makes it a FOREIGN-display predicate.
 ///
 /// It answers "virtual", NEVER "ours". Ownership is
 /// `VirtualDisplayProviding.ownedDisplayIDs` and nothing else may decide
-/// whether Candela may destroy a display (VD12).
+/// whether Candela may destroy a display.
 ///
-/// Signals deliberately NOT used, each measured and rejected (S1):
+/// Signals deliberately NOT used, each measured and rejected:
 /// `CGDisplayIsAsleep` (no discrimination); vendor/model/serial (actively
 /// unsafe: a virtual display can impersonate any real monitor exactly);
 /// `CGDisplayScreenSize == 0` (real panels with bad EDID report 0 too); the

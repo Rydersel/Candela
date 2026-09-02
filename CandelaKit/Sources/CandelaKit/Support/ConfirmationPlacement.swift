@@ -6,12 +6,14 @@ import Foundation
 /// Every reconfiguration surface owns its own confirmation window and each one
 /// centred on the display it was asking about, so two questions resolving to the
 /// same display landed on exactly the same point. A refused mirroring change
-/// once drew the words AR12 requires straight over a live arrangement countdown.
+/// once drew the words the reconfiguration gate requires straight over a live
+/// arrangement countdown.
 ///
 /// The incumbent keeps its place and the newcomer moves. That is not a judgement
 /// about which question matters more, which would need the cross-surface
-/// knowledge DT16 keeps out of the islands: the newcomer is placed CLEAR of what
-/// is already on screen, so both are readable whichever arrived first.
+/// knowledge that is deliberately kept out of the islands: the newcomer is
+/// placed CLEAR of what is already on screen, so both are readable whichever
+/// arrived first.
 public enum ConfirmationPlacement {
   /// Between two windows. Enough to read as separate windows rather than one
   /// mis-drawn one.

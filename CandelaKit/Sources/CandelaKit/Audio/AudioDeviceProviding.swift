@@ -1,4 +1,4 @@
-/// What Candela asks CoreAudio (D4): the default output device, whether it sets
+/// What Candela asks CoreAudio: the default output device, whether it sets
 /// its own volume, and when it changes. Behind a protocol so the routing decisions
 /// are testable against a fake.
 public struct AudioOutputDevice: Sendable, Equatable {
@@ -22,7 +22,7 @@ public protocol AudioDeviceProviding: Sendable {
   func defaultOutputDevice() -> AudioOutputDevice?
   /// Names of every device with output channels; same freshness contract as
   /// `defaultOutputDevice()`. No production callers: volume-slider gating reads the
-  /// DDC capabilities string instead (D24).
+  /// DDC capabilities string instead.
   func outputDeviceNames() -> [String]
   /// Fires on default-output-device change (any thread). Pass nil to clear.
   func setOnDefaultOutputChange(_ handler: (@Sendable () -> Void)?)

@@ -45,9 +45,9 @@ enum GammaReadOutcome {
 /// The CoreGraphics transfer-table pair, the ColorSync hand-back and the
 /// activity enforcer, behind one seam.
 ///
-/// A seam for one testability reason: SS15's companion leg is defined by what
-/// happens when a display REFUSES to report its own table, and no display in the
-/// rig can be told to refuse on demand. A test drives a stub.
+/// A seam for one testability reason: the mirror-synthesis companion leg is
+/// defined by what happens when a display REFUSES to report its own table, and
+/// no display in the rig can be told to refuse on demand. A test drives a stub.
 @MainActor
 protocol GammaTableDriving: AnyObject {
   func readTable(_ displayID: CGDirectDisplayID, capacity: UInt32) -> GammaReadOutcome
@@ -93,8 +93,9 @@ final class GammaController: GammaApplying {
   /// Displays whose baseline capture already failed and was already logged.
   ///
   /// The capture is still RETRIED every time, so a display that starts answering
-  /// gets its baseline; only the line is written once. SS15 writes the table to
-  /// both ends of a synthesis set, and the second end is a virtual display that
+  /// gets its baseline; only the line is written once. The mirror-synthesis
+  /// write writes the table to both ends of a synthesis set, and the second end
+  /// is a virtual display that
   /// measurably cannot read back, so without this one drag fills the log at 60
   /// lines a second. The line itself stays: the hardware pass greps for it.
   private var loggedCaptureFailures: Set<CGDirectDisplayID> = []
@@ -136,7 +137,7 @@ final class GammaController: GammaApplying {
     // Fork order, and it matters: park the enforcer on the drawable display,
     // write the table to the target, then force a composite pass.
     //
-    // DT17: if the enforcer has no screen the write is not attempted at all.
+    // If the enforcer has no screen the write is not attempted at all.
     // Otherwise the enforcer stays where it was, the write gets no composite
     // pass, and `lastAppliedScale` is recorded ANYWAY, so `verifyTableIntact`
     // disagrees with itself, reports interference, and drives the fallback to a
@@ -154,7 +155,7 @@ final class GammaController: GammaApplying {
     // from software. A slave's table was MEASURED storing and reading back
     // changed, with an unmirrored positive control, while its scanout comes from
     // the master's framebuffer: both outcomes fit everything observable. That is
-    // why the engine writes both ends of a synthesis set (SS15). A `.success`
+    // why the engine writes both ends of a synthesis set. A `.success`
     // here means CoreGraphics accepted the table, no more.
     let result = self.driver.writeTable(displayID, scaled)
     guard result == .success else {
@@ -310,7 +311,7 @@ final class CoreGraphicsGammaDriver: GammaTableDriving {
   /// One enforcer window shared by all displays: it can only enforce on one
   /// display at a time, which is fine because every gamma write moves it first.
   ///
-  /// The ID is ALREADY RESOLVED to a drawable display by the engine (DT15).
+  /// The ID is ALREADY RESOLVED to a drawable display by the engine.
   /// DIVERGENCE: the fork resolved mirroring here instead, at each of nine such
   /// sites.
   ///

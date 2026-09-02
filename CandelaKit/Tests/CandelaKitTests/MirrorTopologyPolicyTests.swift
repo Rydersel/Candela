@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-@Suite("Mirror toggle policy (DT13, DT14)")
+@Suite("Mirror toggle policy")
 struct MirrorTopologyPolicyTests {
   /// Two independent mirror sets: 1 owns 2, and 3 owns 4. Nothing on this rig
   /// is locked, so every member is breakable.

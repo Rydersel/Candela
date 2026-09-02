@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-@Suite("Mirror preview session (DT19)")
+@Suite("Mirror preview session")
 struct MirrorPreviewSessionTests {
   private func unmirroredPair() -> [ConfiguredDisplay] {
     [MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2)]

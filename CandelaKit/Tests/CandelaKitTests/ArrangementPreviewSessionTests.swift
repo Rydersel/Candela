@@ -5,9 +5,9 @@ import Testing
 
 /// Mirrors `ModePreviewSessionTests` case for case: an arrangement can put the menu bar
 /// on a dark display or strand the pointer, and then nobody can click Keep, so the
-/// countdown defaults to revert (AR8). What this suite adds is the second interaction,
+/// countdown defaults to revert. What this suite adds is the second interaction,
 /// where the mirroring work's worst defect lived: a no-op that reported success forever.
-@Suite("Arrangement preview session (AR8)")
+@Suite("Arrangement preview session")
 struct ArrangementPreviewSessionTests {
   private var pair: DisplayArrangement { ArrangementFixtures.pair }
   /// Display 2 moved below display 1. Gapless and non-overlapping, so
@@ -397,7 +397,7 @@ struct ArrangementPreviewSessionTests {
     #expect(fake.currentArrangement() == diverged)
   }
 
-  /// AR4 through the session: `stacked` names displays 1 and 2 only, so applying it
+  /// The no-partial-plan rule through the session: `stacked` names displays 1 and 2 only, so applying it
   /// after a third arrives hands the newcomer's origin to CoreGraphics and moves a
   /// display nobody touched.
   @Test func aLayoutForADisplaySetThatHasSinceChangedIsRefused() async {
@@ -505,7 +505,7 @@ struct ArrangementPreviewSessionTests {
   }
 
   /// The display set still matches, but the capture is a layout `ArrangementPlan` will
-  /// not express: display 2 mirrors display 1 and holds a tile of its own (AR6). No retry
+  /// not express: display 2 mirrors display 1 and holds a tile of its own. No retry
   /// fixes a fallback that cannot become a request, so it is dropped and reported
   /// `.failed`, never `.reverted`: the previewed layout is still on screen at `.preview`.
   @Test func aFallbackThatCannotBeExpressedAsAPlanIsReportedFailedNotReverted() async throws {

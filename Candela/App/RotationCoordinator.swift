@@ -12,7 +12,7 @@ import SwiftUI
 /// Owned by `AppModel` rather than by a view: the countdown has to outlive
 /// whatever window started it.
 ///
-/// **The apply is blocking and must not run on the main actor (RS10).**
+/// **The apply is blocking and must not run on the main actor.**
 /// `SLSSetDisplayRotation` does not return until the rotation has taken effect;
 /// measured at 0.4–1.1 seconds. Every call into the session therefore crosses
 /// onto the session actor, and the session's own executor is where the blocking
@@ -32,9 +32,9 @@ final class RotationCoordinator {
   /// Why the last request was not attempted. Cleared by `dismissReport`.
   private(set) var lastRefusal: RotationRefusal?
   /// A rotation or a revert that the hardware refused, or that reported success
-  /// and did not happen (RT8).
+  /// and did not happen.
   private(set) var lastFailure: DisplayConfigError?
-  /// The gate refused this request, and names who holds it (AR12). Not a
+  /// The gate refused this request, and names who holds it. Not a
   /// `RotationRefusal` case: that enum answers about the DISPLAY, and this is no
   /// fact about the display.
   private(set) var blockedBy: ReconfigurationClaimant?
@@ -43,7 +43,7 @@ final class RotationCoordinator {
   @ObservationIgnored weak var confirmation: (any RotationConfirmationPresenting)?
 
   @ObservationIgnored private let configurator: any DisplayConfiguring
-  /// AR12. Held from just before the rotation applies until nothing is
+  /// The reconfiguration gate. Held from just before the rotation applies until nothing is
   /// outstanding. Not defaulted: a per-coordinator default would compile, run,
   /// and exclude nobody.
   @ObservationIgnored private let gate: DisplayReconfigurationGate
@@ -82,7 +82,7 @@ final class RotationCoordinator {
       // Screenshot validation only: the confirmation window cannot be reached
       // from a script. Driving the Settings picker needs an Accessibility grant
       // this machine lacks (synthetic scroll events to the settings window are
-      // silently dropped), and there is no rotation hotkey by design (RT1).
+      // silently dropped), and there is no rotation hotkey by design.
       //
       // Posts the REAL request through the real policy, so the countdown and its
       // revert are the shipping ones. Never the built-in: a rotated laptop panel
@@ -103,7 +103,7 @@ final class RotationCoordinator {
     #endif
   }
 
-  /// RT5. False hides every rotation control rather than offering one that
+  /// False hides every rotation control rather than offering one that
   /// cannot work.
   var canRotate: Bool { configurator.canRotate }
 
@@ -163,7 +163,7 @@ final class RotationCoordinator {
     // suspends, and a window still rendering a just-cleared report is the
     // empty-floating-panel defect `syncConfirmation` documents.
     dismissReport()
-    // AR12, asked BEFORE the apply: `SLSSetDisplayRotation` blocks for 0.4–1.1
+    // The reconfiguration gate, asked BEFORE the apply: `SLSSetDisplayRotation` blocks for 0.4–1.1
     // seconds and does not come back until the panel has moved, so a refusal
     // after it would be a refusal of something that already happened.
     if let holder = await gate.claim(.rotation).refusedBy {
@@ -236,7 +236,7 @@ final class RotationCoordinator {
     guard let outstanding = await session.previewed else {
       preview = nil
       stopCountdown()
-      // THE release (AR12), here rather than at each call site: this funnel
+      // THE release (the reconfiguration gate), here rather than at each call site: this funnel
       // already runs after every path that can end a rotation preview.
       // Unconditional, since the gate refuses a release from a non-holder.
       await gate.release(.rotation)

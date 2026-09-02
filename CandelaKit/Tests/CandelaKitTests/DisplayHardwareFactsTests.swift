@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-@Suite("Display hardware facts (B8)")
+@Suite("Display hardware facts")
 struct DisplayHardwareFactsTests {
   private func service(
     manufacturerID: String = "MSI",
@@ -39,7 +39,7 @@ struct DisplayHardwareFactsTests {
 
   /// `IOregService` defaults strings to `""` and the serial to `0`, so "declared
   /// nothing" and "declared empty" arrive identical. Translating here is what stops
-  /// a row rendering blank where DT30 rule (e) promised a reason.
+  /// a row rendering blank where the diagnostics row promised a reason.
   @Test func aPanelThatDeclaredNothingReportsNilNotAnEmptyString() {
     let facts = DisplayHardwareFacts.from(
       service: service(manufacturerID: ""), matchScore: 0, physicalSizeCm: nil

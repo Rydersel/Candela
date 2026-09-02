@@ -12,8 +12,8 @@ public enum OledCareCadence {
   /// The thresholds are minutes, so nothing needs a fast tick to reach them.
   public static let slow: Duration = .seconds(2)
 
-  /// Fast whenever a dim is UP BY ANY DELIVERY, or an OC12 verification is
-  /// pending.
+  /// Fast whenever a dim is UP BY ANY DELIVERY, or an achieved-state
+  /// verification is pending.
   ///
   /// `anyOverlayUp` is the WANT, not the verified presence, on purpose: input
   /// lifts a dim the engine believes is up, and that belief needs fast ticks to

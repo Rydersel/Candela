@@ -1,6 +1,6 @@
 import Testing
 
-// The sidebar's section structure (SC1), which is the ONE source of render
+// The sidebar's section structure, which is the ONE source of render
 // order: the sidebar draws from it, and ⌘1-⌘9 index the same flattened list
 // through `SettingsRegistry.panes`. Pinned here because the order is a product
 // decision that a screenshot cannot defend and a compiler cannot check:
@@ -35,7 +35,7 @@ struct SidebarSectionTests {
     #expect(SettingsRegistry.sections.map(\.header) == [nil, "CARE", "CONTROLS", nil])
   }
 
-  /// The tail is a gap, never a header (SC1): the utility rows get air without
+  /// The tail is a gap, never a header: the utility rows get air without
   /// being promoted to a peer section. A headerless section has nothing else to
   /// separate it, so this flag is the whole break.
   @Test func theUnlabelledTailCarriesItsOwnGap() {

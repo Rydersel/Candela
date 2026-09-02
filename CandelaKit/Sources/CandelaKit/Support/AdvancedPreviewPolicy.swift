@@ -24,7 +24,7 @@ public struct AdvancedSnapshot: Equatable, Sendable {
   }
 }
 
-/// The one-line summary shown beside the Advanced chevron (SO3).
+/// The one-line summary shown beside the Advanced chevron.
 public enum AdvancedPreviewPolicy {
   /// Ranked, not additive: the two settings that change what every other
   /// control *means* name themselves, and only below them does the row fall

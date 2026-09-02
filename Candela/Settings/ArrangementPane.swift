@@ -9,7 +9,8 @@ import SwiftUI
 /// pane it belongs in.
 ///
 /// The pane exists with one display too, showing the single tile and a caption.
-/// A pane that came and went with the hardware is the failure R16 ruled against.
+/// A pane that came and went with the hardware is the failure the
+/// vanishing-subject rule guards against.
 ///
 /// `@MainActor` because a `View`'s properties other than `body` are nonisolated
 /// under complete concurrency checking, and this one stores main-actor types.
@@ -24,7 +25,7 @@ struct ArrangementPane: View {
   /// leave "Use as Main Display" live over nothing.
   @State private var selection: CGDirectDisplayID?
 
-  /// AR7: why the last drop was refused. Held here because it is the SECTION
+  /// Why the last drop was refused. Held here because it is the SECTION
   /// that says it in words; colour is never allowed to be the only signal.
   @State private var refusal: [ArrangementProblem] = []
   /// Bumped on every refusal so an identical second refusal restarts the timer
@@ -61,7 +62,7 @@ struct ArrangementPane: View {
   }
 
   /// The panel each synthesis virtual display is standing in for, by the
-  /// virtual display's ID (SS12). Runtime IDs, derived per read: the pairing
+  /// virtual display's ID. Runtime IDs, derived per read: the pairing
   /// changes while this pane is open, and display IDs are reassigned across a
   /// replug, so nothing here may be held.
   private static func panels(
@@ -72,7 +73,7 @@ struct ArrangementPane: View {
 
   /// What every surface in this pane calls a display: its own name, or (while a
   /// synthesized size is engaged) the name of the panel whose picture the tile is
-  /// (SS12). ONE closure for the map, the refusal sentence and the restore
+  /// ONE closure for the map, the refusal sentence and the restore
   /// notice, so they cannot disagree.
   private var displayName: (CGDirectDisplayID) -> String {
     let panels = Self.panels(standingBehind: model.synthesis.pairings)
@@ -167,22 +168,22 @@ struct ArrangementPane: View {
       model.virtualDisplays.ownedDisplayIDs.contains(id)
         || VirtualDisplayDetection.isVirtual(id) == true
     })
-    // SS12. Snapshotted for `virtualIDs`' reason, and read from the pairing
+    // Snapshotted for `virtualIDs`' reason, and read from the pairing
     // rather than from the mirror flags: the pairing is what says a mirror set is
     // a size this app engaged rather than one the user asked for.
     //
     // The pair keeps ONE tile, the virtual display's, and it stays movable: that
     // display owns the desktop, so it is the member of the pair a layout can
-    // place (AR6). The panel has no tile, so the tile speaks for it.
+    // place. The panel has no tile, so the tile speaks for it.
     let panels = Self.panels(standingBehind: model.synthesis.pairings)
-    // Drawn as a laptop rather than as a monitor (SV9). Snapshotted for
+    // Drawn as a laptop rather than as a monitor. Snapshotted for
     // `virtualIDs`' reason, and read from the model rather than the tile: an
     // arrangement tile knows a rect, not what kind of glass it is.
     let builtInID = model.builtIn?.id
     return SettingsCardSection {
       VStack(alignment: .leading, spacing: 10) {
         // The stage: a dark recessed floor the displays stand on, spanning the
-        // card while the map itself keeps its fixed size (AR2, and the
+        // card while the map itself keeps its fixed size (the
         // screenshot checks) and is centred on it.
         ArrangementCanvasView(
           arrangement: displayedArrangement,
@@ -228,7 +229,7 @@ struct ArrangementPane: View {
           SettingsCaption("Connect another display to arrange them.")
         }
 
-        // AR7 in words. Built from the problems themselves, so it names the
+        // The same refusal, in words. Built from the problems themselves, so it names the
         // displays, and it is the SAME sentence the confirmation window uses:
         // two spellings of one statement are two things to keep true.
         //
@@ -249,16 +250,16 @@ struct ArrangementPane: View {
 
   // MARK: - Main display
 
-  /// AR9. Setting the main display is a BUTTON, not a drag on a 4 pt strip: the
+  /// Setting the main display is a BUTTON, not a drag on a 4 pt strip: the
   /// strip is undiscoverable enough to be a recurring support question on
   /// Apple's own implementation, and it is not operable by keyboard or
   /// VoiceOver. The same action is on the tile's context menu and as a VoiceOver
   /// custom action.
   ///
   /// The whole card waits for a second display. No button rather than a
-  /// permanently dead one (R8): with one display there is nothing to choose
-  /// between. R16 is about a control whose SUBJECT is still there, so it does
-  /// not apply.
+  /// permanently dead one: with one display there is nothing to choose
+  /// between. The vanishing-subject rule is about a control whose SUBJECT is
+  /// still there, so it does not apply.
   @ViewBuilder private var mainDisplaySection: some View {
     if coordinator.arrangement.tiles.count > 1 {
       SettingsCardSection(title: "Main Display") {
@@ -359,7 +360,7 @@ struct ArrangementPane: View {
   /// kicker carries information the page title does not, which is why the map's
   /// card has none.
   ///
-  /// Present with one display attached, for the reason the whole pane is (R16).
+  /// Present with one display attached, for the reason the whole pane is.
   /// What changes is the caption, not the control.
   private var savedLayoutSection: some View {
     SettingsCardSection(title: "Saved Arrangements") {
@@ -391,7 +392,7 @@ struct ArrangementPane: View {
       }
 
       // Safe Mode suppresses the restore pass, so this control would otherwise
-      // describe behavior that is not happening (D11). Symbol AND text; never
+      // describe behavior that is not happening. Symbol AND text; never
       // state by colour alone.
       if model.isSafeMode {
         notice {
@@ -405,7 +406,7 @@ struct ArrangementPane: View {
 
       // The only account an unattended restore ever gives. It waits until the
       // user dismisses it or a later restore pass supersedes it, never taken away
-      // by a departure alone (SO8), in the section whose control made the
+      // by a departure alone, in the section whose control made the
       // promise.
       //
       // Rendered from the mirror, so arrival and dismissal fade the same way. The

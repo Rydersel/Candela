@@ -30,7 +30,7 @@ struct HUDPlacementTests {
   }
 
   @Test func absentAndUnknownStoredValuesResolveToTheShippedPosition() {
-    // The downgrade story (D13): a value written by a later build decodes to
+    // The downgrade story: a value written by a later build decodes to
     // the position every earlier build used.
     #expect(HUDPosition(rawValue: 99) == nil)
     #expect(HUDPosition.allCases.count == 3)

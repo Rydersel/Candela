@@ -48,7 +48,7 @@ struct ArrangementInsertPolicyTests {
     #expect(origin(arrangement, 2) == DisplayPoint(x: 1_800, y: 0))
     #expect(ArrangementRules.problems(in: arrangement).isEmpty)
 
-    // Moving display 3 alone to the same place overlaps display 2, which AR7 springs
+    // Moving display 3 alone to the same place overlaps display 2, which the overlap-refusal rule springs
     // back, so the push is what makes this drop legal.
     #expect(!ArrangementRules.problems(
       in: row.moving(3, to: DisplayPoint(x: 1_000, y: 0))
@@ -95,7 +95,7 @@ struct ArrangementInsertPolicyTests {
   }
 
   @Test func theGuideIsBuiltInTheCoordinatesTheMapIsDrawnIn() throws {
-    // AR14 re-anchors the layout when an insert pushes the main display, so the
+    // The main-anchor rule re-anchors the layout when an insert pushes the main display, so the
     // insertion's arrangement can be a translation away from the frozen baseline.
     let leftward = ArrangementFixtures.arrangement([
       (1, rect(0, 0, 1_000, 1_000)),
@@ -122,7 +122,7 @@ struct ArrangementInsertPolicyTests {
   }
 
   @Test func insertingLeftOfTheMainDisplayLeavesItMain() throws {
-    // 1 sits at the origin, so 1 is main (AR5). 2 is to its LEFT, so inserting
+    // 1 sits at the origin, so 1 is main. 2 is to its LEFT, so inserting
     // between them pushes 1 off the origin.
     let leftward = ArrangementFixtures.arrangement([
       (1, rect(0, 0, 1_000, 1_000)),
@@ -143,7 +143,7 @@ struct ArrangementInsertPolicyTests {
 
     let arrangement = insertion.arrangement
     // Without the re-anchor display 3 lands on (0,0) and silently takes main from
-    // display 1, since AR5 derives main from the origin.
+    // display 1, since main is derived from the origin.
     #expect(arrangement.mainDisplayID == 1)
     #expect(origin(arrangement, 1) == DisplayPoint(x: 0, y: 0))
     #expect(origin(arrangement, 3) == DisplayPoint(x: -800, y: 0))
@@ -396,7 +396,7 @@ struct ArrangementInsertPolicyTests {
     #expect(insertion?.arrangement.tile(2)?.rect.origin == DisplayPoint(x: 50, y: -600))
     #expect(insertion?.arrangement.tile(3)?.rect.origin == DisplayPoint(x: 75, y: -300))
     #expect(insertion?.arrangement.tile(4)?.rect.origin == DisplayPoint(x: 200, y: 200))
-    // AR14 holds through the walk: the display that was main still is.
+    // The main-anchor rule holds through the walk: the display that was main still is.
     #expect(insertion?.arrangement.mainDisplayID == 1)
   }
 

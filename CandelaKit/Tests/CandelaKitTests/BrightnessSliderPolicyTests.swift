@@ -1,7 +1,7 @@
 import Testing
 @testable import CandelaKit
 
-@Suite("Brightness slider reason (WD5)")
+@Suite("Brightness slider reason")
 struct BrightnessSliderPolicyTests {
   private func reason(_ path: BrightnessPath, wireUnresponsive: Bool = true) -> String? {
     BrightnessSliderPolicy.compactDegradedReason(
@@ -25,7 +25,7 @@ struct BrightnessSliderPolicyTests {
     #expect(reason(.software(.gamma), wireUnresponsive: false) == nil)
   }
 
-  /// WD2: the caption must not blame the display for a control a person turned
+  /// The caption must not blame the display for a control a person turned
   /// off.
   @Test func aCommandTheUserTurnedOffIsNeverBlamedOnTheDisplay() {
     #expect(reason(.softwareOnly(backend: .gamma, reason: .ddcTurnedOff, dimsBelow: 0.5)) == nil)

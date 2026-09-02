@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// CK11. Per advertised control: read, write the same value back, read again,
+/// Per advertised control: read, write the same value back, read again,
 /// quote the round trip. The write's return is discarded; a DDC ACK is evidence
 /// of nothing, so only the second READ grades this.
 public struct CheckupLiveCapabilitiesRunner: CheckupCapabilitiesRunning {
@@ -39,7 +39,7 @@ public struct CheckupLiveCapabilitiesRunner: CheckupCapabilitiesRunning {
             verdict: .notObserved("\(label) is not advertised by this panel")))
         continue
       case .unknown:
-        // Distinct from unsupported (D24): an unparseable string is not a denial,
+        // Distinct from unsupported: an unparseable string is not a denial,
         // and a report a person keeps must not contain one the panel never made.
         claims.append(
           CheckupClaim(
@@ -78,7 +78,7 @@ public struct CheckupLiveCapabilitiesRunner: CheckupCapabilitiesRunning {
   }
 }
 
-/// CK12 and CK13. Stages the native mode, then every rate at the native size,
+/// Stages the native mode, then every rate at the native size,
 /// graded on what `currentMode` reports afterwards. An actor because it holds
 /// the one piece of mutable state in these runners, the mode to put back.
 public actor CheckupLiveModeRunner: CheckupModeRunning {
@@ -232,7 +232,7 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
   }
 }
 
-/// CK14. The EDID EOTF flags, and whether `preferHDRModes` settles after a
+/// The EDID EOTF flags, and whether `preferHDRModes` settles after a
 /// toggle. `setHDR` reports only that the write was issued, so the settle read
 /// grades this. The prior state is restored on every exit path and re-read.
 public struct CheckupLiveHDRRunner: CheckupHDRRunning {

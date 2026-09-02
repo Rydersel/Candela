@@ -51,7 +51,7 @@ enum HUDType {
 /// ControlCenter-based OSD ignores the value of repeat showImage calls while its HUD is visible,
 /// so the pill would freeze mid-interaction.
 ///
-/// Style and position both arrive from the caller (KMR-A3), which reads them
+/// Style and position both arrive from the caller, which reads them
 /// from prefs at announce time; the island holds no judgement.
 @MainActor
 final class BrightnessHUD: BrightnessHUDPresenting {
@@ -66,14 +66,14 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     let fillBox: NSBox?
     /// The track's interval dots (continuous-bar styles only). Held so a show
     /// can hide the ones the fill has passed: `labelColor` is translucent in
-    /// dark appearance, so a covered dot would ghost through (KMR-A4).
+    /// dark appearance, so a covered dot would ghost through.
     let tickBoxes: [NSBox]
     /// The chiclets; empty for the continuous-bar styles.
     let segmentBoxes: [NSBox]
     let style: HUDStyle
   }
 
-  /// Per-style geometry (KMR-A3). The Menu Bar preview's miniature implements
+  /// Per-style geometry. The Menu Bar preview's miniature implements
   /// the same numbers from the spec, so a change here must travel there.
   private struct Metrics {
     let size: NSSize
@@ -109,7 +109,7 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     }
   }
 
-  // KMR-A4 fidelity knobs, one line each so a side-by-side pass against the
+  // Fidelity knobs, one line each so a side-by-side pass against the
   // native pill can tune them without archaeology.
   /// `.popover` blends lighter and brighter than `.hudWindow` in both
   /// appearances; the sheen below pushes it the rest of the way.
@@ -159,7 +159,7 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   /// pills possible, which is a product change nobody has ruled on.
   ///
   /// A window built for one STYLE is torn down and rebuilt when a show arrives
-  /// with another (KMR-A3): the anatomies differ structurally, so
+  /// with another: the anatomies differ structurally, so
   /// reconfiguring in place would leave orphaned subviews.
   private var huds: [CGDirectDisplayID: HUD] = [:]
   private var fadeTimers: [CGDirectDisplayID: Timer] = [:]
@@ -179,7 +179,7 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   // MARK: - Presentation
 
   /// `displayID` must ALREADY be a drawable display, resolved through the mirror
-  /// topology by the caller (DT15/DT16). A mirror slave is absent from
+  /// topology by the caller. A mirror slave is absent from
   /// `NSScreen.screens`, so an unresolved ID lands in the guard below and shows
   /// nothing at all, silently, while the write still reaches the panel.
   ///
@@ -225,14 +225,14 @@ final class BrightnessHUD: BrightnessHUDPresenting {
       }
     }
     if !hud.segmentBoxes.isEmpty {
-      // KMR-A3: filled count rounds, so a half step lights the nearer chiclet.
+      // Filled count rounds, so a half step lights the nearer chiclet.
       let filled = Int((normalized * CGFloat(Self.segmentCount)).rounded())
       for (index, box) in hud.segmentBoxes.enumerated() {
         box.fillColor = index < filled ? .labelColor : .quaternaryLabelColor
       }
     }
     // The arithmetic lives in the Kit, where a rotated display's bounds can be
-    // tested (DT16). `screen.frame` is already the EFFECTIVE geometry, so a
+    // tested. `screen.frame` is already the EFFECTIVE geometry, so a
     // display mounted at 270° needs nothing special here.
     hud.panel.setFrameOrigin(HUDPlacement.origin(
       position,
@@ -303,7 +303,7 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     effectView.layer?.borderColor = Self.hairlineColor.cgColor
     rootView.addSubview(effectView)
 
-    // The bright-glass sheen (KMR-A4): first subview, so every control draws
+    // The bright-glass sheen: first subview, so every control draws
     // above it. Constant white; the alpha is the whole design.
     let sheen = NSView(frame: NSRect(origin: .zero, size: size))
     sheen.wantsLayer = true
@@ -347,7 +347,7 @@ final class BrightnessHUD: BrightnessHUDPresenting {
       barBackground.cornerRadius = Metrics.barHeight / 2
       effectView.addSubview(barBackground)
 
-      // Interval dots at the sixteenths (KMR-A4). Added BEFORE the fill so the
+      // Interval dots at the sixteenths. Added BEFORE the fill so the
       // filled side covers its dots, as the native track reads.
       for index in 1 ... Self.tickCount {
         let centerX = metrics.barX + metrics.barWidth * CGFloat(index) / CGFloat(Self.tickCount + 1)
@@ -373,7 +373,7 @@ final class BrightnessHUD: BrightnessHUDPresenting {
       fillBox = fill
 
     case .segments:
-      // KMR-A3 pinned geometry: chiclets across the system bar rect, centered
+      // Pinned geometry: chiclets across the system bar rect, centered
       // on the bar's line.
       let segmentWidth = (metrics.barWidth - CGFloat(Self.segmentCount - 1) * Self.segmentGap) / CGFloat(Self.segmentCount)
       let segmentY = metrics.barY + Metrics.barHeight / 2 - Self.segmentHeight / 2

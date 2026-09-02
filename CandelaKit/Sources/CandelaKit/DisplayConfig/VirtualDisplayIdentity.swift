@@ -4,9 +4,9 @@ import Foundation
 ///
 /// Everything here is a compile-time constant on purpose: macOS writes ONE
 /// permanent colour profile and ONE device registration per display identity
-/// into system-scope ColorSync state and never removes either (S1 §5B). Fixed
-/// identities bound Candela's permanent footprint at one file per slot, forever
-/// (VD8). A rig that varied identity per run left 143 orphaned profiles and
+/// into system-scope ColorSync state and never removes either. Fixed
+/// identities bound Candela's permanent footprint at one file per slot,
+/// forever. A rig that varied identity per run left 143 orphaned profiles and
 /// drove the ColorSync daemons to 59% CPU.
 ///
 /// The PRODUCT varies per slot, never the serial: macOS keys its
@@ -20,7 +20,8 @@ import Foundation
 /// `DisplayConfigIdentity` is NOT extended and gains no virtual case: its key
 /// format is frozen on-disk schema. The extension is entirely on the INPUTS,
 /// which works because descriptor vendorID/productID/serialNum come back
-/// verbatim as CGDisplayVendorNumber/ModelNumber/SerialNumber (measured in S1).
+/// verbatim as CGDisplayVendorNumber/ModelNumber/SerialNumber (measured
+/// directly).
 public enum VirtualDisplayIdentity {
   /// Reserved for displays Candela creates. NEVER user-settable. Bit 15 is set,
   /// and an EDID manufacturer ID packs three letters into five bits each with
@@ -36,14 +37,14 @@ public enum VirtualDisplayIdentity {
   /// converges, the probe's `vd create`) is clamped to this.
   public static let userSlotRange = 1 ... 3
 
-  /// Engine-internal slots for synthesized sizes (SS6). Never in the pane,
+  /// Engine-internal slots for synthesized sizes. Never in the pane,
   /// never allocated by a user action; the family stays two wide because each
-  /// advertised identity leaks one permanent ColorSync profile (S1 §5B).
+  /// advertised identity leaks one permanent ColorSync profile.
   public static let synthesisSlotRange = 4 ... 5
 
   /// Ceiling for `maxPixelsWide/High`, and the real control surface for HiDPI:
   /// macOS emits a 2x variant only for modes whose doubled framebuffer fits
-  /// under it (S1 §4). 8192 x 4320 leaves a 4K logical size at 2x inside it.
+  /// under it. 8192 x 4320 leaves a 4K logical size at 2x inside it.
   /// Constant because it feeds the advertised EDID, and a new EDID may mint a
   /// new colour profile.
   public static let maxPixels = (wide: 8192, high: 4320)

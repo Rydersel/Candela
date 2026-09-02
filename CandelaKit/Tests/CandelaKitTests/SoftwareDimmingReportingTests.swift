@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-@Suite("Software dimming reports failure instead of faking success (DT17)")
+@Suite("Software dimming reports failure instead of faking success")
 @MainActor
 struct SoftwareDimmingReportingTests {
   private static let slaveID: CGDirectDisplayID = 3
@@ -161,9 +161,9 @@ private final class SelectiveGamma: GammaApplying {
   func resetAllGamma() {}
 }
 
-/// SS15: a synthesis set has two display IDs and nothing in software can say
+/// A synthesis set has two display IDs and nothing in software can say
 /// which one's transfer table reaches the glass, so both get the dimming scale.
-@Suite("Gamma dimming under an engaged synthesis set (SS15)")
+@Suite("Gamma dimming under an engaged synthesis set")
 @MainActor
 struct SynthesisGammaRoutingTests {
   /// `MirrorFixtures.synthesisPair`: panel 2 shows virtual display 5's
@@ -304,8 +304,8 @@ struct SynthesisGammaRoutingTests {
 
   /// Only the PANEL's write decides whether the dimming landed. A companion
   /// write can refuse for reasons that say nothing about it, and clearing the
-  /// dedupe memo off that re-attempts on every drag event (the live-lock DT17's
-  /// reporting rule avoids).
+  /// dedupe memo off that re-attempts on every drag event (the live-lock the
+  /// honest-failure-reporting rule avoids).
   @Test func aRefusedCompanionWriteDoesNotUnMemoiseTheValue() {
     let gamma = SelectiveGamma()
     gamma.refuses = [Self.virtualID]
@@ -361,7 +361,7 @@ struct SynthesisGammaRoutingTests {
     expectBothLegsRestored(gamma)
   }
 
-  /// `clearSoftwareLeg`: entering the native path (C1) takes the software leg
+  /// `clearSoftwareLeg`: entering the native path (the restore-latch clearing) takes the software leg
   /// down, and gamma is broken under HDR, so a companion left scaled would
   /// survive with nothing able to clear it.
   @Test func enteringTheNativePathRestoresBothTables() async {

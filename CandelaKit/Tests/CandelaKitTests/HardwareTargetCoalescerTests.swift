@@ -343,13 +343,13 @@ actor GatedApplier: BrightnessApplying {
   #expect(await second.recordedWrites().map(\.value) == [40]) // re-applied to the new writer
 }
 
-// MARK: - Last write outcome (B4)
+// MARK: - Last write outcome
 
 /// The `Bool` from `DDCCommandApplier` used to advance the duplicate memo and then
 /// evaporate, so diagnostics could not tell a display accepting commands from one
 /// refusing every command since the cable went in. These pin the two facts the
 /// coalescer keeps, and the cases where it must keep neither.
-@Suite("Last DDC write outcome (B4)")
+@Suite("Last DDC write outcome")
 struct LastAppliedTargetTests {
   /// A fresh controller has written nothing, and "nothing written" must not
   /// read as "the last write failed" — the row would then accuse a display
@@ -469,7 +469,7 @@ actor GatedFailingApplier: BrightnessApplying {
   }
 }
 
-/// The controller's B4 accessors are pass-throughs over the coalescer's lock, so
+/// The controller's last-write-outcome accessors are pass-throughs over the coalescer's lock, so
 /// what needs pinning is the wiring: they read the coalescer this controller writes
 /// through, and a real DDC failure shows up in them.
 @MainActor

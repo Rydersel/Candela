@@ -114,7 +114,7 @@ struct MirrorConfirmationView: View {
         ConfirmationCaption(MirroringCopy.applyFailure)
           .help("CoreGraphics error \(failure.cgErrorCode)")
       }
-      // The gate said no (AR12): neither a refusal about the topology nor a
+      // The gate said no: neither a refusal about the topology nor a
       // failed apply, since nothing was staged. Said out loud because a hotkey
       // press has no other surface, and silence on it reads as a dead key.
       if let blockedBy = coordinator.blockedBy {

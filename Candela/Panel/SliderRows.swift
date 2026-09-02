@@ -1,8 +1,8 @@
 import CandelaKit
 import SwiftUI
 
-// The panel's slider rows, so `snapsToZero` is derived in one place (D29 rule
-// 4). Build sliders through these, never a bare `CandelaSlider`: a hand-passed
+// The panel's slider rows, so `snapsToZero` is derived in one place. Build
+// sliders through these, never a bare `CandelaSlider`: a hand-passed
 // `snapsToZero` lets a muting row snap to 0 and hardware-mute over VCP 0x8D.
 
 /// `setBrightness` is synchronous and coalesces hardware writes, so drag
@@ -86,7 +86,7 @@ struct ValueSliderRow: View {
       systemImage: isMuted ? (mutedSystemImage ?? systemImage) : systemImage,
       accessibilityLabel: isMuted ? "\(accessibilityLabel), muted" : accessibilityLabel,
       snapsToStops: snapsToStops,
-      // D29: never let snapping pull a volume drag onto 0, which the engine
+      // Never let snapping pull a volume drag onto 0, which the engine
       // treats as a hardware mute (VCP 0x8D). Contrast keeps the 0 stop.
       snapsToZero: !mutesAtZero,
       showsPercent: showsPercent

@@ -9,11 +9,11 @@ private let resetLog = Logger(subsystem: "com.rydersel.Candela", category: "rese
 
 /// The external display hub: everything you change or consult about one display,
 /// on one page, with Advanced / Diagnostics / the full mode list pushed as
-/// sub-pages (SO1/SO2). Owns the whole page, hero included; `DisplayDetailView`
+/// sub-pages. Owns the whole page, hero included; `DisplayDetailView`
 /// is only the navigation shell's destination host.
 ///
 /// Banners are NOT this page's: `BannerRegion` renders them above this view and
-/// above every pushed sub-page (SO7).
+/// above every pushed sub-page.
 ///
 /// `@MainActor` because a `View`'s properties other than `body` are nonisolated
 /// under complete concurrency, and these read main-actor types.
@@ -29,7 +29,7 @@ struct DisplayHubView: View {
 
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
-  /// SO6's "key settings window" test, read at the click that starts a
+  /// The "key settings window" test, read at the click that starts a
   /// preview: `.key` exactly when this view's window is the key window.
   @Environment(\.controlActiveState) private var controlActiveState
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -39,8 +39,7 @@ struct DisplayHubView: View {
   /// Drafts, not direct pref bindings: a `TextField` bound straight to a pref
   /// would write, fan out and bump `prefsRevision` on every keystroke,
   /// re-rendering the pane mid-edit. Committed on Return and on focus loss; on
-  /// teardown the `@State` dies with the destination and nothing is scheduled
-  /// (SO10).
+  /// teardown the `@State` dies with the destination and nothing is scheduled.
   ///
   /// Seeded at identity creation and re-seeded on `prefsRevision` from `onChange`
   /// modifiers ON THE FIELDS themselves, so a re-seed cannot silently stop firing
@@ -73,9 +72,9 @@ struct DisplayHubView: View {
   private var coordinator: DisplayModeCoordinator { model.displayModes }
   private var synthesis: SynthesisCoordinator { model.synthesis }
   private var catalog: DisplayModeCoordinator.Catalog? { coordinator.catalogs[displayID] }
-  /// The shared apply path, with SO6's answering surface sampled from this
+  /// The shared apply path, with the answering surface sampled from this
   /// window's key state when the row is built. This one is the recommendation
-  /// callout's; it applies the same row through the same countdown (PD9).
+  /// callout's; it applies the same row through the same countdown.
   private var resolutionSelection: ResolutionSelection {
     ResolutionSelection(
       coordinator: coordinator,
@@ -86,7 +85,7 @@ struct DisplayHubView: View {
 
   var body: some View {
     // `DisplayPrefs` is plain UserDefaults, not observable: this re-evaluates
-    // the hub after a write anywhere else, and re-reads the previews (SO3).
+    // the hub after a write anywhere else, and re-reads the previews.
     let _ = model.prefsRevision
     // Every card sits directly in the scaffold's builder: the page is one
     // reading order, not seven fragments composed from child views.
@@ -165,14 +164,14 @@ struct DisplayHubView: View {
         .animation(Motion.disclosure(reduceMotion: reduceMotion), value: hasCustomName)
       }
       if model.isSharedIdentity(persistenceKey) {
-        // SO21: same persistence key, same prefs, so every control on this page
+        // Same persistence key, same prefs, so every control on this page
         // drives both units, and the user deserves to know before renaming one.
         SettingsRowNote(verbatim: "Two identical displays are attached. They share these settings.")
       }
     }
   }
 
-  /// The two menu-bar questions, under their own kicker (SV14).
+  /// The two menu-bar questions, under their own kicker.
   private var menuBarCard: some View {
     SettingsCardSection(title: "In the Menu Bar") {
       SettingRow {
@@ -235,7 +234,7 @@ struct DisplayHubView: View {
       if let catalog {
         // Shared with the built-in display's page, which offers the same choice
         // over the same engine. What stays here is external-only: the density
-        // model's callout and SS14's synthesis opt-in.
+        // model's callout and the synthesized-sizes opt-in.
         DisplaySizeRows(catalog: catalog)
 
         recommendationCallout(catalog)
@@ -269,7 +268,7 @@ struct DisplayHubView: View {
   }
 
   /// The density model's suggestion as an ACTION, where the badge on the size
-  /// picker is only a mark (PD8). Each condition removes the row for a different
+  /// picker is only a mark. Each condition removes the row for a different
   /// reason: no recommendation, the user closed it, the user already applied a
   /// size this session, no curated row to apply (the wire-timing guard can
   /// withhold one), or the display already runs that size. That last is why
@@ -299,7 +298,7 @@ struct DisplayHubView: View {
         isNative: row.mode.isNative
       ))) {
         HStack(spacing: 10) {
-          // The SAME apply the picker uses, countdown and all (PD9): a
+          // The SAME apply the picker uses, countdown and all: a
           // recommended mode is no safer than any other, and the keep/revert
           // window is the only wire-timing detector that exists.
           Button(DisplayModeCopy.recommendationApply) {
@@ -319,13 +318,13 @@ struct DisplayHubView: View {
     }
   }
 
-  /// SS4's per-display opt-in. What a refusal says is NOT here: `BannerRegion`
-  /// renders it above this page and every pushed page (SO7), because a
+  /// The per-display opt-in. What a refusal says is NOT here: `BannerRegion`
+  /// renders it above this page and every pushed page, because a
   /// synthesized size can be picked from All Sizes too, where a row in this
   /// section is unreachable.
   ///
   /// With the size controls rather than under Advanced, because it changes what
-  /// the Size pop-up directly above offers. SS14 keeps the built-in out
+  /// the Size pop-up directly above offers. Synthesized sizes keep the built-in out
   /// entirely; this page is the external hub, so the guard is a belt over a
   /// structural fact.
   @ViewBuilder private func moreSizesRows(
@@ -351,13 +350,13 @@ struct DisplayHubView: View {
     }
   }
 
-  /// SS11's ordering, which is why this is a method and not two lines in a
+  /// The ordering, which is why this is a method and not two lines in a
   /// binding: turning the opt-in OFF disengages and verifies BEFORE the pref is
   /// written, so a failed teardown leaves the display opted in with the
   /// synthesized rows still in the picker. Those rows are the only surface that
   /// can take an engaged size down, so writing the pref first would hide the
   /// recovery behind the state it recovers from. The coordinator owns the write
-  /// and its D27 announcement; a second write path here would be a second
+  /// and its pref-change announcement; a second write path here would be a second
   /// ordering to get wrong.
   private func setMoreSizes(_ enabled: Bool, on display: ConfiguredDisplay) {
     Task { await synthesis.setOptIn(enabled, on: display) }
@@ -385,7 +384,7 @@ struct DisplayHubView: View {
 
       SettingsCardDivider()
 
-      // A safety row (a11y contract 3): what "On" costs is D29's mute strand,
+      // A safety row (a11y contract 3): what "On" costs is the mute strand,
       // so the sentence goes into the toggle's label rather than a hint a
       // VoiceOver user may have switched off. The pref is a request the display
       // or the "Always disabled" override can demote to the volume-register
@@ -400,7 +399,7 @@ struct DisplayHubView: View {
         Toggle(label, isOn: Binding(
           get: { prefs.enableMuteUnmute },
           set: { enabled in
-            // D22/D29 rule 1, with NO engine backstop: unmute BEFORE the pref
+            // With NO engine backstop: unmute BEFORE the pref
             // flips. Once `enableMuteUnmute` is false nothing ever sends 0x8D=2
             // again, so persisting first strands the display hardware-muted with
             // only a CLI to recover it.
@@ -412,8 +411,8 @@ struct DisplayHubView: View {
         ))
         // Disable, don't hide: the control does not apply while the volume
         // command is off, and saying so beats a missing row. Disabling it does
-        // NOT make the D22 hazard unreachable; the stranded-mute recovery in
-        // `BannerRegion` works regardless of `isAvailable` (D29 rule 3) and
+        // NOT make this hazard unreachable; the stranded-mute recovery in
+        // `BannerRegion` works regardless of `isAvailable` and
         // cannot be scrolled out of existence by the state it recovers from.
         .themedSwitch()
         .disabled(!state.volume.isAvailable)
@@ -426,7 +425,7 @@ struct DisplayHubView: View {
         ThemedChoiceRow(label: "Volume slider", selection: Binding(
           get: { prefs.audioSinkOverride },
           set: { override in
-            // D29 rule 1. "Always disabled" takes the MUTE key away as well as
+            // "Always disabled" takes the MUTE key away as well as
             // the slider, because both consult this verdict, so persisting it
             // while the display is hardware-muted would leave the strand behind
             // a control that no longer answers. Unmute BEFORE the pref flips.
@@ -476,7 +475,7 @@ struct DisplayHubView: View {
 
   /// Mirrors what the key path consults, so this row cannot say "On" about keys
   /// that would move nothing. Two unavailability signals and either is enough:
-  /// `volume.isAvailable` is the pref side, `volumeSliderEnabled` is D24's, the
+  /// `volume.isAvailable` is the pref side, `volumeSliderEnabled` is the
   /// monitor's own denial. The Dell answers its capabilities with no VCP 0x62,
   /// and "On" there would contradict the greyed slider two sections up.
   private var volumeKeysStatus: String {
@@ -492,14 +491,14 @@ struct DisplayHubView: View {
 
   // MARK: - OLED Care
 
-  /// The SO2 split of the per-display care controls: the hub holds the decision
-  /// you change (enrollment, OC2's explicit opt-in, reachable where the
+  /// The split of the per-display care controls: the hub holds the decision
+  /// you change (enrollment, an explicit opt-in, reachable where the
   /// display's other everyday controls are) and the state you consult, as the
   /// row's value. Thresholds, levels, hours and the global chrome switches stay
-  /// on the OLED Care pane, which OC3 keeps as their home.
+  /// on the OLED Care pane, which stays their home.
   ///
   /// The route there is a sidebar-selection change, NOT a push from this
-  /// destination's stack (SO1), so it wears the app's cross-pane LINK idiom
+  /// destination's stack, so it wears the app's cross-pane LINK idiom
   /// rather than `NavigationRow`'s chevron: a chevron promises a push on the
   /// current destination. The link lands on this display's own OLED page.
   private var oledCareCard: some View {
@@ -535,7 +534,7 @@ struct DisplayHubView: View {
     }
   }
 
-  /// SO3's value preview, from the coordinator's OWN published state, never a
+  /// The value preview, from the coordinator's OWN published state, never a
   /// second opinion computed here. The exhaustive switch makes a new engine
   /// state a compile error rather than a stale preview.
   private var oledCarePreview: String {
@@ -544,7 +543,7 @@ struct DisplayHubView: View {
     switch model.oledCare.dimStates[persistenceKey] {
     case .active: return "On"
     case .idleDim, .unfocusedDim: return "Dimmed"
-    // OC7 sub-ruling 4: a refused lock dim is recorded and must not be reported
+    // A refused lock dim is recorded and must not be reported
     // as dimmed. `lockDimSkips` is observed, so this re-reads when the refusal
     // appears or clears.
     case .lockDim: return OledCareCopy.lockDimPreview(model.oledCare.lockDimSkips[persistenceKey])
@@ -592,7 +591,7 @@ struct DisplayHubView: View {
     }
   }
 
-  /// SO3: composed from live `DisplayPrefs` reads on every body evaluation, so
+  /// Composed from live `DisplayPrefs` reads on every body evaluation, so
   /// the preview cannot outlive the values it describes. `hideOsd` is passed as
   /// its own fact and deliberately NOT counted into `overrideCount`: the policy
   /// folds it in itself, and counting it here would double it.
@@ -639,7 +638,7 @@ struct DisplayHubView: View {
     SettingsCardSection {
       HStack {
         // The window's destructive style at rest, matching the app-wide reset in
-        // General. What survives of SO20 is the part that was never about looks:
+        // General. What survives is the part that was never about looks:
         // the destructive ROLE stays on the alert's confirm button rather than on
         // the button that opens the alert. Disabled only WHILE a reset runs,
         // never as a state the page can get stuck in; a `defer` on the reset's
@@ -653,7 +652,7 @@ struct DisplayHubView: View {
             Button("Reset", role: .destructive) { resetDisplay() }
             Button("Cancel", role: .cancel) {}
           } message: {
-            // Names the Advanced-page work explicitly (SO20), and names what is
+            // Names the Advanced-page work explicitly, and names what is
             // NOT lost: the saved levels are the only source of truth on a
             // write-only panel, so a reset that took them would leave the display
             // at an unknown brightness. The pinned resolution and rotation are
@@ -667,10 +666,10 @@ struct DisplayHubView: View {
     }
   }
 
-  /// Per-display reset. ORDER IS THE WHOLE POINT (D29 rule 2). An earlier
+  /// Per-display reset. ORDER IS THE WHOLE POINT. An earlier
   /// version attempted `toggleMute()` FIRST, then cleared `forceSoftware` and
   /// the per-command `unavailableDDC`, then set `enableMuteUnmute = false`. On a
-  /// display that arrived already in the D29 state (muted with hardware control
+  /// display that arrived already in that state (muted with hardware control
   /// off) the unmute hit `toggleMute`'s `isAvailable` guard and returned
   /// silently, and the reset then retired the only mute strategy that could ever
   /// send 0x8D=2 again: the button whose alert promises to fix a bad state left
@@ -694,7 +693,7 @@ struct DisplayHubView: View {
         model.oledCare.displayResetDidComplete(key)
         model.endReset()
       }
-      // 0. SS11 for the reset path: the synthesized size comes DOWN, verified,
+      // 0. For the reset path: the synthesized size comes DOWN, verified,
       //    and only then are its two prefs cleared. The coordinator owns both
       //    halves and their order, so nothing here writes either key.
       //
@@ -709,14 +708,14 @@ struct DisplayHubView: View {
         await synthesis.reset(configured)
       }
 
-      // 1. D22: HDR goes through the controller's state machine (settle window,
+      // 1. HDR goes through the controller's state machine (settle window,
       //    poller gating, rollback), never `prefs.hdrMode`. First, so the DDC
       //    register is unlocked for everything below.
       //
       //    The RESET door, not `setHDRMode(.off)`: that one decides from the
       //    stored mode and the cached mirror, and the mirror lags a System
       //    Settings toggle until the reconfigure lands. In that window it reports
-      //    no HDR, the request evaporates, and everything below, the D29 unmute
+      //    no HDR, the request evaporates, and everything below, the unmute
       //    included, runs against a register the monitor still has locked. This
       //    door measures the panel instead, clears the stored mode either way,
       //    and reports whether HDR was engaged elsewhere so step 5 can put it
@@ -747,7 +746,7 @@ struct DisplayHubView: View {
       //    and `forceSw` does not, so with `menuIcon == .sliderOnly` a reset that
       //    un-hid the display would leave the status item missing. Clearing
       //    `forceSoftware` and every command's `unavailableDDC` here is what
-      //    makes step 3 able to work at all (D29 rule 2). Deliberately outside:
+      //    makes step 3 able to work at all. Deliberately outside:
       //    the mute strategy (step 4, ordering), the remembered display mode, and
       //    the size-recommendation dismissal, which only Reset All brings back.
       writer.writeAll([
@@ -795,8 +794,8 @@ struct DisplayHubView: View {
       // `.unknown` the display may still be in HDR, where DDC goes nowhere and a
       // write-only panel cannot report it: the unmute would clear the stored mute
       // flag over a register that stayed muted, and retiring the strategy would
-      // remove the only command that could ever undo it. That is the strand D29
-      // rule 1 forbids, so BOTH steps stand down together and the display keeps
+      // remove the only command that could ever undo it. That is the strand the
+      // mute-strand rule forbids, so BOTH steps stand down together and the display keeps
       // its working strategy and its honest muted flag.
       switch hdrState {
       case .disengaged:
@@ -817,9 +816,9 @@ struct DisplayHubView: View {
         }
         // 4. Only now retire the strategy, and only if the unmute is known to
         //    have reached the panel. Retiring it after an unmute nobody can
-        //    confirm removes the one command that undoes 0x8D = 2, which is D29
-        //    rule 1 read backwards. Its row is UI-only, so this second fan-out
-        //    costs a re-render and nothing else.
+        //    confirm removes the one command that undoes 0x8D = 2, which is the
+        //    mute-strand rule's first clause read backwards. Its row is
+        //    UI-only, so this second fan-out costs a re-render and nothing else.
         if unmuteLanded {
           writer.write(.enableMuteUnmute) { $0.enableMuteUnmute = false }
         } else {
@@ -888,7 +887,7 @@ struct DisplayHubView: View {
     audioNameDraft = trimmed
     guard trimmed != prefs.audioDeviceNameOverride else { return }
     // Fans out to a tap re-arm: `audioDeviceNameOverride` feeds
-    // `AppModel.tapConfig` through `audioMatchingDisplays` (D20/D2).
+    // `AppModel.tapConfig` through `audioMatchingDisplays`.
     writer.write(.audioDeviceNameOverride) { $0.audioDeviceNameOverride = trimmed }
   }
 }

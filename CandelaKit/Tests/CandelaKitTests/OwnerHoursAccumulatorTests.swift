@@ -84,7 +84,7 @@ struct OwnerHoursAccumulatorTests {
 
   /// The tuple label says `hours`; storage is seconds. This shipped briefly
   /// returning raw seconds under that label, a 3600x overstatement one `Text(...)`
-  /// from the screen and the kind of number OC11 forbids the UI to imply. One
+  /// from the screen and the kind of number the label-accuracy rule forbids the UI to imply. One
   /// full-screen hour reads as 1.0, not 3600.
   @Test func topOwnersReturnsHoursNotSeconds() {
     var acc = OwnerHoursAccumulator()

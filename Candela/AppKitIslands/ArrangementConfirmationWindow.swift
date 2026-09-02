@@ -114,7 +114,7 @@ struct ArrangementConfirmationView: View {
 
   /// What this card is reporting, which is what titles it. The precedence
   /// between a known divergence, an uncertain one and "nothing changed" is
-  /// decided in `CandelaKit`, where a test can reach it (D21).
+  /// decided in `CandelaKit`, where a test can reach it.
   private var reportSubject: ArrangementReportSubject {
     .of(
       hasRecoverableLayout: coordinator.recoverableLayout != nil,
@@ -134,7 +134,7 @@ struct ArrangementConfirmationView: View {
         ConfirmationCaption(ArrangementCopy.applyFailure)
           .help("CoreGraphics error \(failure.cgErrorCode)")
       }
-      // The gate said no (AR12). Nothing was staged, so this is neither a
+      // The gate said no. Nothing was staged, so this is neither a
       // refusal about the layout nor a failed apply.
       if let blockedBy = coordinator.blockedBy {
         ConfirmationCaption(ReconfigurationCopy.blocked(by: blockedBy))

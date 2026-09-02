@@ -4,7 +4,7 @@ import Foundation
 /// A per-cell alpha for the dimming overlay, in panel-physical space.
 ///
 /// The overlay's spatial axis, built once and consumed twice: by the feathered
-/// regions and, once its effect-size gate clears, by OC17's wear mask. Values
+/// regions and, once its effect-size gate clears, by the wear mask. Values
 /// are opacity, matching `OledDimming.alpha(for:)`: 0 covers nothing, 1 is
 /// opaque.
 ///
@@ -92,7 +92,7 @@ public struct OverlayMask: Equatable, Sendable {
   /// Transposed as the rotation requires, so a mask hot in the panel's
   /// top-right comes back hot in the display's top-left at 270°. No smoothing
   /// here: a 24x10 grid magnified with a linear filter is already the gradient
-  /// OC17 asks for, and a second blur would cost fidelity.
+  /// the wear mask asks for, and a second blur would cost fidelity.
   public func displayOriented(through transform: PanelSpaceTransform) -> Oriented {
     let swaps = transform.rotation.swapsAxes
     let cols = swaps ? PanelGrid.rows : PanelGrid.cols

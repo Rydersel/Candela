@@ -1,7 +1,7 @@
 import Foundation
 
 /// Which path is driving a display's brightness. Named for what the user sees,
-/// not the prefs behind it (D25): `forceSw` and `avoidGamma` never reach a label.
+/// not the prefs behind it: `forceSw` and `avoidGamma` never reach a label.
 public enum DisplayControlMethod: Sendable, Equatable {
   /// DDC over the data cable. `avoidGamma` is inert on this path.
   case hardwareDDC
@@ -27,7 +27,7 @@ public enum DDCTrafficBlock: Sendable, Equatable {
 }
 
 /// The Displays pane rules that are not pure bindings. Here rather than in the
-/// view because each has a wrong answer no test could catch in the app (D21).
+/// view because each has a wrong answer no test could catch in the app.
 public enum DisplayCardPolicy {
   /// The card's three-way summary, derived from the engine's own path so the two
   /// cannot disagree. nil for `.native` and `.unavailable`, which the card has no
@@ -62,7 +62,7 @@ public enum DisplayCardPolicy {
   /// blocks. `.softwareOnly` and `.unavailable` say nothing about volume or
   /// contrast, which still write over the same wire.
   ///
-  /// `isWireUnresponsive` (WD2) is the fact the path cannot carry: a wire that
+  /// `isWireUnresponsive` is the fact the path cannot carry: a wire that
   /// stopped answering routes `.software`, the same path force-software selects, so
   /// blocking on it would caption a control nobody touched "hardware control is
   /// off".

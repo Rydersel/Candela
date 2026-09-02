@@ -7,7 +7,7 @@ import SwiftUI
 /// the Window menu (a `WindowGroup` opened the settings window on plain launch,
 /// a measured regression), so this is a plain `NSWindow` created on demand.
 ///
-/// D14's load-bearing detail lives in `windowWillClose`: completion is recorded
+/// The completion-recording rule's load-bearing detail lives in `windowWillClose`: completion is recorded
 /// when the window goes away, never at launch, so force-quitting mid-Setup
 /// re-runs it. DIVERGENCE from the fork, which set `appAlreadyLaunched` two
 /// statements after presenting the window.
@@ -18,12 +18,12 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
   private let onCompletion: () -> Void
   /// Fires after the window closes ONLY when the close came from the finish
   /// page's "Start Using …" button. ⌘W, the red close button and Skip Setup
-  /// complete Setup (D14) but stay quiet: the user asked to dismiss a window,
+  /// complete Setup but stay quiet: the user asked to dismiss a window,
   /// not to be handed a menu.
   var onFinishedByButton: (() -> Void)?
   private var closedByFinishButton = false
   /// Constructed once and reused like the window, which is only safe because
-  /// `isEnabled` is a LIVE read of `SMAppService.mainApp.status` (D10). No copy
+  /// `isEnabled` is a LIVE read of `SMAppService.mainApp.status`. No copy
   /// of the registration state is held, so nothing here goes stale after a
   /// settings reset unregisters the login item.
   private let loginItem = LoginItem()
@@ -65,7 +65,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     // `makeKeyAndOrderFront` nor `orderFrontRegardless` rescues it.
     NSApp.activate(ignoringOtherApps: true)
     window.makeKeyAndOrderFront(nil)
-    // D13 safety net: completion is otherwise recorded ONLY from
+    // The schema-version safety net: completion is otherwise recorded ONLY from
     // `windowWillClose`. If presentation ever fails, the version key would never
     // be written, Setup would re-run on every launch, and `migrateIfNeeded`
     // would never have a stored version to advance.
@@ -106,7 +106,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     flow.onCommit = { router.route($0) }
     flow.onRequestAccessibility = { permission.promptIfNeeded() }
     flow.onOpenAccessibilitySettings = { AccessibilityPermission.openSystemSettings() }
-    // OB5: the request and nothing else. The return value means "already
+    // The request and nothing else. The return value means "already
     // granted", not "granted now" (it is false when the dialog was merely
     // shown), so nothing may gate on it; the telemetry pref itself is written
     // later through the commit router when the care page is advanced past.
@@ -136,9 +136,9 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     window.setContentSize(NSSize(width: 760, height: 560))
   }
 
-  /// The commit router over the real write paths (OB6): D27 pref writes
+  /// The commit router over the real write paths: standard pref writes
   /// through `DisplayPrefWriter`, launch at login through `LoginItem`'s live
-  /// SMAppService read and setter (D10).
+  /// SMAppService read and setter.
   private func liveRouter() -> OnboardingCommitRouter {
     let actions = actions
     let loginItem = loginItem

@@ -22,9 +22,9 @@ actor EngagesAfterFirstMeasureHDR: HDRToggling {
   func displaysReconfigured() {}
 }
 
-/// The banner recovery's ordering and evidence rules (D29). The reset path's
+/// The banner recovery's ordering and evidence rules. The reset path's
 /// equivalent lives in the app target, where nothing can pin it.
-@Suite("Stranded mute recovery (D29)")
+@Suite("Stranded mute recovery")
 @MainActor
 struct StrandedMuteRecoveryTests {
   /// A muted volume queue on its own wire, plus the HDR owner whose measured
@@ -38,7 +38,7 @@ struct StrandedMuteRecoveryTests {
     let volume: DDCValueController
     let store = PathMemoryStore()
     /// Recorded rather than asserted inline: the ORDER against the wire is the
-    /// D29 rule, so the test needs both events on one timeline.
+    /// mute-strand rule, so the test needs both events on one timeline.
     private(set) var reopenedAtWriteCount: Int?
 
     init(hdrEnabled: Bool = false, muted: Bool = true, dedicatedMuteCommand: Bool = true) {
@@ -94,7 +94,7 @@ struct StrandedMuteRecoveryTests {
     #expect(rig.reopenedAtWriteCount == 0)
   }
 
-  @Test("the routes reopen even when HDR blocks the unmute (D29 rule 2)")
+  @Test("the routes reopen even when HDR blocks the unmute")
   func theRoutesReopenUnderLiveHDR() async {
     let rig = Rig(hdrEnabled: true)
     await rig.prime()

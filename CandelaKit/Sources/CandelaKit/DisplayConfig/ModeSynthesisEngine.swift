@@ -6,7 +6,7 @@ import os
 /// verifies its virtual display against.
 ///
 /// Separate from the base protocol because achieved mode is not part of a
-/// virtual display's lifetime (VD5), and only synthesis has to ask.
+/// virtual display's lifetime, and only synthesis has to ask.
 ///
 /// **Not a live read, and a conformance must not implement it as one.** The
 /// creating process usually cannot read its own virtual display back:
@@ -25,7 +25,7 @@ extension VirtualDisplayHost: VirtualDisplayAchievedModeReporting {}
 /// One physical display currently showing a synthesized size, and the virtual
 /// display it is mirroring to get it.
 ///
-/// The authority on synthesis topology (SS1). Nothing derives it from CG mirror
+/// The authority on synthesis topology. Nothing derives it from CG mirror
 /// flags, so a driver that stopped reporting them would change nothing here.
 public struct SynthesisPairing: Sendable, Equatable {
   public let physicalDisplayID: CGDirectDisplayID
@@ -53,10 +53,10 @@ public struct SynthesisPairing: Sendable, Equatable {
 
 /// Why a synthesis request produced no engaged size. Every case names a step.
 public enum SynthesisFailure: Error, Sendable, Equatable {
-  /// The private virtual-display class family is absent (VD10). Nothing was
+  /// The private virtual-display class family is absent. Nothing was
   /// attempted.
   case unavailable
-  /// Both synthesis slots are in use. The family is two wide (SS6).
+  /// Both synthesis slots are in use. The family is two wide.
   case noFreeSlot
   case createFailed(VirtualDisplayFailure)
   /// The virtual display came up, and not at the requested size at 2x. Measured
@@ -74,8 +74,8 @@ public enum SynthesisFailure: Error, Sendable, Equatable {
   case unwindIncomplete
 }
 
-/// The verified engage and disengage sequence for synthesized sizes (SS10), and
-/// the pairing table every other synthesis-aware surface reads (SS1).
+/// The verified engage and disengage sequence for synthesized sizes, and
+/// the pairing table every other synthesis-aware surface reads.
 ///
 /// **Non-reentrant by construction.** The methods are not `async`, so they hold
 /// no suspension point and the actor runs one engage or disengage to
@@ -117,7 +117,7 @@ public actor ModeSynthesisEngine {
   /// Called with the virtual display's ID after the display exists and before
   /// the mirror that makes it a master.
   ///
-  /// The pairing table is the authority (SS1) but is written only once the whole
+  /// The pairing table is the authority but is written only once the whole
   /// sequence passes. The mirror lands in the MIDDLE of this call and
   /// `didChangeScreenParameters` is posted and sampled synchronously, so until
   /// it returns every carve-out keyed on the pairing reads a synthesis set as
@@ -128,7 +128,7 @@ public actor ModeSynthesisEngine {
   /// nothing.
   ///
   /// Synchronous and `@Sendable` because it runs on this actor's executor
-  /// between two steps of SS10's ordering: it may only touch something
+  /// between two steps of the sequence's ordering: it may only touch something
   /// lock-backed and nonisolated, and must never be given work that blocks.
   private let willMirrorOntoVirtualDisplay: (@Sendable (CGDirectDisplayID) -> Void)?
   private let log = Logger(subsystem: "com.rydersel.Candela", category: "synthesis")
@@ -299,7 +299,7 @@ public actor ModeSynthesisEngine {
     guard unwind(pairing) else {
       // RETAINED, not dropped: a pairing whose teardown did not finish still
       // names the slot and the virtual display, so a later disengage can retry
-      // and the SS7 carve-outs keep reading the set as synthesis.
+      // and the mirror-set carve-outs keep reading the set as synthesis.
       return .failure(.unwindIncomplete)
     }
     table[displayID] = nil
@@ -312,7 +312,7 @@ public actor ModeSynthesisEngine {
   /// Reverse the steps taken, and say whether the machine came all the way back.
   ///
   /// **Break the mirror, then destroy the virtual display, then check the
-  /// panel** (SS10). Releasing a master first leaves its slaves showing a
+  /// panel**. Releasing a master first leaves its slaves showing a
   /// framebuffer that is going away.
   ///
   /// The break is staged only when the topology says the physical really is
@@ -345,7 +345,7 @@ public actor ModeSynthesisEngine {
       complete = false
     }
 
-    // SS10's last step, the only one about the GLASS rather than the topology.
+    // The sequence's last step, the only one about the GLASS rather than the topology.
     // Skipped when the display is gone: a departure teardown has no panel to
     // ask, and "incomplete" would retain a pairing for absent hardware.
     let attached = configurator.displays().contains { $0.id == pairing.physicalDisplayID }
@@ -387,7 +387,7 @@ public actor ModeSynthesisEngine {
     case unreadable
   }
 
-  /// SS10's last step, asked of the glass rather than of the topology.
+  /// The sequence's last step, asked of the glass rather than of the topology.
   ///
   /// The enumeration-membership half is what makes this able to fail at all.
   /// The engage tail re-times the slave, so seconds after an engage the panel

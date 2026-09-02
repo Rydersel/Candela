@@ -2,10 +2,10 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// The exclusion between reconfiguring features (AR12). The two cases nobody would
+/// The exclusion between reconfiguring features. The two cases nobody would
 /// think to write are the ones that matter: a gate refusing the holder its own claim
 /// breaks superseding, and a gate letting one claimant release another's fails open.
-@Suite("Display reconfiguration gate (AR12)")
+@Suite("Display reconfiguration gate")
 struct DisplayReconfigurationGateTests {
   /// Every ordered pair, generated rather than listed: a fifth claimant is
   /// covered the moment its case exists.
@@ -22,7 +22,7 @@ struct DisplayReconfigurationGateTests {
     #expect(await gate.holder == nil)
   }
 
-  /// AR12's substance is the fourth claimant. Deleting the `arrangement` case
+  /// The reconfiguration gate's substance is the fourth claimant. Deleting the `arrangement` case
   /// would leave every other test here passing over a three-way gate.
   @Test func allFourReconfiguringFeaturesAreClaimants() {
     #expect(Set(ReconfigurationClaimant.allCases) == [

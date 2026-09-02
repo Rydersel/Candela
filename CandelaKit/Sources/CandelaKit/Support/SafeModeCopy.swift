@@ -3,7 +3,7 @@ import Foundation
 /// The one list of what a Safe Mode session suppresses, and the summaries built
 /// from it.
 ///
-/// D11 is about one feature being described the same way everywhere. This list used
+/// Safe Mode is about one feature being described the same way everywhere. This list used
 /// to live separately in the launch alert, the Diagnostics row and the General pane,
 /// and the three drifted apart. Adding a `Suppression` case is now a compile error
 /// until its clause is written, and every summary picks it up for free.
@@ -76,7 +76,7 @@ public enum SafeModeCopy {
   /// The second paragraph is as load-bearing as the first. Someone reaching for Safe
   /// Mode because DDC writes are wedging a monitor must not read the list above as
   /// "the traffic has stopped", and gating the sliders and keys would remove the only
-  /// unmute affordance a hardware-muted display has (D29 rule 3).
+  /// unmute affordance a hardware-muted display has.
   public static func launchNotice(app: String) -> String {
     """
     Shift was held during launch. For this session, \(suppressions(app: app))

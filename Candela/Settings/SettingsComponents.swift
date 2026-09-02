@@ -1,7 +1,7 @@
 import CandelaKit
 import SwiftUI
 
-/// The settings SO15 grants a second sentence to, because each one names a
+/// The settings that get a second sentence, because each one names a
 /// state a person may not be able to undo from inside the app.
 ///
 /// Closed on purpose, so a new safety case cannot appear by someone writing a
@@ -10,9 +10,9 @@ import SwiftUI
 enum SafetySentence {
   /// The brightness slider can reach 0% on a display dimming in software.
   case blankDisplay
-  /// A display's Sound section, D29's mute strand. SO5 gives the unavailable
-  /// state a sentence of its own rather than letting a recoverable state borrow
-  /// this one.
+  /// A display's Sound section, part of the mute-strand rule. The unavailable
+  /// state gets a sentence of its own rather than letting a recoverable state
+  /// borrow this one.
   ///
   /// `dedicatedCommandInReach` asks `VolumeSliderPolicy.usesDedicatedMuteCommand`
   /// with the pref held on, so it answers the switch's promise rather than its
@@ -43,8 +43,8 @@ enum SafetySentence {
       } else {
         // Says what the SWITCH does; the level and the cause are the status
         // caption's. Scoped to the mute direction on purpose: an unmute still
-        // sends the command's release on the pref alone, ungated by the verdict
-        // (D29 rule 3), so a sentence about the command in general is false.
+        // sends the command's release on the pref alone, ungated by the
+        // verdict, so a sentence about the command in general is false.
         "Off or On, a mute here goes to the volume command instead."
       }
     case let .hdrBlock(block):
@@ -53,7 +53,7 @@ enum SafetySentence {
   }
 
   /// The same sentence shown under the control. Nil for the HDR block, which
-  /// SO12 states once for the whole page at the foot of Control Method, so that
+  /// is stated once for the whole page at the foot of Control Method, so that
   /// case goes into the label and nowhere else.
   var visibleCaption: SettingsCaption? {
     switch self {

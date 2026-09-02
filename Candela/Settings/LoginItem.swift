@@ -3,9 +3,9 @@ import Foundation
 import Observation
 import ServiceManagement
 
-/// The SMAppService touchpoints behind one injectable value (D21). The closures
-/// are the seam, not a cache: `status` executes on every read, so D10's
-/// live-read invariant survives injection by construction.
+/// The SMAppService touchpoints behind one injectable value. The closures
+/// are the seam, not a cache: `status` executes on every read, so the
+/// live-status rule's live-read invariant survives injection by construction.
 @MainActor
 struct LoginItemService {
   var status: () -> SMAppService.Status
@@ -18,13 +18,13 @@ struct LoginItemService {
     unregister: { try SMAppService.mainApp.unregister() })
 }
 
-/// Launch-at-login via SMAppService (D10). ONE source of truth: `isEnabled` is a
+/// Launch-at-login via SMAppService. ONE source of truth: `isEnabled` is a
 /// LIVE read of the service status, never a mirrored bool, so a failed
 /// register() shows OFF plus an error instead of the fork's lying checkbox.
 @MainActor @Observable
 final class LoginItem {
   @ObservationIgnored private let service: LoginItemService
-  /// D10: never mirror the status. The settings reset and System Settings >
+  /// Never mirror the status. The settings reset and System Settings >
   /// Login Items both change the registration with no notification to us, and a
   /// mirror would read ON forever.
   ///
@@ -53,7 +53,7 @@ final class LoginItem {
     // A live read is not a live render, and `.onAppear` only fires when a pane
     // appears. Becoming active is the only signal that covers a change made in
     // System Settings > Login Items, or by `sfltool`, while Candela sat in the
-    // background (D10).
+    // background.
     activationObserver = NotificationCenter.default.addObserver(
       forName: NSApplication.didBecomeActiveNotification,
       object: nil,

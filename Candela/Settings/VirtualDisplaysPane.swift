@@ -2,14 +2,14 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// The virtual display slots (VD2). A virtual display never gets a menu bar row
+/// The virtual display slots. A virtual display never gets a menu bar row
 /// or a per-display destination: it has no DDC and no brightness, and macOS
 /// handles its arrangement and scaling once it exists.
 ///
-/// Every write goes through `SettingsActions` with a `PrefName` case (D27).
-/// Only the `virtualSlotConfigured` write converges live displays (VD14),
+/// Every write goes through `SettingsActions` with a `PrefName` case.
+/// Only the `virtualSlotConfigured` write converges live displays,
 /// scoped to the written slot so one slot's Create never applies another slot's
-/// pending edits (VD17). Field edits are inert until Create or Apply.
+/// pending edits. Field edits are inert until Create or Apply.
 @MainActor
 struct VirtualDisplaysPane: View {
   @Environment(AppModel.self) private var model
@@ -90,7 +90,7 @@ struct VirtualDisplaysPane: View {
   }
 
   private var unavailableCard: some View {
-    // VD16: the class family resolved to nothing on this macOS, so every entry
+    // The class family resolved to nothing on this macOS, so every entry
     // point is inert and the pane says why rather than showing dead controls.
     // No kicker, or the page header's title is said twice.
     SettingsCardSection {
@@ -160,7 +160,7 @@ struct VirtualDisplaysPane: View {
       prefs.setVirtualSlot(definition, slot: slot)
       selectedSlot = slot
       // The batch, never a representative name; the slot scopes the
-      // convergence to this write (VD17).
+      // convergence to this write.
       actions.prefsDidChange(
         [.virtualSlotDefined, .virtualSlotConfigured, .virtualSlotUUID], virtualSlot: slot
       )
@@ -447,7 +447,7 @@ struct VirtualDisplaysPane: View {
           .buttonStyle(SettingsPrimaryButtonStyle())
           .accessibilityIdentifier("action.slotApply.\(slot)")
       } else if drifted {
-        // VD1/VD17: the apply path is destroy-and-recreate under the same
+        // The apply path is destroy-and-recreate under the same
         // slot, so the button names that rather than acting on the field edit.
         Button("Apply and Recreate") { setConfigured(true, slot: slot) }
           .buttonStyle(SettingsPrimaryButtonStyle())
@@ -467,13 +467,13 @@ struct VirtualDisplaysPane: View {
     updated.configured = configured
     var names: [PrefName] = [.virtualSlotConfigured]
     if configured, updated.uuid == nil {
-      // VD9: minted once, on first configure; survives recreate and relaunch.
+      // Minted once, on first configure; survives recreate and relaunch.
       updated.uuid = UUID()
       names.append(.virtualSlotUUID)
     }
     prefs.setVirtualSlot(updated, slot: slot)
     // The batch, never a representative name; the slot scopes the
-    // convergence to this write (VD17).
+    // convergence to this write.
     actions.prefsDidChange(names, virtualSlot: slot)
   }
 

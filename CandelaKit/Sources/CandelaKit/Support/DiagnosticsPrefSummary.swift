@@ -42,9 +42,9 @@ public enum DiagnosticsPrefSummary {
     // Answers "the app never suggested a size here". Without it, a dismissed
     // suggestion is indistinguishable from the density model abstaining.
     if prefs.sizeRecommendationDismissed { note(.sizeRecommendationDismissed, "true") }
-    // SS4's opt-in, reported because it explains a size list the panel never
-    // advertised. The stored stop stays out, like `storedDisplayMode`: the size in
-    // force belongs in the mode line.
+    // The synthesized-sizes opt-in, reported because it explains a size list the
+    // panel never advertised. The stored stop stays out, like `storedDisplayMode`:
+    // the size in force belongs in the mode line.
     if prefs.offerSyntheticSizes { note(.offerSyntheticSizes, "true") }
 
     // The comparison values are the accessor defaults (the Recommended preset),

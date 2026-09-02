@@ -1,13 +1,13 @@
 import CandelaKit
 import SwiftUI
 
-/// Every user-visible word about synthesized sizes (SS4/SS5/SS9): the opt-in
+/// Every user-visible word about synthesized sizes: the opt-in
 /// row, the badge and rate column on a synthesized row, the refusal sentences,
 /// and the two diagnostics lines.
 ///
 /// Three constraints bind everything here.
 ///
-/// No sharpness claim, ever (RM11, and the camera gate measured supersampling
+/// No sharpness claim, ever (the camera gate measured supersampling
 /// reading SOFTER on standard-PPI glass). This feature sells size granularity:
 /// "more sizes", never "sharper", "full resolution" or "Retina".
 ///
@@ -22,7 +22,7 @@ import SwiftUI
 /// reachable while the size is visibly on the glass, so it states what the app
 /// could not do rather than what the display no longer offers.
 enum SynthesisCopy {
-  // MARK: - The opt-in row (SS4)
+  // MARK: - The opt-in row
 
   /// "More sizes" is the whole promise: options between the ones the display
   /// reports, with no claim about how any of them look.
@@ -35,14 +35,13 @@ enum SynthesisCopy {
     "Adds in-between scaled sizes rendered through a virtual display. The picture may use more memory while one is active."
   }
 
-  // MARK: - Synthesized rows (SS5)
+  // MARK: - Synthesized rows
 
   /// The mark on a row this app renders rather than one the display offers.
   ///
   /// NOT `DisplayModeCopy.addedByApp` ("Added by Candela"), which marks a mode
   /// our own enumeration FOUND on the display. The two differ in what they cost
-  /// and in what happens when the app quits, so the marks stay distinguishable
-  /// (SS5).
+  /// and in what happens when the app quits, so the marks stay distinguishable.
   static var badge: String { "Rendered by \(AppInfo.productName)" }
 
   /// The rate column of a synthesized row. The stop has no rate of its own, so
@@ -55,7 +54,7 @@ enum SynthesisCopy {
   /// OFFERED row, so a cost claim that is usually false is a caution attached
   /// to every stop before anybody chooses one.
   ///
-  /// "display", not "panel": SO14 retired that word from visible copy while
+  /// "display", not "panel": that word was retired from visible copy while
   /// leaving it in the type and comment vocabulary.
   static var keepsPanelRefresh: String { "Keeps the display's refresh rate" }
 
@@ -66,9 +65,9 @@ enum SynthesisCopy {
     "The size in use is one \(AppInfo.productName) renders, so this list does not hold it. It is in the Recommended list."
   }
 
-  // MARK: - Refusals (SS9, SS14)
+  // MARK: - Refusals
 
-  /// SS9's sentence read in the other direction, for the panel's HDR button
+  /// The HDR-engaged guard's sentence read in the other direction, for the panel's HDR button
   /// while a size is engaged. The mirror image of `refusal`'s `.hdrEngaged`:
   /// the two guard one pairing from opposite ends, and a person who has met one
   /// should recognise the other.
@@ -84,7 +83,7 @@ enum SynthesisCopy {
   static func refusal(_ reason: SynthesisCoordinator.Refusal.Reason) -> LocalizedStringKey {
     switch reason {
     case .builtIn:
-      // SS14. Unreachable from the external hub, but stated rather than left
+      // Unreachable from the external hub, but stated rather than left
       // to a fallback.
       "\(AppInfo.productName) renders these sizes on external displays only."
     case .hdrEngaged:
@@ -113,7 +112,7 @@ enum SynthesisCopy {
     case .busy:
       "\(AppInfo.productName) is still finishing the last display change. Try again in a moment."
     case let .blocked(claimant):
-      // The one sentence every AR12 claimant says, from the one place it lives.
+      // The one sentence every reconfiguration-gate claimant says, from the one place it lives.
       ReconfigurationCopy.blocked(by: claimant)
     case let .engine(failure):
       engineFailure(failure)
@@ -145,7 +144,7 @@ enum SynthesisCopy {
       // standing with no account of it anywhere a person can read.
       //
       // "usually", and the second route, because quitting is NOT sufficient in
-      // the measured exception (S1 5A): while the virtual display is the only
+      // the measured exception: while the virtual display is the only
       // ACTIVE display macOS will not remove it, and it survived both the
       // owning object's release and a SIGKILL. A real display being active
       // again clears it within about a second.

@@ -2,7 +2,7 @@ import CandelaKit
 import CoreGraphics
 import Foundation
 
-/// One attached display as the checkup flow sees it (CK26). Virtual displays are
+/// One attached display as the checkup flow sees it. Virtual displays are
 /// filtered out where entries are built, so a report can never key on one.
 struct CheckupDisplayEntry: Equatable, Sendable, Identifiable {
   var id: CGDirectDisplayID
@@ -21,7 +21,7 @@ struct CheckupDisplayEntry: Equatable, Sendable, Identifiable {
   var pixelHeight: Int
   /// Points, the field view's unit: the strip is sized in points, the plant placed in pixels.
   var pointHeight: Double
-  /// CK16: with nowhere else to put the instructions, they sit on the field
+  /// With nowhere else to put the instructions, they sit on the field
   /// itself and the report records the field as partially occluded.
   var isOnlyDisplay: Bool
 }
@@ -43,7 +43,7 @@ protocol CheckupCareHolding: AnyObject {
   func endCheckupField(identityKey: String)
 }
 
-/// Everything the flow reaches past itself (CK25): live in the app, fakes in
+/// Everything the flow reaches past itself: live in the app, fakes in
 /// the suite. The model never touches a display, a clock or a store directly.
 struct CheckupEnvironment {
   var displays: [CheckupDisplayEntry]
@@ -51,7 +51,7 @@ struct CheckupEnvironment {
   var appBuild: String
   var runners: (CheckupDisplayEntry) -> CheckupRunnerSet
   var presenter: any CheckupFieldPresenting
-  /// CK17: every showing is booked to the exposure record with its on-time.
+  /// Every showing is booked to the exposure record with its on-time.
   var bookShowing: (_ identityKey: String, _ kind: CheckupFieldKind, _ seconds: TimeInterval) -> Void
   var now: () -> Date
   var makeRNG: () -> any RandomNumberGenerator
@@ -65,7 +65,7 @@ struct AnyRandomNumberGenerator: RandomNumberGenerator {
   mutating func next() -> UInt64 { base.next() }
 }
 
-/// CK24's page order, plus the three states a field passes through. The
+/// The page order, plus the three states a field passes through. The
 /// instruction page is where a field rests before and after its showing.
 enum CheckupPage: Equatable {
   case scenario, displayPick, plan, identity, capabilities, nativeMode, refresh, witness
@@ -75,7 +75,7 @@ enum CheckupPage: Equatable {
   case fieldConfirmSecondDot(CheckupFieldKind)
   case hdr, summary
 
-  /// Names the page in the report when a run ends here (CK27).
+  /// Names the page in the report when a run ends here.
   var name: String {
     switch self {
     case .scenario: "the scenario page"
@@ -98,5 +98,5 @@ enum CheckupPage: Equatable {
 }
 
 /// What a person can answer on a field. The first three belong to the visual
-/// fields (CK22), the last two to the witness card (CK19).
+/// fields, the last two to the witness card.
 enum CheckupFieldAnswer: Equatable { case nothing, oneMark, moreThanOne, roundAndUncut, notRound }

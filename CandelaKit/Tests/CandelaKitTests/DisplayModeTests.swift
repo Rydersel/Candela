@@ -42,7 +42,7 @@ struct DisplayModeTests {
   }
 
   /// The descriptor is what persists. It must NOT carry ioModeID, which is not
-  /// stable across replug (spec DM6).
+  /// stable across replug.
   @Test func theDescriptorCarriesGeometryAndRefreshButNotTheModeID() {
     let m = mode(logical: (2560, 1440), pixels: (5120, 2880), hz: 120)
     let d = m.descriptor

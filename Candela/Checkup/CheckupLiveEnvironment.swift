@@ -22,7 +22,7 @@ enum CheckupLiveEnvironment {
     /// No `NSScreen` of its own, so no field can be drawn on it.
     var isMirroring: Bool
     /// The cached MCCS capabilities string. nil is "nobody has a string for
-    /// this display", never "this display advertises nothing" (D24).
+    /// this display", never "this display advertises nothing".
     var capabilities: String?
     var hasDDCService: Bool
     /// Whether the panel is in HDR right now. DDC is dead while it is.
@@ -32,7 +32,7 @@ enum CheckupLiveEnvironment {
     var pointHeight: Double
   }
 
-  /// CK26: a virtual display is never a target, and neither is a mirroring one,
+  /// A virtual display is never a target, and neither is a mirroring one,
   /// so both drop here rather than at every surface. `isOnlyDisplay` counts what
   /// survives: a display the flow cannot target cannot host the window either.
   static func entries(from sources: [Source]) -> [CheckupDisplayEntry] {
@@ -58,7 +58,7 @@ enum CheckupLiveEnvironment {
   }
 
   /// Reads the live state the plan grades off, BEFORE it grades anything: HDR
-  /// from the panel, then a capability string for every external the D24 probe
+  /// from the panel, then a capability string for every external the capabilities probe
   /// lacks one for. A nil `hdr` leaves the caller's value alone.
   ///
   /// Both re-reads exist because the cached answers lie. The controller's HDR
@@ -184,7 +184,7 @@ enum CheckupLiveEnvironment {
       // `NSScreen` is what actually stops the draw. Either alone lets a run fabricate a showing.
       isMirroring: CGDisplayMirrorsDisplay(state.id) != kCGNullDirectDisplay
         || OverlayWindow.screen(for: state.id) == nil,
-      // The D24 probe's string where it has one; `readingLiveState` above
+      // The capabilities probe's string where it has one; `readingLiveState` above
       // fills the rest in before anything is graded off them.
       capabilities: model.capabilityString[key],
       // Discovery admits only externals with a live DDC service, so membership
@@ -236,7 +236,7 @@ enum CheckupLiveEnvironment {
     func run() async -> [CheckupClaim] { [] }
   }
 
-  /// CK11's round trip writes VCP registers straight at the display, past the
+  /// The capabilities round trip writes VCP registers straight at the display, past the
   /// coalescers that own them. A control moved mid-leg is left at the runner's
   /// read-back value while the coalescer's memo names the newer one, so the
   /// move back is skipped as a duplicate. Restores whatever the verdict: the

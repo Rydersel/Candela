@@ -5,7 +5,7 @@ import Testing
 
 /// Convergence of live virtual displays to per-slot prefs. Pure, so every
 /// lifecycle decision is testable with no hardware and no private API.
-@Suite("Virtual display reconciler (VD14, VD17)")
+@Suite("Virtual display reconciler")
 struct VirtualDisplayReconcilerTests {
   private func definition(
     configured: Bool = true, name: String = "Test", width: Int = 1920, height: Int = 1080,
@@ -40,7 +40,7 @@ struct VirtualDisplayReconcilerTests {
     #expect(actions == [.destroy(slot: 2)])
   }
 
-  /// SS6: synthesis slots are stood by the engine and have no stored
+  /// Synthesis slots are stood by the engine and have no stored
   /// definition, so a full-family sweep would read one as
   /// unconfigured-but-live and destroy the engine's display on the next sync.
   /// This pins the `userSlotRange` bound; on `slotRange` it draws a
@@ -61,7 +61,7 @@ struct VirtualDisplayReconcilerTests {
     #expect(actions.isEmpty)
   }
 
-  /// The explicit-apply path (VD17): the pane edits fields, then rewrites
+  /// The explicit-apply path: the pane edits fields, then rewrites
   /// `configured`; only that write carries `.syncVirtualDisplays`, and the
   /// drift between the live spec and the stored one is what converts it into
   /// a recreate.
@@ -109,7 +109,7 @@ struct VirtualDisplayReconcilerTests {
     #expect(actions.isEmpty)
   }
 
-  /// VD17 made structural: a Create on one slot must never apply another
+  /// The explicit-apply path made structural: a Create on one slot must never apply another
   /// slot's drifted-but-unapplied edits. The unscoped version recreated slot 1
   /// when slot 2 was created.
   @Test func aScopedSyncTouchesOnlyTheNamedSlot() {
@@ -147,7 +147,7 @@ struct VirtualDisplayReconcilerTests {
     #expect(actions.isEmpty)
   }
 
-  // MARK: - Launch normalization (VD13's counterpart)
+  // MARK: - Launch normalization
 
   /// A configured slot without recreate-at-launch died with the last
   /// session; its pref must say so, or the next sync would silently create a
@@ -176,7 +176,7 @@ struct VirtualDisplayReconcilerTests {
 
 /// The slot definition's prefs round-trip, against an isolated defaults
 /// domain the way every prefs suite here does it.
-@Suite("Virtual slot prefs (VD9)")
+@Suite("Virtual slot prefs")
 struct VirtualSlotPrefsTests {
   private func freshPrefs() -> DisplayPrefs {
     let defaults = UserDefaults(suiteName: "vd-slot-tests-\(UUID().uuidString)")!

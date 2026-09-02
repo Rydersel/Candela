@@ -3,9 +3,9 @@ import CoreGraphics
 import SwiftUI
 import Testing
 
-/// Layer 2 of AT4 for the two surfaces SC4 and SC5 rearranged: build them with
-/// faked data, run them through `ImageRenderer`, and assert only that pixels
-/// came out at a plausible size.
+/// Layer 2 for the two surfaces the sidebar restructure rearranged:
+/// build them with faked data, run them through `ImageRenderer`, and assert
+/// only that pixels came out at a plausible size.
 ///
 /// What this covers: a crash in `body` and a render that collapses to nothing.
 /// Both surfaces are deep compositions, exactly the shape a `body` mistake

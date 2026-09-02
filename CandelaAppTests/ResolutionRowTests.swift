@@ -2,7 +2,7 @@ import CandelaKit
 import CoreGraphics
 import Testing
 
-// The Size pop-up's derivation, over a BUILT-IN shaped catalog (AT4 layer 1).
+// The Size pop-up's derivation, over a BUILT-IN shaped catalog.
 //
 // These rows are shared by the external hub and the built-in display's page,
 // and the built-in is the shape nothing covered: a high-PPI panel whose whole
@@ -11,10 +11,10 @@ import Testing
 // recommended), and which the refresh-rate pair 59.9 / 60.0 is real on.
 //
 // The defect worth catching here is a mark that appears where it must not.
-// "Recommended" over an abstaining model and "Rendered by Candela" over a panel
-// SS14 excludes would both be the app claiming something it has not decided,
-// and neither is visible to a Kit test: the catalog is honest in both cases and
-// only the label builder can invent them.
+// "Recommended" over an abstaining model and "Rendered by Candela" over a
+// panel the exclusion rule excludes would both be the app claiming
+// something it has not decided, and neither is visible to a Kit test: the
+// catalog is honest in both cases and only the label builder can invent them.
 @Suite("Resolution rows") @MainActor
 struct ResolutionRowTests {
   // MARK: - Size labels
@@ -101,8 +101,9 @@ struct ResolutionRowTests {
         == "1800 × 1169 (\(DisplayModeCopy.recommended))")
   }
 
-  /// SS14 keeps synthesized stops away from the built-in, and the catalog
-  /// carries none for it. The badge is the visible half of that rule.
+  /// The exclusion rule keeps synthesized stops away from the built-in, and
+  /// the catalog carries none for it. The badge is the visible half of that
+  /// rule.
   @Test func noRowOnTheBuiltInIsMarkedAsRendered() {
     let catalog = BuiltInFixtures.catalog()
     #expect(catalog.syntheticStops.isEmpty)

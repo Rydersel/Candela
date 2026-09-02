@@ -3,7 +3,7 @@ import Foundation
 
 /// One window as the window server describes it.
 ///
-/// **OC18: no title, ever.** `kCGWindowName` is the only field of a window list
+/// **No title, ever.** `kCGWindowName` is the only field of a window list
 /// gated behind Screen Recording, and it carries what the user was reading.
 /// Attribution needs the owning app, which is free; a title field here would
 /// turn a permission-free feature into a permissioned one and put document names
@@ -67,8 +67,9 @@ public struct WindowObservation: Equatable, Sendable {
 /// **Stationary bounds are a prior, not a verdict.** A video player holds a
 /// fixed rect while every pixel under it changes, and this type calls it
 /// stationary. Geometry cannot tell static content from moving content without
-/// reading pixels or titles, and OC18 rules the second out, so what comes out of
-/// here is evidence to weigh and never a conclusion to act on alone.
+/// reading pixels or titles, and the no-title rule rules the second out, so
+/// what comes out of here is evidence to weigh and never a conclusion to act
+/// on alone.
 public struct WindowObserver: Sendable {
   /// Five minutes of unmoved bounds. Long enough that dragging a window around
   /// a workspace never trips it, short enough that a left-open editor does.

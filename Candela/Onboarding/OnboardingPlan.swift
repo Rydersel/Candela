@@ -1,6 +1,6 @@
 import Foundation
 
-/// One page of the guided setup flow. The list is always derived (OB2); views
+/// One page of the guided setup flow. The list is always derived; views
 /// render what the plan says and never decide what exists.
 enum OnboardingPage: Equatable, Hashable, Identifiable {
   case welcome
@@ -9,7 +9,8 @@ enum OnboardingPage: Equatable, Hashable, Identifiable {
   /// Shown instead of detection when no external display is connected: the
   /// slim flow's pivot page.
   case noDisplays
-  /// One per display with an active size suggestion (OB8 suppresses the rest
+  /// One per display with an active size suggestion (the size-suppression
+  /// decision suppresses the rest
   /// upstream, before the environment is built).
   case size(displayKey: String)
   case oledSelect
@@ -61,7 +62,7 @@ enum OnboardingPlan {
     return pages
   }
 
-  /// OB4: a display whose reported product name contains "OLED" arrives
+  /// A display whose reported product name contains "OLED" arrives
   /// preselected as a labeled guess. Case-insensitive, product name only; a
   /// user's rename never feeds the guess.
   static func suggestsOled(productName: String) -> Bool {
@@ -69,7 +70,7 @@ enum OnboardingPlan {
   }
 
   /// The designation set a fresh flow starts from: the name guess plus
-  /// anything already enrolled (a re-run arrives prefilled, OB7).
+  /// anything already enrolled (a re-run arrives prefilled).
   static func initialDesignation(for environment: OnboardingEnvironment) -> Set<String> {
     Set(
       environment.displays

@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-@Suite("Batch mirror application (DT11)")
+@Suite("Batch mirror application")
 struct MirrorApplyTests {
   /// Rule 4. An empty transaction commits `.success` having changed nothing, the
   /// same silent no-op a discarded staged return produces. Safe to run here: it

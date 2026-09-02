@@ -5,7 +5,7 @@ import SwiftUI
 
 /// Every mode one display reports (spec §5).
 ///
-/// The page exists solely to enumerate (SO2): the hub's Size pop-up is the
+/// The page exists solely to enumerate: the hub's Size pop-up is the
 /// curated answer and this is the escape hatch behind it, so nothing here is a
 /// preference. Choosing a row goes through the hub's preview-with-countdown.
 ///
@@ -18,7 +18,7 @@ import SwiftUI
 @MainActor
 struct AllModesPage: View {
   let state: AppModel.DisplayState
-  /// The header's display switcher (SO23). The root view owns switching: carry
+  /// The header's display switcher. The root view owns switching: carry
   /// the path, move the sidebar selection.
   let displays: [(key: String, name: String)]
   let onSwitch: (String) -> Void
@@ -57,7 +57,7 @@ struct AllModesPage: View {
   @FocusState private var focusedRow: String?
 
   @Environment(AppModel.self) private var model
-  /// SO6's "key settings window" test, read at the click that starts a
+  /// The "key settings window" test, read at the click that starts a
   /// preview: `.key` exactly when this view's window is the key window.
   @Environment(\.controlActiveState) private var controlActiveState
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -274,7 +274,7 @@ struct AllModesPage: View {
         // ONE card, not one per size: the size rows are content, not headers,
         // and a header repeating the row under it says the same words twice.
         SettingsCardSection(title: "Sizes") {
-          // SS4's All clause. This list enumerates what the DISPLAY reports, so
+          // The All clause. This list enumerates what the DISPLAY reports, so
           // an engaged synthesized stop has no row and the checkmark is on
           // nothing. Saying so beats looking like the list lost track.
           //
@@ -321,7 +321,7 @@ struct AllModesPage: View {
     .accessibilityLabel("Sizes")
   }
 
-  /// SO18: the row states what pressing it DOES, not what its catalog entry
+  /// The row states what pressing it DOES, not what its catalog entry
   /// says. A curated row applies its size at the rate the display is already
   /// running when that size offers it, so a row that cannot hold the current
   /// rate says so instead of naming its representative's rate.
@@ -329,7 +329,7 @@ struct AllModesPage: View {
   /// `currentHz` is `outcome`'s contract, not a hint: with no current mode the
   /// caps warning is suppressed rather than judged against a placeholder.
   ///
-  /// No "low resolution" tag here (SO14 scopes it to the full list). The
+  /// No "low resolution" tag here (that tag applies only to the full list). The
   /// representative for a size can be its 1x half with the sharp twin
   /// deduplicated away, so the tag would name a choice this list cannot offer.
   static func recommendedRowModel(
@@ -365,7 +365,7 @@ struct AllModesPage: View {
       : (hz > 0
         ? (caps ? "caps at \(ModeSpeech.spokenRate(hz))" : ModeSpeech.spokenRate(hz))
         : nil)
-    // The mode this row would APPLY, not its representative (SO18). The two
+    // The mode this row would APPLY, not its representative. The two
     // carry different provenance when a size holds both kinds: measured on the
     // MAG, CoreGraphics began publishing one engaged rate while the other rates
     // at that framebuffer stayed ours.
@@ -418,7 +418,7 @@ struct AllModesPage: View {
     //
     // The low-resolution twins are the exception. The model ranked the sharp
     // mode at that size, so a row reading "low resolution" while wearing
-    // "Recommended" is the quality claim RM11 forbids. Measured on the Dell, one
+    // "Recommended" is a quality claim that is forbidden here. Measured on the Dell, one
     // logical size held one HiDPI rung and ten 1x modes, so this is ten wrong
     // marks rather than an edge case.
     let badge = rowBadge(
@@ -527,7 +527,7 @@ struct AllModesPage: View {
   /// at once, so a source mark there would claim something about a set rather
   /// than about a mode.
   ///
-  /// TWO source marks, saying different things (SS5): "Added by Candela" is a
+  /// TWO source marks, saying different things: "Added by Candela" is a
   /// mode our enumeration found on the display, "Rendered by Candela" is a size
   /// the display does not have, which this app mirrors onto a virtual display.
   /// Mutually exclusive by construction, kept as separate parameters so a row
@@ -570,7 +570,7 @@ struct AllModesPage: View {
     }
   }
 
-  /// Whether the All list says the size in use is one this app renders (SS4's
+  /// Whether the All list says the size in use is one this app renders (the
   /// All clause).
   ///
   /// BOTH clauses are load-bearing. An engaged stop has no row here, so the
@@ -616,7 +616,7 @@ struct AllModesPage: View {
     // THE apply path, shared with the hub's Size pop-up, including the
     // already-on-screen guard, which lives on the coordinator so the two cannot
     // drift. `.settings` routes a failed `begin()` to the banner region; the
-    // SURFACE is the SO6 decision, sampled from this window's key state
+    // SURFACE is the key-window decision, sampled from this window's key state
     // synchronously at the click (see `DisplayHubView`).
     coordinator.selectFromList(
       mode, on: displayID, from: .settings,
@@ -789,7 +789,7 @@ struct AllModesRow: Identifiable, Equatable {
   /// What a press does, which is also what kind of row this is.
   enum Kind: Equatable {
     /// Applies this mode. On a curated row it is the mode the press would
-    /// APPLY, not the row's representative (SO18), so the two lists can carry
+    /// APPLY, not the row's representative, so the two lists can carry
     /// different provenance for the same size.
     case mode(DisplayMode)
     /// Opens or shuts the size group filed under this header.

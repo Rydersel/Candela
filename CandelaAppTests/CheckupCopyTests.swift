@@ -69,7 +69,7 @@ struct CheckupCopyTests {
     #expect(CheckupStore.exportFileName(for: report).contains(day))
   }
 
-  /// CK16's occlusion note names the fields in prose and says nothing at all
+  /// The occlusion note names the fields in prose and says nothing at all
   /// when no field was occluded.
   @Test func theOcclusionLineNamesFieldsInProseAndIsAbsentWhenThereAreNone() throws {
     #expect(CheckupCopy.occlusionLine(fieldIDs: []) == nil)

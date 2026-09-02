@@ -52,7 +52,7 @@ struct UnattendedRestoreSequenceTests {
     #expect(await log.refused == [.arrangement])
   }
 
-  /// C1. The same two passes through the sequence: the first has released before
+  /// The same two passes through the sequence: the first has released before
   /// the second claims, so applying nothing costs the second nothing.
   @Test func aFirstPassThatAppliesNothingDoesNotPreventTheSecondFromRunning() async {
     let gate = DisplayReconfigurationGate()

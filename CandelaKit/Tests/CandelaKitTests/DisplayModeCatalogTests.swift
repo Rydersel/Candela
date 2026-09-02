@@ -244,11 +244,12 @@ struct DisplayModeCatalogTests {
   }
 }
 
-/// SO18: a size row states what pressing it does. Every expectation here predicts
+/// The size-selection-outcome rule: a size row states what pressing it does. Every
+/// expectation here predicts
 /// `DisplayModeCoordinator.Catalog.modeKeepingCurrentRefreshRate`. A prediction that
 /// disagrees with the applier warns about a drop that does not happen, or stays
 /// silent through one that does.
-@Suite("Size selection outcomes (SO18)")
+@Suite("Size selection outcomes")
 struct SizeSelectionOutcomeTests {
   private var ladder: [DisplayMode] { DisplayModeFixtures.magRateLadder }
 
@@ -377,7 +378,7 @@ struct SizeSelectionOutcomeTests {
   }
 }
 
-@Suite("Size grouping and rate filters (SO18)")
+@Suite("Size grouping and rate filters")
 struct DisplayModeGroupingTests {
   private var ladder: [DisplayMode] { DisplayModeFixtures.magRateLadder }
 
@@ -424,7 +425,7 @@ struct DisplayModeGroupingTests {
     #expect(DisplayModeCatalog.distinctRates(ladder) == [175, 120, 60])
   }
 
-  /// SO14: the 1x mode is tagged, never its sharp twin.
+  /// The 1x mode is tagged, never its sharp twin.
   @Test func onlyTheBlurryHalfOfAPairIsTagged() {
     let sharp = DisplayModeFixtures.mode(1, logical: (1920, 804), pixels: (3840, 1608))
     let blurry = DisplayModeFixtures.mode(2, logical: (1920, 804), pixels: (1920, 804))

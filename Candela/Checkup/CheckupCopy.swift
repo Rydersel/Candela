@@ -209,7 +209,7 @@ enum CheckupCopy {
     return "\(model), \(scenarioWords(report.scenario)), \(CheckupStore.day(report.startedAt))"
   }
 
-  /// CK16: which fields were shown with the strip over their lower edge. Nil
+  /// Which fields were shown with the strip over their lower edge. Nil
   /// when none were, so no caveat sits over an empty list.
   static func occlusionLine(fieldIDs: [String]) -> String? {
     let names = fieldIDs
@@ -232,7 +232,7 @@ enum CheckupCopy {
 
   // MARK: - The document
 
-  /// CK30: the document itself says the visual fields are attestations: a file
+  /// The document itself says the visual fields are attestations: a file
   /// handed to a stranger cannot point at the control sensitivity on screen.
   static let attestationNote =
     "These are the user's attestations at the recorded control sensitivity."
@@ -247,7 +247,7 @@ enum CheckupCopy {
   static let flagPresent = "present"
   static let flagAbsent = "absent"
 
-  /// CK30: a run that never read the display may not print a serial, a size or
+  /// A run that never read the display may not print a serial, a size or
   /// an EDID flag.
   static let identityNotRead = "Identity: not read from the display"
 

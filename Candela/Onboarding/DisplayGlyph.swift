@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// A display drawn as a lit object (OB10): true mounted aspect ratio, glass
+/// A display drawn as a lit object: true mounted aspect ratio, glass
 /// gradient face, specular edge light, stand and a soft floor reflection. Every
 /// set piece in the flow is built from these, sized by context.
 struct DisplayGlyph: View {

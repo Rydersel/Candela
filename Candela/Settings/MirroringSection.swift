@@ -7,12 +7,12 @@ import SwiftUI
 /// of "mirrored" in this app; nothing here re-derives a topology, because two
 /// samples of one machine disagree exactly when it matters.
 ///
-/// Nothing here is persisted (DT20). Mirroring is not a preference and is not
+/// Nothing here is persisted. Mirroring is not a preference and is not
 /// reapplied at launch or on reconnect, so there is no `PrefName` case, no
 /// `PrefPropagation` row and no `DisplayPrefWriter` call in this file. Adding
 /// one changes shipped on-disk schema.
 ///
-/// D29 conditional: nothing here disables or greys a volume, mute or DDC control
+/// Mute-strand conditional: nothing here disables or greys a volume, mute or DDC control
 /// on the basis of mirror state. Whether an active mirror suppresses a slave's
 /// DDC is UNVERIFIED, and treating it as suppressed would put VCP 0x8D out of
 /// reach and could strand a display muted with no way back from inside the app.
@@ -47,12 +47,12 @@ struct MirroringSection: View {
 
   private var displayID: CGDirectDisplayID { state.display.id }
 
-  /// The coordinator's sample, carrying the engine's synthesis pairing (SS1).
-  /// The predicates below are the SS7 carve-out; on an un-stamped sample they
+  /// The coordinator's sample, carrying the engine's synthesis pairing.
+  /// The predicates below are the synthesized-size carve-out; on an un-stamped sample they
   /// answer "ordinary mirror set" for everything.
   private var topology: MirrorTopology { coordinator.topology }
 
-  /// True when this panel is showing a synthesized size (SS7). The ONE predicate
+  /// True when this panel is showing a synthesized size. The ONE predicate
   /// behind every carve-out here; the panel's section and the display hero read
   /// the same one.
   private var isSynthesized: Bool {
@@ -339,8 +339,8 @@ struct MirroringSection: View {
   /// locked to a set.
   ///
   /// `isApplying` lives here rather than in a separate `.disabled`, which is what
-  /// left the button grey with NOTHING attached while a change was in flight (the
-  /// shape R8 forbids). Checked last: the structural reasons outlive it.
+  /// left the button grey with NOTHING attached while a change was in flight.
+  /// Checked last: the structural reasons outlive it.
   private var cannotStartReason: LocalizedStringKey? {
     guard eligibleMasters.count < 2 else {
       return coordinator.isApplying ? MirroringCopy.applyInProgress : nil

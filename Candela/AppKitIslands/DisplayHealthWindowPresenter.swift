@@ -2,7 +2,7 @@ import AppKit
 import CandelaKit
 import SwiftUI
 
-/// Presents Display Health windows (OCR-A1) as an AppKit island, the pattern
+/// Presents Display Health windows as an AppKit island, the pattern
 /// `StatusItemController` already holds for the confirmation windows.
 ///
 /// NOT a SwiftUI `WindowGroup`: adding one to this LSUIElement app changed PLAIN
@@ -41,7 +41,7 @@ final class DisplayHealthWindowPresenter {
     // is "Health", and two neighbouring doorways called Health and Display
     // Health told nobody which was which. The type keeps its name.
     window.title = "Heat Map"
-    // Dark-only (SV2), on the WINDOW and not just in SwiftUI: the titlebar, the
+    // Dark-only, on the WINDOW and not just in SwiftUI: the titlebar, the
     // traffic lights and the AppKit-drawn switcher take their look from the
     // window's appearance, and a light titlebar over the page's canvas is the
     // seam this avoids.

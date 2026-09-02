@@ -60,7 +60,7 @@ struct PlatformConformanceTests {
     #expect(report.lines().first == "platform: Version 26.6.1 (Build 25G76)")
   }
 
-  // MARK: - modeNumber == index (S6 §4)
+  // MARK: - modeNumber == index
 
   @Test func indexAgreementPassesWhenTheyMatch() {
     let outcome = PC.indexAgreement(pairs: [(0, 0), (1, 1), (2, 2)])

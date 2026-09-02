@@ -223,7 +223,7 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
   }
 
   /// What each display currently reports. A display absent from this map reads
-  /// as `nil` — the RT7 "reports something that is not a right angle" case.
+  /// as `nil` — the "reports something that is not a right angle" case.
   var rotations: [CGDirectDisplayID: DisplayRotation] {
     get { lock.withLock { _rotations } }
     set { lock.withLock { _rotations = newValue } }
@@ -231,9 +231,9 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
 
   /// Accept the call, return success, and change nothing.
   ///
-  /// This is RS5 reproduced: `SLSSetDisplayRotation(display, -90)` and `(display,
+  /// This is an earlier experiment's result, reproduced: `SLSSetDisplayRotation(display, -90)` and `(display,
   /// 360)` both return `CGError` 0 and leave the display where it was. A fake
-  /// that could only fail loudly would let RT8's verification be deleted with
+  /// that could only fail loudly would let the readback verification be deleted with
   /// this suite still green.
   var swallowRotations: Bool {
     get { lock.withLock { _swallowRotations } }

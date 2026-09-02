@@ -8,7 +8,7 @@ import Foundation
 // Iterating against the shipped app costs a deploy plus a multi-day soak to read
 // one number. Replaying costs seconds, and one log scores every future variant.
 //
-// Two controls run before any variant is scored (MP8). If replay cannot
+// Two controls run before any variant is scored. If replay cannot
 // reproduce what the capture tool computed live, the log is lossy or the replay
 // is wrong, and everything downstream is arithmetic on noise.
 
@@ -350,7 +350,7 @@ func accumulate(
 /// **Pearson cannot fit absolute luminance.** It is invariant under `y -> a*y + b`,
 /// so scaling and offsetting every prior leaves it unmoved: the ground-truth harness
 /// recovered known luminances 0.85, 0.35 and 0.05 in the right ORDER as 1.00, 0.61
-/// and 0.25, biased high throughout. MP2's bar is the hottest multiple, which an
+/// and 0.25, biased high throughout. The bar is the hottest multiple, which an
 /// offset does change, so fitting on a scale-blind objective and judging on a
 /// scale-sensitive one is incoherent.
 ///
@@ -477,7 +477,7 @@ if byDisplay.count > identities.count {
   }
 }
 
-// MARK: - Controls (MP8)
+// MARK: - Controls
 
 let tolerance = 1.0 / pow(10.0, Double(ModelReplayLog.decimals - 1))
 
@@ -635,7 +635,7 @@ func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
 // MARK: - Fitting
 
 /// Coordinate refinement over `0...1`, maximising Pearson on the fit split
-/// (MP3, fixed before any result was seen).
+/// (fixed before any result was seen).
 func refine(
   _ start: ExposureModelParameters, keys: [(get: (ExposureModelParameters) -> Double,
     set: (inout ExposureModelParameters, Double) -> Void)],
@@ -701,7 +701,7 @@ func identifiabilityThreshold(_ base: Double) -> Double {
   base.isFinite ? max(1e-9, abs(base) * identifiabilityFraction) : 1e-9
 }
 
-/// MP2 as amended. Three conditions, all required.
+/// The bar, as amended. Three conditions, all required.
 ///
 /// The predicate `multiple >= 2.7 && top10 >= 5` was broken three ways, each measured
 /// on this rig before any real verdict was read:
@@ -813,7 +813,7 @@ func report(_ label: String, _ records: [Prepared], _ parameters: ExposureModelP
   let s = pearson(averageRanks(measured), averageRanks(modelled)) ?? .nan
   let multiple = hottestMultiple(modelled)
   let measuredMultiple = hottestMultiple(measured)
-  // Reported, never gating. EM14 blocks hottestRelative, which the peak ratio
+  // Reported, never gating. The gate blocks hottestRelative, which the peak ratio
   // licenses, and hottestOwner, which needs the SINGLE hottest cell to be right. No
   // rung has scored above 0/1 on that, so hottestOwner stays blocked whatever the
   // gate says about the peak.
@@ -988,7 +988,7 @@ guard !fitGroups.isEmpty else {
 var layerWeight: [Int: Double] = [:]
 var appWeight: [String: Double] = [:]
 // Selected from the FIT SPLIT of the FITTED panels only. Reading the holdout to decide
-// which apps get free parameters is a softer form of the failure MP14 exists to
+// which apps get free parameters is a softer form of the failure the holdout exists to
 // prevent, and reading panels that --fit-displays removed lets an app that never
 // appears in the fit earn a parameter applied to the holdout.
 //
@@ -1048,7 +1048,7 @@ if !tooLight.isEmpty {
 var v1 = ExposureModelParameters.baseline
 v1.compositing = .topmostWins
 
-// V2 is MP4's stated bet: admit system chrome and give each chrome LAYER its own
+// V2 is the next stated bet: admit system chrome and give each chrome LAYER its own
 // luminance. Chrome enters here rather than at the end of the ladder because the
 // layer table has nothing else to fit on an ordinary desktop.
 var v2 = v1

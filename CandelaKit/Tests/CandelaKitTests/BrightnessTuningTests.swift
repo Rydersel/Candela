@@ -106,7 +106,7 @@ struct BrightnessTuningTests {
   }
 
   @Test func stepFineIsNowFlatPointZeroOne() {
-    // D3: the shared 16-chiclet step, with fine a flat ±0.01 rather than a 1/64 snap.
+    // The shared 16-chiclet step, with fine a flat ±0.01 rather than a 1/64 snap.
     let h = TuningHarness()
     #expect(h.controller.step(isUp: true, isFine: true) == 1.0) // rail from default 1.0
     h.controller.setBrightness(0.5)

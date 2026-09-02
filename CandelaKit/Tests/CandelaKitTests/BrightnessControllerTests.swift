@@ -146,7 +146,7 @@ actor FakeDDC: DDCWriting {
 // Coalescer-level contract tests (latest-wins, drain, duplicate-skip, retry, epoch
 // gate) live in `HardwareTargetCoalescerTests`.
 
-// MARK: - DisplayServices availability (B6)
+// MARK: - DisplayServices availability
 
 /// The shim degrades silently by design: a missing framework or symbol logs once at
 /// resolve time and every call after returns nil or false. This runs on a real macOS

@@ -124,7 +124,7 @@ struct TileLabelStyle: Equatable, Sendable {
   static let mirroredLabel = "Mirrored"
 }
 
-/// One display on the arrangement map, drawn to scale as a lit object (SV9).
+/// One display on the arrangement map, drawn to scale as a lit object.
 ///
 /// It carries NO geometry of its own: the canvas sizes and positions it and
 /// hands it the `TileLabelStyle` every other tile is using, so there is nothing
@@ -136,7 +136,7 @@ struct TileLabelStyle: Equatable, Sendable {
 /// inset inside its own rect would put a gap between two displays the layout
 /// says are adjacent.
 ///
-/// The face is the flow's glyph, never a second drawing of one (SV5). Colour is
+/// The face is the flow's glyph, never a second drawing of one. Colour is
 /// never the only signal: an invalid drop also draws a 2 pt border and a
 /// sentence under the canvas, a virtual display says so in its name and its
 /// accessibility value, and the main display's menu-bar strip is a shape.
@@ -176,8 +176,8 @@ struct DisplayTile: View {
   /// Displays pane's purple, never as the ONLY signal: the name says what it is,
   /// and the canvas appends "virtual display" to the accessibility value.
   var isVirtual: Bool = false
-  /// The built-in display, which is drawn as a laptop everywhere it is depicted
-  /// (SV9): screen over a deck, the way the machine actually closes.
+  /// The built-in display, which is drawn as a laptop everywhere it is depicted:
+  /// screen over a deck, the way the machine actually closes.
   var isBuiltIn: Bool = false
   /// The map's decision, not this tile's. See `TileLabelStyle`.
   let labels: TileLabelStyle
@@ -217,7 +217,7 @@ struct DisplayTile: View {
   }
 
   /// The face, drawn by the glyphs the guided setup flow and the display heroes
-  /// already use (SV5). Aspect comes from the FRAME, not the display's mode: the
+  /// already use. Aspect comes from the FRAME, not the display's mode: the
   /// frame is what `CanvasTransform` put there, so asking the glyph for that
   /// aspect makes the glass fill the rect instead of fitting inside it.
   @ViewBuilder private func glass(in size: CGSize) -> some View {
@@ -246,7 +246,7 @@ struct DisplayTile: View {
   }
 
   /// The menu bar drawn on the main display's face: the platform's own signifier
-  /// for "this is the main display". Drawn, never dragged (AR9), so there is no
+  /// for "this is the main display". Drawn, never dragged, so there is no
   /// second drag semantic on this tile. Handed to the glyph as its face overlay,
   /// which clips it to the glass; the band it occupies is reserved on EVERY tile
   /// (`TileLabelStyle.stripBand`), so a name never lands under it.

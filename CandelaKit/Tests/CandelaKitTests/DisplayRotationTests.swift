@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-@Suite("Display rotation (RT6, RT7, RT13)")
+@Suite("Display rotation")
 struct DisplayRotationTests {
   private func display(_ id: CGDirectDisplayID, builtIn: Bool = false) -> ConfiguredDisplay {
     ConfiguredDisplay(
@@ -24,7 +24,7 @@ struct DisplayRotationTests {
     #expect(DisplayRotation.allCases.count == 4)
   }
 
-  /// RT7: a display reporting something that is not a right angle is one this
+  /// A display reporting something that is not a right angle is one this
   /// feature declines to describe. Rounding 45 to 90 would put a rotation on
   /// screen that the display is not in, and offer a revert to an angle it was
   /// never at.
@@ -44,7 +44,7 @@ struct DisplayRotationTests {
     #expect(DisplayRotation(degrees: .infinity) == nil)
   }
 
-  /// RS3, measured: the MAG went 3440×1440 → 1440×3440 at 90 and back at 180.
+  /// Measured: the MAG went 3440×1440 → 1440×3440 at 90 and back at 180.
   @Test func onlyTheQuarterTurnsExchangeWidthAndHeight() {
     #expect(DisplayRotation.standard.swapsAxes == false)
     #expect(DisplayRotation.ninety.swapsAxes)
@@ -62,7 +62,7 @@ struct DisplayRotationTests {
     #expect(decision == .rotate(RotationRequest(display: 2, from: .standard, to: .ninety)))
   }
 
-  /// RT13: no countdown opens for a no-op. A 30-second timer over a change that
+  /// No countdown opens for a no-op. A 30-second timer over a change that
   /// is not happening is a bug, not a courtesy — and its revert would "restore"
   /// an angle nothing moved away from.
   @Test func rotatingToTheAngleItIsAlreadyAtIsRefusedRatherThanApplied() {
@@ -81,7 +81,7 @@ struct DisplayRotationTests {
     #expect(decision == .refused(.displayGone))
   }
 
-  /// RT7 reaching the policy: no readable current angle means no honest "from"
+  /// A missing current angle reaching the policy: no readable current angle means no honest "from"
   /// to show or to revert to.
   @Test func aDisplayWhoseAngleCannotBeReadIsRefusedAsUnreadable() {
     let decision = RotationPolicy.decide(
@@ -91,7 +91,7 @@ struct DisplayRotationTests {
     #expect(decision == .refused(.unreadable))
   }
 
-  /// RT5: a missing SkyLight symbol is a capability answer, not a crash — and it
+  /// A missing SkyLight symbol is a capability answer, not a crash — and it
   /// outranks every other refusal, since nothing can be attempted at all.
   @Test func withoutTheSymbolEveryRotationIsRefusedAsUnavailable() {
     for current in [DisplayRotation.standard, .ninety] {
@@ -110,7 +110,7 @@ struct DisplayRotationTests {
 
   // MARK: - The verification the platform makes necessary
 
-  /// RS5, reproduced: the setter can return success and change nothing. The fake
+  /// An earlier experiment's result, reproduced: the setter can return success and change nothing. The fake
   /// swallows the write the way `SLSSetDisplayRotation(display, 360)` does, so a
   /// caller that trusts the return value is visibly wrong here.
   @Test func aSwallowedRotationIsVisibleInTheReadbackEvenThoughTheCallSucceeded() throws {

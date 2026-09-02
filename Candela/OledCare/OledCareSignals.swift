@@ -37,7 +37,7 @@ enum OledCareSignalSources {
   }
 
   /// True while anything system-wide holds `PreventUserIdleDisplaySleep`: video,
-  /// calls, presentations, caffeinate, and since A-21 Candela's own Keep Display
+  /// calls, presentations, caffeinate, and Candela's own Keep Display
   /// Awake. Ours is deliberately NOT excluded: a control that promises to keep
   /// the display awake should not leave it dimmed.
   ///
