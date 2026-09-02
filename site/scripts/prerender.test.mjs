@@ -13,6 +13,7 @@ import {
   pageMetadata,
   privacyMetadata,
   rebaseNestedAssets,
+  termsMetadata,
   validatePageHtml,
   validateSeoOutput,
 } from './prerender.mjs'
@@ -109,6 +110,18 @@ test('buildSitemap lists every page and dates the ones that carry a date', () =>
   assert.match(sitemap, /<url>\n    <loc>https:\/\/candela\.fyi\/guides\/oled-burn-in-mac\/<\/loc>\n    <lastmod>2026-09-03<\/lastmod>\n  <\/url>/)
   assert.doesNotMatch(sitemap, /<loc>https:\/\/candela\.fyi\/privacy\/<\/loc>\n    <lastmod>/)
   assert.match(sitemap, /<\/urlset>\n$/)
+})
+
+test('termsMetadata gives the terms page its own canonical identity', () => {
+  const shell = '<title>Landing</title><meta name="description" content="Landing description" /><link rel="canonical" href="https://candela.fyi/" /><meta property="og:url" content="https://candela.fyi/" /><meta property="og:title" content="Landing" /><meta property="og:description" content="Landing description" /><meta name="twitter:title" content="Landing" /><meta name="twitter:description" content="Landing description" />\n      <script type="application/ld+json">{"@type":"SoftwareApplication"}</script>'
+  const result = termsMetadata(shell)
+  assert.match(result, /<title>Terms \| Candela<\/title>/)
+  assert.match(result, /rel="canonical" href="https:\/\/candela\.fyi\/terms\/"/)
+  assert.match(result, /property="og:url" content="https:\/\/candela\.fyi\/terms\/"/)
+  assert.match(result, /property="og:title" content="Terms \| Candela"/)
+  assert.match(result, /content="The terms for candela\.fyi, the Candela downloads/)
+  assert.doesNotMatch(result, /SoftwareApplication/)
+  assert.doesNotMatch(result, /Landing/)
 })
 
 test('privacyMetadata gives the public disclosure its own canonical identity', () => {

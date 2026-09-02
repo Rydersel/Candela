@@ -12,6 +12,7 @@ import { Trust } from './components/Trust'
 import { Faq } from './components/Faq'
 import { Footer } from './components/Footer'
 import { PrivacyPage } from './PrivacyPage'
+import { TermsPage } from './TermsPage'
 import { GuidePage } from './GuidePage'
 import { GuidesIndexPage } from './GuidesIndexPage'
 import type { Guide } from './guides'
@@ -69,6 +70,7 @@ function LandingPage() {
 export default function App({ pathname = '/', guides = [] }: { pathname?: string; guides?: Guide[] }) {
   const path = pathname.replace(/\/+$/, '')
   if (path === '/privacy') return <PrivacyPage />
+  if (path === '/terms') return <TermsPage />
   if (path === '/guides') return <GuidesIndexPage guides={guides} />
   const guide = guides.find((entry) => `/guides/${entry.slug}` === path)
   if (guide) return <GuidePage guide={guide} guides={guides} />
