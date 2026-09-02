@@ -2,13 +2,72 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import * as reportModule from './analytics-report.mjs'
 
-const { buildReport, formatCsv, parseArgs } = reportModule
+const { buildReport, dayRange, formatCsv, formatHtml, parseArgs } = reportModule
 
 test('parseArgs accepts supported windows and CSV output', () => {
-  assert.deepEqual(parseArgs(['--days', '7']), { days: 7, format: 'table' })
-  assert.deepEqual(parseArgs(['--days', '30', '--format', 'csv']), { days: 30, format: 'csv' })
+  assert.deepEqual(parseArgs(['--days', '7']), { days: 7, format: 'table', open: false })
+  assert.deepEqual(parseArgs(['--days', '30', '--format', 'csv']), { days: 30, format: 'csv', open: false })
+  assert.deepEqual(parseArgs(['--format', 'html', '--open']), { days: 7, format: 'html', open: true })
   assert.throws(() => parseArgs(['--days', '8']), /7 or 30/)
-  assert.throws(() => parseArgs(['--format', 'json']), /table or csv/)
+  assert.throws(() => parseArgs(['--format', 'json']), /table, csv or html/)
+  assert.throws(() => parseArgs(['--open']), /only applies/)
+})
+
+test('buildReport zero-fills the per-day series across the whole range', () => {
+  const today = new Date('2026-09-02T15:00:00Z')
+  const report = buildReport({
+    counters: [],
+    rollups: [],
+    liveCompleted: [],
+    provisionalWindows: 0,
+    daily: [
+      { day: '2026-08-31', metric: 'pageview', value: 5 },
+      { day: '2026-08-31', metric: 'download_attempt', value: 2 },
+      { day: '2026-09-02', metric: 'github_attempt', value: 1 },
+      { day: '2026-08-01', metric: 'pageview', value: 99 },
+    ],
+  }, 7, today)
+
+  assert.deepEqual(dayRange(7, today), ['2026-08-27', '2026-08-28', '2026-08-29', '2026-08-30', '2026-08-31', '2026-09-01', '2026-09-02'])
+  assert.equal(report.daily.length, 7)
+  assert.deepEqual(report.daily[4], { day: '2026-08-31', pageviews: 5, downloads: 2, github: 0 })
+  assert.deepEqual(report.daily[5], { day: '2026-09-01', pageviews: 0, downloads: 0, github: 0 })
+  assert.deepEqual(report.daily[6], { day: '2026-09-02', pageviews: 0, downloads: 0, github: 1 })
+  assert.equal(report.daily.reduce((sum, point) => sum + point.pageviews, 0), 5)
+})
+
+test('formatHtml is self-contained and escapes values that come from the database', () => {
+  const html = formatHtml({
+    days: 7,
+    pageviews: 12,
+    completedWindows: 4,
+    provisionalWindows: 1,
+    githubAttempts: 3,
+    uniqueGithubWindows: 2,
+    githubConversion: 50,
+    downloadAttempts: 5,
+    uniqueDownloadWindows: 3,
+    downloadConversion: 75,
+    optOuts: 0,
+    droppedWrites: 0,
+    cleanupRuns: 1,
+    placements: { github: { hero: 2 }, download: { hero: 2, header: 1 } },
+    dimensions: { country: { US: 3, unknown: 1 }, device: {}, referrer: { '<script>alert(1)</script>': 1 } },
+    daily: [
+      { day: '2026-09-01', pageviews: 7, downloads: 3, github: 1 },
+      { day: '2026-09-02', pageviews: 5, downloads: 2, github: 2 },
+    ],
+  }, new Date('2026-09-02T10:30:00Z'))
+
+  assert.match(html, /<title>Candela analytics, last 7 days<\/title>/)
+  assert.match(html, /generated 2026-09-02 10:30 UTC/)
+  assert.doesNotMatch(html, /<script>alert/)
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/)
+  assert.doesNotMatch(html, /<script|src="http|href="http/)
+  assert.equal((html.match(/<svg /g) ?? []).length, 3)
+  assert.match(html, /<title>2026-09-01: 7<\/title>/)
+  assert.match(html, /No completed windows yet\./)
+  assert.match(html, /75% of completed/)
 })
 
 test('buildReport keeps attempts, completed browser windows, and provisional windows distinct', () => {
@@ -92,12 +151,14 @@ test('loadData keeps live aggregation queries within the D1 compound-select limi
       return [{ metric: 'unique_windows', dimension_name: 'country', dimension_value: 'US', value: 4 }]
     }
     if (sql.includes('expires_at >')) return [{ value: 2 }]
+    if (sql.includes('SELECT day, metric')) return [{ day: '2026-09-01', metric: 'pageview', value: 3 }]
     return []
   }
 
   const data = await reportModule.loadData(7, query)
 
-  assert.equal(queries.length, 5)
+  assert.equal(queries.length, 6)
+  assert.deepEqual(data.daily, [{ day: '2026-09-01', metric: 'pageview', value: 3 }])
   assert.deepEqual(data.liveCompleted, [
     { metric: 'unique_windows', dimension_name: 'all', dimension_value: 'all', value: 4 },
     { metric: 'unique_windows', dimension_name: 'country', dimension_value: 'US', value: 4 },

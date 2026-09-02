@@ -11,7 +11,13 @@ npm run build     # static output in dist/, deployable anywhere (base is './')
 npm run preview   # serve the production build locally
 npm run analytics:report -- --days 7
 npm run analytics:report -- --days 30 --format csv
+npm run analytics:report -- --days 30 --format html --open   # local dashboard
 ```
+
+The report reads D1 over the REST API: set `CLOUDFLARE_ACCOUNT_ID`,
+`CANDELA_ANALYTICS_DATABASE_ID` and a `CLOUDFLARE_API_TOKEN` that has D1 read
+permission. The HTML format writes one self-contained page to the temp
+directory and prints its path; `--open` also opens it in the default browser.
 
 `scripts/check-copy.sh` gates em dashes and leftover placeholder assets.
 `functions/` contains the narrow Pages Function surface for Markdown content
