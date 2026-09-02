@@ -2,8 +2,9 @@
 <!-- Renders the social cards from the site's own hero shader, frozen at one
      frame. Serve this directory (python3 -m http.server) and open
      card.html?t=12&p=0.5&sw=0.8 at a 2400x1260 viewport for
-     site/public/social-card.png, or 2560x1280 for
-     .github/assets/social-preview.png; downscale each by half. -->
+     site/public/social-card.png, or card.html?t=12&p=0.5&sw=0.8&gh=1 at
+     2560x1280 for the GitHub social preview (uploaded in the repository
+     settings, not committed); downscale each by half. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -74,13 +75,10 @@
     opacity: 0.05;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
   }
-  /* GitHub's repo list card crops the preview to about 2.7:1, losing the top
-     and bottom ~13% of a 2:1 image. The brand row and the footer stay inside
-     that band. */
   .content {
     position: absolute;
     inset: 0;
-    padding: 210px 128px 220px;
+    padding: 120px 128px 108px;
     display: flex;
     flex-direction: column;
   }
@@ -102,7 +100,7 @@
   }
   .headline {
     margin-top: auto;
-    font-size: 170px;
+    font-size: 186px;
     line-height: 1.04;
     font-weight: 620;
     letter-spacing: -0.022em;
@@ -111,7 +109,7 @@
   }
   .headline .wick { color: var(--accent); }
   .meta {
-    margin-top: 72px;
+    margin-top: 96px;
     display: flex;
     align-items: baseline;
     justify-content: space-between;
@@ -133,6 +131,12 @@
     color: var(--accent);
     letter-spacing: 0.004em;
   }
+  /* GitHub's repo list card crops the preview to about 2.7:1, losing the top
+     and bottom ~13% of a 2:1 image. The brand row and the footer stay inside
+     that band; the site card is never cropped and keeps the default layout. */
+  .card.gh .content { padding: 210px 128px 220px; }
+  .card.gh .headline { font-size: 170px; }
+  .card.gh .meta { margin-top: 72px; }
 </style>
 </head>
 <body>
@@ -174,6 +178,7 @@ const Q = new URLSearchParams(location.search);
 const FROZEN_T = parseFloat(Q.get('t') || '40');
 if (Q.get('p')) PARAMS.proportion = parseFloat(Q.get('p'));
 if (Q.get('sw')) PARAMS.swirl = parseFloat(Q.get('sw'));
+if (Q.get('gh')) document.querySelector('.card').classList.add('gh');
 if (Q.get('o')) document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('swirl').style.opacity = Q.get('o');
 });
