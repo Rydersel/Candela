@@ -4,7 +4,10 @@
      card.html?t=12&p=0.5&sw=0.8 at a 2400x1260 viewport for
      site/public/social-card.png, or card.html?t=12&p=0.5&sw=0.8&gh=1 at
      2560x1280 for the GitHub social preview (uploaded in the repository
-     settings, not committed); downscale each by half. -->
+     settings, not committed); downscale each by half. Two more variants:
+     &windows=1&t=20 at 2400x1260 adds the app's windows for posts that should
+     show the UI, and the README hero is &hero=1&t=20 at 2400x1400 with a
+     transparent page. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -131,6 +134,49 @@
     color: var(--accent);
     letter-spacing: 0.004em;
   }
+  /* ?windows=1: the captures ship without a shadow, so .win adds one. */
+  .card.windows .content { padding: 96px 112px 92px; width: 1200px; }
+  .card.windows .headline { font-size: 102px; line-height: 1.06; max-width: none; white-space: nowrap; }
+  .card.windows .meta { flex-direction: column; align-items: flex-start; gap: 22px; margin-top: 52px; }
+  .card.windows .pillars, .card.windows .foss { font-size: 36px; line-height: 1.35; }
+  .card.windows .pillars .dot { padding: 0 16px; }
+  .stage { position: absolute; inset: 0; }
+  .win {
+    position: absolute;
+    display: block;
+    border-radius: 20px;
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.09),
+      0 48px 110px rgba(0, 0, 0, 0.66),
+      0 12px 34px rgba(0, 0, 0, 0.5);
+  }
+  .win-display { left: 1180px; top: 120px; width: 1010px; }
+  .win-heatmap { left: 1150px; top: 760px; width: 370px; border-radius: 18px; z-index: 2; }
+  .win-health  { left: 1490px; top: 520px; width: 900px; }
+  .win-menubar { left: 2124px; top: 60px; width: 250px; border-radius: 16px; }
+  /* Lighter than the default scrim: the windows cover the right, so the swirl
+     only shows through the text. t=20 puts its dark fold behind the headline. */
+  .card.windows .scrim {
+    background:
+      linear-gradient(105deg,
+        rgba(10, 10, 12, 0.80) 0%,
+        rgba(10, 10, 12, 0.52) 34%,
+        rgba(10, 10, 12, 0.12) 60%,
+        rgba(10, 10, 12, 0) 82%),
+      linear-gradient(to top, rgba(10, 10, 12, 0.5) 0%, rgba(10, 10, 12, 0) 20%);
+  }
+  /* ?hero=1: the README header already shows icon and name, so no brand row;
+     the frame separates the card from GitHub's dark page. */
+  .card.hero { border-radius: 28px; }
+  .card.hero .brand { display: none; }
+  .card.hero .content { padding: 110px 112px; width: 1240px; }
+  .card.hero .headline { font-size: 108px; margin: auto 0 0; }
+  .card.hero .meta { margin: 52px 0 auto; }
+  .card.hero .win-display { left: 1160px; top: 90px; width: 1140px; }
+  .card.hero .win-menubar { left: 2120px; top: 50px; width: 260px; }
+  .card.hero .win-health  { left: 1440px; top: 600px; width: 940px; }
+  .card.hero .win-heatmap { left: 1040px; top: 900px; width: 420px; }
+  .card.hero .frame { position: absolute; inset: 0; border: 4px solid rgba(232, 161, 58, 0.62); border-radius: 28px; z-index: 10; }
   /* GitHub's repo list card crops the preview to about 2.7:1, losing the top
      and bottom ~13% of a 2:1 image. The brand row and the footer stay inside
      that band; the site card is never cropped and keeps the default layout. */
@@ -179,6 +225,30 @@ const FROZEN_T = parseFloat(Q.get('t') || '40');
 if (Q.get('p')) PARAMS.proportion = parseFloat(Q.get('p'));
 if (Q.get('sw')) PARAMS.swirl = parseFloat(Q.get('sw'));
 if (Q.get('gh')) document.querySelector('.card').classList.add('gh');
+if (Q.get('windows') || Q.get('hero')) {
+  const card = document.querySelector('.card');
+  card.classList.add('windows');
+  const stage = document.createElement('div');
+  stage.className = 'stage';
+  const H = '../src/assets/captures/hero/';
+  for (const [k, f] of [['display', 'display-1280'], ['heatmap', 'heatmap-576'], ['health', 'health-1280'], ['menubar', 'menubar-352']]) {
+    const img = document.createElement('img');
+    img.className = 'win win-' + k;
+    img.src = H + f + '.webp';
+    stage.appendChild(img);
+  }
+  card.insertBefore(stage, card.querySelector('.content'));
+  document.querySelector('.pillars').innerHTML = 'Panel health<span class="dot">&middot;</span>Burn-in protection<br>Monitor checkup<span class="dot">&middot;</span>Every control';
+}
+if (Q.get('hero')) {
+  const card = document.querySelector('.card');
+  card.classList.add('hero');
+  const frame = document.createElement('div');
+  frame.className = 'frame';
+  card.appendChild(frame);
+  document.documentElement.style.background = 'transparent';
+  document.body.style.background = 'transparent';
+}
 if (Q.get('o')) document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('swirl').style.opacity = Q.get('o');
 });
