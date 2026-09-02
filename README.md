@@ -91,12 +91,13 @@ Some features (mode switching, virtual displays, the HDR toggle, menu-bar auto-h
 
 ## Tested hardware
 
-Every release is tested on as many different displays, connections and Macs as we can get our hands on, but no two setups are alike. If something misbehaves on yours, [open an issue](https://github.com/Rydersel/Candela/issues/new/choose) with your Mac, macOS version, monitor model and how it is connected, and we will look at it as soon as we can. A working setup is worth reporting too: it goes into the verified hardware list.
+Every release is tested on as many different displays, connections and Macs as we can get our hands on, but no two setups are alike. If something misbehaves on yours, [open an issue](https://github.com/Rydersel/Candela/issues/new/choose) with your Mac, macOS version, monitor model and how it is connected, and we will look at it as soon as we can. A working setup is worth reporting too: it goes into the [tested hardware table](docs/HARDWARE.md).
 
 ## Documentation
 
 - [User guides](docs/guide/index.md): OLED care, checkup, resolutions, the Diagnostics page, and advanced settings.
 - [Advanced settings](docs/ADVANCED-SETTINGS.md): the `defaults write` keys behind the escape hatches.
+- [Tested hardware](docs/HARDWARE.md): the monitors, connections and Macs Candela has been used on, one row per report.
 - [Contributing](CONTRIBUTING.md): building from source, running the suites, and what a change is expected to state about its own verification.
 
 ## Credits
