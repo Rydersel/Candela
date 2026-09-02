@@ -1,0 +1,46 @@
+{
+  "/guides/img/heat-map.webp": {
+    "width": 560,
+    "height": 568
+  },
+  "/guides/img/display-hdr.webp": {
+    "width": 1600,
+    "height": 1172
+  },
+  "/guides/img/oled-care-display.webp": {
+    "width": 1600,
+    "height": 1162
+  },
+  "/guides/img/menu-bar-panel.webp": {
+    "width": 280,
+    "height": 576
+  },
+  "/guides/img/checkup-report.webp": {
+    "width": 1280,
+    "height": 938
+  },
+  "/guides/img/header-oled-burn-in-mac.svg": {
+    "width": 1400,
+    "height": 600
+  },
+  "/guides/img/header-check-new-monitor-dead-pixels-mac.svg": {
+    "width": 1400,
+    "height": 600
+  },
+  "/guides/img/header-external-monitor-brightness-mac.svg": {
+    "width": 1400,
+    "height": 600
+  },
+  "/guides/img/social-oled-burn-in-mac.png": {
+    "width": 1200,
+    "height": 630
+  },
+  "/guides/img/social-check-new-monitor-dead-pixels-mac.png": {
+    "width": 1200,
+    "height": 630
+  },
+  "/guides/img/social-external-monitor-brightness-mac.png": {
+    "width": 1200,
+    "height": 630
+  }
+}

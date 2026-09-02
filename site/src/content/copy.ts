@@ -56,6 +56,7 @@ export const mediaResume = "Play"
 export const navigation = {
   label: "Primary",
   brand: "Candela",
+  guides: "Guides",
   faq: "FAQ",
   github: "GitHub",
   download: "Download",
@@ -352,6 +353,26 @@ export const footer: { note: string } = {
   note: "Candela is free and open source, MIT licensed.",
 }
 
+// Guides: for people who arrive with a question and no idea Candela exists. The
+// lead is the section's first sentence, so the copy filter binds it.
+export const guides: {
+  kicker: string
+  h1: string
+  lead: string
+  listLabel: string
+  updated: string
+  tryPillars: string[]
+  more: string
+} = {
+  kicker: "Candela",
+  h1: "Guides",
+  lead: "What wears a panel, how to check a display for defects, and how to get the controls macOS leaves out. Written for anyone with a display on a Mac, whether or not they ever install Candela.",
+  listLabel: "Guides",
+  updated: "Updated",
+  tryPillars: ["Panel health", "Burn-in protection", "Monitor checkup", "Every control"],
+  more: "More guides",
+}
+
 export const privacy = {
   h1: "Privacy, without the vague parts.",
   lead: "Candela's website analytics are anonymous to Candela and first-party only. A random, short-lived cookie distinguishes one browser for 24 hours so we can count visits and whether that browser chooses Download or GitHub. There are no cross-site cookies.",
@@ -359,7 +380,7 @@ export const privacy = {
   app: "The Candela app performs display analysis locally. It requires no account, sends no screen samples to Candela, and uploads no display-health record. Website analytics are separate from the app.",
   does: [
     "Counts pageviews and anonymous 24-hour browser windows.",
-    "Counts Download attempts and GitHub clicks, including which header, hero or footer link was used, or whether the download came from the GitHub README's button.",
+    "Counts Download attempts and GitHub clicks, including which header, hero, footer or guide link was used, or whether the download came from the GitHub README's button.",
     "Records coarse country, device category and external referrer hostname.",
     "Produces anonymous daily statistics and operational counts.",
     "Keeps a charting copy of the same counts (event, placement, country, device category) in Cloudflare's Workers Analytics Engine, which expires on its own after about 90 days.",

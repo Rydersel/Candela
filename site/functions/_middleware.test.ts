@@ -3,15 +3,15 @@ import { onRequest } from './_middleware'
 
 type TestContext = Parameters<typeof onRequest>[0]
 
-function contextFor(accept?: string) {
-  const request = new Request('https://candela.fyi/', {
+function contextFor(accept?: string, path = '/') {
+  const request = new Request(`https://candela.fyi${path}`, {
     headers: accept ? { accept } : undefined,
   })
   const next = vi.fn(async () => new Response('<html><body>Candela</body></html>', {
     headers: { 'content-type': 'text/html; charset=utf-8' },
   }))
   const markdown = `---\ntitle: Candela\n---\n\n# Candela\n\nDisplay health for Mac.\n`
-  const fetch = vi.fn(async () => new Response(markdown, {
+  const fetch = vi.fn(async (_request: Request) => new Response(markdown, {
     headers: {
       'cache-control': 'public, max-age=0, must-revalidate',
       vary: 'Accept-Encoding',
@@ -104,5 +104,51 @@ describe('Markdown content negotiation', () => {
     expect(response.headers.get('vary')).toBe('Accept')
     expect(await response.text()).toContain('<body>Candela</body>')
     expect(next).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Markdown content negotiation for the guides section', () => {
+  it('serves a guide its Markdown twin from beside its HTML', async () => {
+    const { context, fetch, markdown, next } = contextFor('text/markdown', '/guides/oled-burn-in-mac/')
+
+    const response = await onRequest(context)
+
+    expect(await response.text()).toBe(markdown)
+    expect(response.headers.get('content-type')).toBe('text/markdown; charset=utf-8')
+    expect((fetch.mock.calls[0][0] as Request).url).toBe('https://candela.fyi/guides/oled-burn-in-mac/index.md')
+    expect(next).not.toHaveBeenCalled()
+  })
+
+  it('serves the guides index its twin too', async () => {
+    const { context, fetch } = contextFor('text/markdown', '/guides/')
+
+    await onRequest(context)
+
+    expect((fetch.mock.calls[0][0] as Request).url).toBe('https://candela.fyi/guides/index.md')
+  })
+
+  it('falls back to the HTML response, which is the 404, for a guide that does not exist', async () => {
+    const { context, fetch, next } = contextFor('text/markdown', '/guides/no-such-guide/')
+    fetch.mockResolvedValueOnce(new Response('Not found', { status: 404 }))
+
+    const response = await onRequest(context)
+
+    expect(response.headers.get('content-type')).toBe('text/html; charset=utf-8')
+    expect(response.headers.get('vary')).toBe('Accept')
+    expect(next).toHaveBeenCalledTimes(1)
+  })
+
+  it('passes every other path straight through, whatever the client accepts', async () => {
+    // A guide URL without its trailing slash is Pages' redirect to make, not
+    // the middleware's: the twin only exists beside the canonical path.
+    for (const path of ['/guides/oled-burn-in-mac', '/privacy/', '/guides/Not-A-Slug/', '/guides/a/b/', '/download']) {
+      const { context, fetch, next } = contextFor('text/markdown', path)
+
+      const response = await onRequest(context)
+
+      expect(next).toHaveBeenCalledTimes(1)
+      expect(fetch).not.toHaveBeenCalled()
+      expect(response.headers.get('vary')).toBeNull()
+    }
   })
 })

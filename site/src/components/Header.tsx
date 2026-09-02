@@ -1,7 +1,17 @@
 import { navigation } from '../content/copy'
 import './Header.css'
 
-export function Header({ homeHref = '#top', faqHref = '#faq' }: { homeHref?: string; faqHref?: string }) {
+// placement tags this header's two actions with the section they were clicked
+// from, so guide traffic is countable apart from the landing page's.
+export function Header({
+  homeHref = '#top',
+  faqHref = '#faq',
+  placement = 'header',
+}: {
+  homeHref?: string
+  faqHref?: string
+  placement?: 'header' | 'guide'
+}) {
   return (
     <>
       <a className="skip-link" href="#content">
@@ -13,13 +23,16 @@ export function Header({ homeHref = '#top', faqHref = '#faq' }: { homeHref?: str
             {navigation.brand}
           </a>
           <div className="site-nav-links">
+            <a className="site-nav-link" href="/guides/">
+              {navigation.guides}
+            </a>
             <a className="site-nav-link" href={faqHref}>
               {navigation.faq}
             </a>
-            <a className="site-nav-link" href="/github?placement=header">
+            <a className="site-nav-link" href={`/github?placement=${placement}`}>
               {navigation.github}
             </a>
-            <a className="site-nav-download" href="/download?placement=header">
+            <a className="site-nav-download" href={`/download?placement=${placement}`}>
               {navigation.download}
             </a>
           </div>

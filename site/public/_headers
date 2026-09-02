@@ -12,3 +12,7 @@
 
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
+
+# Guide captures keep their names when replaced, so a week, not forever.
+/guides/img/*
+  Cache-Control: public, max-age=604800
