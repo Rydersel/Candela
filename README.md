@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>Candela looks after your displays.</b><br>
-  Panel health, burn-in protection, a checkup for new monitors, and the everyday controls macOS leaves out.<br>
+  Panel health, burn-in protection, a checkup for defects and wear, and the everyday controls macOS leaves out.<br>
   Free and open source, for macOS.
 </p>
 
@@ -48,9 +48,9 @@ Other display apps adjust settings in the moment. Candela stewards your display 
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <img src=".github/assets/checkup.webp" alt="A checkup report for a new monitor">
+      <img src=".github/assets/checkup.webp" alt="A checkup report: one line per check, each graded by how the result was known">
       <h3>Checkup</h3>
-      A guided verification of a new, used or rechecked monitor while the return window is open. Every claim carries a grade (observed, refused, not observed, self-reported), the by-eye tests carry a disclosed sensitivity control, and a missed control records as inconclusive. It records observations; it does not certify.
+      A guided diagnostic for any display, new or years in: solid colour fields to look for dead pixels, burn-in and uneven backlight, and the monitor's own claims (capabilities, native mode, every refresh rate, HDR) checked against what it does. Every result is graded (observed, refused, not observed, self-reported), the by-eye tests carry a disclosed control, and a missed control records as inconclusive. It records observations; it does not certify.
     </td>
     <td width="50%" valign="top">
       <img src=".github/assets/controls.gif" alt="Brightness and volume sliders for every display in the menu bar">

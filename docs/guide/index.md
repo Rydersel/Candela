@@ -7,9 +7,9 @@ hatches for hardware that misbehaves.
 - [OLED care](oled-care.md). Enrolling a display, the dimming settings, the
   exposure heat map, panel hours, and what the permission-free path can and
   cannot see.
-- [Checkup](checkup.md). What a guided verification measures, how each claim is
-  graded, the planted control that grades your own eyes, and what the report
-  does not certify.
+- [Checkup](checkup.md). The panel diagnostic: what it measures, how each
+  claim is graded, the planted control that grades your own eyes, and what the
+  report does not certify.
 - [Resolutions](resolutions.md). The size list, the HiDPI sizes macOS does not
   list, the in-between sizes Candela renders, and what happens when a size
   fails.

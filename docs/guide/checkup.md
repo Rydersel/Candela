@@ -1,8 +1,12 @@
 # Checkup
 
-A new monitor is easiest to send back in its first days, and hardest to judge
-by eye. Checkup walks one display through a fixed protocol, grades every claim
-by how it was established, and writes down what it saw.
+Checkup is a diagnostic for the panel in front of you: solid colour fields to
+look for dead pixels, burn-in and uneven backlight, and the monitor's own
+claims (capabilities, native mode, every refresh rate, HDR) checked against
+what it actually does. A new monitor is easiest to send back in its first days
+and hardest to judge by eye, which is one reason to run it; a display years
+into service is another. Checkup walks one display through a fixed protocol,
+grades every claim by how it was established, and writes down what it saw.
 
 Settings, **Checkup**, then **Run a checkup**. The flow opens in its own
 window and you can stop it at any point; whatever was recorded before that
