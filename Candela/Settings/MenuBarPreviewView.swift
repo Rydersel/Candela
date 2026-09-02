@@ -240,7 +240,12 @@ struct MenuBarPreviewView: View {
         )
       }
       ForEach(externals) { state in
-        displaySection(name: PanelView.title(for: state.display), rows: rows(for: state))
+        // Same derivation as the panel's header, so the preview grows a line
+        // exactly when the panel does.
+        displaySection(
+          name: PanelView.title(for: state.display),
+          careLine: PanelView.careLine(for: state, model: model),
+          rows: rows(for: state))
       }
       Divider().opacity(0.6)
       HStack {
@@ -286,13 +291,25 @@ struct MenuBarPreviewView: View {
     return rows
   }
 
-  private func displaySection(name: String, rows: [MiniRow]) -> some View {
+  private func displaySection(
+    name: String, careLine: String? = nil, rows: [MiniRow]
+  ) -> some View {
     VStack(alignment: .leading, spacing: 3) {
-      // 13 pt semibold secondary in the real panel.
-      Text(name)
-        .font(.system(size: 13 * Self.s, weight: .semibold))
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
+      VStack(alignment: .leading, spacing: 2 * Self.s) {
+        // 13 pt semibold secondary in the real panel.
+        Text(name)
+          .font(.system(size: 13 * Self.s, weight: .semibold))
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+        if let careLine {
+          // 11 pt secondary under the name in the real panel.
+          Text(verbatim: careLine)
+            .font(.system(size: 11 * Self.s))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+        }
+      }
       ForEach(rows) { row in
         miniSlider(row)
       }

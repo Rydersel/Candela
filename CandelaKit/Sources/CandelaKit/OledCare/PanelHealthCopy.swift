@@ -32,6 +32,17 @@ public enum PanelHealthCopy {
     return whole == 1 ? "1 hour" : "\(whole) hours"
   }
 
+  /// Hours for the menu-bar panel's one-line caption, where "178 hours" does
+  /// not fit beside two more segments. Rounds to whole hours, so above ten it is
+  /// `hours(_:)`'s own number with a shorter unit; under an hour it says so
+  /// rather than switching units. Nil for an empty counter, so the caller drops
+  /// the segment instead of writing "0 h".
+  public static func compactHours(_ hours: Double) -> String? {
+    guard hours.isFinite, hours > 0 else { return nil }
+    if hours < 1 { return "under 1 h" }
+    return "\(Int(hours.rounded())) h"
+  }
+
   /// A relative exposure figure, as a multiple of the panel mean.
   ///
   /// Nil rather than a placeholder glyph when there is no number: the caller

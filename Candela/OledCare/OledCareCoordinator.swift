@@ -468,6 +468,14 @@ final class OledCareCoordinator: CheckupCareHolding {
       observationEnabled: observing)
   }
 
+  /// Loads the exposure map and per-app hours through the sampling path's own
+  /// accessors, so later samples fold into the accumulator surfaces read.
+  /// No-op once either is live.
+  private func warmHealthStores(for key: String) {
+    _ = exposureAccumulator(for: key)
+    _ = ownerHoursAccumulator(for: key)
+  }
+
   /// The raw map, live accumulator first. The health summary normalizes and drops
   /// `firstSample`, both of which the provenance record needs.
   func exposureMap(for persistenceKey: String) -> ExposureMap {
@@ -695,6 +703,11 @@ final class OledCareCoordinator: CheckupCareHolding {
         dropState(for: key)
         continue
       }
+      // The panel body reads this summary, and a key with no live accumulator
+      // decodes the stored map on menu open. Warmed here, not at the menu's own
+      // refresh, which runs on close and misses a display enrolled between one
+      // close and the next open.
+      warmHealthStores(for: key)
       let config = OledDimConfig(prefs: prefs)
       if var existing = states[key] {
         existing.engine.updateConfig(config)

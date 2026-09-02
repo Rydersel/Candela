@@ -55,6 +55,37 @@ struct PanelHealthCopyTests {
     #expect(PanelHealthCopy.hours(10.0) == "10 hours")
   }
 
+  // MARK: - Compact hours
+
+  /// From ten hours up the number is the long form's own, rounded the same way.
+  @Test func compactHoursAgreeWithTheLongFormAboveTenHours() {
+    #expect(PanelHealthCopy.compactHours(341.6) == "342 h")
+    #expect(PanelHealthCopy.hours(341.6) == "342 hours")
+    #expect(PanelHealthCopy.compactHours(178.4) == "178 h")
+    #expect(PanelHealthCopy.compactHours(10.4) == "10 h")
+  }
+
+  @Test func compactHoursAreWholeHoursFromOneUp() {
+    #expect(PanelHealthCopy.compactHours(1.0) == "1 h")
+    #expect(PanelHealthCopy.compactHours(1.4) == "1 h")
+    #expect(PanelHealthCopy.compactHours(1.6) == "2 h")
+  }
+
+  /// A panel row has no room for minutes.
+  @Test func compactHoursUnderOneHourSaySo() {
+    #expect(PanelHealthCopy.compactHours(0.999) == "under 1 h")
+    #expect(PanelHealthCopy.compactHours(0.4) == "under 1 h")
+    #expect(PanelHealthCopy.compactHours(0.001) == "under 1 h")
+  }
+
+  /// Nil rather than "0 h": the caller drops the segment.
+  @Test func compactHoursWithNothingCountedAreNil() {
+    #expect(PanelHealthCopy.compactHours(0) == nil)
+    #expect(PanelHealthCopy.compactHours(-5) == nil)
+    #expect(PanelHealthCopy.compactHours(.nan) == nil)
+    #expect(PanelHealthCopy.compactHours(.infinity) == nil)
+  }
+
   // MARK: - Multiples
 
   @Test func aMultipleIsOneDecimalWithATimesSign() {
@@ -121,6 +152,7 @@ struct PanelHealthCopyTests {
     ]
     produced += (0..<PanelGrid.cellCount).compactMap { PanelHealthCopy.region(cell: $0) }
     produced += [1.0, 3.25, 99.9].compactMap { PanelHealthCopy.multiple($0) }
+    produced += [0.5, 1, 178.4].compactMap { PanelHealthCopy.compactHours($0) }
     #expect(produced.allSatisfy { !$0.contains("—") })
   }
 }
