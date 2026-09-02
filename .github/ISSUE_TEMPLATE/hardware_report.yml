@@ -9,7 +9,10 @@ body:
         Monitors differ more than their spec sheets suggest, and the
         development setup has two of them. A report on a panel we have never
         seen is one of the most useful things you can send, whether or not
-        anything is broken.
+        anything is broken. The
+        [tested hardware table](https://github.com/Rydersel/Candela/blob/main/docs/HARDWARE.md)
+        lists what has been reported so far; a monitor that is already there
+        and behaves differently for you is still worth a report.
 
         Everything below is visible on the display's Diagnostics page:
         Settings, the display in the sidebar, then Diagnostics.
