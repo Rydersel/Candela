@@ -40,6 +40,13 @@
   text-wrap: pretty;
 }
 
+.privacy-effective {
+  margin-top: 1rem;
+  color: var(--text-dim);
+  font-size: var(--fs-small);
+  font-variant-numeric: tabular-nums;
+}
+
 .privacy-control {
   display: flex;
   align-items: center;

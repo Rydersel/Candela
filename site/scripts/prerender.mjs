@@ -117,6 +117,12 @@ export function privacyMetadata(html) {
   return pageMetadata(html, { title: 'Privacy | Candela', description: privacyDescription, path: '/privacy/' })
 }
 
+const termsDescription = "The terms for candela.fyi, the Candela downloads and the app's update feed, in plain words: who publishes Candela, what the MIT license covers, and what to expect from a tool that adjusts display hardware."
+
+export function termsMetadata(html) {
+  return pageMetadata(html, { title: 'Terms | Candela', description: termsDescription, path: '/terms/' })
+}
+
 const guidesIndexTitle = 'Guides | Candela'
 const guidesIndexDescription = 'Guides to looking after a display on a Mac: what wears a panel, how to check one for defects, and how to get the controls macOS leaves out.'
 
@@ -286,6 +292,11 @@ export async function prerender({ siteRoot = new URL('../', import.meta.url) } =
       path: '/privacy/',
       kind: 'page',
       html: rebaseNestedAssets(privacyMetadata(injectAppMarkup(shell, render('/privacy/', guides))), 1),
+    },
+    {
+      path: '/terms/',
+      kind: 'page',
+      html: rebaseNestedAssets(termsMetadata(injectAppMarkup(shell, render('/terms/', guides))), 1),
     },
     {
       path: '/guides/',

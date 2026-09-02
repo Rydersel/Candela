@@ -400,3 +400,76 @@ export const privacy = {
   ],
   source: "Candela is public, including the analytics implementation. The Functions, schema, retention Worker, report command and this disclosure can all be inspected in the source code.",
 }
+
+// Terms: for a stranger deciding whether to trust a download from an
+// independent developer.
+export const terms = {
+  kicker: "Candela website and app",
+  h1: "Terms, in plain words.",
+  lead: "Candela is made and published by Ryder Selikow, an independent developer. These terms cover candela.fyi, the downloads it links to, and the update feed the app checks. The app itself is open source under the MIT license, which is the document that governs copying, changing and redistributing it.",
+  effective: "Effective 2 September 2026.",
+  who: {
+    h2: "Who is behind Candela",
+    body: [
+      "Ryder Selikow, working independently, not a company. The source code, the release history and every hardware finding behind the app are public at github.com/Rydersel/Candela.",
+      "Questions, problems and requests go to ryder@candela.fyi. Security reports have their own path, described in the repository's SECURITY.md.",
+    ],
+  },
+  license: {
+    h2: "The software is MIT licensed",
+    body: [
+      "Candela is free. There is no paid tier, no account and no subscription, and nothing on this site asks you to create one. You may use, copy, modify and redistribute the app under the MIT license, whose full text ships with every download and sits in the repository as LICENSE. Portions derived from other open source projects are credited in THIRD-PARTY-LICENSES.md.",
+      "The MIT license is the legal document for the software. Where these terms and the license say different things about the software, the license wins.",
+    ],
+  },
+  hardware: {
+    h2: "Your display hardware",
+    body: [
+      "Candela changes settings on your monitor. It sends DDC/CI commands over the display cable to adjust brightness, contrast, volume, input and related controls, applies software dimming, can create virtual displays, and records how your panel is used so it can report wear. By running it, you accept that it will change what your display is doing.",
+      "Monitors implement DDC/CI inconsistently. Some ignore commands, some report values they do not honour, and some misbehave. Candela is built to verify what actually happened and to be reversible: Safe Mode exists, risky changes ask for confirmation and revert on their own, and one feature was removed before release because it could blank a panel with no recovery from inside the app. That is care, not a guarantee. Candela cannot promise how a given display will respond, and you use it with your own hardware at your own risk.",
+    ],
+  },
+  countOn: {
+    h2: "What you can count on",
+    items: [
+      "No account, no sign-in and no payment, on this site or in the app.",
+      "Display analysis runs on your Mac. The app uploads no screen content and no display-health record.",
+      "Downloads come only from the GitHub release page and the Homebrew tap, signed with a Developer ID and notarized by Apple.",
+      "The website's analytics are first-party and anonymous, and you can turn them off. The Privacy page describes exactly what is recorded.",
+    ],
+  },
+  agreeTo: {
+    h2: "What you agree to",
+    items: [
+      "You use the app and the site as they are, with your own hardware, at your own risk.",
+      "You follow the MIT license when you copy, change or redistribute the software.",
+      "You do not present a modified build as the official Candela release, and you do not use the site or the app to break the law or someone else's rights.",
+      "You do not attack, scrape or overload candela.fyi, including its analytics and update endpoints.",
+    ],
+  },
+  updates: {
+    h2: "Updates",
+    body: [
+      "The app checks candela.fyi for new versions. That request carries no account and no information about your display. Each update is signed with a key the app verifies before installing, is notarized by Apple before it is published, and the app asks before installing one.",
+    ],
+  },
+  warranty: {
+    h2: "No warranty, and the limits of liability",
+    body: [
+      "Candela and candela.fyi are provided as they are, without warranty of any kind, express or implied, including any warranty of merchantability, fitness for a particular purpose and non-infringement. To the extent the law allows, Ryder Selikow is not liable for any claim, damage or other liability arising from the software or the site, including damage to a display or other hardware, whether in contract, tort or otherwise. This restates the MIT license's disclaimer in plain words; the license text controls for the software.",
+    ],
+  },
+  site: {
+    h2: "The website",
+    body: [
+      "candela.fyi exists to describe the app, link to its downloads and host the update feed. Its pages, guides and images are written by the developer and may change or be removed at any time. The Candela name and icon identify this project and its official releases.",
+    ],
+  },
+  changes: {
+    h2: "Changes to these terms",
+    body: [
+      "This page can change. The effective date above moves when it does, and because the site lives in the public repository, every revision is in the commit history with its reason. Continuing to use the site or the app after a change means the current terms apply.",
+    ],
+  },
+  source: "This page is part of the public repository, next to the license, the third-party credits and the security policy it refers to.",
+}
