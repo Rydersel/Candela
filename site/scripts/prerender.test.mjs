@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { htmlToAgentMarkdown, inlineStylesheet, injectAppMarkup, privacyMetadata, validateSeoOutput } from './prerender.mjs'
+import { htmlToAgentMarkdown, inlineStylesheet, injectAppMarkup, privacyMetadata, rebaseNestedAssets, validateSeoOutput } from './prerender.mjs'
 
 const root = new URL('../', import.meta.url)
 
@@ -105,5 +105,12 @@ test('inlineStylesheet replaces the built stylesheet link with its contents', ()
   const shell = '<head><link rel="stylesheet" crossorigin href="./assets/index-abc.css"></head>'
   const out = inlineStylesheet(shell, (href) => (href === './assets/index-abc.css' ? 'body{margin:0}' : null))
   assert.equal(out, '<head><style>body{margin:0}</style></head>')
+  const fonts = inlineStylesheet(shell, () => '@font-face{src:url(./sans-abc.woff2)}')
+  assert.equal(fonts, '<head><style>@font-face{src:url(/assets/sans-abc.woff2)}</style></head>')
   assert.equal(inlineStylesheet(shell, () => null), shell)
+})
+
+test('rebaseNestedAssets points a nested page at the root favicon and assets', () => {
+  const out = rebaseNestedAssets('<link rel="icon" href="./favicon.svg" /><img src="./assets/a.webp" srcset="./assets/a.webp 1x, ./assets/b.webp 2x" />')
+  assert.equal(out, '<link rel="icon" href="../favicon.svg" /><img src="../assets/a.webp" srcset="../assets/a.webp 1x, ../assets/b.webp 2x" />')
 })

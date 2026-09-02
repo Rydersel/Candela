@@ -75,7 +75,11 @@ export function injectAppMarkup(shell, markup) {
 export function inlineStylesheet(html, readCss) {
   return html.replace(/<link rel="stylesheet"[^>]*href="([^"]+)"[^>]*>/, (tag, href) => {
     const css = readCss(href)
-    return css == null ? tag : `<style>${css}</style>`
+    if (css == null) return tag
+    // A url() inside the stylesheet was relative to the stylesheet's own
+    // directory; inlined into a page it would resolve against the page instead.
+    const dir = href.replace(/^\.\//, '/').replace(/[^/]*$/, '')
+    return `<style>${css.replace(/url\(\.\//g, `url(${dir}`)}</style>`
   })
 }
 
@@ -96,8 +100,11 @@ export function privacyMetadata(html) {
     .replace(/\s*<script type="application\/ld\+json">[\s\S]*?<\/script>/, '')
 }
 
-function rebaseNestedAssets(html) {
-  return html.replaceAll('="./assets/', '="../assets/').replaceAll(', ./assets/', ', ../assets/')
+export function rebaseNestedAssets(html) {
+  return html
+    .replaceAll('="./assets/', '="../assets/')
+    .replaceAll(', ./assets/', ', ../assets/')
+    .replaceAll('href="./favicon.svg"', 'href="../favicon.svg"')
 }
 
 export function validateSeoOutput({ html, robots, sitemap }) {
