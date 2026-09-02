@@ -9,8 +9,8 @@ import UniformTypeIdentifiers
 enum CheckupPaneCopy {
   static let title = "Checkup"
   static let subtitle =
-    "A new display is easiest to send back in its first days. Checkup examines one while "
-    + "the return window is still open, and writes down what it saw."
+    "Checkup looks for defects and wear, checks what a display claims against what it does, "
+    + "and writes down what it saw."
 
   static let runTitle = "A new checkup"
   static let run = "Run a checkup"
