@@ -43,7 +43,7 @@ Other display apps adjust settings in the moment. Candela stewards your display 
     <td width="50%" valign="top">
       <img src=".github/assets/protection.webp" alt="OLED Care: an enrolled panel with its exposure thumbnail, and the menu bar and Dock auto-hide switches">
       <h3>Protection</h3>
-      One-click auto-hide for the menu bar and Dock, dimming when you step away or lock the Mac, and an optional static-region dim that eases down bright, unchanged areas while live content stays at full brightness. Display settings survive replugs and reboots.
+      Adaptive, real-time burn-in defense: Candela watches what the screen is showing and eases down bright regions that sit unchanged, while live content stays at full brightness. Alongside it, one-click auto-hide for the menu bar and Dock, dimming when you step away or lock the Mac, and display settings that survive replugs and reboots.
     </td>
   </tr>
   <tr>
