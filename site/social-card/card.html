@@ -1,0 +1,314 @@
+<!doctype html>
+<!-- Renders the social cards from the site's own hero shader, frozen at one
+     frame. Serve this directory (python3 -m http.server) and open
+     card.html?t=12&p=0.5&sw=0.8 at a 2400x1260 viewport for
+     site/public/social-card.png, or 2560x1280 for
+     .github/assets/social-preview.png; downscale each by half. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face {
+    font-family: 'Candela Display';
+    font-style: normal;
+    font-weight: 400 700;
+    font-stretch: 75% 100%;
+    src: url('instrument-sans-latin-standard-normal.woff2') format('woff2-variations');
+  }
+  :root {
+    --bg: #0a0a0c;
+    --text: rgba(255, 255, 255, 0.94);
+    --text-dim: rgba(255, 255, 255, 0.62);
+    --accent: #e8a13a;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { background: var(--bg); }
+  /* Authored at 2x: the 1200x630 card rendered at 2400x1260. */
+  .card {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    background: var(--bg);
+    font-family: 'Candela Display', -apple-system, 'SF Pro Display', Helvetica, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* Candle warmth that does not depend on the frozen shader frame. */
+  .bloom {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 1050px 780px at 82% 30%,
+        rgba(232, 161, 58, 0.34) 0%,
+        rgba(184, 112, 32, 0.18) 40%,
+        rgba(59, 35, 13, 0.06) 68%,
+        transparent 100%),
+      radial-gradient(ellipse 520px 420px at 88% 22%,
+        rgba(255, 214, 140, 0.30) 0%,
+        rgba(232, 161, 58, 0.10) 55%,
+        transparent 100%);
+  }
+  canvas#swirl {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0.9;
+  }
+  /* Heavy where the text sits, open on the right so the shader shows through. */
+  .scrim {
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(105deg,
+        rgba(10, 10, 12, 0.92) 0%,
+        rgba(10, 10, 12, 0.66) 34%,
+        rgba(10, 10, 12, 0.16) 60%,
+        rgba(10, 10, 12, 0) 82%),
+      linear-gradient(to top, rgba(10, 10, 12, 0.5) 0%, rgba(10, 10, 12, 0) 20%);
+  }
+  /* Fine grain so the dark field reads as material, not dead pixels. */
+  .grain {
+    position: absolute;
+    inset: 0;
+    opacity: 0.05;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
+  }
+  .content {
+    position: absolute;
+    inset: 0;
+    padding: 120px 128px 108px;
+    display: flex;
+    flex-direction: column;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 40px;
+  }
+  .brand img {
+    width: 128px;
+    height: 128px;
+    display: block;
+  }
+  .brand .name {
+    font-size: 66px;
+    font-weight: 560;
+    letter-spacing: 0.005em;
+    color: var(--text);
+  }
+  .headline {
+    margin-top: auto;
+    font-size: 186px;
+    line-height: 1.04;
+    font-weight: 620;
+    letter-spacing: -0.022em;
+    color: var(--text);
+    max-width: 1780px;
+  }
+  .headline .wick { color: var(--accent); }
+  .meta {
+    margin-top: 96px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+  .pillars {
+    font-size: 47px;
+    font-weight: 460;
+    letter-spacing: 0.004em;
+    color: var(--text-dim);
+  }
+  .pillars .dot {
+    color: var(--accent);
+    padding: 0 22px;
+    font-weight: 600;
+  }
+  .foss {
+    font-size: 47px;
+    font-weight: 500;
+    color: var(--accent);
+    letter-spacing: 0.004em;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="bloom"></div>
+  <canvas id="swirl"></canvas>
+  <div class="scrim"></div>
+  <div class="grain"></div>
+  <div class="content">
+    <div class="brand">
+      <img src="icon.png" alt="">
+      <div class="name">Candela</div>
+    </div>
+    <div class="headline">The display software<br>Apple forgot to ship<span class="wick">.</span></div>
+    <div class="meta">
+      <div class="pillars">Panel health<span class="dot">&middot;</span>Burn-in protection<span class="dot">&middot;</span>Monitor checkup<span class="dot">&middot;</span>Every control</div>
+      <div class="foss">Free and open source</div>
+    </div>
+  </div>
+</div>
+<script>
+// The site's own hero swirl (HeroBackdropSwirl.tsx), frozen at ?t=<seconds>.
+const PARAMS = {
+  color1: '#0a0a0c',
+  color2: '#3b230d',
+  color3: '#e8a13a',
+  rotation: -50,
+  proportion: 0.01,
+  scale: 0.01,
+  speed: 6,
+  distortion: 0,
+  swirl: 0.5,
+  swirlIterations: 16,
+  softness: 0.47,
+  offset: -299,
+  shapeScale: 0.45,
+};
+const Q = new URLSearchParams(location.search);
+const FROZEN_T = parseFloat(Q.get('t') || '40');
+if (Q.get('p')) PARAMS.proportion = parseFloat(Q.get('p'));
+if (Q.get('sw')) PARAMS.swirl = parseFloat(Q.get('sw'));
+if (Q.get('o')) document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('swirl').style.opacity = Q.get('o');
+});
+
+function hexToRgb(hex) {
+  const c = hex.slice(1);
+  return [
+    parseInt(c.slice(0, 2), 16) / 255,
+    parseInt(c.slice(2, 4), 16) / 255,
+    parseInt(c.slice(4, 6), 16) / 255,
+  ];
+}
+
+const VERTEX_SHADER = `#version 300 es
+in vec4 a_position;
+void main() { gl_Position = a_position; }`;
+
+const FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+uniform float u_time;
+uniform float u_pixelRatio;
+uniform vec2 u_resolution;
+uniform float u_scale;
+uniform float u_rotation;
+uniform vec4 u_color1;
+uniform vec4 u_color2;
+uniform vec4 u_color3;
+uniform float u_proportion;
+uniform float u_softness;
+uniform float u_shapeScale;
+uniform float u_distortion;
+uniform float u_swirl;
+uniform float u_swirlIterations;
+out vec4 fragColor;
+#define TWO_PI 6.28318530718
+#define PI 3.14159265358979323846
+vec2 rotate(vec2 uv, float th) {
+  return mat2(cos(th), sin(th), -sin(th), cos(th)) * uv;
+}
+float random(vec2 st) {
+  return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+}
+float noise(vec2 st) {
+  vec2 i = floor(st);
+  vec2 f = fract(st);
+  float a = random(i);
+  float b = random(i + vec2(1.0, 0.0));
+  float c = random(i + vec2(0.0, 1.0));
+  float d = random(i + vec2(1.0, 1.0));
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  float x1 = mix(a, b, u.x);
+  float x2 = mix(c, d, u.x);
+  return mix(x1, x2, u.y);
+}
+vec4 blend_colors(vec4 c1, vec4 c2, vec4 c3, float mixer, float edgesWidth, float edge_blur) {
+    vec3 color1 = c1.rgb * c1.a;
+    vec3 color2 = c2.rgb * c2.a;
+    vec3 color3 = c3.rgb * c3.a;
+    float r1 = smoothstep(.0 + .35 * edgesWidth, .7 - .35 * edgesWidth + .5 * edge_blur, mixer);
+    float r2 = smoothstep(.3 + .35 * edgesWidth, 1. - .35 * edgesWidth + edge_blur, mixer);
+    vec3 blended_color_2 = mix(color1, color2, r1);
+    float blended_opacity_2 = mix(c1.a, c2.a, r1);
+    vec3 c = mix(blended_color_2, color3, r2);
+    float o = mix(blended_opacity_2, c3.a, r2);
+    return vec4(c, o);
+}
+void main() {
+    vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+    float t = .5 * u_time;
+    float noise_scale = .0005 + .006 * u_scale;
+    uv -= .5;
+    uv *= (noise_scale * u_resolution);
+    uv = rotate(uv, u_rotation * .5 * PI);
+    uv /= u_pixelRatio;
+    uv += .5;
+    float n1 = noise(uv * 1. + t);
+    float n2 = noise(uv * 2. - t);
+    float angle = n1 * TWO_PI;
+    uv.x += 4. * u_distortion * n2 * cos(angle);
+    uv.y += 4. * u_distortion * n2 * sin(angle);
+    float iterations_number = ceil(clamp(u_swirlIterations, 1., 30.));
+    for (float i = 1.; i <= iterations_number; i++) {
+        uv.x += clamp(u_swirl, 0., 2.) / i * cos(t + i * 1.5 * uv.y);
+        uv.y += clamp(u_swirl, 0., 2.) / i * cos(t + i * 1. * uv.x);
+    }
+    float proportion = clamp(u_proportion, 0., 1.);
+    vec2 checks_shape_uv = uv * (.5 + 3.5 * u_shapeScale);
+    float shape = .5 + .5 * sin(checks_shape_uv.x) * cos(checks_shape_uv.y);
+    float mixer = shape + .48 * sign(proportion - .5) * pow(abs(proportion - .5), .5);
+    vec4 color_mix = blend_colors(u_color1, u_color2, u_color3, mixer, 1. - clamp(u_softness, 0., 1.), .01 + .01 * u_scale);
+    fragColor = vec4(color_mix.rgb, color_mix.a);
+}`;
+
+const canvas = document.getElementById('swirl');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+const gl = canvas.getContext('webgl2', { premultipliedAlpha: true, antialias: true });
+if (gl) {
+  const compile = (type, source) => {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, source);
+    gl.compileShader(s);
+    return s;
+  };
+  const program = gl.createProgram();
+  gl.attachShader(program, compile(gl.VERTEX_SHADER, VERTEX_SHADER));
+  gl.attachShader(program, compile(gl.FRAGMENT_SHADER, FRAGMENT_SHADER));
+  gl.linkProgram(program);
+  gl.useProgram(program);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(program, 'a_position');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  const u = (n) => gl.getUniformLocation(program, n);
+  const [r1, g1, b1] = hexToRgb(PARAMS.color1);
+  const [r2, g2, b2] = hexToRgb(PARAMS.color2);
+  const [r3, g3, b3] = hexToRgb(PARAMS.color3);
+  gl.uniform4f(u('u_color1'), r1, g1, b1, 1);
+  gl.uniform4f(u('u_color2'), r2, g2, b2, 1);
+  gl.uniform4f(u('u_color3'), r3, g3, b3, 1);
+  gl.uniform1f(u('u_pixelRatio'), 2);
+  gl.uniform2f(u('u_resolution'), canvas.width, canvas.height);
+  gl.uniform1f(u('u_scale'), PARAMS.scale);
+  gl.uniform1f(u('u_rotation'), PARAMS.rotation);
+  gl.uniform1f(u('u_proportion'), PARAMS.proportion);
+  gl.uniform1f(u('u_softness'), PARAMS.softness);
+  gl.uniform1f(u('u_shapeScale'), PARAMS.shapeScale);
+  gl.uniform1f(u('u_distortion'), PARAMS.distortion);
+  gl.uniform1f(u('u_swirl'), PARAMS.swirl);
+  gl.uniform1f(u('u_swirlIterations'), PARAMS.swirlIterations);
+  gl.uniform1f(u('u_time'), PARAMS.offset + FROZEN_T * PARAMS.speed * 0.1);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  gl.finish();
+}
+document.title = 'ready-t' + FROZEN_T;
+</script>
+</body>
+</html>
