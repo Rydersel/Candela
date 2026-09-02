@@ -29,7 +29,7 @@
   <img src=".github/assets/hero.webp" width="880" alt="Candela: a display's page, the Health pane, the heat map, and the menu-bar controls over a macOS desktop">
 </p>
 
-Other display apps adjust settings in the moment. Candela stewards your display over its lifetime, and does the settings too. Your monitor is probably the most expensive thing on your desk that nothing takes care of: macOS forgets its settings, offers no brightness slider for it, and has no idea how many hours its panel has been lit. Candela is a menu-bar app that keeps those records, protects the panel from wear, and fills in the controls.
+Other display apps adjust settings in the moment. Candela cares about what happens to your panel over the years you own it, and does the settings too. Your monitor is probably the most expensive thing on your desk that nothing takes care of: macOS forgets its settings, offers no brightness slider for it, and has no idea how many hours its panel has been lit. Candela is a menu-bar app that keeps those records, protects the panel from wear, and fills in the controls.
 
 ## What it does
 
