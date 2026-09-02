@@ -5,6 +5,9 @@
   "vars": {
     "RELEASE_DOWNLOAD_URL": "https://github.com/Rydersel/Candela/releases/download/v1.0.0/Candela-1.0.0.dmg"
   },
+  "analytics_engine_datasets": [
+    { "binding": "ANALYTICS_EVENTS", "dataset": "candela_site_events" }
+  ],
   "d1_databases": [
     {
       "binding": "ANALYTICS_DB",

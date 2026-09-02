@@ -362,6 +362,7 @@ export const privacy = {
     "Counts Download attempts and GitHub clicks, including which header, hero or footer link was used, or whether the download came from the GitHub README's button.",
     "Records coarse country, device category and external referrer hostname.",
     "Produces anonymous daily statistics and operational counts.",
+    "Keeps a charting copy of the same counts (event, placement, country, device category) in Cloudflare's Workers Analytics Engine, which expires on its own after about 90 days.",
     "Uses one host-only measurement cookie restricted to candela.fyi.",
   ],
   doesNot: [

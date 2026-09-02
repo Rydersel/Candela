@@ -7,6 +7,7 @@ import {
   sanitizeReferrerHost,
 } from '../lib/measurement'
 import { isSameOriginPost } from '../lib/request'
+import { recordEvent, requestCountry } from '../lib/events'
 import { recordVisit } from '../lib/store'
 import type { FunctionContext } from '../lib/runtime'
 
@@ -23,9 +24,9 @@ export const onRequestPost = async (context: FunctionContext) => {
     // Empty or malformed input is simply a direct visit; no request data is logged.
   }
 
-  const cloudflareRequest = context.request as Request & { cf?: { country?: string } }
-  const country = cloudflareRequest.cf?.country?.toUpperCase() ?? 'unknown'
-  const countryCode = /^[A-Z]{2}$/.test(country) ? country : 'unknown'
+  const countryCode = requestCountry(context.request)
+  const deviceCategory = reduceDeviceCategory(context.request.headers.get('user-agent'))
+  recordEvent(context.env, { metric: 'pageview', placement: 'all', countryCode, deviceCategory })
   const ownHost = new URL(context.request.url).hostname
   const referrerHost = sanitizeReferrerHost(payload.referrerHost, ownHost) ?? 'direct'
 
@@ -39,7 +40,7 @@ export const onRequestPost = async (context: FunctionContext) => {
       expiresAt: measurement.expiresAt,
       cohortDay: cohortDay(new Date(measurement.issuedAt)),
       countryCode,
-      deviceCategory: reduceDeviceCategory(context.request.headers.get('user-agent')),
+      deviceCategory,
       referrerHost,
     })
   })().catch(() => {})

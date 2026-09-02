@@ -20,10 +20,18 @@ export type D1Database = {
   batch<T = Record<string, unknown>>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]>
 }
 
+// Workers Analytics Engine: the dashboard's charting copy of the counts.
+// D1 stays the record; this store samples at volume and expires after its
+// retention window, so nothing is derived from it.
+export type AnalyticsEngineDataset = {
+  writeDataPoint(event: { blobs?: string[]; doubles?: number[]; indexes?: string[] }): void
+}
+
 export type AnalyticsEnv = {
   ANALYTICS_DB: D1Database
   ANALYTICS_SIGNING_KEY: string
   RELEASE_DOWNLOAD_URL?: string
+  ANALYTICS_EVENTS?: AnalyticsEngineDataset
 }
 
 export type FunctionContext = {
