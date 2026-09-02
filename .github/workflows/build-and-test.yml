@@ -24,16 +24,35 @@ on:
   # PR's branch. macOS runner minutes are the expensive ones here, so a
   # duplicate run would be the costliest thing in the pipeline and would buy no
   # signal at all.
+  #
+  # paths-ignore holds only what no job below reads. Keep the push and
+  # pull_request lists identical.
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'site/**'
+      - 'LICENSE'
+      - '.github/assets/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+      - '.github/workflows/site.yml'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'site/**'
+      - 'LICENSE'
+      - '.github/assets/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+      - '.github/workflows/site.yml'
   workflow_dispatch:
 
-# No `paths:` filter, deliberately. A hand-maintained path list goes stale the
-# first time a check grows, and the engine's tests cover types the app target
-# consumes, so a filter that misses a path lets a real break through as green.
-# The suite is well under a minute, so always running it is simpler and safer.
+# `paths-ignore:`, never `paths:`. A stale allow-list hides a real break as
+# green; a stale ignore-list only costs one extra run.
 
 permissions:
   contents: read
