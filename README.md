@@ -50,7 +50,7 @@ Other display apps adjust settings in the moment. Candela stewards your display 
     <td width="50%" valign="top">
       <img src=".github/assets/checkup.webp" alt="A checkup report: one line per check, each graded by how the result was known">
       <h3>Checkup</h3>
-      A guided diagnostic for any display, new or years in: it looks for defects and wear, checks what the monitor claims against what it does, and ends in a report you keep. Every result is graded by how it was known, and the by-eye tests carry a control that can be missed. It records observations; it does not certify.
+      A guided diagnostic for any display, new or years in: it looks for defects and wear, checks what the monitor claims against what it does, and ends in a report you keep. Every result is graded (observed, refused, not observed, self-reported).
     </td>
     <td width="50%" valign="top">
       <img src=".github/assets/controls.gif" alt="Brightness and volume sliders for every display in the menu bar">
