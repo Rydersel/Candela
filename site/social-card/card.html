@@ -74,10 +74,13 @@
     opacity: 0.05;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
   }
+  /* GitHub's repo list card crops the preview to about 2.7:1, losing the top
+     and bottom ~13% of a 2:1 image. The brand row and the footer stay inside
+     that band. */
   .content {
     position: absolute;
     inset: 0;
-    padding: 120px 128px 108px;
+    padding: 210px 128px 220px;
     display: flex;
     flex-direction: column;
   }
@@ -99,7 +102,7 @@
   }
   .headline {
     margin-top: auto;
-    font-size: 186px;
+    font-size: 170px;
     line-height: 1.04;
     font-weight: 620;
     letter-spacing: -0.022em;
@@ -108,7 +111,7 @@
   }
   .headline .wick { color: var(--accent); }
   .meta {
-    margin-top: 96px;
+    margin-top: 72px;
     display: flex;
     align-items: baseline;
     justify-content: space-between;
