@@ -139,7 +139,7 @@
   .card.windows .headline { font-size: 102px; line-height: 1.06; max-width: none; white-space: nowrap; }
   .card.windows .meta { flex-direction: column; align-items: flex-start; gap: 22px; margin-top: 52px; }
   .card.windows .pillars, .card.windows .foss { font-size: 36px; line-height: 1.35; }
-  .card.windows .pillars .dot { padding: 0 16px; }
+  .card.windows .pillars .dot, .card.windows .foss .dot { padding: 0 16px; }
   .stage { position: absolute; inset: 0; }
   .win {
     position: absolute;
@@ -239,6 +239,7 @@ if (Q.get('windows') || Q.get('hero')) {
   }
   card.insertBefore(stage, card.querySelector('.content'));
   document.querySelector('.pillars').innerHTML = 'Panel health<span class="dot">&middot;</span>Burn-in protection<br>Monitor checkup<span class="dot">&middot;</span>Every control';
+  if (!Q.get('hero')) document.querySelector('.foss').innerHTML = 'Free and open source<span class="dot">&middot;</span>candela.fyi';
 }
 if (Q.get('hero')) {
   const card = document.querySelector('.card');
