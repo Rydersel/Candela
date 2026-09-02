@@ -79,15 +79,21 @@ export function inlineStylesheet(html, readCss) {
   })
 }
 
+const privacyDescription = "How Candela's first-party website analytics work, what they do not collect, and how to opt out."
+
 export function privacyMetadata(html) {
   return html
     .replace(/<title>[^<]*<\/title>/, '<title>Privacy | Candela</title>')
-    .replace(
-      /<meta name="description" content="[^"]*"\s*\/>/,
-      '<meta name="description" content="How Candela\'s first-party website analytics work, what they do not collect, and how to opt out." />',
-    )
+    .replace(/<meta name="description" content="[^"]*"\s*\/>/, `<meta name="description" content="${privacyDescription}" />`)
     .replace('<link rel="canonical" href="https://candela.fyi/" />', '<link rel="canonical" href="https://candela.fyi/privacy/" />')
     .replace('<meta property="og:url" content="https://candela.fyi/" />', '<meta property="og:url" content="https://candela.fyi/privacy/" />')
+    .replace(/<meta property="og:title" content="[^"]*"\s*\/>/, '<meta property="og:title" content="Privacy | Candela" />')
+    .replace(/<meta name="twitter:title" content="[^"]*"\s*\/>/, '<meta name="twitter:title" content="Privacy | Candela" />')
+    .replace(/<meta property="og:description" content="[^"]*"\s*\/>/, `<meta property="og:description" content="${privacyDescription}" />`)
+    .replace(/<meta name="twitter:description" content="[^"]*"\s*\/>/, `<meta name="twitter:description" content="${privacyDescription}" />`)
+    // The app's structured data describes the landing page; a disclosure
+    // page claiming to be the SoftwareApplication would be a duplicate.
+    .replace(/\s*<script type="application\/ld\+json">[\s\S]*?<\/script>/, '')
 }
 
 function rebaseNestedAssets(html) {

@@ -26,6 +26,21 @@ function contextFor(accept?: string) {
   }
 }
 
+describe('www redirect', () => {
+  it('sends www to the apex with the path and query intact', async () => {
+    const { context, next } = contextFor()
+    Object.defineProperty(context, 'request', {
+      value: new Request('https://www.candela.fyi/privacy/?utm_source=x', { headers: { accept: 'text/html' } }),
+    })
+
+    const response = await onRequest(context)
+
+    expect(response.status).toBe(301)
+    expect(response.headers.get('location')).toBe('https://candela.fyi/privacy/?utm_source=x')
+    expect(next).not.toHaveBeenCalled()
+  })
+})
+
 describe('Markdown content negotiation', () => {
   it('returns the Markdown representation when the request accepts text/markdown', async () => {
     const { context, fetch, markdown, next } = contextFor('text/markdown, text/html;q=0.9')

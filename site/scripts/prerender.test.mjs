@@ -87,12 +87,18 @@ test('source crawler files advertise the canonical landing page', async () => {
 })
 
 test('privacyMetadata gives the public disclosure its own canonical identity', () => {
-  const shell = '<title>Landing</title><meta name="description" content="Landing description" /><link rel="canonical" href="https://candela.fyi/" /><meta property="og:url" content="https://candela.fyi/" />'
+  const shell = '<title>Landing</title><meta name="description" content="Landing description" /><link rel="canonical" href="https://candela.fyi/" /><meta property="og:url" content="https://candela.fyi/" /><meta property="og:title" content="Landing" /><meta property="og:description" content="Landing description" /><meta name="twitter:title" content="Landing" /><meta name="twitter:description" content="Landing description" />\n      <script type="application/ld+json">{"@type":"SoftwareApplication"}</script>'
   const result = privacyMetadata(shell)
   assert.match(result, /<title>Privacy \| Candela<\/title>/)
   assert.match(result, /content="How Candela's first-party website analytics work, what they do not collect, and how to opt out\."/)
   assert.match(result, /rel="canonical" href="https:\/\/candela\.fyi\/privacy\/"/)
   assert.match(result, /property="og:url" content="https:\/\/candela\.fyi\/privacy\/"/)
+  assert.match(result, /property="og:title" content="Privacy \| Candela"/)
+  assert.match(result, /name="twitter:title" content="Privacy \| Candela"/)
+  assert.match(result, /property="og:description" content="How Candela's first-party/)
+  assert.match(result, /name="twitter:description" content="How Candela's first-party/)
+  assert.doesNotMatch(result, /Landing/)
+  assert.doesNotMatch(result, /ld\+json/)
 })
 
 test('inlineStylesheet replaces the built stylesheet link with its contents', () => {

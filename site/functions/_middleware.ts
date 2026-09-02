@@ -38,8 +38,16 @@ async function htmlResponse(context: Context) {
   })
 }
 
+const canonicalHost = 'candela.fyi'
+
 export const onRequest = async (context: Context) => {
   const url = new URL(context.request.url)
+  // www is a Pages custom domain so that it resolves at all; the apex is the
+  // one address the sitemap, canonical tags and analytics know.
+  if (url.hostname === `www.${canonicalHost}`) {
+    url.hostname = canonicalHost
+    return Response.redirect(url.toString(), 301)
+  }
   if (url.pathname !== '/') return context.next()
   if (!acceptsMarkdown(context.request.headers.get('accept'))) return htmlResponse(context)
 
