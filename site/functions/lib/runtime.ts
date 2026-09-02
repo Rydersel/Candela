@@ -31,7 +31,11 @@ export type AnalyticsEnv = {
   ANALYTICS_DB: D1Database
   ANALYTICS_SIGNING_KEY: string
   RELEASE_DOWNLOAD_URL?: string
-  ANALYTICS_EVENTS?: AnalyticsEngineDataset
+  // One dataset per counted event, so the dashboard's dataset picker is the
+  // chart picker.
+  ANALYTICS_PAGEVIEWS?: AnalyticsEngineDataset
+  ANALYTICS_DOWNLOADS?: AnalyticsEngineDataset
+  ANALYTICS_GITHUB?: AnalyticsEngineDataset
 }
 
 export type FunctionContext = {

@@ -32,7 +32,7 @@ class Database implements D1Database {
   }
 }
 
-const events: unknown[] = []
+const events: Record<string, unknown[]> = { pageviews: [], downloads: [], github: [] }
 
 function context(request: Request, db = new Database()): FunctionContext {
   return {
@@ -41,7 +41,9 @@ function context(request: Request, db = new Database()): FunctionContext {
       ANALYTICS_DB: db,
       ANALYTICS_SIGNING_KEY: 'a-test-secret-that-is-long-enough-for-hmac',
       RELEASE_DOWNLOAD_URL: 'https://candela.fyi/Candela-1.0.0.dmg',
-      ANALYTICS_EVENTS: { writeDataPoint: (event) => { events.push(event) } },
+      ANALYTICS_PAGEVIEWS: { writeDataPoint: (event) => { events.pageviews.push(event) } },
+      ANALYTICS_DOWNLOADS: { writeDataPoint: (event) => { events.downloads.push(event) } },
+      ANALYTICS_GITHUB: { writeDataPoint: (event) => { events.github.push(event) } },
     },
   }
 }
@@ -70,7 +72,7 @@ function post(path: string, cookie?: string) {
 describe('analytics routes', () => {
   it('creates a visit window and rejects cross-origin submissions', async () => {
     const response = await visit(context(post('/analytics/visit')))
-    expect(events).toContainEqual({ indexes: ['pageview'], blobs: ['pageview', 'all', 'unknown', 'unknown'], doubles: [1] })
+    expect(events.pageviews).toContainEqual({ indexes: ['all'], blobs: ['all', 'unknown', 'unknown'], doubles: [1] })
     expect(response.status).toBe(204)
     expect(response.headers.get('set-cookie')).toContain('candela_measurement=')
 
@@ -117,13 +119,13 @@ describe('analytics routes', () => {
     expect(failed.headers.get('location')).toBe('https://candela.fyi/Candela-1.0.0.dmg')
 
     const db = new Database()
-    const before = events.length
+    const before = events.github.length
     await github(context(new Request('https://candela.fyi/github?placement=header', {
       headers: { cookie: 'candela_analytics=off', 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' },
       redirect: 'manual',
     }), db))
     expect(db.statements).toHaveLength(0)
-    expect(events).toHaveLength(before)
+    expect(events.github).toHaveLength(before)
   })
 
   it('counts the README button as a cross-site download and keeps the same-origin rule elsewhere', async () => {
@@ -134,11 +136,7 @@ describe('analytics routes', () => {
     }), db))
     expect(readme.status).toBe(302)
     expect(db.statements.length).toBeGreaterThan(0)
-    expect(events).toContainEqual({
-      indexes: ['download_attempt'],
-      blobs: ['download_attempt', 'readme', 'unknown', 'unknown'],
-      doubles: [1],
-    })
+    expect(events.downloads).toContainEqual({ indexes: ['readme'], blobs: ['readme', 'unknown', 'unknown'], doubles: [1] })
 
     const crossSiteHero = new Database()
     await download(context(new Request('https://candela.fyi/download?placement=hero', {

@@ -2,22 +2,21 @@ import { describe, expect, it, vi } from 'vitest'
 import { recordEvent, requestCountry } from './events'
 
 describe('recordEvent', () => {
-  it('writes one weighted data point with the counted fields only', () => {
-    const writeDataPoint = vi.fn()
-    recordEvent({ ANALYTICS_EVENTS: { writeDataPoint } }, {
+  it('writes one weighted data point to the dataset of its event, with the counted fields only', () => {
+    const downloads = vi.fn()
+    const pageviews = vi.fn()
+    recordEvent({ ANALYTICS_DOWNLOADS: { writeDataPoint: downloads }, ANALYTICS_PAGEVIEWS: { writeDataPoint: pageviews } }, {
       metric: 'download_attempt', placement: 'readme', countryCode: 'US', deviceCategory: 'desktop',
     })
-    expect(writeDataPoint).toHaveBeenCalledWith({
-      indexes: ['download_attempt'],
-      blobs: ['download_attempt', 'readme', 'US', 'desktop'],
-      doubles: [1],
-    })
+    expect(downloads).toHaveBeenCalledWith({ indexes: ['readme'], blobs: ['readme', 'US', 'desktop'], doubles: [1] })
+    expect(pageviews).not.toHaveBeenCalled()
   })
 
   it('is a no-op without the binding and swallows a failing write', () => {
-    expect(() => recordEvent({}, { metric: 'pageview', placement: 'all', countryCode: 'unknown', deviceCategory: 'unknown' })).not.toThrow()
+    const event = { metric: 'pageview' as const, placement: 'all' as const, countryCode: 'unknown', deviceCategory: 'unknown' as const }
+    expect(() => recordEvent({}, event)).not.toThrow()
     const writeDataPoint = vi.fn(() => { throw new Error('quota') })
-    expect(() => recordEvent({ ANALYTICS_EVENTS: { writeDataPoint } }, { metric: 'pageview', placement: 'all', countryCode: 'unknown', deviceCategory: 'unknown' })).not.toThrow()
+    expect(() => recordEvent({ ANALYTICS_PAGEVIEWS: { writeDataPoint } }, event)).not.toThrow()
   })
 })
 
