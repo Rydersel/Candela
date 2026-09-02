@@ -8,10 +8,16 @@
 // data on screen, re-encoded here. The dim and accumulation figures are not
 // assets at all: DimDemo.tsx and ExposureDemo.tsx draw them live.
 
-import healthFlowPoster from '../assets/captures/health-flow-poster.webp'
+import healthFlowPoster from '../assets/captures/health-flow-poster-1280.webp'
+import healthFlowPoster960 from '../assets/captures/health-flow-poster-960.webp'
+import healthFlowPoster640 from '../assets/captures/health-flow-poster-640.webp'
+import healthFlowPoster480 from '../assets/captures/health-flow-poster-480.webp'
 import setupFlowPoster from '../assets/captures/setup-flow-poster.webp'
 import panelFlowPoster from '../assets/captures/panel-flow-poster.webp'
-import checkupReportCapture from '../assets/captures/checkup-report.webp'
+import checkupReportCapture from '../assets/captures/checkup-report-1280.webp'
+import checkupReportCapture960 from '../assets/captures/checkup-report-960.webp'
+import checkupReportCapture640 from '../assets/captures/checkup-report-640.webp'
+import checkupReportCapture480 from '../assets/captures/checkup-report-480.webp'
 import healthFlowVideo from '../assets/media/health-flow.mp4'
 import healthFlowVideoHevc from '../assets/media/health-flow-hevc.mp4'
 import setupFlowVideo from '../assets/media/setup-flow.mp4'
@@ -27,6 +33,11 @@ export type Asset = {
   // decode HEVC fall through to src.
   srcHevc?: string
   poster?: string
+  // Width candidates for the still (or the poster), with the slot's share of
+  // the viewport, so the browser fetches the size it will paint.
+  srcSet?: string
+  posterSrcSet?: string
+  sizes?: string
   width: number
   height: number
   alt: string
@@ -60,6 +71,8 @@ export const assets: Record<AssetKey, Asset> = {
     src: healthFlowVideo,
     srcHevc: healthFlowVideoHevc,
     poster: healthFlowPoster,
+    posterSrcSet: `${healthFlowPoster480} 480w, ${healthFlowPoster640} 640w, ${healthFlowPoster960} 960w, ${healthFlowPoster} 1280w`,
+    sizes: '(min-width: 1200px) 640px, (min-width: 900px) 50vw, 100vw',
     width: 1920,
     height: 1080,
     alt: "The Health page in motion: both displays with their hours and hottest areas, the provenance export, the measurement switches, and the Heat Map window opening on the live exposure map.",
@@ -84,8 +97,10 @@ export const assets: Record<AssetKey, Asset> = {
   checkupReport: {
     kind: 'image',
     src: checkupReportCapture,
-    width: 2080,
-    height: 1524,
+    srcSet: `${checkupReportCapture480} 480w, ${checkupReportCapture640} 640w, ${checkupReportCapture960} 960w, ${checkupReportCapture} 1280w`,
+    sizes: '(min-width: 1200px) 640px, (min-width: 900px) 50vw, 100vw',
+    width: 1280,
+    height: 938,
     alt: 'A finished checkup report, one line per check, each line saying how the result was known: observed, refused, not observed, or self-reported.',
   },
 } satisfies Record<AssetKey, ImageAsset | VideoAsset>

@@ -22,7 +22,7 @@ describe('Homebrew command', () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     vi.stubGlobal('navigator', { clipboard: { writeText } })
     const { getByRole } = render(<Hero />)
-    const button = getByRole('button', { name: 'Copy the Homebrew install command' })
+    const button = getByRole('button', { name: /brew install --cask rydersel\/tap\/candela/ })
 
     fireEvent.click(button)
 
@@ -36,7 +36,7 @@ describe('Homebrew command', () => {
       clipboard: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
     })
     const { getByRole } = render(<Hero />)
-    const button = getByRole('button', { name: 'Copy the Homebrew install command' })
+    const button = getByRole('button', { name: /brew install --cask rydersel\/tap\/candela/ })
 
     fireEvent.click(button)
 
@@ -47,7 +47,7 @@ describe('Homebrew command', () => {
   it('reports when the clipboard API is unavailable', async () => {
     vi.stubGlobal('navigator', {})
     const { getByRole } = render(<Hero />)
-    const button = getByRole('button', { name: 'Copy the Homebrew install command' })
+    const button = getByRole('button', { name: /brew install --cask rydersel\/tap\/candela/ })
 
     fireEvent.click(button)
 

@@ -127,6 +127,8 @@ export function MediaFrame({ asset, className }: { asset: Asset; className?: str
       <img
         className={classes}
         src={asset.src}
+        srcSet={asset.srcSet}
+        sizes={asset.sizes}
         alt={asset.alt}
         width={asset.width}
         height={asset.height}
@@ -142,6 +144,8 @@ export function MediaFrame({ asset, className }: { asset: Asset; className?: str
       <img
         className={`${classes} media-poster`}
         src={asset.poster}
+        srcSet={asset.posterSrcSet}
+        sizes={asset.sizes}
         alt={asset.alt}
         width={asset.width}
         height={asset.height}

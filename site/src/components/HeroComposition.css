@@ -11,13 +11,27 @@
   /* The export's geometry: corner radius, and windows that run past the edge
      clipped by the frame, so the composition reads as one picture. */
   border-radius: clamp(14px, 1.6vw, 24px);
-  /* The desktop at three quarters: the page's own dark shows through a
-     quarter of the way, so the wallpaper sits under the windows rather than
-     competing with them. */
-  background:
-    linear-gradient(color-mix(in srgb, var(--bg) 25%, transparent), color-mix(in srgb, var(--bg) 25%, transparent)),
-    var(--hero-comp-bg, none) center / cover no-repeat,
-    var(--surface);
+  background: var(--surface);
+}
+
+.hero-comp-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+}
+
+/* The desktop at three quarters: the page's own dark shows through a quarter
+   of the way, so the wallpaper sits under the windows rather than competing
+   with them. */
+.hero-comp-tint {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: color-mix(in srgb, var(--bg) 25%, transparent);
+  pointer-events: none;
 }
 
 .hero-comp-slot {

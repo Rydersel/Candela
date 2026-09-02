@@ -210,16 +210,21 @@ export function HeroBackdropSwirl() {
       const uResolution = u('u_resolution')
       const uPixelRatio = u('u_pixelRatio')
 
-      const resize = () => {
+      // The observer hands over the wrapper's size, so no layout read is
+      // forced mid-frame; only the first sizing reads the element itself.
+      const resize = (width: number, height: number) => {
         // The backdrop is atmospheric, not content. Capping its internal
         // resolution keeps a Retina display from quadrupling the fragment work.
         const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5)
-        canvas.width = wrap.clientWidth * pixelRatio
-        canvas.height = wrap.clientHeight * pixelRatio
+        canvas.width = Math.round(width * pixelRatio)
+        canvas.height = Math.round(height * pixelRatio)
         gl.viewport(0, 0, canvas.width, canvas.height)
       }
-      resize()
-      const resizeObserver = new ResizeObserver(resize)
+      resize(wrap.clientWidth, wrap.clientHeight)
+      const resizeObserver = new ResizeObserver((entries) => {
+        const rect = entries[0]?.contentRect
+        if (rect) resize(rect.width, rect.height)
+      })
       resizeObserver.observe(wrap)
 
       const reduced = window.matchMedia('(prefers-reduced-motion: reduce)')

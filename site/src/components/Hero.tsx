@@ -43,17 +43,13 @@ function BrewInstall() {
       className="hero-brew"
       data-state={copyState === 'idle' ? undefined : copyState}
       onClick={copy}
-      aria-label={brew.copyLabel}
     >
       <span className="hero-brew-cmd">
-        <span className="hero-brew-dollar" aria-hidden="true">
-          ${' '}
-        </span>
+        <span className="hero-brew-dollar" aria-hidden="true" />
         {brew.cmd}
       </span>
-      <span className="hero-brew-hint" aria-hidden="true">
-        {feedback}
-      </span>
+      <span className="sr-only">. {brew.copyLabel}</span>
+      <span className="hero-brew-hint" aria-hidden="true" data-hint={feedback} />
       <span className="sr-only" role="status" aria-live="polite">
         {copyState === 'idle' ? '' : feedback}
       </span>

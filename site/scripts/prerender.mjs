@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import { JSDOM } from 'jsdom'
@@ -62,8 +63,20 @@ export function htmlToAgentMarkdown(html) {
 export function injectAppMarkup(shell, markup) {
   const rootPattern = /<div id="root"><\/div>/
   if (!rootPattern.test(shell)) throw new Error('Production shell is missing an empty #root')
-  const portableMarkup = markup.replaceAll('="/assets/', '="./assets/')
+  // Both the attribute start and the comma-separated candidates of a srcset.
+  const portableMarkup = markup.replaceAll('="/assets/', '="./assets/').replaceAll(', /assets/', ', ./assets/')
   return shell.replace(rootPattern, `<div id="root">${portableMarkup}</div>`)
+}
+
+// The one stylesheet is small enough to ship inside the document. Fetched
+// separately it is the only render-blocking request on the page, and on a slow
+// link that round trip is the whole gap between the HTML arriving and the
+// first paint.
+export function inlineStylesheet(html, readCss) {
+  return html.replace(/<link rel="stylesheet"[^>]*href="([^"]+)"[^>]*>/, (tag, href) => {
+    const css = readCss(href)
+    return css == null ? tag : `<style>${css}</style>`
+  })
 }
 
 export function privacyMetadata(html) {
@@ -78,7 +91,7 @@ export function privacyMetadata(html) {
 }
 
 function rebaseNestedAssets(html) {
-  return html.replaceAll('="./assets/', '="../assets/')
+  return html.replaceAll('="./assets/', '="../assets/').replaceAll(', ./assets/', ', ../assets/')
 }
 
 export function validateSeoOutput({ html, robots, sitemap }) {
@@ -131,12 +144,13 @@ export function validateSeoOutput({ html, robots, sitemap }) {
 export async function prerender({ siteRoot = new URL('../', import.meta.url) } = {}) {
   const dist = new URL('dist/', siteRoot)
   const server = new URL('dist-ssr/entry-server.js', siteRoot)
-  const [{ render }, shell, robots, sitemap] = await Promise.all([
+  const [{ render }, rawShell, robots, sitemap] = await Promise.all([
     import(pathToFileURL(server.pathname).href),
     readFile(new URL('index.html', dist), 'utf8'),
     readFile(new URL('robots.txt', dist), 'utf8'),
     readFile(new URL('sitemap.xml', dist), 'utf8'),
   ])
+  const shell = inlineStylesheet(rawShell, (href) => readFileSync(new URL(href, dist), 'utf8'))
   const html = injectAppMarkup(shell, render('/'))
   const privacyHtml = rebaseNestedAssets(privacyMetadata(injectAppMarkup(shell, render('/privacy/'))))
   const markdown = htmlToAgentMarkdown(html)

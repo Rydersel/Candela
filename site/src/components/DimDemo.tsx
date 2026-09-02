@@ -73,7 +73,7 @@ export function DimDemo() {
   const stepRef = useRef(0)
   const timerRef = useRef(0)
   const tickRef = useRef<() => void>(() => {})
-  const figRef = useRef<HTMLElement>(null)
+  const figRef = useRef<HTMLDivElement>(null)
 
   // The loop runs only on screen, the same rule MediaFrame applies to the
   // videos: scrolled away, the timeline stops; scrolled back, it resumes
@@ -129,7 +129,7 @@ export function DimDemo() {
 
   return (
     <div className="media-shell">
-      <figure
+      <div
         ref={figRef}
         className="dim-demo protection-frame"
         data-settled={phase.settled || undefined}
@@ -152,7 +152,7 @@ export function DimDemo() {
         <figcaption className="dim-phase" aria-hidden="true">
           {phase.settled ? dimDemo.phases.settled : dimDemo.phases.lit}
         </figcaption>
-      </figure>
+      </div>
       <button
         type="button"
         className="media-toggle"

@@ -153,8 +153,20 @@
   white-space: nowrap;
 }
 
+/* The prompt glyph and the hint are drawn from CSS, not DOM text, so the
+   button's accessible name is exactly the command a sighted reader sees plus
+   the visually hidden purpose; text that only decorates would otherwise have
+   to be in the name too. */
 .hero-brew-dollar {
   color: color-mix(in srgb, var(--accent) 68%, var(--text-dim));
+}
+
+.hero-brew-dollar::before {
+  content: '$ ';
+}
+
+.hero-brew-hint::before {
+  content: attr(data-hint);
 }
 
 .hero-brew-hint {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { htmlToAgentMarkdown, injectAppMarkup, privacyMetadata, validateSeoOutput } from './prerender.mjs'
+import { htmlToAgentMarkdown, inlineStylesheet, injectAppMarkup, privacyMetadata, validateSeoOutput } from './prerender.mjs'
 
 const root = new URL('../', import.meta.url)
 
@@ -93,4 +93,11 @@ test('privacyMetadata gives the public disclosure its own canonical identity', (
   assert.match(result, /content="How Candela's first-party website analytics work, what they do not collect, and how to opt out\."/)
   assert.match(result, /rel="canonical" href="https:\/\/candela\.fyi\/privacy\/"/)
   assert.match(result, /property="og:url" content="https:\/\/candela\.fyi\/privacy\/"/)
+})
+
+test('inlineStylesheet replaces the built stylesheet link with its contents', () => {
+  const shell = '<head><link rel="stylesheet" crossorigin href="./assets/index-abc.css"></head>'
+  const out = inlineStylesheet(shell, (href) => (href === './assets/index-abc.css' ? 'body{margin:0}' : null))
+  assert.equal(out, '<head><style>body{margin:0}</style></head>')
+  assert.equal(inlineStylesheet(shell, () => null), shell)
 })
