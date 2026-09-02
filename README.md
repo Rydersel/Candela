@@ -5,8 +5,8 @@
 <h1 align="center">Candela</h1>
 
 <p align="center">
-  <b>Candela looks after your displays.</b><br>
-  Panel health, burn-in protection, a checkup for defects and wear, and the everyday controls macOS leaves out.<br>
+  <b>Candela protects your displays from burn-in and wear.</b><br>
+  Panel health, a checkup for defects, and the monitor controls macOS leaves out (brightness, volume, HiDPI scaling).<br>
   Free and open source, for macOS.
 </p>
 
