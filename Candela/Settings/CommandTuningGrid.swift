@@ -36,7 +36,7 @@ enum DDCCommandCopy {
 
 /// Per-command DDC tuning for one display: Enabled / Min / Max / Invert for
 /// brightness, volume and contrast. The response curve and the hex
-/// control-code remap live in the Advanced page's VCP Overrides sub-group (A1)
+/// control-code remap live in the Advanced page's VCP Overrides sub-group
 /// below, and that page owns the section header and its traffic-block
 /// explanation, so neither is drawn here.
 ///

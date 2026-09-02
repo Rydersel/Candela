@@ -4,7 +4,7 @@ import SwiftUI
 /// The lit opening of a display's page: the display drawn as an object,
 /// the identity block under it, and the live levels on their own card.
 ///
-/// The glyph earns its place by being functional (A4). It carries the display's
+/// The glyph earns its place by being functional. It carries the display's
 /// real shape: aspect ratio straight off the current mode, which is why a
 /// display mounted at 270° renders TALL with no rotation transform anywhere
 /// (`CGDisplayCopyDisplayMode` reports the rotated logical size, so the shape IS
