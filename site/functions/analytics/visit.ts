@@ -29,7 +29,10 @@ export const onRequestPost = async (context: FunctionContext) => {
   const ownHost = new URL(context.request.url).hostname
   const referrerHost = sanitizeReferrerHost(payload.referrerHost, ownHost) ?? 'direct'
 
-  try {
+  // Analytics is deliberately fail-open, and the visitor's request does not
+  // wait for the write: it finishes after the response where the runtime
+  // allows, so a slow database never shows up in the page's own timings.
+  const write = (async () => {
     await recordVisit(context.env.ANALYTICS_DB, {
       windowKey: await deriveWindowKey(measurement.rawId, context.env),
       startedAt: measurement.issuedAt,
@@ -39,9 +42,9 @@ export const onRequestPost = async (context: FunctionContext) => {
       deviceCategory: reduceDeviceCategory(context.request.headers.get('user-agent')),
       referrerHost,
     })
-  } catch {
-    // Analytics is deliberately fail-open.
-  }
+  })().catch(() => {})
+  if (context.waitUntil) context.waitUntil(write)
+  else await write
 
   const headers = new Headers()
   if (measurement.setCookie) headers.append('set-cookie', measurement.setCookie)

@@ -80,27 +80,14 @@
    travels the perimeter: the frame catching the light, in the glance
    band's idiom. The ring is a conic gradient masked to a 1px border; the
    angle is the only thing that moves. */
-@property --hero-ring-angle {
-  syntax: '<angle>';
-  inherits: false;
-  initial-value: 0deg;
-}
-
 .hero-comp-ring {
   position: absolute;
   inset: 0;
   z-index: 4;
   border-radius: inherit;
   padding: 1px;
-  background:
-    conic-gradient(
-      from var(--hero-ring-angle),
-      transparent 0deg,
-      color-mix(in srgb, var(--accent) 85%, white) 14deg,
-      transparent 34deg,
-      transparent 360deg
-    ),
-    color-mix(in srgb, var(--accent) 28%, transparent);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
   -webkit-mask:
     linear-gradient(#000 0 0) content-box,
     linear-gradient(#000 0 0);
@@ -110,6 +97,24 @@
     linear-gradient(#000 0 0);
   mask-composite: exclude;
   pointer-events: none;
+}
+
+/* The sweep is a fixed gradient on an oversized square that rotates, so
+   each frame is a transform of a cached layer. Animating the gradient's
+   angle instead re-rasterised the whole ring every frame, which on a
+   machine without GPU acceleration was most of the page's main-thread time. */
+.hero-comp-ring::before {
+  content: '';
+  position: absolute;
+  inset: -50%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    color-mix(in srgb, var(--accent) 85%, white) 14deg,
+    transparent 34deg,
+    transparent 360deg
+  );
+  will-change: transform;
   animation: hero-comp-ring 7s linear 1.2s infinite;
 }
 
@@ -126,13 +131,13 @@
 
 @keyframes hero-comp-ring {
   to {
-    --hero-ring-angle: 360deg;
+    transform: rotate(360deg);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .hero-comp-slot,
-  .hero-comp-ring {
+  .hero-comp-ring::before {
     animation: none;
   }
 

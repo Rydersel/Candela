@@ -174,6 +174,13 @@ export function HeroBackdropSwirl() {
         failIfMajorPerformanceCaveat: true,
       })
       if (!gl) return
+      // The caveat flag is not honoured everywhere; the renderer's own name
+      // is the second opinion.
+      const debugInfo = gl.getExtension('WEBGL_debug_renderer_info')
+      const renderer = debugInfo
+        ? String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL))
+        : String(gl.getParameter(gl.RENDERER))
+      if (/swiftshader|llvmpipe|softpipe|software|mesa offscreen/i.test(renderer)) return
 
       const compile = (type: number, source: string) => {
         const shader = gl.createShader(type)!
