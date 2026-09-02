@@ -163,7 +163,16 @@ export function HeroBackdropSwirl() {
       const wrap = wrapRef.current
       if (!canvas || !wrap) return
 
-      const gl = canvas.getContext('webgl2', { premultipliedAlpha: true, antialias: true })
+      // A software-rendered WebGL (SwiftShader in headless Chrome, VMs, some
+      // remote desktops) would compile and run the shader on the CPU, which
+      // is most of a second of main-thread time on a slow machine for a
+      // decorative flourish. Such a context is refused, and the static
+      // gradient stays.
+      const gl = canvas.getContext('webgl2', {
+        premultipliedAlpha: true,
+        antialias: true,
+        failIfMajorPerformanceCaveat: true,
+      })
       if (!gl) return
 
       const compile = (type: number, source: string) => {

@@ -2,6 +2,7 @@
   "version": 1,
   "include": [
     "/",
+    "/privacy/*",
     "/analytics/*",
     "/download",
     "/github"
