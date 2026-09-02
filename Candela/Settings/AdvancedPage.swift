@@ -2,7 +2,7 @@ import CandelaKit
 import SwiftUI
 
 /// One external display's Advanced sub-page (spec §6): the settings most
-/// displays never need, plus the escape hatches A1 promoted out of
+/// displays never need, plus the escape hatches promoted out of
 /// `defaults write`.
 ///
 /// `@MainActor` because a `View`'s properties other than `body` are nonisolated

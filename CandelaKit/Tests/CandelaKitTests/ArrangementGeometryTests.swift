@@ -99,7 +99,7 @@ struct CanvasTransformTests {
     CanvasTransform.fitting(arrangement.bounds, in: Self.canvas, margin: Self.margin, headroom: Self.headroom)
   }
 
-  /// A spread of fits, so R1/R2 are not pinned to one lucky scale: a real L, a small
+  /// A spread of fits, so the round trips are not pinned to one lucky scale: a real L, a small
   /// panel, a bounds far larger than any desktop (worst float error), a scale above 1.
   private var transforms: [CanvasTransform] {
     [
