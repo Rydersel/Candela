@@ -14,9 +14,9 @@ export function Footer() {
           <p className="footer-note">{footer.note}</p>
         </div>
         <div className="footer-links">
-          <button className="footer-link footer-link-lit" type="button" disabled>
+          <a className="footer-link footer-link-lit" href="/download?placement=footer">
             {hero.ctaPrimary}
-          </button>
+          </a>
           <a className="footer-link" href="/github?placement=footer">
             {hero.ctaSecondary}
           </a>

@@ -5,9 +5,10 @@ export function isSameOriginPost(request: Request) {
   return request.method === 'POST' && request.headers.get('origin') === new URL(request.url).origin
 }
 
-export function isEligibleNavigation(request: Request) {
+export function isEligibleNavigation(request: Request, { allowCrossSite = false } = {}) {
+  const site = request.headers.get('sec-fetch-site')
   return request.method === 'GET'
-    && request.headers.get('sec-fetch-site') === 'same-origin'
+    && (site === 'same-origin' || (allowCrossSite && (site === 'cross-site' || site === 'none')))
     && request.headers.get('sec-fetch-mode') === 'navigate'
     && request.headers.get('sec-fetch-dest') === 'document'
 }

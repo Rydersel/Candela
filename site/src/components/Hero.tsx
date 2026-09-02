@@ -69,9 +69,9 @@ export function Hero() {
         <h1 className="hero-h1">{hero.h1}</h1>
         <p className="hero-sub">{hero.sub}</p>
         <div className="hero-actions">
-          <button className="hero-cta" type="button" disabled>
+          <a className="hero-cta" href="/download?placement=hero">
             {hero.ctaPrimary}
-          </button>
+          </a>
           <a className="hero-quiet" href="/github?placement=hero">
             {hero.ctaSecondary}
           </a>

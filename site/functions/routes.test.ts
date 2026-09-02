@@ -120,6 +120,23 @@ describe('analytics routes', () => {
     expect(db.statements).toHaveLength(0)
   })
 
+  it('counts the README button as a cross-site download and keeps the same-origin rule elsewhere', async () => {
+    const db = new Database()
+    const readme = await download(context(new Request('https://candela.fyi/download?placement=readme', {
+      headers: { 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' },
+      redirect: 'manual',
+    }), db))
+    expect(readme.status).toBe(302)
+    expect(db.statements.length).toBeGreaterThan(0)
+
+    const crossSiteHero = new Database()
+    await download(context(new Request('https://candela.fyi/download?placement=hero', {
+      headers: { 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' },
+      redirect: 'manual',
+    }), crossSiteHero))
+    expect(crossSiteHero.statements).toHaveLength(0)
+  })
+
   it('falls back to the current release archive when no download URL is configured', async () => {
     const response = await download(contextWithoutReleaseUrl(new Request('https://candela.fyi/download', {
       headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' },

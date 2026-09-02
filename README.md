@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rydersel/Candela/releases/latest"><img src=".github/assets/download-macos.png" height="45" alt="Download Candela for macOS"></a>
+  <a href="https://candela.fyi/download?placement=readme"><img src=".github/assets/download-macos.png" height="45" alt="Download Candela for macOS"></a>
   &nbsp;
   <a href="#install"><img src=".github/assets/install-homebrew.png" height="45" alt="Install with Homebrew"></a>
   &nbsp;

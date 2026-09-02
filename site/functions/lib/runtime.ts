@@ -1,4 +1,4 @@
-export type Placement = 'header' | 'hero' | 'footer'
+export type Placement = 'header' | 'hero' | 'footer' | 'readme'
 export type AnalyticsAction = 'download' | 'github'
 export type DeviceCategory = 'desktop' | 'mobile' | 'tablet' | 'unknown'
 
@@ -32,7 +32,12 @@ export type FunctionContext = {
   waitUntil?: (promise: Promise<unknown>) => void
 }
 
-export const placements = new Set<Placement>(['header', 'hero', 'footer'])
+export const placements = new Set<Placement>(['header', 'hero', 'footer', 'readme'])
+
+// Placements reached from another site: the README's download button lives on
+// github.com, so its click is a cross-site navigation and must not be dropped
+// by the same-origin rule that keeps prefetchers out of the counts.
+export const externalPlacements = new Set<Placement>(['readme'])
 
 export function parsePlacement(value: string | null): Placement | null {
   return value && placements.has(value as Placement) ? value as Placement : null

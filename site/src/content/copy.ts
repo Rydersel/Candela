@@ -24,7 +24,7 @@ export const hero: {
 } = {
   h1: "The display software Apple forgot to ship.",
   sub: "Candela watches your display's health, protects OLED panels from burn-in, checks for defects and wear, and gives every monitor the controls macOS should have.",
-  ctaPrimary: "Download at 1.0",
+  ctaPrimary: "Download for macOS",
   ctaSecondary: "View on GitHub",
   foss: "Free and open source, forever.",
 }
@@ -58,7 +58,7 @@ export const navigation = {
   brand: "Candela",
   faq: "FAQ",
   github: "GitHub",
-  download: "Download at 1.0",
+  download: "Download",
   skip: "Skip to content",
 }
 
@@ -359,7 +359,7 @@ export const privacy = {
   app: "The Candela app performs display analysis locally. It requires no account, sends no screen samples to Candela, and uploads no display-health record. Website analytics are separate from the app.",
   does: [
     "Counts pageviews and anonymous 24-hour browser windows.",
-    "Counts Download attempts and GitHub clicks, including which header, hero or footer link was used.",
+    "Counts Download attempts and GitHub clicks, including which header, hero or footer link was used, or whether the download came from the GitHub README's button.",
     "Records coarse country, device category and external referrer hostname.",
     "Produces anonymous daily statistics and operational counts.",
     "Uses one host-only measurement cookie restricted to candela.fyi.",

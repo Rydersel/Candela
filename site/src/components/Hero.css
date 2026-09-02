@@ -96,7 +96,14 @@
   font-family: inherit;
   font-size: inherit;
   font-weight: 600;
-  cursor: not-allowed;
+  text-decoration: none;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.hero-cta:hover {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  color: var(--text);
 }
 
 .hero-quiet {

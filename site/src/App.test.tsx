@@ -29,10 +29,17 @@ describe('App navigation', () => {
 
     const { container, getAllByRole, getByRole } = render(<App />)
     expect(getByRole('navigation', { name: 'Primary' })).toBeTruthy()
-    const heldDownloads = getAllByRole('button', { name: 'Download at 1.0' })
+    const downloads = [
+      ...getAllByRole('link', { name: 'Download for macOS' }),
+      ...getAllByRole('link', { name: 'Download' }),
+    ]
 
-    expect(heldDownloads).toHaveLength(3)
-    heldDownloads.forEach((button) => expect((button as HTMLButtonElement).disabled).toBe(true))
+    expect(downloads).toHaveLength(3)
+    expect(downloads.map((link) => link.getAttribute('href')).sort()).toEqual([
+      '/download?placement=footer',
+      '/download?placement=header',
+      '/download?placement=hero',
+    ])
     expect(container.querySelector('a[href="/download"]')).toBeNull()
     expect(getByRole('link', { name: 'Skip to content' }).getAttribute('href')).toBe('#content')
     expect(getByRole('main').id).toBe('content')

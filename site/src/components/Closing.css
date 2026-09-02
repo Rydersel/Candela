@@ -279,7 +279,6 @@
 
 .footer-link-lit {
   color: color-mix(in srgb, var(--accent) 68%, var(--text-dim));
-  cursor: not-allowed;
 }
 
 /* 860 is the width the glance band already goes vertical at; the closing

@@ -19,9 +19,9 @@ export function Header({ homeHref = '#top', faqHref = '#faq' }: { homeHref?: str
             <a className="site-nav-link" href="/github?placement=header">
               {navigation.github}
             </a>
-            <button className="site-nav-download" type="button" disabled>
+            <a className="site-nav-download" href="/download?placement=header">
               {navigation.download}
-            </button>
+            </a>
           </div>
         </nav>
       </header>

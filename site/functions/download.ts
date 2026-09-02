@@ -1,13 +1,14 @@
 import { readAnalyticsPreference } from './lib/measurement'
 import { actionMeasurement, isEligibleNavigation, redirect } from './lib/request'
-import { parsePlacement, type FunctionContext } from './lib/runtime'
+import { externalPlacements, parsePlacement, type FunctionContext } from './lib/runtime'
 import { recordAction } from './lib/store'
 
 const releaseArchiveUrl = 'https://github.com/Rydersel/Candela/releases/download/v1.0.0/Candela-1.0.0.dmg'
 
 export const onRequestGet = async (context: FunctionContext) => {
   const placement = parsePlacement(new URL(context.request.url).searchParams.get('placement'))
-  if (placement && isEligibleNavigation(context.request) && readAnalyticsPreference(context.request) !== 'off') {
+  const eligible = placement && isEligibleNavigation(context.request, { allowCrossSite: externalPlacements.has(placement) })
+  if (placement && eligible && readAnalyticsPreference(context.request) !== 'off') {
     try {
       await recordAction(context.env.ANALYTICS_DB, {
         action: 'download',
