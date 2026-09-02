@@ -428,7 +428,7 @@ if [ "$TWINS" -eq 1 ]; then
   needs exactly the pair macOS forbids. Two REAL identical monitors are
   unaffected — this is the virtual-display service's registry, not a display
   rule. Re-run this command on a future macOS to re-test; if it starts
-  passing, the twin spike becomes possible and AR11 can be revisited.
+  passing, the twin experiment becomes possible and the shared-identity refusal can be revisited.
 EOM
     first_guard 75
     exit 75

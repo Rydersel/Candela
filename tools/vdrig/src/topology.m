@@ -28,7 +28,7 @@
 
 // Lives in ColorSync, not CoreGraphics, and is not in any public header on
 // macOS 26. Declared here rather than dropped, because it is one of the two
-// candidate disambiguators the twin-identity spike has to test.
+// candidate disambiguators the twin-identity experiment has to test.
 extern CFUUIDRef CGDisplayCreateUUIDFromDisplayID(CGDirectDisplayID display);
 
 static int CompareIDs(const void *a, const void *b) {
@@ -100,7 +100,7 @@ int main(int argc, const char *argv[]) {
                CGDisplayIsAsleep(d) ? 1 : 0);
       }
       // vendor/model/serial ARE Candela's DisplayConfigIdentity. Printed so the
-      // twin spike can see the collision it is reasoning about rather than
+      // twin-identity experiment can see the collision it is reasoning about rather than
       // assume it from the descriptor it asked for.
       printf("vendor=0x%X model=0x%X serial=0x%X ", CGDisplayVendorNumber(d),
              CGDisplayModelNumber(d), CGDisplaySerialNumber(d));

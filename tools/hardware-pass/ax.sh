@@ -40,9 +40,9 @@ BIND='set cands to (every window whose name does not start with "Candela Gamma A
       error "ax.sh: settings window not uniquely identified: " & (count of cands) & " candidates. Open windows:" & linefeed & seen
     end if
     set w to item 1 of cands'
-# MEASURED 2026-08-20 against the hand-built shell (SV4): the window is one
+# MEASURED 2026-08-20 against the hand-built shell: the window is one
 # AXGroup holding two scroll areas, sidebar first, detail second. The map window
-# coexists with settings (OCR-A1) and is excluded under BOTH its titles, so this
+# coexists with settings and is excluded under BOTH its titles, so this
 # selector keeps working against an older installed build.
 SB="UI element 1 of UI element 1 of w"
 DETAIL="UI element 2 of UI element 1 of w"

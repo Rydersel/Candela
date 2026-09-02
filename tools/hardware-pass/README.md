@@ -21,7 +21,7 @@ What each one exists for, and the measured fact behind it:
 
 For the app-behaviour invariants these scripts were assembled into multi-leg
 passes to prove (the combined-dimming propagation, the crossover, the sync
-fan-out, the mute strand, the quiet wake, the panel's D24 pair),
+fan-out, the mute strand, the quiet wake, the panel's capabilities pair),
 `candela-probe regress` supersedes the ad-hoc scripting: it carries the positive
 control for each one, splits its verdict three ways rather than two, and writes
 a machine-readable record of the run. Run it against the

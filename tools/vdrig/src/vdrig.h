@@ -113,10 +113,10 @@ static const VDRigIdentity kVDRigSlots[3] = {
 //
 // So this is the narrowest separation that gets two displays on screen at once
 // while leaving DisplayConfigIdentity ambiguous, which is the condition the
-// twin spike exists to test. If a future macOS refuses even this, the mode is
+// twin-identity experiment exists to test. If a future macOS refuses even this, the mode is
 // dead and the refuse-to-guess fallback is the answer by default.
 //
-// Names differ so the spike has ground truth about which display is which; the
+// Names differ so the experiment has ground truth about which display is which; the
 // measurement above proves the name is not doing the separating.
 static const VDRigIdentity kVDRigTwins[2] = {
     {"twinA", "Candela Rig Twin A", 0xCA1D, 0x1701, 0x00000017, 1920, 1080, 600, 340},

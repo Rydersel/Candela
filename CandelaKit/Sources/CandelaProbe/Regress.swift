@@ -1280,7 +1280,7 @@ enum Regress {
   static func combinedDimmingCheck(
     instruments: RegressInstruments, preflight: Preflight, displays: [Display]
   ) -> PlatformConformance.Check {
-    let name = "regress.d28.combined"
+    let name = "regress.dimming.combined"
     let mag: Display
     let key: String
     switch magPanel(displays) {
@@ -1312,7 +1312,7 @@ enum Regress {
   private static func combinedDimmingDrive(
     instruments: RegressInstruments, mag: Display, persistenceKey: String
   ) -> PlatformConformance.Check {
-    let name = "regress.d28.combined"
+    let name = "regress.dimming.combined"
     for gate in [switchingPointGate, avoidGammaGate, ddcTuningGate] {
       if let reason = gate(instruments, persistenceKey) {
         return plainCheck(name: name, outcome: .inconclusive("setup: \(reason)"))
@@ -1729,7 +1729,7 @@ enum Regress {
   static func muteStrandCheck(
     instruments: RegressInstruments, preflight: Preflight, displays: [Display]
   ) -> PlatformConformance.Check {
-    let name = "regress.d29.mute"
+    let name = "regress.mute.strand"
     let mag: Display
     let key: String
     switch magPanel(displays) {
@@ -1786,7 +1786,7 @@ enum Regress {
   private static func muteStrandDrive(
     instruments: RegressInstruments, mag: Display, persistenceKey: String
   ) -> PlatformConformance.Check {
-    let name = "regress.d29.mute"
+    let name = "regress.mute.strand"
     let identifier = volumeCommandIdentifier(persistenceKey)
     let mutedKey = mutedPrefKey(persistenceKey)
 
