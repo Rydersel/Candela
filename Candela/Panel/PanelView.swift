@@ -79,7 +79,8 @@ struct PanelView: View {
               // Asked of the engine that owns the pairing: a catalog refresh
               // inside an engage window answers "not engaged" with the mirror
               // already up.
-              isShowingSynthesizedSize: model.synthesis.isEngaged(displayID: state.display.id)
+              isShowingSynthesizedSize: model.synthesis.isEngaged(displayID: state.display.id),
+              careLine: Self.careLine(for: state, model: model)
             )
             DisplaySliderRow(
               controller: state.controller, displayName: name,
@@ -377,6 +378,32 @@ enum PanelMenu {
 }
 
 extension PanelView {
+  // MARK: - The care line
+
+  /// The caption under an external display's name, nil when there is nothing to
+  /// say. The Menu Bar preview calls this too, so both surfaces derive one line.
+  @MainActor
+  static func careLine(for state: AppModel.DisplayState, model: AppModel) -> String? {
+    careLine(
+      persistenceKey: state.display.persistenceKey,
+      prefs: standardPrefs(state.display.persistenceKey),
+      care: model.oledCare, safeMode: model.isSafeMode)
+  }
+
+  /// Reads the summary only when enrolled and not in Safe Mode. That leaves an
+  /// un-enrolled display's history unstated, as the Health pane does, and keeps
+  /// a store decode out of this view body.
+  @MainActor
+  static func careLine(
+    persistenceKey: String, prefs: DisplayPrefs, care: OledCareCoordinator, safeMode: Bool
+  ) -> String? {
+    let enrolled = prefs.oledCareEnrolled
+    let hours = care.hoursTracker(for: persistenceKey).totalHours
+    let summary = enrolled && !safeMode ? care.healthSummary(for: persistenceKey) : nil
+    return PanelCareLine.text(
+      enrolled: enrolled, hours: hours, summary: summary, safeMode: safeMode)
+  }
+
   /// Why the panel's HDR button cannot act, or nil when it can.
   ///
   /// Only the ENGAGE direction is refused: with HDR live the button offers the
@@ -391,12 +418,14 @@ extension PanelView {
   }
 }
 
-/// Section header for one display: name, an "HDR" state badge, and an HDR-mode
-/// toggle. All secondary-colored so the slider stays the row's only emphasis.
+/// Section header for one display, all secondary-colored so the slider stays
+/// the row's only emphasis.
 private struct DisplayHeaderRow: View {
   let controller: BrightnessController
   let displayName: String
   let isShowingSynthesizedSize: Bool
+  /// `PanelView.careLine`'s answer. Nil draws nothing, keeping the row one line tall.
+  let careLine: String?
 
   @State private var isHovering = false
 
@@ -415,23 +444,35 @@ private struct DisplayHeaderRow: View {
   }
 
   var body: some View {
-    HStack(spacing: 6) {
-      Text(displayName)
-        .font(.system(size: 13, weight: .semibold))
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .accessibilityHidden(true)  // the slider carries the display name
-      if controller.isHDREngaged {
-        Text("HDR")
-          .font(.system(size: 11, weight: .medium))
+    VStack(alignment: .leading, spacing: 2) {
+      HStack(spacing: 6) {
+        Text(displayName)
+          .font(.system(size: 13, weight: .semibold))
           .foregroundStyle(.secondary)
-          .padding(.horizontal, 4)
-          .padding(.vertical, 1)
-          .background(RoundedRectangle(cornerRadius: 3, style: .continuous).fill(.quaternary))
-          .accessibilityLabel("HDR engaged")
+          .lineLimit(1)
+          .accessibilityHidden(true)  // the slider carries the display name
+        if controller.isHDREngaged {
+          Text("HDR")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(RoundedRectangle(cornerRadius: 3, style: .continuous).fill(.quaternary))
+            .accessibilityLabel("HDR engaged")
+        }
+        Spacer(minLength: 4)
+        hdrModeButton
       }
-      Spacer(minLength: 4)
-      hdrModeButton
+      if let careLine {
+        Text(verbatim: careLine)
+          .font(.system(size: 11))
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .truncationMode(.tail)
+          // The name above is hidden from VoiceOver (the slider carries it), so
+          // this line names its display and is read as one element.
+          .accessibilityLabel(Text(verbatim: "\(displayName), \(careLine)"))
+      }
     }
     // On the row, not the button: the caption draws in a leading-aligned column
     // under whatever it wraps, and the button's slot is a few characters wide.

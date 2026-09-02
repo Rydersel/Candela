@@ -346,6 +346,70 @@ struct PanelRowModelTests {
     #expect(!copy.contains("—"))
   }
 
+  // MARK: - The care line
+
+  /// The keys here are ones no real display has and no test writes hours to, so
+  /// the tracker answers zero.
+  @Test func anUnenrolledDisplayWithNoHoursHasNoCareLine() {
+    let domain = PrefsDomain()
+    let model = TestFixtures.appModel()
+    let line = PanelView.careLine(
+      persistenceKey: "row-model-plain", prefs: domain.prefs("row-model-plain"),
+      care: model.oledCare, safeMode: model.isSafeMode)
+    #expect(line == nil)
+  }
+
+  @Test func aFreshlyEnrolledDisplaySaysOnlyThatCareIsOn() {
+    let domain = PrefsDomain()
+    domain.edit("row-model-enrolled") { $0.oledCareEnrolled = true }
+    let model = TestFixtures.appModel()
+    let line = PanelView.careLine(
+      persistenceKey: "row-model-enrolled", prefs: domain.prefs("row-model-enrolled"),
+      care: model.oledCare, safeMode: model.isSafeMode)
+    #expect(line == PanelCareLine.enrolledSegment)
+  }
+
+  /// The care loop does not run in a Safe Mode session, so an enrolled display
+  /// with nothing counted has no line at all.
+  @Test func safeModeNeverClaimsCareIsOn() {
+    let domain = PrefsDomain()
+    domain.edit("row-model-safe") { $0.oledCareEnrolled = true }
+    let model = TestFixtures.appModel(safeMode: true)
+    let line = PanelView.careLine(
+      persistenceKey: "row-model-safe", prefs: domain.prefs("row-model-safe"),
+      care: model.oledCare, safeMode: model.isSafeMode)
+    #expect(line == nil)
+  }
+
+  /// The coordinator's counter reads the process defaults and there is no seam
+  /// to inject through, so the key is unique per run and cleaned up in a `defer`.
+  @Test func theHoursAreTheCoordinatorsOwnCounter() {
+    let key = "row-model-hours-\(UUID().uuidString)"
+    UserDefaults.standard.set(178.4 * 3600, forKey: "oledPanelSeconds.\(key)")
+    defer { UserDefaults.standard.removeObject(forKey: "oledPanelSeconds.\(key)") }
+    let domain = PrefsDomain()
+    domain.edit(key) { $0.oledCareEnrolled = true }
+    let model = TestFixtures.appModel()
+
+    let enrolled = PanelView.careLine(
+      persistenceKey: key, prefs: domain.prefs(key), care: model.oledCare, safeMode: false)
+    #expect(enrolled == "OLED Care on · 178 h")
+
+    domain.edit(key) { $0.oledCareEnrolled = false }
+    let unenrolled = PanelView.careLine(
+      persistenceKey: key, prefs: domain.prefs(key), care: model.oledCare, safeMode: false)
+    #expect(unenrolled == "178 h")
+  }
+
+  /// This form reads the app's own prefs domain, so the key is one nothing has
+  /// written to and the answer is nil.
+  @Test func theModelFormReadsTheDisplaysOwnPrefs() {
+    let model = TestFixtures.appModel()
+    let state = Self.state(
+      id: 1, name: "MAG 341C", key: "row-model-care-\(UUID().uuidString)")
+    #expect(PanelView.careLine(for: state, model: model) == nil)
+  }
+
   // MARK: - Brightness row reason
 
   /// Drives the wire until the display is demoted, or gives up. A bounded wait
