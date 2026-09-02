@@ -12,13 +12,13 @@
     <language>en</language>
     <item>
       <title>Version 1.0.0</title>
-      <pubDate>Tue, 01 Sep 2026 18:35:06 +0000</pubDate>
-      <sparkle:version>4</sparkle:version>
+      <pubDate>Wed, 02 Sep 2026 02:39:36 +0000</pubDate>
+      <sparkle:version>1.0.0</sparkle:version>
       <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
       <enclosure
         url="https://github.com/Rydersel/Candela/releases/download/v1.0.0/Candela-1.0.0.zip"
-        sparkle:edSignature="6nYuwEJwiK70WjdzsOn5YsBvD0JE5WGcVZ2X8MzSb2jzf1kHJaDloLCqm9aNXGb7yXvHNuowU6b2VMUBm4oVCA==" length="5122520"
+        sparkle:edSignature="Nc9pJ7uyOJgxxF+BUH0UZ2/ThpEvtQBDU81UfE3+nmRGsW8tiowkGWCrjNZwwd6Y0Z23rkJRAkhAx8NRVi1/BA==" length="5126976"
         type="application/octet-stream"/>
     </item>
   </channel>
