@@ -81,8 +81,11 @@ public struct CheckupStore: Sendable {
     }.sorted { $0.startedAt > $1.startedAt }
   }
 
+  /// The model goes through the same sanitizer as a stored run's folder: a
+  /// product name is whatever the panel's EDID says, and a slash or a colon in
+  /// it would reach the save panel as a path.
   public static func exportFileName(for report: CheckupReport) -> String {
     let model = report.identity.productName.isEmpty ? "Display" : report.identity.productName
-    return "Candela Checkup \(model) \(day(report.startedAt)).candela-checkup.json"
+    return "Candela Checkup \(safe(model)) \(day(report.startedAt)).candela-checkup.json"
   }
 }

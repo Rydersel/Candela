@@ -174,10 +174,11 @@ struct CheckupAXLabelTests {
     #expect(expectAllSpeak(secondDot, "the second dot page") == expected)
   }
 
-  @Test func theSummaryPageSpeaksItsTwoWaysOutOfTheReport() {
+  /// Two ways out of the report, and the way out of the window.
+  @Test func theSummaryPageSpeaksItsActionsAndItsWayOut() {
     let flow = CheckupFixture.flow()
     let labels = expectAllSpeak(CheckupSummaryPage(model: flow), "the summary page")
-    #expect(labels == [CheckupCopy.export, CheckupCopy.copySummary])
+    #expect(labels == [CheckupCopy.export, CheckupCopy.copySummary, CheckupCopy.done])
   }
 
   /// An `NSButton` falls back to its title when no label was set, so blanking the

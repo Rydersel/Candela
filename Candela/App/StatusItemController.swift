@@ -784,7 +784,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // bar, where it aims at the top edge the bar slides out of. Pointing beats
     // auto-opening the panel (tried first): with the bar hidden, a programmatic
     // performClick shows a disembodied menu that teaches nothing.
-    controller.onFinishedByButton = { [weak self] in
+    controller.onFirstRunClosed = { [weak self] in
       Task { @MainActor in
         try? await Task.sleep(for: .milliseconds(400))
         self?.showSetupLandingCallout()

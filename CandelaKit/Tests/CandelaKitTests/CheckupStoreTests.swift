@@ -29,8 +29,22 @@ struct CheckupStoreTests {
 
   @Test func exportFileNameCarriesModelAndDate() {
     let name = CheckupStore.exportFileName(for: report(started: 800_000_000))
-    #expect(name.hasPrefix("Candela Checkup DELL U2725QE 2026-05-09"))
+    #expect(name.hasPrefix("Candela Checkup DELL_U2725QE 2026-05-09"))
     #expect(name.hasSuffix(".candela-checkup.json"))
+  }
+
+  /// A product name is whatever the panel's EDID says. A slash in it would
+  /// reach the save panel as a path separator.
+  @Test func exportFileNameSanitizesTheModel() {
+    var hostile = report(started: 800_000_000)
+    hostile.identity = CheckupDisplayIdentity(
+      identityKey: "k1", vendorID: 1, modelID: 2, serial: nil, manufactureWeek: nil,
+      manufactureYear: nil, nativePixelWidth: 1, nativePixelHeight: 1, maxRefreshHz: nil,
+      supportsPQEOTF: false, supportsHDRGammaEOTF: false, productName: "AW/34: DW")
+    let name = CheckupStore.exportFileName(for: hostile)
+    #expect(!name.contains("/"))
+    #expect(!name.contains(":"))
+    #expect(name.hasPrefix("Candela Checkup AW_34__DW 2026-05-09"))
   }
 
   @Test func theBookingGridIsUniformAtTheFieldLuminance() {

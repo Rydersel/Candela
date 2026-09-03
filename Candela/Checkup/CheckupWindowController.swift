@@ -39,6 +39,14 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
     // A present() while the window is up only brings it forward, keeping the
     // user's place in a run. Read before ordering front, which makes it visible.
     let needsFlow = !window.isVisible
+    if needsFlow {
+      // Both before the window is visible: the environment read can take
+      // seconds, and an empty window that fills in and then jumps to centre
+      // reads as a glitch. On a re-presentation this also clears the previous
+      // run's summary, which would otherwise sit there through the read.
+      window.contentView = NSHostingView(rootView: CheckupPreparingView())
+      window.center()
+    }
     // Same as the setup window: modern `NSApp.activate()` cannot activate an
     // accessory app from inside a status-item tracking session.
     NSApp.activate(ignoringOtherApps: true)
@@ -52,7 +60,6 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
       // flow into it now would start a run nobody is looking at.
       guard window.isVisible else { return }
       self.installFlow(in: window, environment: environment)
-      window.center()
     }
   }
 
@@ -70,6 +77,9 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
       window: fieldWindow, beforeShow: { [weak self] entry in self?.moveOffTarget(entry) })
     let model = CheckupFlowModel(environment: environment)
     model.onSaved = onSaved
+    // `windowShouldClose` does not abandon on the summary, so the close this
+    // routes to leaves the saved report exactly as it stands.
+    model.onClose = { [weak window] in window?.performClose(nil) }
     self.model = model
 
     fieldWindow.onAnswer = { [weak self] answer in
