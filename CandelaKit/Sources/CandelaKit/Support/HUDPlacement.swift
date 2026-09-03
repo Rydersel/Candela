@@ -54,17 +54,10 @@ public enum HUDPlacement {
     let y = frame.maxY - topInset - size.height - margin
     // Whole points: a centred pill on an odd-width screen otherwise starts on a
     // half point and its text renders soft.
-    return CGPoint(
-      x: clamp(x, length: size.width, lower: visibleFrame.minX, upper: visibleFrame.maxX).rounded(),
-      y: clamp(y, length: size.height, lower: frame.minY, upper: frame.maxY).rounded()
+    let clampedX = ScreenClamp.clamped(
+      x, length: size.width, lower: visibleFrame.minX, upper: visibleFrame.maxX
     )
-  }
-
-  /// The inner `max` matters for a pill larger than its screen: without it the upper
-  /// bound falls below the lower one and the clamp reports a position off-screen.
-  private static func clamp(
-    _ value: CGFloat, length: CGFloat, lower: CGFloat, upper: CGFloat
-  ) -> CGFloat {
-    min(max(value, lower), max(lower, upper - length))
+    let clampedY = ScreenClamp.clamped(y, length: size.height, lower: frame.minY, upper: frame.maxY)
+    return CGPoint(x: clampedX.rounded(), y: clampedY.rounded())
   }
 }

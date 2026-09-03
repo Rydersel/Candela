@@ -71,13 +71,10 @@ public enum ConfirmationPlacement {
     hypot(a.x - b.x, a.y - b.y)
   }
 
-  /// Keeps a window on screen. The inner `max` matters for a window taller or
-  /// wider than the space it is going into: without it the upper bound falls
-  /// below the lower one and the clamp reports a position off the top or left.
   private static func clamp(_ origin: CGPoint, size: CGSize, in frame: CGRect) -> CGPoint {
     CGPoint(
-      x: min(max(origin.x, frame.minX), max(frame.minX, frame.maxX - size.width)),
-      y: min(max(origin.y, frame.minY), max(frame.minY, frame.maxY - size.height))
+      x: ScreenClamp.clamped(origin.x, length: size.width, lower: frame.minX, upper: frame.maxX),
+      y: ScreenClamp.clamped(origin.y, length: size.height, lower: frame.minY, upper: frame.maxY)
     )
   }
 }
