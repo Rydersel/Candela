@@ -436,10 +436,24 @@ extension PanelView {
   /// exit, and greying that would be the forbidden shape: a recovery control
   /// unavailable in the state it recovers from.
   /// `BrightnessController.setHDRMode` enforces the same asymmetry.
+  ///
+  /// The capability arm comes before the synthesized-size one: a display that reports
+  /// no HDR modes would not gain HDR by dropping the size, so naming the size there
+  /// would send a person to do something that changes nothing.
+  ///
+  /// `capabilityProbed` is the whole of the guard against libel. `supportsHDR` is
+  /// false before the async refresh answers as well as after it answers no, and a
+  /// caption on the first reading calls an HDR display incapable for as long as the
+  /// refresh takes.
   static func hdrRefusalReason(
-    isShowingSynthesizedSize: Bool, isHDREngaged: Bool
+    isShowingSynthesizedSize: Bool, isHDREngaged: Bool,
+    supportsHDR: Bool, capabilityProbed: Bool
   ) -> String? {
-    guard isShowingSynthesizedSize, !isHDREngaged else { return nil }
+    guard !isHDREngaged else { return nil }
+    if capabilityProbed, !supportsHDR {
+      return DiagnosticsCopy.hdrNoAnswer(app: AppInfo.productName)
+    }
+    guard isShowingSynthesizedSize else { return nil }
     return SynthesisCopy.hdrBlockedBySynthesizedSize
   }
 }
@@ -512,7 +526,9 @@ private struct DisplayHeaderRow: View {
   private var refusalReason: String? {
     PanelView.hdrRefusalReason(
       isShowingSynthesizedSize: isShowingSynthesizedSize,
-      isHDREngaged: controller.isHDREngaged
+      isHDREngaged: controller.isHDREngaged,
+      supportsHDR: controller.supportsHDR,
+      capabilityProbed: controller.hdrCapabilityProbed
     )
   }
 

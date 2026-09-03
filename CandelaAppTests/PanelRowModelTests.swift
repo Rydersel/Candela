@@ -314,17 +314,20 @@ struct PanelRowModelTests {
 
   @Test func theHDRButtonExplainsItselfWhileASynthesizedSizeIsShowing() {
     let reason = PanelView.hdrRefusalReason(
-      isShowingSynthesizedSize: true, isHDREngaged: false
+      isShowingSynthesizedSize: true, isHDREngaged: false,
+      supportsHDR: true, capabilityProbed: true
     )
     #expect(reason == SynthesisCopy.hdrBlockedBySynthesizedSize)
   }
 
   @Test func theHDRButtonIsUnrefusedWithNoSizeEngaged() {
     #expect(PanelView.hdrRefusalReason(
-      isShowingSynthesizedSize: false, isHDREngaged: false
+      isShowingSynthesizedSize: false, isHDREngaged: false,
+      supportsHDR: true, capabilityProbed: true
     ) == nil)
     #expect(PanelView.hdrRefusalReason(
-      isShowingSynthesizedSize: false, isHDREngaged: true
+      isShowingSynthesizedSize: false, isHDREngaged: true,
+      supportsHDR: true, capabilityProbed: true
     ) == nil)
   }
 
@@ -332,7 +335,44 @@ struct PanelRowModelTests {
   /// display out of the HDR-over-a-size combination is never the greyed one.
   @Test func theHDRExitIsOfferedEvenWithASizeEngaged() {
     #expect(PanelView.hdrRefusalReason(
-      isShowingSynthesizedSize: true, isHDREngaged: true
+      isShowingSynthesizedSize: true, isHDREngaged: true,
+      supportsHDR: true, capabilityProbed: true
+    ) == nil)
+  }
+
+  /// The button greys on `supportsHDR` alone, so the caption is the only thing
+  /// standing between a person and a grey control with no reason on it.
+  @Test func theHDRButtonExplainsItselfOnADisplayThatReportsNoHDRModes() {
+    #expect(PanelView.hdrRefusalReason(
+      isShowingSynthesizedSize: false, isHDREngaged: false,
+      supportsHDR: false, capabilityProbed: true
+    ) == DiagnosticsCopy.hdrNoAnswer(app: AppInfo.productName))
+  }
+
+  /// The libel case: `supportsHDR` reads false before the async capability refresh
+  /// answers, so an unprobed display must say nothing rather than say no.
+  @Test func theHDRButtonSaysNothingBeforeTheCapabilityRefreshLands() {
+    #expect(PanelView.hdrRefusalReason(
+      isShowingSynthesizedSize: false, isHDREngaged: false,
+      supportsHDR: false, capabilityProbed: false
+    ) == nil)
+  }
+
+  /// A size engaged on a display with no HDR modes: dropping the size would not
+  /// bring HDR, so the caption names the capability rather than the size.
+  @Test func theCapabilityRefusalOutranksTheSizeRefusal() {
+    #expect(PanelView.hdrRefusalReason(
+      isShowingSynthesizedSize: true, isHDREngaged: false,
+      supportsHDR: false, capabilityProbed: true
+    ) == DiagnosticsCopy.hdrNoAnswer(app: AppInfo.productName))
+  }
+
+  /// HDR live on a display whose last probe said it has none: the exit stays
+  /// offered and unexplained, the recovery-control rule the engaged guard exists for.
+  @Test func theHDRExitIsOfferedEvenWhenTheProbeSaysNoHDR() {
+    #expect(PanelView.hdrRefusalReason(
+      isShowingSynthesizedSize: false, isHDREngaged: true,
+      supportsHDR: false, capabilityProbed: true
     ) == nil)
   }
 

@@ -159,6 +159,13 @@ public final class BrightnessController: PendingWireDraining {
   /// displays.
   public var supportsHDR: Bool { cachedSupportsHDR }
 
+  /// Whether the capability refresh has answered yet, same publishing pattern as
+  /// `supportsHDR`. `supportsHDR` false reads the same for "asked, no HDR modes" and
+  /// for "not asked yet", so anything that EXPLAINS the false (rather than just
+  /// disabling on it) has to wait for this, or it tells an HDR display it has no HDR
+  /// in the window before the first refresh lands.
+  public var hdrCapabilityProbed: Bool { cachedHDRProbed }
+
   /// Whether HDR is live on the display right now, same pattern as `supportsHDR`.
   /// The panel's badge reads STATE from here; `hdrMode` is only the POLICY, so an
   /// externally toggled HDR (mode still `.off`) still reports engaged.
@@ -196,6 +203,10 @@ public final class BrightnessController: PendingWireDraining {
   /// synchronous keypress/drag paths — never awaited there.
   private(set) var cachedHDRActive = false
   private(set) var cachedSupportsHDR = false
+
+  /// Observed, not `@ObservationIgnored`: a caption that reads it has to redraw when
+  /// the first refresh lands.
+  private(set) var cachedHDRProbed = false
 
   /// What the last REFRESH observed, a different fact from `cachedHDRActive`:
   /// transitions write that one optimistically (an exit sets it false before the drop
@@ -1599,6 +1610,9 @@ public final class BrightnessController: PendingWireDraining {
       cachedSupportsHDR = false
       cachedHDRActive = false
     }
+    // Both arms, the backend-less one included: "this build has no HDR backend" is a
+    // settled answer, not a pending one.
+    cachedHDRProbed = true
     // The DDC register just came back, whoever unlocked it. Keyed to the OBSERVED
     // edge rather than to a call because most routes out of HDR have no call of ours
     // in them: HDR switched off in System Settings or on the display's own controls
@@ -1798,8 +1812,12 @@ public final class BrightnessController: PendingWireDraining {
       // now on the wire.
       syncDeadband.reset()
       // Same rule as the read evidence directly above: a verdict earned by the
-      // panel that was here is not a fact about the one that replaced it.
+      // panel that was here is not a fact about the one that replaced it. The HDR
+      // caches keep the old answer until the reconfiguration's refresh supersedes
+      // them; dropping the PROBED flag is what stops anything explaining that
+      // stale answer as though it were about the panel now on the wire.
       resetWireHealth()
+      cachedHDRProbed = false
     }
     coalescer.resetDuplicateState()
     // Dropped with the memo and for the memo's own reason: it names a write

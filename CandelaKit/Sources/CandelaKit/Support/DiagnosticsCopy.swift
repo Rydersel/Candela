@@ -491,9 +491,17 @@ public enum DiagnosticsCopy {
       return "Unavailable: macOS did not load the framework \(app) needs for HDR brightness"
     }
     guard supportsHDR else {
-      return "Unavailable: \(app) has no HDR answer for this display. Either it lists no HDR modes, or macOS did not load the framework \(app) asks. From here the two look the same."
+      return "Unavailable: \(hdrNoAnswer(app: app)) Either it lists no HDR modes, or macOS did not load the framework \(app) asks. From here the two look the same."
     }
     return "Available"
+  }
+
+  /// The claim itself, without the diagnostics row's verdict prefix or its two
+  /// causes: the menu-bar panel's greyed HDR button captions itself with this, and a
+  /// 280 pt row has no space for the full sentence. Shared rather than restated so
+  /// the surface a person meets first cannot drift from the one they meet second.
+  public static func hdrNoAnswer(app: String) -> String {
+    "\(app) has no HDR answer for this display."
   }
 
   // MARK: - Right now
