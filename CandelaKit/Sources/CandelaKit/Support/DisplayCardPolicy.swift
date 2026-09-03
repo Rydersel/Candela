@@ -1,16 +1,5 @@
 import Foundation
 
-/// Which path is driving a display's brightness. Named for what the user sees,
-/// not the prefs behind it: `forceSw` and `avoidGamma` never reach a label.
-public enum DisplayControlMethod: Sendable, Equatable {
-  /// DDC over the data cable. `avoidGamma` is inert on this path.
-  case hardwareDDC
-  /// Software dimming through the display's color profile (gamma table).
-  case softwareGamma
-  /// Software dimming through a dark overlay window.
-  case softwareOverlay
-}
-
 /// Why no DDC command reaches a display, which is what makes the per-command
 /// tuning grid inert. Per-command reasons are deliberately absent: brightness
 /// being off leaves the volume and contrast rows live, so greying the whole grid
@@ -29,29 +18,6 @@ public enum DDCTrafficBlock: Sendable, Equatable {
 /// The Displays pane rules that are not pure bindings. Here rather than in the
 /// view because each has a wrong answer no test could catch in the app.
 public enum DisplayCardPolicy {
-  /// The card's three-way summary, derived from the engine's own path so the two
-  /// cannot disagree. nil for `.native` and `.unavailable`, which the card has no
-  /// vocabulary for; the caller renders those from the path itself.
-  ///
-  /// Do not re-add a prefs-shaped overload: the old one mirrored `applyPaths` while
-  /// ignoring HDR-native, combined mode and `unavailableDDC`, so it captioned the
-  /// wireless built-in panel "Hardware (DDC) control".
-  public static func controlMethod(for path: BrightnessPath) -> DisplayControlMethod? {
-    switch path {
-    case .native, .unavailable:
-      nil
-    // Combined is the default path and DDC carries the top of its range, so the
-    // summary calls it hardware. The split point needs a sentence, not a row.
-    case .hardware, .combined:
-      .hardwareDDC
-    // `.softwareOnly` is combined mode with its hardware half NOT running (R-A).
-    // Answering `.hardwareDDC` would caption a dead DDC wire as hardware control,
-    // the untruth this case exists to make unrepresentable.
-    case let .software(backend), let .softwareOnly(backend, _, _):
-      backend == .overlay ? .softwareOverlay : .softwareGamma
-    }
-  }
-
   /// Whether any DDC command can reach this display, and if not, why. Derived from
   /// the same `BrightnessPath` the diagnostics section renders, so one settings page
   /// cannot give two answers about one display. Do not gate on `prefs.forceSoftware`

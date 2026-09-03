@@ -4,108 +4,6 @@ import Testing
 
 @Suite("Display card policy")
 struct DisplayCardPolicyTests {
-  /// `native` and `unavailable` map to nil on purpose: the card has no vocabulary
-  /// for them and diagnostics states both in full. Rendering that nil as "Hardware
-  /// (DDC) control" is the defect, and it captioned the built-in panel that way.
-  @Test func theCardHasNoWordForNativeOrForNothingAtAll() {
-    #expect(DisplayCardPolicy.controlMethod(for: .native) == nil)
-    #expect(DisplayCardPolicy.controlMethod(
-      for: .unavailable(.ddcTurnedOffWithNoSoftwareLeg)
-    ) == nil)
-  }
-
-  @Test func pureDDCAndCombinedBothReadAsHardwareControl() {
-    #expect(DisplayCardPolicy.controlMethod(for: .hardware) == .hardwareDDC)
-    // Combined is the default path and DDC carries the top of its range, so the
-    // card calls it hardware. Diagnostics has room to state the split.
-    #expect(DisplayCardPolicy.controlMethod(
-      for: .combined(switchingValue: 0.47, backend: .gamma)
-    ) == .hardwareDDC)
-    #expect(DisplayCardPolicy.controlMethod(
-      for: .combined(switchingValue: 0.47, backend: .overlay)
-    ) == .hardwareDDC)
-  }
-
-  @Test func theSoftwareLegNamesItsBackend() {
-    #expect(DisplayCardPolicy.controlMethod(for: .software(.gamma)) == .softwareGamma)
-    #expect(DisplayCardPolicy.controlMethod(for: .software(.overlay)) == .softwareOverlay)
-  }
-
-  /// Ruling R-A. `.softwareOnly` is combined mode with its hardware half stopped,
-  /// so answering `.hardwareDDC` captions a display whose DDC wire is switched off
-  /// as hardware-controlled. The type cannot catch it: that answer is well-formed.
-  @Test func aDeadDDCLegIsNeverCaptionedAsHardwareControl() {
-    for backend: SoftwareDimmingBackend in [.gamma, .overlay] {
-      let expected: DisplayControlMethod = backend == .overlay ? .softwareOverlay : .softwareGamma
-      #expect(DisplayCardPolicy.controlMethod(
-        for: .softwareOnly(backend: backend, reason: .ddcTurnedOff, dimsBelow: 0.5)
-      ) == expected)
-    }
-  }
-
-  /// The card word is a function of the path alone. A prefs-shaped overload is how
-  /// the shipped row drifted from the engine, so nothing about a display's prefs
-  /// reaches this projection except through `BrightnessPathPolicy`.
-  @Test func everyPathTheEngineCanProduceHasAnAnswer() {
-    var reached = Set<String>()
-    for path in Self.everyReachablePath() {
-      reached.insert(Self.caseTag(path))
-      // The invariant that outranks all the others: a path whose DDC leg is not
-      // running never reads as hardware control.
-      switch path {
-      case .softwareOnly:
-        #expect(DisplayCardPolicy.controlMethod(for: path) != .hardwareDDC, "\(path)")
-      case .unavailable, .native:
-        #expect(DisplayCardPolicy.controlMethod(for: path) == nil, "\(path)")
-      case .hardware, .combined:
-        #expect(DisplayCardPolicy.controlMethod(for: path) == .hardwareDDC, "\(path)")
-      case .software:
-        #expect(DisplayCardPolicy.controlMethod(for: path) != .hardwareDDC, "\(path)")
-      }
-    }
-    // Guards the sweep itself: if a future edit narrows the input product so it
-    // stops reaching a case, the assertions above quietly stop asserting it.
-    #expect(reached.count == 6, "reached \(reached.sorted())")
-  }
-
-  /// Swept over the whole input product rather than a hand-picked list, which a new
-  /// `BrightnessPath` case would silently fall out of.
-  private static func everyReachablePath() -> [BrightnessPath] {
-    var paths: [BrightnessPath] = []
-    let flags = [true, false]
-    for role in [DisplayRole.builtIn, .external] {
-      for (isHDRActive, forceSoftware) in flags.flatMap({ a in flags.map { (a, $0) } }) {
-        for (avoidGamma, disableCombined) in flags.flatMap({ a in flags.map { (a, $0) } }) {
-          for (unavailableDDC, switching) in flags.flatMap({ a in [0.0, 0.5].map { (a, $0) } }) {
-            paths.append(BrightnessPathPolicy.path(.init(
-              role: role,
-              isHDRActive: isHDRActive,
-              forceSoftware: forceSoftware,
-              avoidGamma: avoidGamma,
-              disableCombinedBrightness: disableCombined,
-              unavailableDDC: unavailableDDC,
-              switchingValue: switching
-            )))
-          }
-        }
-      }
-    }
-    return paths
-  }
-
-  private static func caseTag(_ path: BrightnessPath) -> String {
-    switch path {
-    case .native: "native"
-    case .software: "software"
-    case .hardware: "hardware"
-    case .combined: "combined"
-    case .softwareOnly: "softwareOnly"
-    case .unavailable: "unavailable"
-    }
-  }
-
-  // MARK: - DDC traffic
-
   /// The defect the projection exists to remove. `CommandTuningGrid` gated on
   /// `prefs.forceSoftware` alone, so a display in live HDR — where DDC is dead
   /// outright — presented an editable grid whose every write went nowhere.
@@ -139,8 +37,6 @@ struct DisplayCardPolicyTests {
     ) == nil)
   }
 
-  /// Same sweep and same reason as `everyPathTheEngineCanProduceHasAnAnswer`: over
-  /// every path the engine can produce, not a hand-picked list.
   @Test func everyPathTheEngineCanProduceHasATrafficVerdict() {
     var reached = Set<String>()
     for path in Self.everyReachablePath() {
@@ -190,5 +86,41 @@ struct DisplayCardPolicyTests {
     #expect(DisplayCardPolicy.ddcTrafficBlock(
       for: .native, isWireUnresponsive: true
     ) == .macOSDrivesBrightness)
+  }
+
+  /// The whole input product, not a hand-picked list that a new `BrightnessPath`
+  /// case would silently fall out of.
+  private static func everyReachablePath() -> [BrightnessPath] {
+    var paths: [BrightnessPath] = []
+    let flags = [true, false]
+    for role in [DisplayRole.builtIn, .external] {
+      for (isHDRActive, forceSoftware) in flags.flatMap({ a in flags.map { (a, $0) } }) {
+        for (avoidGamma, disableCombined) in flags.flatMap({ a in flags.map { (a, $0) } }) {
+          for (unavailableDDC, switching) in flags.flatMap({ a in [0.0, 0.5].map { (a, $0) } }) {
+            paths.append(BrightnessPathPolicy.path(.init(
+              role: role,
+              isHDRActive: isHDRActive,
+              forceSoftware: forceSoftware,
+              avoidGamma: avoidGamma,
+              disableCombinedBrightness: disableCombined,
+              unavailableDDC: unavailableDDC,
+              switchingValue: switching
+            )))
+          }
+        }
+      }
+    }
+    return paths
+  }
+
+  private static func caseTag(_ path: BrightnessPath) -> String {
+    switch path {
+    case .native: "native"
+    case .software: "software"
+    case .hardware: "hardware"
+    case .combined: "combined"
+    case .softwareOnly: "softwareOnly"
+    case .unavailable: "unavailable"
+    }
   }
 }
