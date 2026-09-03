@@ -11,6 +11,17 @@
     <description>Update feed for Candela.</description>
     <language>en</language>
     <item>
+      <title>Version 1.0.1</title>
+      <pubDate>Thu, 03 Sep 2026 00:12:04 +0000</pubDate>
+      <sparkle:version>1.0.1</sparkle:version>
+      <sparkle:shortVersionString>1.0.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/Rydersel/Candela/releases/download/v1.0.1/Candela-1.0.1.zip"
+        sparkle:edSignature="lurz85m4z4yBXry33x00uRo8jseRn1Wre2XFLmW+PA/bMu/1NEn9dQa2Rl3SX7Hg/8OqaV2V1VXnZn8O6mE9AQ==" length="5133690"
+        type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Version 1.0.0</title>
       <pubDate>Wed, 02 Sep 2026 03:14:51 +0000</pubDate>
       <sparkle:version>1.0.0</sparkle:version>
