@@ -25,8 +25,15 @@ public final class PreviewCountdownDriver: Sendable {
   /// Behind a lock, not a main-actor property, so `stop()` is `nonisolated`:
   /// every coordinator cancels its clock from a nonisolated `deinit`, which a
   /// main-actor-only stop would silently drop.
-  private let task = OSAllocatedUnfairLock<Task<Void, Never>?>(initialState: nil)
+  private let slot = OSAllocatedUnfairLock<Slot>(initialState: Slot())
   private let interval: Duration
+
+  /// The generation lets a clock that expires clear its own slot without
+  /// touching the one a restart put there after it.
+  private struct Slot {
+    var task: Task<Void, Never>?
+    var generation: UInt64 = 0
+  }
 
   public init(interval: Duration = .seconds(1)) {
     self.interval = interval
@@ -45,34 +52,48 @@ public final class PreviewCountdownDriver: Sendable {
     onTick: @escaping @Sendable @MainActor (Outcome?) -> Void
   ) {
     let interval = interval
-    let started = Task.detached {
-      while !Task.isCancelled {
-        try? await Task.sleep(for: interval)
-        if Task.isCancelled { return }
-        let outcome = await tick()
-        Task { @MainActor in onTick(outcome) }
-        // The countdown fires at most once; whatever it returned, it is spent.
-        if outcome != nil { return }
+    // Captured directly, not via `self`: a self-task-self cycle would keep the
+    // driver alive past the coordinator `deinit` that is its only `stop()` call.
+    let slot = slot
+    // One acquisition for cancel, bump and install, so no clock can finish and
+    // nothing can `stop()` in between; two live clocks on one session would
+    // spend it in half the time. Creating the task here is safe: a detached
+    // task never runs inline on its creating thread. The lock is not reentrant:
+    // nothing unbounded and no call into app code belongs inside this acquisition.
+    slot.withLock { state in
+      state.task?.cancel()
+      state.generation += 1
+      let generation = state.generation
+      state.task = Task.detached {
+        defer {
+          // A spent clock must not read as armed. Only its own generation is
+          // cleared: after a restart the slot belongs to the live clock.
+          slot.withLock { current in
+            if current.generation == generation { current.task = nil }
+          }
+        }
+        while !Task.isCancelled {
+          try? await Task.sleep(for: interval)
+          if Task.isCancelled { return }
+          let outcome = await tick()
+          Task { @MainActor in onTick(outcome) }
+          // The countdown fires at most once; whatever it returned, it is spent.
+          if outcome != nil { return }
+        }
       }
-    }
-    // Swapped under the lock, so a restart cannot lose the clock it replaces:
-    // two live clocks on one session would spend it in half the time.
-    task.withLock { current in
-      current?.cancel()
-      current = started
     }
   }
 
   public nonisolated func stop() {
-    task.withLock { current in
-      current?.cancel()
-      current = nil
+    slot.withLock { current in
+      current.task?.cancel()
+      current.task = nil
     }
   }
 
   /// Test seam: whether a clock is currently armed. Not used by the app, which
   /// tracks that through its own preview state.
   public nonisolated var isRunning: Bool {
-    task.withLock { $0 != nil && !($0?.isCancelled ?? true) }
+    slot.withLock { $0.task != nil && !($0.task?.isCancelled ?? true) }
   }
 }

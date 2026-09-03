@@ -87,6 +87,7 @@ struct PreviewPlumbingTests {
 
     #expect(await ticks.count == 3, "spent on the third tick and never ran again")
     #expect(seen.entries == ["nil", "nil", "reverted"])
+    #expect(driver.isRunning == false, "a spent clock is not an armed one")
   }
 
   /// The expiry is what rescues a display nobody meant to reconfigure, so
@@ -121,6 +122,7 @@ struct PreviewPlumbingTests {
     try? await Task.sleep(for: .milliseconds(80))
 
     #expect(await first.count == firstNow, "the superseded clock is dead")
+    #expect(driver.isRunning, "the dead clock's exit did not disarm the live one")
     driver.stop()
   }
 
