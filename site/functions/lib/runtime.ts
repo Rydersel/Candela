@@ -36,6 +36,7 @@ export type AnalyticsEnv = {
   ANALYTICS_PAGEVIEWS?: AnalyticsEngineDataset
   ANALYTICS_DOWNLOADS?: AnalyticsEngineDataset
   ANALYTICS_GITHUB?: AnalyticsEngineDataset
+  ANALYTICS_UPDATES?: AnalyticsEngineDataset
 }
 
 export type FunctionContext = {

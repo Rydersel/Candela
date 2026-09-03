@@ -8,7 +8,8 @@
   "analytics_engine_datasets": [
     { "binding": "ANALYTICS_PAGEVIEWS", "dataset": "candela_site_pageviews" },
     { "binding": "ANALYTICS_DOWNLOADS", "dataset": "candela_site_downloads" },
-    { "binding": "ANALYTICS_GITHUB", "dataset": "candela_site_github" }
+    { "binding": "ANALYTICS_GITHUB", "dataset": "candela_site_github" },
+    { "binding": "ANALYTICS_UPDATES", "dataset": "candela_site_updates" }
   ],
   "d1_databases": [
     {

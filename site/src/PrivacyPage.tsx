@@ -82,6 +82,8 @@ export function PrivacyPage() {
             <ul>
               <li><a href={`${sourceBase}/functions/analytics/visit.ts`}>Visit and cookie Function</a></li>
               <li><a href={`${sourceBase}/functions/analytics/opt-out.ts`}>Opt-out Function</a></li>
+              <li><a href={`${sourceBase}/functions/_middleware.ts`}>Update feed counter</a></li>
+              <li><a href={`${sourceBase}/functions/lib/events.ts`}>Event fields, including the update check's</a></li>
               <li><a href={`${sourceBase}/migrations/0001_analytics.sql`}>D1 schema</a></li>
               <li><a href={`${sourceBase}/analytics-worker/src/index.ts`}>Retention and rollup Worker</a></li>
               <li><a href={`${sourceBase}/scripts/analytics-report.mjs`}>Analytics report command</a></li>

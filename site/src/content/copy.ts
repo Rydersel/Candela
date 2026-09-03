@@ -377,13 +377,14 @@ export const privacy = {
   h1: "Privacy, without the vague parts.",
   lead: "Candela's website analytics are anonymous to Candela and first-party only. A random, short-lived cookie distinguishes one browser for 24 hours so we can count visits and whether that browser chooses Download or GitHub. There are no cross-site cookies.",
   control: "Website analytics are enabled by default. Opting out stops both Candela's first-party funnel and Cloudflare Web Analytics in this browser. You can opt back in at any time.",
-  app: "The Candela app performs display analysis locally. It requires no account, sends no screen samples to Candela, and uploads no display-health record. Website analytics are separate from the app.",
+  app: "The Candela app performs display analysis locally. It requires no account, sends no screen samples to Candela, and uploads no display-health record. Its one request to candela.fyi is the update check, which names the app's version and nothing about you or your display. The site counts those checks by app version and day, keeps no address and sets no cookie. The browser opt-out above does not reach the app. Turning off automatic checks in the app's About pane stops the scheduled request; pressing Check for Updates still fetches the feed, and that check is counted too.",
   does: [
     "Counts pageviews and anonymous 24-hour browser windows.",
+    "Counts the app's update checks by app version and day. That is the request Sparkle already makes for the update feed; nothing is added to it, and the version is the only thing read from it.",
     "Counts Download attempts and GitHub clicks, including which header, hero, footer or guide link was used, or whether the download came from the GitHub README's button.",
     "Records coarse country, device category and external referrer hostname.",
     "Produces anonymous daily statistics and operational counts.",
-    "Keeps a charting copy of the same counts (event, placement, country, device category) in Cloudflare's Workers Analytics Engine, which expires on its own after about 90 days.",
+    "Keeps a charting copy of the same counts (event, placement, country and device category for the website; app version alone for update checks) in Cloudflare's Workers Analytics Engine, which expires on its own after about 90 days.",
     "Uses one host-only measurement cookie restricted to candela.fyi.",
   ],
   doesNot: [
@@ -397,6 +398,7 @@ export const privacy = {
     "The random measurement cookie expires after 24 hours. It contains no name, account, email, IP address, fingerprint or advertising identifier, and it is never sent to another website.",
     "A one-way derived browser-window key is retained for seven days so completed visit-to-action cohorts can be counted. The raw random cookie value is never stored in the database. After seven days, linkable rows are deleted and only thresholded anonymous totals remain. Groups smaller than ten browser windows are folded into other.",
     "A 24-hour browser window is not a person. Two browsers on one Mac count separately, and a returning browser receives a new random window after the prior one expires. Anonymous totals already produced cannot be traced back to a browser and cannot be selectively removed.",
+    "The app's update checks are daily totals by version and nothing else: no address, no cookie, no browser-window key, so nothing in them points back to a particular install. The charting copy expires after about 90 days; the daily totals are anonymous and are kept.",
   ],
   source: "Candela is public, including the analytics implementation. The Functions, schema, retention Worker, report command and this disclosure can all be inspected in the source code.",
 }
@@ -450,7 +452,7 @@ export const terms = {
   updates: {
     h2: "Updates",
     body: [
-      "The app checks candela.fyi for new versions. That request carries no account and no information about your display. Each update is signed with a key the app verifies before installing, is notarized by Apple before it is published, and the app asks before installing one.",
+      "The app checks candela.fyi for new versions. That request carries no account and no information about your display. The site counts those checks by app version and day so it can see which versions are still in use; the Privacy page describes it in full. Each update is signed with a key the app verifies before installing, is notarized by Apple before it is published, and the app asks before installing one.",
     ],
   },
   warranty: {

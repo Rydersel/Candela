@@ -1,10 +1,55 @@
+import { recordUpdateCheckEvent, updateCheckVersion } from './lib/events'
+import { recordUpdateCheck } from './lib/store'
+import type { AnalyticsEnv } from './lib/runtime'
+
 type Context = {
   request: Request
   next: () => Promise<Response>
-  env: {
+  env: Partial<AnalyticsEnv> & {
     ASSETS: {
       fetch(request: Request): Promise<Response>
     }
+  }
+  waitUntil?: (promise: Promise<unknown>) => void
+}
+
+// Versions the feed lists; anything else counts as "other". Each version is a
+// primary-key row in a table nothing prunes, so a stranger must not be able to add rows.
+let feedVersions: Promise<Set<string>> | null = null
+function knownVersions(context: Context) {
+  if (!feedVersions) {
+    feedVersions = (async () => {
+      const feed = await context.env.ASSETS.fetch(new Request(new URL('/appcast.xml', context.request.url)))
+      if (!feed.ok) throw new Error('feed unavailable')
+      const xml = await feed.text()
+      return new Set([...xml.matchAll(/<sparkle:shortVersionString>\s*([^<\s]+)\s*</g)].map((match) => match[1]))
+    })().catch(() => {
+      feedVersions = null
+      return new Set<string>()
+    })
+  }
+  return feedVersions
+}
+
+export function resetFeedVersionsForTests() {
+  feedVersions = null
+}
+
+// Everything here runs after the response where the runtime allows, and
+// nothing in it can decide whether the feed is served.
+function countUpdateCheck(context: Context) {
+  try {
+    if (context.request.method !== 'GET') return
+    const version = updateCheckVersion(context.request.headers.get('user-agent'))
+    if (!version) return
+    const write = (async () => {
+      const bucket = (await knownVersions(context)).has(version) ? version : 'other'
+      recordUpdateCheckEvent(context.env, bucket)
+      if (context.env.ANALYTICS_DB) await recordUpdateCheck(context.env.ANALYTICS_DB, bucket)
+    })().catch(() => {})
+    if (context.waitUntil) context.waitUntil(write)
+  } catch {
+    // Counting is never a reason to fail the feed.
   }
 }
 
@@ -54,6 +99,10 @@ export const onRequest = async (context: Context) => {
   if (url.hostname === `www.${canonicalHost}`) {
     url.hostname = canonicalHost
     return Response.redirect(url.toString(), 301)
+  }
+  if (url.pathname === '/appcast.xml') {
+    countUpdateCheck(context)
+    return context.next()
   }
   const markdownPath = markdownAssetPath(url.pathname)
   if (!markdownPath) return context.next()
