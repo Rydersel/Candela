@@ -31,6 +31,10 @@ struct VirtualDisplaysPane: View {
   /// the sync lands.
   @State private var shownIssue: ShownIssue?
 
+  /// The slot whose removal is being confirmed. Held as the slot rather than a
+  /// flag, so the alert cannot survive a slot switch and delete the wrong one.
+  @State private var removingSlot: Int?
+
   private struct ShownIssue: Equatable {
     var slot: Int
     var failure: VirtualDisplayFailure?
@@ -386,11 +390,16 @@ struct VirtualDisplaysPane: View {
         ForEach(Self.presets.indices, id: \.self) { index in
           Text(Self.presets[index].label).tag(index)
         }
-        Text("Custom").tag(-1)
+        // Only while it describes the state. Listed all the time it is an item
+        // that cannot be chosen, since a size becomes custom by being typed
+        // into the fields below.
+        if presetIndex == nil {
+          Text("Custom").tag(-1)
+        }
       }
     }
     SettingsCardDivider()
-    SettingRow {
+    SettingRow("Width and height can each be 320 to 8192.") {
       HStack {
         Text("Width and Height")
         Spacer()
@@ -437,26 +446,57 @@ struct VirtualDisplaysPane: View {
   private func actionRow(slot: Int, definition: VirtualSlotDefinition, live: VirtualDisplayHandle?) -> some View {
     let drifted = live.map { $0.spec != definition.spec.normalized } ?? false
     let busy = model.virtualSlotBusy.contains(slot)
+    // A `String`, so the display's own name goes in verbatim rather than as a
+    // lookup key.
+    let removalTitle = "Remove \(definition.name)?"
     HStack(spacing: 8) {
       if live == nil {
         // A tile with no running display: the create failed (the status row
         // says why) or the last session ended without come-back-at-launch.
         // Create and Apply are the same write through the same path and never
         // appear together, so they share one identifier.
+        // SwiftUI does not publish a `Button`'s own title to the accessibility
+        // layer, so each title here is stated twice or the button announces as
+        // a bare "button".
         Button("Create Display") { setConfigured(true, slot: slot) }
           .buttonStyle(SettingsPrimaryButtonStyle())
+          .accessibilityLabel("Create Display")
           .accessibilityIdentifier("action.slotApply.\(slot)")
       } else if drifted {
         // The apply path is destroy-and-recreate under the same
         // slot, so the button names that rather than acting on the field edit.
         Button("Apply and Recreate") { setConfigured(true, slot: slot) }
           .buttonStyle(SettingsPrimaryButtonStyle())
+          .accessibilityLabel("Apply and Recreate")
           .accessibilityIdentifier("action.slotApply.\(slot)")
       }
       Spacer(minLength: 16)
-      Button("Remove Display") { remove(slot: slot) }
+      // Trailing ellipsis: the click opens the confirmation, and the
+      // `.destructive` role belongs on the button that does the removing.
+      // Removal clears the slot's stored keys, the minted identity included, so
+      // it is not something a stray click may do.
+      Button("Remove Display…") { removingSlot = slot }
         .buttonStyle(SettingsDangerButtonStyle())
+        .accessibilityLabel("Remove Display…")
         .accessibilityIdentifier("action.slotRemove.\(slot)")
+        .alert(
+          removalTitle,
+          isPresented: Binding(
+            get: { removingSlot == slot },
+            set: { if !$0 { removingSlot = nil } })
+        ) {
+          // Cancel holds Return: a destructive action never takes the primary
+          // role.
+          Button("Cancel", role: .cancel) {}
+            .keyboardShortcut(.defaultAction)
+          Button("Remove", role: .destructive) { remove(slot: slot) }
+        } message: {
+          // Names the slot's stored settings, since the tile and every field on
+          // this card go with it, and says what a later Create does and does not
+          // bring back: the slot's identity is minted fresh, so macOS meets a
+          // display it has not seen before.
+          Text("The display stops and this slot goes back to its defaults: the name, the size, Retina and Come Back at Launch. Any windows on it move to your other displays. A virtual display created here afterwards counts as a new one, so macOS does not restore this display's place in your arrangement.")
+        }
     }
     .padding(.vertical, 8)
     .disabled(busy)

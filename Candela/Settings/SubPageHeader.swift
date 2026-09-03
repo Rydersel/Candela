@@ -82,5 +82,8 @@ private struct BackButton: View {
     .onHover { hovering = $0 }
     .animation(SettingsTheme.hoverMotion, value: hovering)
     .accessibilityLabel(Text("Back"))
+    // The shortcut has no other trace: the button carrying it is zero-size and
+    // hidden from accessibility, and the window draws no menu item for it.
+    .help(Text(verbatim: "Command ["))
   }
 }

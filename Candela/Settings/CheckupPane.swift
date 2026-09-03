@@ -62,6 +62,13 @@ enum CheckupHistoryScope {
     if let newest = dated.max(by: { $0.date < $1.date }) { return newest.key }
     return (candidates.first { !$0.isBuiltIn } ?? candidates.first)?.key
   }
+
+  /// Whether reloading the history has to read every display's runs. Only the
+  /// default scope needs them: it follows the most recent run anywhere, so a
+  /// run finishing on another display moves the history to it. A scope the user
+  /// picked stays put, and reading the whole store to confirm that decodes every
+  /// stored run for nothing.
+  static func needsEveryDisplay(chosenByHand: Bool) -> Bool { !chosenByHand }
 }
 
 /// The Checkup pillar: the launcher, this display's past runs, and the
@@ -96,6 +103,10 @@ struct CheckupPane: View {
   }
 
   var body: some View {
+    // `DisplayPrefs` is plain UserDefaults and not observable, and the scope
+    // picker is NAMED through it, so without this read a rename elsewhere in
+    // the window leaves the old name in the menu.
+    let _ = model.prefsRevision
     SettingsPageScaffold {
       SettingsPageHeader(title: CheckupPaneCopy.title, subtitle: CheckupPaneCopy.subtitle)
       runSection
@@ -113,7 +124,14 @@ struct CheckupPane: View {
     }
     .onChange(of: activeState) { _, state in
       guard state != .inactive else { return }
-      refresh()
+      // The sweep decodes every stored run for every display, and the only
+      // thing it buys is the default scope. Once the scope was picked by hand
+      // it cannot move, so coming back to the window reads one display.
+      if CheckupHistoryScope.needsEveryDisplay(chosenByHand: chosenByHand) {
+        refresh()
+      } else {
+        reload()
+      }
     }
   }
 
@@ -123,8 +141,12 @@ struct CheckupPane: View {
     SettingsCardSection(title: CheckupPaneCopy.runTitle) {
       VStack(alignment: .leading, spacing: 10) {
         SettingsRowNote(verbatim: CheckupPaneCopy.runNote)
+        // Stated twice on purpose: SwiftUI does not publish a `Button`'s own
+        // title to the accessibility layer, so without this the button
+        // announces as a bare "button".
         Button(CheckupPaneCopy.run) { actions.openCheckup() }
           .buttonStyle(SettingsPrimaryButtonStyle())
+          .accessibilityLabel(Text(verbatim: CheckupPaneCopy.run))
       }
       .padding(.vertical, 2)
     }
@@ -232,6 +254,7 @@ struct CheckupPane: View {
         SettingsRowNote(verbatim: CheckupPaneCopy.verifyNote)
         Button(CheckupPaneCopy.verify) { verify() }
           .buttonStyle(SettingsSecondaryButtonStyle())
+          .accessibilityLabel(Text(verbatim: CheckupPaneCopy.verify))
         if let verification {
           // The answer is about the file and never about the display: a report
           // that validates is one nobody edited, and nothing more.
@@ -245,6 +268,7 @@ struct CheckupPane: View {
         SettingsRowNote(verbatim: ProvenanceCopy.checkNote)
         Button(ProvenanceCopy.check) { checkProvenance() }
           .buttonStyle(SettingsSecondaryButtonStyle())
+          .accessibilityLabel(Text(verbatim: ProvenanceCopy.check))
         if let provenanceVerdict {
           // Styled like the verify answer above it: both are a sentence about a file.
           Text(verbatim: provenanceVerdict)
@@ -327,14 +351,21 @@ private struct CheckupHistoryRow: View {
         .fixedSize(horizontal: false, vertical: true)
 
       HStack(spacing: 8) {
+        // Every title is stated twice: SwiftUI publishes none of them to the
+        // accessibility layer, and a list of runs whose buttons all announce as
+        // "button" is unusable. The details label follows the visible one, so
+        // the spoken title says which way the row is about to go.
         Button(CheckupPaneCopy.export) { export() }
           .buttonStyle(SettingsSecondaryButtonStyle())
+          .accessibilityLabel(Text(verbatim: CheckupPaneCopy.export))
         Button(CheckupPaneCopy.copySummary) { copySummary() }
           .buttonStyle(SettingsSecondaryButtonStyle())
-        Button(showingDetails ? CheckupPaneCopy.hideDetails : CheckupPaneCopy.showDetails) {
-          showingDetails.toggle()
-        }
-        .buttonStyle(SettingsSecondaryButtonStyle())
+          .accessibilityLabel(Text(verbatim: CheckupPaneCopy.copySummary))
+        let detailsTitle = showingDetails
+          ? CheckupPaneCopy.hideDetails : CheckupPaneCopy.showDetails
+        Button(detailsTitle) { showingDetails.toggle() }
+          .buttonStyle(SettingsSecondaryButtonStyle())
+          .accessibilityLabel(Text(verbatim: detailsTitle))
         if justCopied {
           Text(verbatim: CheckupPaneCopy.copied)
             .font(.caption)

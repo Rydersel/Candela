@@ -51,6 +51,10 @@ struct SettingsRootView: View {
   @Environment(AppModel.self) private var model
 
   var body: some View {
+    // Rename dependency, registered HERE because `currentTitle` is read here
+    // and `DisplayPrefs` has no observation of its own. Without it the window
+    // title, and so the Window menu, keeps the hardware name after a rename.
+    let _ = model.prefsRevision
     ZStack {
       // One canvas for the life of the window, so a selection change moves the
       // light rather than cutting to a new one.
@@ -301,7 +305,9 @@ struct SettingsRootView: View {
 
   /// Resolved from `presentation` rather than read back from the panes, so the
   /// title always names what is on screen. Display destinations use the
-  /// display's own name.
+  /// display's name as the sidebar and the switcher resolve it: the window
+  /// draws no title of its own any more, so this reaches the Window menu and
+  /// VoiceOver, where the hardware name would be a display nobody renamed.
   private var currentTitle: String {
     switch presentation {
     case let .display(key, _):
@@ -309,7 +315,11 @@ struct SettingsRootView: View {
       // `presentation` already established the key is connected.
       model.allControlledStates
         .first { $0.display.persistenceKey == key }
-        .map(\.display.name) ?? SettingsRegistry.descriptor(for: .general).title
+        .map {
+          DisplayOrdering.title(
+            friendlyName: DisplayPrefs(persistenceKey: key).friendlyName,
+            hardwareName: $0.display.name)
+        } ?? SettingsRegistry.descriptor(for: .general).title
     case .pane:
       if case let .pane(id) = selection {
         SettingsRegistry.descriptor(for: id).title

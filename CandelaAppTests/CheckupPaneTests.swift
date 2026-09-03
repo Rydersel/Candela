@@ -101,6 +101,14 @@ struct CheckupPaneTests {
     #expect(CheckupHistoryScope.defaultKey([]) == nil)
   }
 
+  /// The sweep that feeds `defaultKey` decodes every stored run for every
+  /// display, and the pane re-ran it every time the window came back to the
+  /// front. It buys the default scope and nothing else.
+  @Test func onlyTheDefaultScopeNeedsEveryDisplaysHistory() {
+    #expect(CheckupHistoryScope.needsEveryDisplay(chosenByHand: false))
+    #expect(!CheckupHistoryScope.needsEveryDisplay(chosenByHand: true))
+  }
+
   private func report(
     identityVerdict: CheckupVerdict, serial: String? = nil, nativeWidth: Int = 3840,
     nativeHeight: Int = 2160, maxRefreshHz: Double? = 120

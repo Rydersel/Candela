@@ -28,8 +28,11 @@ struct AboutPane: View {
         // The sentence belongs to the row, not the button: `SettingsActionRow`
         // republishes it as the control's accessibility hint (contract 3).
         SettingsActionRow(verbatim: checkNowLine, dividerFollows: true) {
+          // Stated twice, like Run Setup Again below: SwiftUI does not publish
+          // a `Button`'s own title to the accessibility layer.
           Button("Check for Updates") { updater.checkForUpdates() }
             .buttonStyle(SettingsPrimaryButtonStyle())
+            .accessibilityLabel("Check for Updates")
             .disabled(!updater.canCheckForUpdates)
         }
         SettingsCardDivider()
