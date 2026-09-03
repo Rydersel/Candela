@@ -209,8 +209,8 @@ struct PanelMirroringSection: View {
       //
       // Nothing is lost by closing: the answer was never available here, since an
       // engage's Keep/Revert lives in a floating panel built to outlive this
-      // menu. Sliders and the HDR toggle stay put because they are in-place
-      // adjustments, not choices.
+      // menu. Sliders stay put: a drag is an in-place adjustment nothing waits
+      // on. The HDR button ends tracking too, for the starvation reason above.
       PanelMenu.endTracking()
     }
     .disabled(!enabled || coordinator.isApplying)

@@ -227,17 +227,30 @@ struct PanelView: View {
     DisplayPrefs(persistenceKey: persistenceKey)
   }
 
+  /// Which pane holds the switch that brings a hidden display back. The
+  /// built-in's lives on Menu Bar and an external's on the display's own page,
+  /// so one sentence cannot serve both.
+  static func unhideHint(hasExternals: Bool) -> String {
+    hasExternals
+      ? "Show one again in Settings → Displays."
+      : "Show it again in Settings → Menu Bar."
+  }
+
   /// Two empties: nothing attached is a hardware fact, everything hidden is
   /// undoable, so that branch says where to undo it.
   private var emptyState: some View {
     VStack(spacing: 4) {
       if model.displays.isEmpty, model.builtIn == nil {
         Text("No controllable displays")
+        // Discovery keeps only displays that answer with an IOAVService, so a
+        // DisplayLink or AirPlay panel never reaches the panel at all and the
+        // line above reads as a fault in the app.
+        emptyCaption(
+          "Displays on DisplayLink, AirPlay or Sidecar have no DDC channel, so they cannot be controlled."
+        )
       } else {
         Text("Every display is hidden")
-        Text("Show one again in Settings → Displays.")
-          .font(.system(size: 11))
-          .foregroundStyle(.tertiary)
+        emptyCaption(Self.unhideHint(hasExternals: !model.displays.isEmpty))
       }
     }
     .font(.system(size: 13))
@@ -245,6 +258,15 @@ struct PanelView: View {
     .multilineTextAlignment(.center)
     .frame(maxWidth: .infinity)
     .padding(.vertical, 6)
+  }
+
+  /// `fixedSize` on the vertical axis only: the panel is a fixed 280 pt wide, so
+  /// a caption that wraps must be allowed the height its wrap needs.
+  private func emptyCaption(_ text: String) -> some View {
+    Text(verbatim: text)
+      .font(.system(size: 11))
+      .foregroundStyle(.tertiary)
+      .fixedSize(horizontal: false, vertical: true)
   }
 
   // MARK: - Slider visibility
@@ -297,6 +319,10 @@ struct PanelView: View {
         .fixedSize(horizontal: false, vertical: true)
       Spacer(minLength: 8)
       Button("Open Settings…") {
+        // No window can take focus while a menu tracking session runs, so
+        // without this System Settings opens behind whatever is frontmost. Same
+        // constraint `SettingsOpener` states for the footer's gear.
+        PanelMenu.endTracking()
         AccessibilityPermission.openSystemSettings()
       }
       .buttonStyle(.link)
@@ -496,6 +522,11 @@ private struct DisplayHeaderRow: View {
   private var hdrModeButton: some View {
     Button {
       Task { await controller.setHDRMode(nextMode) }
+      // ENDING TRACKING IS THE POINT OF THIS LINE, not a courtesy, and the same
+      // rule the Resolution and Mirroring rows state at length: tracking starves
+      // the main-actor work the Task above queues, so the click looks dead until
+      // the panel is dismissed and every queued toggle then fires at once.
+      PanelMenu.endTracking()
     } label: {
       Text(modeLabel)
         .font(.system(size: 12))

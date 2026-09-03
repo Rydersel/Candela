@@ -519,3 +519,21 @@ struct CombinedBrightnessRowTests {
     #expect(row.value == 0.4)
   }
 }
+
+/// The empty state's second line names a pane, and the two panes are different
+/// pages: a laptop sent to Displays finds no switch there.
+@Suite("Panel empty state")
+@MainActor
+struct PanelEmptyStateTests {
+  @Test func aHiddenBuiltInAloneIsUndoneOnTheMenuBarPane() {
+    let hint = PanelView.unhideHint(hasExternals: false)
+    #expect(hint.contains("Menu Bar"))
+    #expect(hint.contains("Displays") == false)
+  }
+
+  @Test func aHiddenExternalIsUndoneOnItsOwnPage() {
+    let hint = PanelView.unhideHint(hasExternals: true)
+    #expect(hint.contains("Displays"))
+    #expect(hint.contains("Menu Bar") == false)
+  }
+}
