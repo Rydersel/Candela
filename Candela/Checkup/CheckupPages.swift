@@ -471,12 +471,15 @@ struct CheckupSummaryPage: View {
       }
     } actions: {
       VStack(spacing: 10) {
-        // Both secondary: the page's one primary action sits below, where the
-        // scaffold puts every other page's, so the flow ends where the eye
-        // already expects Continue.
+        // Export carries the emphasis. It is the thing this flow exists to
+        // produce: a report nobody saves is a run that left nothing behind, and
+        // the save rate is a metric this feature is judged on. Done keeps its
+        // place at the foot, where every other page's way onward sits, and its
+        // Return shortcut, but it is styled as the exit it is rather than as
+        // the action to take.
         HStack(spacing: 10) {
           Button(CheckupCopy.export) { export() }
-            .buttonStyle(OnboardingSecondaryButtonStyle())
+            .buttonStyle(OnboardingPrimaryButtonStyle(accent: CheckupStyle.accent))
             .accessibilityLabel(Text(verbatim: CheckupCopy.export))
           Button(CheckupCopy.copySummary) { copySummary() }
             .buttonStyle(OnboardingSecondaryButtonStyle())
@@ -489,7 +492,7 @@ struct CheckupSummaryPage: View {
           .opacity(justCopied ? 1 : 0)
           .accessibilityHidden(!justCopied)
         Button(CheckupCopy.done) { model.close() }
-          .buttonStyle(OnboardingPrimaryButtonStyle(accent: CheckupStyle.accent))
+          .buttonStyle(OnboardingSecondaryButtonStyle())
           .keyboardShortcut(.defaultAction)
           .accessibilityLabel(Text(verbatim: CheckupCopy.done))
       }

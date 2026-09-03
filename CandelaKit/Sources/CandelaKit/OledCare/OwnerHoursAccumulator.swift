@@ -9,6 +9,11 @@ import Foundation
 public struct OwnerHours: Equatable, Sendable, Codable {
   public private(set) var secondsByOwner: [String: Double]
   public private(set) var totalSeconds: Double
+  /// Time from owners past `storedOwnerLimit`, kept out of `secondsByOwner`
+  /// entirely so nothing that reads that dictionary can render the fold as an
+  /// app. It is a sibling field an older decoder does not know and skips, which
+  /// is why the schema version does not move for it.
+  public private(set) var foldedSeconds: Double
 
   public static let empty = OwnerHours(secondsByOwner: [:], totalSeconds: 0)
 
@@ -17,13 +22,14 @@ public struct OwnerHours: Equatable, Sendable, Codable {
   /// them would grow the prefs blob without bound.
   static let storedOwnerLimit = 50
 
-  /// Where the owners past `storedOwnerLimit` are folded at encode time, so the
-  /// per-owner seconds still sum to `totalSeconds`.
+  /// Where a build before `foldedSeconds` existed put the fold: INSIDE
+  /// `secondsByOwner`, where a reader that did not know to skip it drew it as
+  /// the heaviest app on the display. Kept as a decode-time migration only, and
+  /// never written again.
   ///
-  /// A macOS file name cannot contain "/", so no process can ever report this
-  /// as its owner name and the bucket cannot absorb a real app's time.
-  /// `topOwners` drops it rather than drawing a row nobody can act on.
-  static let foldedOwnerKey = "other/apps"
+  /// A macOS file name cannot contain "/", so no process can ever have reported
+  /// this as its owner name and the bucket holds nothing but folded time.
+  static let legacyFoldedOwnerKey = "other/apps"
 
   /// Descending by seconds, ties broken by owner name so the view does not
   /// reshuffle between equal-weight renders.
@@ -33,7 +39,6 @@ public struct OwnerHours: Equatable, Sendable, Codable {
   /// screen.
   public func topOwners(limit: Int) -> [(owner: String, hours: Double)] {
     secondsByOwner
-      .filter { $0.key != Self.foldedOwnerKey }
       .sorted { lhs, rhs in
         lhs.value != rhs.value ? lhs.value > rhs.value : lhs.key < rhs.key
       }
@@ -41,18 +46,16 @@ public struct OwnerHours: Equatable, Sendable, Codable {
       .map { (owner: $0.key, hours: $0.value / 3600) }
   }
 
-  /// Keeps the heaviest `storedOwnerLimit` named owners whole and folds the rest
-  /// into `foldedOwnerKey`. Idempotent: an already-folded store re-encodes to
-  /// itself, because the existing bucket is ranked out and then re-added.
-  private static func capped(_ seconds: [String: Double]) -> [String: Double] {
-    var named = seconds
-    var folded = named.removeValue(forKey: foldedOwnerKey) ?? 0
-    guard named.count > storedOwnerLimit else { return seconds }
-
-    let ranked = named.sorted { lhs, rhs in
+  /// Keeps the heaviest `storedOwnerLimit` named owners whole and returns what
+  /// the rest carry, for the caller to add to `foldedSeconds`. Idempotent: a
+  /// store already at or under the limit folds nothing more.
+  private static func capped(_ seconds: [String: Double]) -> (kept: [String: Double], folded: Double) {
+    guard seconds.count > storedOwnerLimit else { return (seconds, 0) }
+    let ranked = seconds.sorted { lhs, rhs in
       lhs.value != rhs.value ? lhs.value > rhs.value : lhs.key < rhs.key
     }
-    var kept = [String: Double](minimumCapacity: storedOwnerLimit + 1)
+    var kept = [String: Double](minimumCapacity: storedOwnerLimit)
+    var folded = 0.0
     for (index, entry) in ranked.enumerated() {
       if index < storedOwnerLimit {
         kept[entry.key] = entry.value
@@ -60,8 +63,7 @@ public struct OwnerHours: Equatable, Sendable, Codable {
         folded += entry.value
       }
     }
-    if folded > 0 { kept[foldedOwnerKey] = folded }
-    return kept
+    return (kept, folded)
   }
 
   fileprivate mutating func add(_ secondsAdded: [String: Double], totalAdded: Double) {
@@ -78,13 +80,19 @@ public struct OwnerHours: Equatable, Sendable, Codable {
     case schemaVersion = "schemaVersion"
     case secondsByOwner = "secondsByOwner"
     case totalSeconds = "totalSeconds"
+    case foldedSeconds = "foldedSeconds"
   }
 
   public func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
+    // NOT bumped for `foldedSeconds`: the version gates a decoder OUT, and an
+    // older build reading this store is meant to go on working. It skips the key
+    // it does not know, which costs it the folded total and nothing else.
     try container.encode(OledStoreSchema.currentVersion, forKey: .schemaVersion)
-    try container.encode(Self.capped(secondsByOwner), forKey: .secondsByOwner)
+    let capped = Self.capped(secondsByOwner)
+    try container.encode(capped.kept, forKey: .secondsByOwner)
     try container.encode(totalSeconds, forKey: .totalSeconds)
+    try container.encode(foldedSeconds + capped.folded, forKey: .foldedSeconds)
   }
 
   public init(from decoder: Decoder) throws {
@@ -94,15 +102,23 @@ public struct OwnerHours: Equatable, Sendable, Codable {
       throw OledStoreDecodeFailure.unsupportedVersion(
         found: version, supported: OledStoreSchema.currentVersion)
     }
-    self.secondsByOwner = try container.decode([String: Double].self, forKey: .secondsByOwner)
+    var stored = try container.decode([String: Double].self, forKey: .secondsByOwner)
+    // Absent on a store this build has not rewritten yet, and on one written
+    // before the field existed, where the fold sits under the legacy key.
+    // Migrated out here so nothing downstream has to know the key.
+    let carried = try container.decodeIfPresent(Double.self, forKey: .foldedSeconds) ?? 0
+    let legacy = stored.removeValue(forKey: Self.legacyFoldedOwnerKey) ?? 0
+    self.secondsByOwner = stored
     self.totalSeconds = try container.decode(Double.self, forKey: .totalSeconds)
+    self.foldedSeconds = carried + legacy
   }
 
   /// Internal, not private: replaces the memberwise init that adding
   /// `init(from:)` suppressed, and the tests reach it through `@testable`.
-  init(secondsByOwner: [String: Double], totalSeconds: Double) {
+  init(secondsByOwner: [String: Double], totalSeconds: Double, foldedSeconds: Double = 0) {
     self.secondsByOwner = secondsByOwner
     self.totalSeconds = totalSeconds
+    self.foldedSeconds = foldedSeconds
   }
 }
 

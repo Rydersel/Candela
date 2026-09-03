@@ -270,10 +270,12 @@ struct SynthesisGateTests {
   /// set down behind another feature's open reconfiguration and answered true,
   /// leaving its caller to stage a raw mirror change over the result.
   ///
-  /// The whole-app reset is the one caller that presses on: it is wiping the
-  /// domain and rebuilding, so a set left standing there would outlive
-  /// everything that knows about it.
-  @Test func aRefusedGateStopsTheUnwindUnlessTheResetForcesIt() async throws {
+  /// The whole-app reset is the one caller that goes on without the claim, and
+  /// only after waiting for it: it is wiping the domain and rebuilding, so a set
+  /// left standing there would outlive everything that knows about it. The
+  /// window is collapsed to nothing here, which is the never-clears case at test
+  /// speed.
+  @Test func aRefusedGateStopsTheUnwindAndTheResetProceedsOnlyAfterItsWait() async throws {
     let fixture = Fixture()
     defer { fixture.forgetPrefs() }
     let display = try fixture.configured(Self.panelID)
@@ -293,13 +295,62 @@ struct SynthesisGateTests {
       "a refusal must leave the set exactly where it found it"
     )
 
-    let forced = await fixture.synthesis.disengageAllForReset(force: true)
+    let forced = await fixture.synthesis.disengageAllForReset(
+      force: true, forcedClaimWait: .zero, forcedClaimRetryDelay: .zero
+    )
     #expect(forced)
     #expect(fixture.synthesis.pairings.isEmpty)
 
     // Still ours: the forced pass never took the claim, so it must not have
     // given one back either.
+    #expect(await fixture.gate.holder == .mirroring)
     await fixture.gate.release(.mirroring)
+  }
+
+  /// The other half of the same contract: a holder that lets go inside the
+  /// window is WAITED for, so the reset's teardown runs under its own claim
+  /// rather than alongside somebody else's configuration.
+  ///
+  /// The flag is what separates a wait from a barge. A barge returns while the
+  /// releasing task is still asleep, so it sees the flag unset; only an
+  /// implementation that retried until the gate came free can see it set.
+  @Test func aResetWaitsOutAGateHolderThatLetsGoInsideTheWindow() async throws {
+    let fixture = Fixture()
+    defer { fixture.forgetPrefs() }
+    let display = try fixture.configured(Self.panelID)
+    let stop = try #require(fixture.modes.catalogs[Self.panelID]?.syntheticStops.first)
+
+    _ = await fixture.synthesis.engage(stop, on: display)
+    #expect(fixture.synthesis.isEngaged(displayID: Self.panelID))
+
+    let held = await fixture.gate.claim(.mirroring)
+    #expect(held.isGranted, "the fixture's own control")
+
+    let signal = ReleaseSignal()
+    let gate = fixture.gate
+    let releaser = Task {
+      try? await Task.sleep(for: .milliseconds(150))
+      await signal.markReleased()
+      await gate.release(.mirroring)
+    }
+
+    let forced = await fixture.synthesis.disengageAllForReset(
+      force: true, forcedClaimWait: .seconds(5), forcedClaimRetryDelay: .milliseconds(10)
+    )
+    await releaser.value
+
+    #expect(forced)
+    #expect(fixture.synthesis.pairings.isEmpty)
+    #expect(
+      await signal.released,
+      "the forced pass must wait the holder out rather than barge past it"
+    )
+    // The claim it waited for is now ITS claim. The fixture leaves
+    // `releaseClaimIfIdle` unwired, so nothing hands it back here; in the app
+    // the reset's rebuild does. A barge would have left the gate free instead,
+    // since the releasing task above let go of it.
+    #expect(await fixture.gate.holder == .displayModes, "the reset holds the claim it waited for")
+    await fixture.gate.release(.displayModes)
   }
 
   /// Both slots taken, and the attended guard answers what the unattended one
@@ -332,8 +383,76 @@ struct SynthesisGateTests {
     #expect(fixture.synthesis.refusalReason(for: first) == nil)
   }
 
-  /// The control for the test above: with nothing selected the gate is free, so
-  /// the refusal there is about the operation rather than about a gate that
+  /// A hardware sequence that STARTS inside the teardown refuses it, even
+  /// though the gate said yes.
+  ///
+  /// The top-of-function `isWorking` reading is taken before two awaits, the
+  /// preview stand-down and the claim, and before the forced path's wait of up
+  /// to two seconds. The gate cannot stand in for it: `claim` is re-entrant per
+  /// claimant and synthesis claims `.displayModes`, the same claimant the mode
+  /// coordinator uses, so a mode preview or apply starting in that window is
+  /// GRANTED rather than refused. Only the second reading catches it.
+  ///
+  /// Driven through the stand-down seam because that is one of the real awaits:
+  /// in the app it enters the mode coordinator's serial queue.
+  @Test func aSequenceStartingInsideTheTeardownRefusesItEvenWithTheGateGranted() async throws {
+    let fixture = Fixture(secondPanel: true)
+    defer { fixture.forgetPrefs() }
+    let display = try fixture.configured(Self.panelID)
+    let second = try fixture.configured(Self.secondPanelID)
+    let stop = try #require(fixture.modes.catalogs[Self.panelID]?.syntheticStops.first)
+
+    _ = await fixture.synthesis.engage(stop, on: display)
+    #expect(fixture.synthesis.isEngaged(displayID: Self.panelID))
+    #expect(!fixture.synthesis.isWorking, "the fixture's own control: the teardown starts idle")
+
+    // Parked in `create`, so the interloping engage holds the working depth up
+    // for as long as this test wants it. Armed only now: the engage above had to
+    // land.
+    let entered = DispatchSemaphore(value: 0)
+    let proceed = DispatchSemaphore(value: 0)
+    fixture.host.onCreate = {
+      entered.signal()
+      // DEADLINED, unlike the parks above: the release comes after the teardown
+      // returns, so a teardown that ran on regardless would block on the engine
+      // executor this park is holding. Ten seconds turns that hang into a
+      // failing expectation.
+      _ = proceed.wait(timeout: .now() + 10)
+    }
+
+    let teardownReachedTheSeam = DispatchSemaphore(value: 0)
+    let interloper = Task { @MainActor [synthesis = fixture.synthesis] in
+      _ = await awaitSignal(teardownReachedTheSeam)
+      _ = await synthesis.engage(stop, on: second)
+    }
+    // Hands the main actor to the interloper and comes back once it is parked in
+    // the engine, which is the interleaving under test.
+    fixture.synthesis.endOutstandingPreview = {
+      teardownReachedTheSeam.signal()
+      return await awaitSignal(entered)
+    }
+
+    let unwound = await fixture.synthesis.disengageAllForReset()
+
+    #expect(fixture.synthesis.isWorking, "the fixture's own control: a sequence really did start")
+    #expect(!unwound, "a sequence that started inside the teardown must refuse it")
+    #expect(
+      fixture.synthesis.isEngaged(displayID: Self.panelID),
+      "and the refusal must leave the set exactly where it found it"
+    )
+    // The claim is deliberately NOT handed back on this path: the sequence now
+    // running shares the `.displayModes` claimant, so a release here would take
+    // the gate out from under it.
+    #expect(await fixture.gate.holder == .displayModes)
+
+    proceed.signal()
+    await interloper.value
+    await fixture.settle()
+    await fixture.gate.release(.displayModes)
+  }
+
+  /// The control for the refusal tests: with nothing selected the gate is free,
+  /// so a refusal there is about the operation rather than about a gate that
   /// refuses everything.
   @Test func theGateIsFreeWithNoSelectionOutstanding() async {
     let fixture = Fixture()
@@ -344,4 +463,22 @@ struct SynthesisGateTests {
     await fixture.revertAnyPreview()
   }
 
+}
+
+/// Waits for a semaphore off the cooperative pool, deadlined: a blocked thread is
+/// not a suspended one, so an unbounded wait here would hang the suite past any
+/// cancellation. Five seconds is orders of magnitude past what the fakes need.
+private func awaitSignal(_ semaphore: DispatchSemaphore) async -> Bool {
+  await withCheckedContinuation { continuation in
+    DispatchQueue.global().async {
+      continuation.resume(returning: semaphore.wait(timeout: .now() + 5) == .success)
+    }
+  }
+}
+
+/// A one-way flag shared by the releasing task and the assertion that reads it,
+/// so "did the reset wait" is something the test observes rather than times.
+private actor ReleaseSignal {
+  private(set) var released = false
+  func markReleased() { released = true }
 }

@@ -38,6 +38,18 @@ struct RotationRows: View {
     model.mirroring.topology.displays.contains { $0.id == displayID && $0.isMirrorSlave }
   }
 
+  /// A display showing a size the app renders is mechanically a slave too, so it
+  /// is refused as well. Kept apart from `isMirrorSlave` because the sentence
+  /// differs: the user paired nothing here, and the way out is the size control.
+  ///
+  /// Off the same coordinator sample as `isMirrorSlave`, not the raw store the
+  /// policy reads: that one is an observation dependency and it unions in a
+  /// pairing the store has not been told about yet, so the caption can never
+  /// lag the flag it explains.
+  private var isSynthesizedSize: Bool {
+    MirroringPredicates.isSynthesized(model.mirroring.topology, displayID: displayID)
+  }
+
   var body: some View {
     // No control at all rather than a dead one. A picker that cannot
     // rotate only invites a click that produces a report.
@@ -52,11 +64,16 @@ struct RotationRows: View {
       }
       // A rotation takes up to a second; without this the window accepts a
       // second selection on top of the first.
-      .disabled(coordinator.isApplying || isMirrorSlave)
+      .disabled(coordinator.isApplying || isMirrorSlave || isSynthesizedSize)
 
-      // One caption at a time, mirror state first: it is the reason the control
+      // One caption at a time, pairing state first: it is the reason the control
       // above is dead, and the angle it shows is beside the point while it is.
-      if isMirrorSlave {
+      // The synthesis arm ahead of the mirror arm, in the policy's order: such a
+      // display sets the raw flag too, and the mirroring sentence would name a
+      // display the user does not have.
+      if isSynthesizedSize {
+        SettingsCaption(RotationCopy.refusal(.synthesizedSize))
+      } else if isMirrorSlave {
         SettingsCaption(RotationCopy.refusal(.mirrored))
       } else if coordinator.rotation(of: displayID) == nil {
         // The display reports a non-right angle, so the picker above is showing

@@ -445,8 +445,10 @@ struct AdvancedPage: View {
         }
       }
     }
-    // The retries branch only. The enabler branch stays live under a block.
-    .disabled(isBlocked && appPrefs.startupAction == .read)
+    // The retries branch only. The enabler branch stays live under a block, and
+    // so does the never-answered verdict: greying a statement of fact says the
+    // fact is unavailable rather than that a control is.
+    .disabled(isBlocked && !readbackNeverAnswered && appPrefs.startupAction == .read)
   }
 
   /// NOT `DDCReadEvidence.worst(...)`: worst-wins folds a display whose

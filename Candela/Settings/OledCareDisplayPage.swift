@@ -27,13 +27,16 @@ struct OledCareDisplayPage: View {
 
   /// `pmset -g` costs a 79 ms process spawn [MEASURED 2026-08-06]. Read ONCE
   /// per page appearance into state, never from `body` (which re-evaluates on
-  /// every pref write and on every dim-state change).
+  /// every pref write and on every dim-state change) and never under the
+  /// dim-state task id.
   @State private var displaySleepMinutes: Int?
 
   /// Sampled beside `displaySleepMinutes`, and for the same reason: `body`
-  /// re-evaluates on every pref write and every dim-state change, and a reading
-  /// taken there would make the note below flicker with the page rather than
-  /// describe what was true when it opened.
+  /// re-evaluates on every pref write, and a reading taken there would make the
+  /// note below flicker with the page. Re-sampled on the engine's dim state
+  /// instead, which is the page's one live signal and the state an assertion
+  /// actually moves, so the note describes now rather than the moment the page
+  /// opened.
   @State private var displaySleepAssertionHeld = false
 
   /// Slider drafts, live only while a drag is in progress. A `Slider` bound
@@ -151,8 +154,11 @@ struct OledCareDisplayPage: View {
         }
       }
     }
-    .task {
-      displaySleepMinutes = OledCareSignalSources.displaySleepMinutes()
+    // Two tasks, not one: the pmset spawn is a per-appearance reading, while the
+    // assertion is a cheap IOKit query that has to follow the engine's dim state.
+    // Keyed together, every dim transition re-spawns pmset.
+    .task { displaySleepMinutes = OledCareSignalSources.displaySleepMinutes() }
+    .task(id: model.oledCare.dimStates[persistenceKey]) {
       displaySleepAssertionHeld = OledCareSignalSources.displaySleepAssertionHeld()
     }
   }
@@ -372,8 +378,8 @@ struct OledCareDisplayPage: View {
 
   /// Live means the pipeline produced a reading inside
   /// `OledCareCadence.livenessWindowSeconds`, so a dead grant stills the dot
-  /// within two minutes whatever the prefs claim. The window is the Kit's, not a
-  /// number chosen here: the comment used to say two intervals while the code
+  /// within a few minutes whatever the prefs claim. The window is the Kit's, not
+  /// a number chosen here: the comment used to say two intervals while the code
   /// said three.
   private func isMeasuringLive(_ summary: PanelHealthSummary) -> Bool {
     guard !model.isSafeMode, prefs.oledTelemetry, CGPreflightScreenCaptureAccess(),
@@ -556,7 +562,7 @@ struct OledCareDisplayPage: View {
         // divider between a control and the sentence saying it does nothing
         // turns the warning into what looks like an unrelated setting.
         if prefs.oledDetectionDimming, displaySleepAssertionHeld {
-          OledInlineNote(Text("Something was holding the screen awake when this page opened: video playback, a call, or Keep Display Awake. Nothing is dimmed here for as long as that lasts."))
+          OledInlineNote(Text("Something is holding the screen awake: video playback, a call, or Keep Display Awake. Nothing is dimmed here for as long as that lasts."))
         }
       }
     }

@@ -47,6 +47,10 @@ final class RotationCoordinator {
   /// outstanding. Not defaulted: a per-coordinator default would compile, run,
   /// and exclude nobody.
   @ObservationIgnored private let gate: DisplayReconfigurationGate
+  /// The pairing sample the synthesis carve-out reads. The raw mirroring flag on
+  /// `ConfiguredDisplay` cannot tell a size this app renders from a mirror the
+  /// user set up, and the two get different refusals.
+  @ObservationIgnored private let topologyStore: any MirrorTopologyProviding
   @ObservationIgnored private let session: RotationPreviewSession
   @ObservationIgnored private let queue = PreviewQueue()
   @ObservationIgnored private let countdown = PreviewCountdownDriver()
@@ -62,10 +66,12 @@ final class RotationCoordinator {
 
   init(
     gate: DisplayReconfigurationGate,
+    topologyStore: any MirrorTopologyProviding,
     configurator: any DisplayConfiguring = CoreGraphicsDisplayConfigurator(),
     timeoutSeconds: Int = 30
   ) {
     self.gate = gate
+    self.topologyStore = topologyStore
     self.configurator = configurator
     session = RotationPreviewSession(configurator: configurator, timeoutSeconds: timeoutSeconds)
     // A rotation fires this notification itself, so besides departures this is
@@ -107,6 +113,13 @@ final class RotationCoordinator {
   /// cannot work.
   var canRotate: Bool { configurator.canRotate }
 
+  /// Whether this display is showing a size the app renders for it. The row
+  /// reads this rather than sampling a topology of its own, so the caption it
+  /// shows and the refusal the policy would return cannot disagree.
+  func isSynthesizedSize(_ displayID: CGDirectDisplayID) -> Bool {
+    MirroringPredicates.isSynthesized(topologyStore.topology(), displayID: displayID)
+  }
+
   func rotation(of displayID: CGDirectDisplayID) -> DisplayRotation? {
     configurator.rotation(of: displayID)
   }
@@ -127,7 +140,8 @@ final class RotationCoordinator {
       to: requested,
       in: configurator.displays(),
       currentRotation: configurator.rotation(of: displayID),
-      isSupported: configurator.canRotate
+      isSupported: configurator.canRotate,
+      isSynthesizedSize: isSynthesizedSize(displayID)
     )
     switch decision {
     case let .refused(refusal):

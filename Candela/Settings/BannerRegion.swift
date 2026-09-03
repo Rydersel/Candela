@@ -23,9 +23,11 @@ struct BannerRegion: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   /// Measured by `measureDomainFreshness()`, never in `body`. Re-measured on
-  /// the display change and on `prefsRevision`, which is every event that can
-  /// flip it: both resets bump it, so a wiped domain reads as fresh again
-  /// rather than staying stale behind a cache.
+  /// the display change, on `prefsRevision` (both resets bump it, so a wiped
+  /// domain reads as fresh again rather than staying stale behind a cache), and
+  /// on this display's brightness, because the engine's own store writes
+  /// `combinedBrightness.<key>` through `UserDefaults` directly and bumps
+  /// nothing. Without that last one a slider drag no longer retires the banner.
   @State private var domainIsFresh: Bool?
 
   private var persistenceKey: String { state.display.persistenceKey }
@@ -67,6 +69,17 @@ struct BannerRegion: View {
     .onAppear { measureDomainFreshness() }
     .onChange(of: persistenceKey) { _, _ in measureDomainFreshness() }
     .onChange(of: model.prefsRevision) { _, _ in measureDomainFreshness() }
+    // The engine's stored level is written straight to `UserDefaults` with no
+    // revision bump, so this is the only signal that a drag has just filled the
+    // domain this banner calls empty. Gated on the fresh state: this fires at
+    // drag rate and the scan is a whole-domain dictionary walk, so once the
+    // domain reads as stored there is no question left to ask. It can only read
+    // fresh again through a wipe, and both resets bump `prefsRevision`, which
+    // re-measures above.
+    .onChange(of: state.controller.brightness) { _, _ in
+      guard domainIsFresh != false else { return }
+      measureDomainFreshness()
+    }
   }
 
   /// One banner's chrome, in the same content column as the page below. Applied
@@ -441,7 +454,18 @@ struct BannerRegion: View {
   /// re-evaluates every countdown second, so it cannot run from `body`. nil
   /// draws no banner: erring to silent for one frame beats flashing "first time
   /// seeing this display" at a display that has settings.
+  ///
+  /// The two cheap terms of `showsFirstSight` are checked FIRST, and they answer
+  /// for the built-in and for every dismissed display without a scan: the banner
+  /// cannot show for either, so the dictionary walk would be work with no
+  /// question behind it.
   private func measureDomainFreshness() {
+    guard persistenceKey != "builtIn",
+          !model.dismissedFirstSightKeys.contains(persistenceKey)
+    else {
+      domainIsFresh = false
+      return
+    }
     domainIsFresh = !DisplayPrefs.hasAnyStoredValue(forKey: persistenceKey)
   }
 }

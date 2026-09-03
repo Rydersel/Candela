@@ -237,7 +237,7 @@ final class AppModel {
   /// other two it persists nothing, since a rotation is already system state the
   /// instant it applies.
   @ObservationIgnored private(set) lazy var rotation = RotationCoordinator(
-    gate: reconfigurationGate
+    gate: reconfigurationGate, topologyStore: mirrorTopology
   )
 
   /// The display arrangement, its preview countdown, and the layout on screen.
@@ -430,7 +430,9 @@ final class AppModel {
     //
     // `force` for the same reason, one step earlier: a gate claim held by
     // another feature does not get to leave a set standing through a reset that
-    // is about to rebuild the controller which would have taken it down.
+    // is about to rebuild the controller which would have taken it down. It
+    // WAITS for that claim rather than barging past it, and only proceeds
+    // unclaimed once the wait runs out.
     if await synthesis.disengageAllForReset(force: true) == false {
       log.error("reset: the synthesis engine refused its teardown; the virtual displays go down without it")
     }

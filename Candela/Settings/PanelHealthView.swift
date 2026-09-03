@@ -396,7 +396,12 @@ struct PanelHealthView: View {
       return "Waiting on Screen Recording; no readings are being taken."
     }
     if summary.confidence == .estimated {
-      return "Not shown while measuring is off. The history recorded so far is kept."
+      // The kept-history half belongs to the lenses that draw history. The live
+      // lens draws the last minute, and a reassurance about a record it does not
+      // show reads as an answer to a question nobody asked.
+      return mode == .now
+        ? "Not shown while measuring is off."
+        : "Not shown while measuring is off. The history recorded so far is kept."
     }
     if mode == .now {
       return "No reading this session yet. One lands within a minute while this display is awake and in use."

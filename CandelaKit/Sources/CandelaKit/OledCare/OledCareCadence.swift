@@ -27,10 +27,12 @@ public enum OledCareCadence {
   public static let samplingSeconds: Double = Double(
     OledCareCadence.sampling.components.seconds)
 
-  /// A reading counts as live for two sampling intervals: long enough that one
-  /// skipped capture is not reported as a failure, short enough that a dead
-  /// Screen Recording grant stills the measuring dot within two minutes.
-  public static let livenessWindowSeconds: Double = 2 * OledCareCadence.samplingSeconds
+  /// A reading counts as live for two and a half sampling intervals. Exactly two
+  /// put the boundary on top of the next capture's own arrival, so a single late
+  /// or skipped one flipped the dot off; the half interval is the slack that
+  /// takes to survive one miss. Still short enough that a dead Screen Recording
+  /// grant stills the dot inside three minutes.
+  public static let livenessWindowSeconds: Double = 2.5 * OledCareCadence.samplingSeconds
 
   /// The stall warning's window, ten intervals, and deliberately NOT the
   /// liveness window. This one accuses macOS of having dropped the Screen

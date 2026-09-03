@@ -80,13 +80,13 @@ public struct ProvenanceEnvelope: Codable, Equatable, Sendable {
 
   /// Named for the panel, not for the user's label: `displayName` carries a
   /// friendly name someone typed, which is not what the record is about. Same
-  /// sanitizer as a checkup export, since a product name is whatever the EDID
-  /// says and a slash in it would reach the save panel as a path.
+  /// filename sanitizer as a checkup export, since a product name is whatever
+  /// the EDID says and a slash in it would reach the save panel as a path.
   public static func exportFileName(for record: ProvenanceRecord) -> String {
     let model = [record.identity.edid?.productName, record.identity.displayName]
       .compactMap { $0 }
       .first { !$0.isEmpty } ?? "Display"
-    return "Candela Provenance \(CheckupStore.safe(model)) "
+    return "Candela Provenance \(CheckupStore.safeFileName(model)) "
       + "\(CheckupStore.day(record.exportedAt)).candela-provenance.json"
   }
 }

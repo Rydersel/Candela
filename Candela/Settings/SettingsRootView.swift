@@ -51,10 +51,6 @@ struct SettingsRootView: View {
   @Environment(AppModel.self) private var model
 
   var body: some View {
-    // Rename dependency, registered HERE because `currentTitle` is read here
-    // and `DisplayPrefs` has no observation of its own. Without it the window
-    // title, and so the Window menu, keeps the hardware name after a rename.
-    let _ = model.prefsRevision
     ZStack {
       // One canvas for the life of the window, so a selection change moves the
       // light rather than cutting to a new one.
@@ -145,7 +141,16 @@ struct SettingsRootView: View {
     // the scene's own title at the LEADING edge next to the Back button, and it
     // LINGERS after the pop. With no dependency that changes with the path,
     // `updateNSView` never fires for a push and cannot re-hide it.
-    .background(SettingsWindowConfigurator(title: currentTitle, navigationToken: currentPathDepth))
+    // The title resolves inside a leaf view, which is where the `prefsRevision`
+    // read lives. A rename is a pref write and `DisplayPrefs` has no observation
+    // of its own, so something has to depend on the revision; read at this level
+    // it re-ran the entire shell, canvas included, on every pref write anywhere
+    // in the app.
+    .background(
+      SettingsWindowTitleHost(
+        displayKey: presentation.displayKey,
+        fallbackTitle: selectedPaneTitle,
+        navigationToken: currentPathDepth))
     // Debug screenshot hook: the window has no URL scheme and cannot be driven
     // by clicking without an Accessibility grant, so a capture run names its
     // destination through an env var and this adopts it once, where the
@@ -303,30 +308,15 @@ struct SettingsRootView: View {
     )
   }
 
-  /// Resolved from `presentation` rather than read back from the panes, so the
-  /// title always names what is on screen. Display destinations use the
-  /// display's name as the sidebar and the switcher resolve it: the window
-  /// draws no title of its own any more, so this reaches the Window menu and
-  /// VoiceOver, where the hardware name would be a display nobody renamed.
-  private var currentTitle: String {
-    switch presentation {
-    case let .display(key, _):
-      // The `??` covers the same-frame race, not a second policy:
-      // `presentation` already established the key is connected.
-      model.allControlledStates
-        .first { $0.display.persistenceKey == key }
-        .map {
-          DisplayOrdering.title(
-            friendlyName: DisplayPrefs(persistenceKey: key).friendlyName,
-            hardwareName: $0.display.name)
-        } ?? SettingsRegistry.descriptor(for: .general).title
-    case .pane:
-      if case let .pane(id) = selection {
-        SettingsRegistry.descriptor(for: id).title
-      } else {
-        // The fallback case, which `detailRoot` renders General for.
-        SettingsRegistry.descriptor(for: .general).title
-      }
+  /// The title for a pane destination, and the fallback for a display one. The
+  /// display half lives in `SettingsWindowTitleHost`, which is what keeps the
+  /// rename dependency off this view.
+  private var selectedPaneTitle: String {
+    if case let .pane(id) = selection {
+      SettingsRegistry.descriptor(for: id).title
+    } else {
+      // The fallback case, which `detailRoot` renders General for.
+      SettingsRegistry.descriptor(for: .general).title
     }
   }
 
@@ -735,6 +725,49 @@ enum SettingsWindowMetrics {
   static let idealHeight: CGFloat = 680
 
   static var minContentSize: NSSize { NSSize(width: minWidth, height: minHeight) }
+}
+
+/// Resolves the window title and hosts the configurator, so the only view in the
+/// shell itself that depends on `prefsRevision` is this leaf; the sidebar and
+/// the panes keep their own reads.
+///
+/// A rename is a pref write and `DisplayPrefs` has no observation of its own, so
+/// the title has to hang off the revision. Read in the shell's body that
+/// dependency re-ran the sidebar, the canvas and the detail column on every pref
+/// write in the app; read here it re-runs one background view that draws nothing.
+///
+/// Resolved from the presented display rather than read back from the panes, so
+/// the title always names what is on screen. Display destinations use the name
+/// the sidebar and the switcher resolve: the window draws no title of its own
+/// any more, so this reaches the Window menu and VoiceOver, where the hardware
+/// name would be a display nobody renamed.
+private struct SettingsWindowTitleHost: View {
+  /// The display the detail column is presenting; nil for a pane destination.
+  let displayKey: String?
+  /// Used for a pane destination, and for the same-frame race where the key is
+  /// no longer among the connected states.
+  let fallbackTitle: String
+  let navigationToken: Int
+
+  @Environment(AppModel.self) private var model
+
+  var body: some View {
+    SettingsWindowConfigurator(title: title, navigationToken: navigationToken)
+  }
+
+  private var title: String {
+    guard let displayKey else { return fallbackTitle }
+    // The revision read that this view exists to contain.
+    _ = model.prefsRevision
+    return
+      model.allControlledStates
+      .first { $0.display.persistenceKey == displayKey }
+      .map {
+        DisplayOrdering.title(
+          friendlyName: DisplayPrefs(persistenceKey: displayKey).friendlyName,
+          hardwareName: $0.display.name)
+      } ?? fallbackTitle
+  }
 }
 
 /// The window chrome a `Settings` scene does not offer: the `.resizable` and

@@ -119,7 +119,7 @@ struct ProvenanceEnvelopeTests {
   @Test func exportFileNameCarriesModelAndDay() throws {
     let e = try envelope()
     #expect(ProvenanceEnvelope.exportFileName(for: e.record)
-      == "Candela Provenance DELL_U2725QE 2026-05-09.candela-provenance.json")
+      == "Candela Provenance DELL U2725QE 2026-05-09.candela-provenance.json")
   }
 
   /// The panel's own model wins over whatever the user called the display, and
@@ -139,7 +139,7 @@ struct ProvenanceEnvelopeTests {
         hardware: sample.identity.hardware),
       hours: sample.hours, exposure: sample.exposure, checkups: sample.checkups)
     let name = ProvenanceEnvelope.exportFileName(for: record)
-    #expect(name == "Candela Provenance AW_34__DW 2026-05-09.candela-provenance.json")
+    #expect(name == "Candela Provenance AW_34_ DW 2026-05-09.candela-provenance.json")
     #expect(!name.contains("Ryder"))
   }
 }

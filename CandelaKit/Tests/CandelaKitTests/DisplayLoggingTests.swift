@@ -36,9 +36,22 @@ struct DisplayLoggingTests {
       != DisplayLogging.tag(for: Self.tripleKey))
   }
 
+  /// Over a 12-character serial the assertion below could not fail: an
+  /// 8-character tag cannot contain it however the tag is built, so a truncating
+  /// implementation that leaked the key outright would still pass. A two-letter
+  /// key is short enough to fit, and the tag is asserted against every prefix of
+  /// it, which is what a truncating implementation would produce.
   @Test func tagCarriesNeitherTheSerialNorTheKey() {
-    let tag = DisplayLogging.tag(for: Self.tripleKey)
-    #expect(!tag.contains(Self.serial))
-    #expect(!tag.contains("MSIMAG341C"))
+    #expect(!DisplayLogging.tag(for: Self.tripleKey).contains(Self.serial))
+    #expect(!DisplayLogging.tag(for: Self.tripleKey).contains("MSIMAG341C"))
+
+    // Lowercase hex, so the assertions below are not passing on a case
+    // mismatch the tag alphabet makes free.
+    let short = "ab"
+    let tag = DisplayLogging.tag(for: short)
+    for length in 1...short.count {
+      #expect(tag != String(short.prefix(length)))
+      #expect(!tag.hasPrefix(String(short.prefix(length))))
+    }
   }
 }

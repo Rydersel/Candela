@@ -438,14 +438,7 @@ private struct MeasurementControls: View {
             // The pref is written whether or not the grant arrives: macOS
             // returns false from the request that merely SHOWS the dialog, so
             // gating the switch on the return value leaves it stuck off.
-            //
-            // Not raised for an un-enrolled display. `reconcileEnrollment` drops
-            // every un-enrolled key, so the prompt would spend a system
-            // permission on a display that is not going to be sampled. Nothing
-            // raises it on enrollment (this switch and guided setup are still
-            // the only two prompting calls in the app), so the recovery is the
-            // missing-grant note below, which names System Settings.
-            if on, prefs.oledCareEnrolled { _ = CGRequestScreenCaptureAccess() }
+            if on { _ = CGRequestScreenCaptureAccess() }
             writer.write(.oledTelemetry) { $0.oledTelemetry = on }
           }
         ))

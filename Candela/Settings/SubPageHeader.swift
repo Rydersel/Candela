@@ -84,6 +84,8 @@ private struct BackButton: View {
     .accessibilityLabel(Text("Back"))
     // The shortcut has no other trace: the button carrying it is zero-size and
     // hidden from accessibility, and the window draws no menu item for it.
-    .help(Text(verbatim: "Command ["))
+    // Spelled out: VoiceOver reads a bare "[" as "left bracket" or skips it
+    // outright, so the punctuation form announces a shortcut nobody can press.
+    .help(Text(verbatim: "Command with the left bracket key"))
   }
 }

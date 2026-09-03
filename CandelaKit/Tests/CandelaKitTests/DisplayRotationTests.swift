@@ -60,7 +60,7 @@ struct DisplayRotationTests {
   @Test func aRotationToADifferentAngleIsApprovedAndCarriesBothEnds() {
     let decision = RotationPolicy.decide(
       display: 2, to: .ninety, in: [display(1), display(2)],
-      currentRotation: .standard, isSupported: true
+      currentRotation: .standard, isSupported: true, isSynthesizedSize: false
     )
     #expect(decision == .rotate(RotationRequest(display: 2, from: .standard, to: .ninety)))
   }
@@ -71,7 +71,7 @@ struct DisplayRotationTests {
   @Test func rotatingToTheAngleItIsAlreadyAtIsRefusedRatherThanApplied() {
     let decision = RotationPolicy.decide(
       display: 2, to: .twoSeventy, in: [display(2)],
-      currentRotation: .twoSeventy, isSupported: true
+      currentRotation: .twoSeventy, isSupported: true, isSynthesizedSize: false
     )
     #expect(decision == .refused(.unchanged(.twoSeventy)))
   }
@@ -79,7 +79,7 @@ struct DisplayRotationTests {
   @Test func aDisplayThatIsNotInTheListIsRefusedAsGone() {
     let decision = RotationPolicy.decide(
       display: 9, to: .ninety, in: [display(1), display(2)],
-      currentRotation: .standard, isSupported: true
+      currentRotation: .standard, isSupported: true, isSynthesizedSize: false
     )
     #expect(decision == .refused(.displayGone))
   }
@@ -93,16 +93,34 @@ struct DisplayRotationTests {
   @Test func aMirrorSlaveIsRefusedWhileItsMasterIsStillRotatable() {
     let set = [display(1), display(2, mirroring: 1)]
     #expect(RotationPolicy.decide(
-      display: 2, to: .ninety, in: set, currentRotation: .standard, isSupported: true
+      display: 2, to: .ninety, in: set, currentRotation: .standard,
+      isSupported: true, isSynthesizedSize: false
     ) == .refused(.mirrored))
     #expect(RotationPolicy.decide(
-      display: 1, to: .ninety, in: set, currentRotation: .standard, isSupported: true
+      display: 1, to: .ninety, in: set, currentRotation: .standard,
+      isSupported: true, isSynthesizedSize: false
     ) == .rotate(RotationRequest(display: 1, from: .standard, to: .ninety)))
     // And a standalone display is unchanged by the new guard.
     #expect(RotationPolicy.decide(
       display: 2, to: .ninety, in: [display(1), display(2)],
-      currentRotation: .standard, isSupported: true
+      currentRotation: .standard, isSupported: true, isSynthesizedSize: false
     ) == .rotate(RotationRequest(display: 2, from: .standard, to: .ninety)))
+  }
+
+  /// A display running a size this app renders sets the raw mirroring flag, so
+  /// without its own arm it would be refused as mirroring and told to look for a
+  /// display it is showing. Same set membership, two different answers, decided
+  /// by the flag the caller states.
+  @Test func aDisplayShowingARenderedSizeIsRefusedForThatRatherThanForMirroring() {
+    let set = [display(1), display(2, mirroring: 1)]
+    #expect(RotationPolicy.decide(
+      display: 2, to: .ninety, in: set, currentRotation: .standard,
+      isSupported: true, isSynthesizedSize: true
+    ) == .refused(.synthesizedSize))
+    #expect(RotationPolicy.decide(
+      display: 2, to: .ninety, in: set, currentRotation: .standard,
+      isSupported: true, isSynthesizedSize: false
+    ) == .refused(.mirrored))
   }
 
   /// A missing current angle reaching the policy: no readable current angle means no honest "from"
@@ -110,7 +128,7 @@ struct DisplayRotationTests {
   @Test func aDisplayWhoseAngleCannotBeReadIsRefusedAsUnreadable() {
     let decision = RotationPolicy.decide(
       display: 2, to: .ninety, in: [display(2)],
-      currentRotation: nil, isSupported: true
+      currentRotation: nil, isSupported: true, isSynthesizedSize: false
     )
     #expect(decision == .refused(.unreadable))
   }
@@ -121,14 +139,15 @@ struct DisplayRotationTests {
     for current in [DisplayRotation.standard, .ninety] {
       let decision = RotationPolicy.decide(
         display: 2, to: .ninety, in: [display(2)],
-        currentRotation: current, isSupported: false
+        currentRotation: current, isSupported: false, isSynthesizedSize: false
       )
       #expect(decision == .refused(.unavailable))
     }
     // Even for a display that is not there: unavailable is the truthful answer,
     // and "which display" is not a question worth asking of a dead API.
     #expect(RotationPolicy.decide(
-      display: 9, to: .ninety, in: [], currentRotation: nil, isSupported: false
+      display: 9, to: .ninety, in: [], currentRotation: nil, isSupported: false,
+      isSynthesizedSize: false
     ) == .refused(.unavailable))
   }
 

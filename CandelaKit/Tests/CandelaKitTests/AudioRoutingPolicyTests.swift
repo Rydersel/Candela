@@ -12,6 +12,42 @@ struct AudioRoutingPolicyTests {
     #expect(AudioRoutingPolicy.normalizedName("") == "")
   }
 
+  /// The counter suffix is all digits, so a parenthesized word survives: people
+  /// name two devices "(left)" and "(right)", and collapsing those to one name
+  /// sends both displays' volume keys wherever the match landed first.
+  @Test func aParenthesizedWordIsPartOfTheNameAndOnlyACounterIsDropped() {
+    #expect(AudioRoutingPolicy.normalizedName("Desk (left)") == "Deskleft")
+    #expect(AudioRoutingPolicy.normalizedName("Desk (right)") == "Deskright")
+    #expect(
+      AudioRoutingPolicy.normalizedName("Desk (left)")
+        != AudioRoutingPolicy.normalizedName("Desk (right)")
+    )
+    #expect(!AudioRoutingPolicy.displayMatchesDevice(
+      deviceName: "Desk (left)", rawDisplayName: "Desk (right)", nameOverride: ""
+    ))
+    // Mixed contents are not a counter either.
+    #expect(AudioRoutingPolicy.normalizedName("Studio (2b)") == "Studio2b")
+    #expect(AudioRoutingPolicy.normalizedName("Studio ()") == "Studio")
+    // CoreAudio's counter is ASCII. `isNumber` alone is true of every numeric
+    // scalar Unicode has, so a device named with Eastern Arabic digits lost its
+    // group and collided with the neighbour it was named apart from.
+    #expect(AudioRoutingPolicy.normalizedName("Desk (٢)") == "Desk٢")
+    #expect(
+      AudioRoutingPolicy.normalizedName("Desk (٢)")
+        != AudioRoutingPolicy.normalizedName("Desk (٣)")
+    )
+  }
+
+  /// A model name can end in a number, so a bare trailing digit group stays: the
+  /// two sizes of one product line are different displays.
+  @Test func aBareTrailingNumberIsPartOfTheModelName() {
+    #expect(AudioRoutingPolicy.normalizedName("UltraFine 27") == "UltraFine27")
+    #expect(AudioRoutingPolicy.normalizedName("UltraFine 32") == "UltraFine32")
+    #expect(!AudioRoutingPolicy.displayMatchesDevice(
+      deviceName: "UltraFine 27", rawDisplayName: "UltraFine 32", nameOverride: ""
+    ))
+  }
+
   /// The digit strip this replaced turned every "MAG n41C" into "MAGC", so a
   /// press aimed at one panel of a family could land on its sibling.
   @Test func sameFamilyPanelsDoNotCollide() {

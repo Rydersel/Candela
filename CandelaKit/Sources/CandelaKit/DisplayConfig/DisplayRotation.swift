@@ -62,6 +62,12 @@ public enum RotationRefusal: Sendable, Equatable {
   /// `ModeReapplyPolicy` already defers on; `ArrangementPlan` refuses the same
   /// display by another route.
   case mirrored
+  /// The display is running a size the app renders for it, which is a mirror
+  /// pairing onto a virtual display. Mechanically a slave, so it is refused for
+  /// `mirrored`'s reason, but it gets its own case because the user mirrored
+  /// nothing: naming the other display would name one they do not have, and the
+  /// way out is the size control rather than a mirroring control.
+  case synthesizedSize
 }
 
 /// A rotation that policy has approved. Carries `from` because the revert path
@@ -86,13 +92,18 @@ public enum RotationDecision: Sendable, Equatable {
 /// The whole decision, in one pure function, for the same reason
 /// `MirrorTopologyPolicy` is one: it is the part worth testing exhaustively, and
 /// it must not be able to drift from what the UI claims.
+///
+/// `isSynthesizedSize` arrives as a flag rather than being derived here: the
+/// pairing lives in `MirrorTopology`, which this decision does not take, and a
+/// caller that has to state it cannot silently inherit the raw mirroring answer.
 public enum RotationPolicy {
   public static func decide(
     display: CGDirectDisplayID,
     to requested: DisplayRotation,
     in displays: [ConfiguredDisplay],
     currentRotation: DisplayRotation?,
-    isSupported: Bool
+    isSupported: Bool,
+    isSynthesizedSize: Bool
   ) -> RotationDecision {
     guard isSupported else { return .refused(.unavailable) }
     guard let entry = displays.first(where: { $0.id == display }) else {
@@ -100,6 +111,10 @@ public enum RotationPolicy {
     }
     // Ahead of the angle questions: a slave's reported angle is readable and a
     // request against it looks ordinary, which is how this reached the apply.
+    // The synthesis arm first, because such a display is also a raw slave and
+    // the mirroring answer would send the user looking for a display they never
+    // paired.
+    if isSynthesizedSize { return .refused(.synthesizedSize) }
     guard !entry.isMirrorSlave else { return .refused(.mirrored) }
     guard let current = currentRotation else { return .refused(.unreadable) }
     guard current != requested else { return .refused(.unchanged(current)) }

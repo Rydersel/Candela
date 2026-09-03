@@ -229,11 +229,21 @@ struct PanelView: View {
 
   /// Which pane holds the switch that brings a hidden display back. The
   /// built-in's lives on Menu Bar and an external's on the display's own page,
-  /// so one sentence cannot serve both.
-  static func unhideHint(hasExternals: Bool) -> String {
-    hasExternals
-      ? "Show one again in Settings → Displays."
-      : "Show it again in Settings → Menu Bar."
+  /// so one sentence cannot serve both, and a rig with both kinds hidden needs
+  /// both named: pointing only at Displays sends a clamshell user looking for a
+  /// switch that is not there.
+  static func unhideHint(builtInHidden: Bool, externalsHidden: Bool) -> String {
+    switch (builtInHidden, externalsHidden) {
+    case (true, true):
+      "Show them again in Settings → Menu Bar and Settings → Displays."
+    case (true, false):
+      "Show it again in Settings → Menu Bar."
+    case (false, true):
+      "Show one again in Settings → Displays."
+    default:
+      // (false, false): nothing is hidden, so nothing asked this question.
+      "Show one again in Settings → Displays."
+    }
   }
 
   /// Two empties: nothing attached is a hardware fact, everything hidden is
@@ -250,7 +260,12 @@ struct PanelView: View {
         )
       } else {
         Text("Every display is hidden")
-        emptyCaption(Self.unhideHint(hasExternals: !model.displays.isEmpty))
+        // Nothing is visible in this branch, so every display that EXISTS is a
+        // display that is hidden.
+        emptyCaption(Self.unhideHint(
+          builtInHidden: model.builtIn != nil && !Self.showsBuiltIn(model),
+          externalsHidden: !model.displays.isEmpty
+        ))
       }
     }
     .font(.system(size: 13))
@@ -322,8 +337,12 @@ struct PanelView: View {
         // No window can take focus while a menu tracking session runs, so
         // without this System Settings opens behind whatever is frontmost. Same
         // constraint `SettingsOpener` states for the footer's gear.
+        //
+        // Queued rather than called straight after, the shape both sibling
+        // buttons use: `endTracking` asks the session to end, and a synchronous
+        // open on the next line still runs inside it.
         PanelMenu.endTracking()
-        AccessibilityPermission.openSystemSettings()
+        Task { @MainActor in AccessibilityPermission.openSystemSettings() }
       }
       .buttonStyle(.link)
       .font(.system(size: 12))
@@ -451,10 +470,35 @@ extension PanelView {
   ) -> String? {
     guard !isHDREngaged else { return nil }
     if capabilityProbed, !supportsHDR {
-      return DiagnosticsCopy.hdrNoAnswer(app: AppInfo.productName)
+      return Self.hdrNoModesCaption
     }
     guard isShowingSynthesizedSize else { return nil }
     return SynthesisCopy.hdrBlockedBySynthesizedSize
+  }
+
+  /// The panel's own sentence for a display that reports no HDR modes. Not
+  /// `DiagnosticsCopy.hdrNoAnswer`, which is written for a row that goes on to
+  /// give both causes: on its own "has no HDR answer" reads as the app not
+  /// knowing rather than as the display having nothing to offer.
+  static let hdrNoModesCaption = "No HDR modes were found for this display."
+
+  /// Whether the panel's HDR button is live. The unprobed reading is grey, which
+  /// is what shipped before the caption existed: `supportsHDR` is false until the
+  /// async refresh answers, so a button enabled on that reading is one a click
+  /// reaches a moment before the app knows whether the display has HDR at all.
+  /// Grey and uncaptioned for that moment, then the probe brings both.
+  ///
+  /// The engaged escape outranks all of it, the same asymmetry `hdrRefusalReason`
+  /// keeps: with HDR live this button IS the way out, and a way out that greys
+  /// itself in the state it exists to leave is not one. A panel swap drops the
+  /// probe flag while the engaged and capability caches still answer for the
+  /// display that left, so without this arm the exit went grey for the length of
+  /// the reconfiguration refresh.
+  static func hdrButtonIsEnabled(
+    isHDREngaged: Bool, capabilityProbed: Bool, supportsHDR: Bool, refusalReason: String?
+  ) -> Bool {
+    if isHDREngaged { return true }
+    return capabilityProbed && supportsHDR && refusalReason == nil
   }
 }
 
@@ -553,9 +597,14 @@ private struct DisplayHeaderRow: View {
     // status item), which would leave a phantom highlight on the next open.
     .onDisappear { isHovering = false }
     .fixedSize()
-    // Disable, don't hide, on non-HDR displays. `supportsHDR` is
+    // Disable, don't hide, on non-HDR displays. Both flags are
     // observation-tracked, so the button enables when the async refresh lands.
-    .disabled(!controller.supportsHDR || refusalReason != nil)
+    .disabled(!PanelView.hdrButtonIsEnabled(
+      isHDREngaged: controller.isHDREngaged,
+      capabilityProbed: controller.hdrCapabilityProbed,
+      supportsHDR: controller.supportsHDR,
+      refusalReason: refusalReason
+    ))
     // No `.help`: the panel delivers no tooltip at all, enabled controls
     // included. Menu tracking is the cause, not the greying next door.
     .accessibilityLabel("\(displayName) HDR mode")

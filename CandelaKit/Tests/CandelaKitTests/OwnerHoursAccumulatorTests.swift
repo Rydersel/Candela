@@ -175,18 +175,46 @@ struct OwnerHoursAccumulatorTests {
 
   /// The store is rewritten every five minutes and never forgets an app, so
   /// without a cap the prefs blob grows for the life of the machine. The fold
-  /// keeps the per-owner seconds summing to the total.
+  /// keeps the per-owner seconds plus the folded field summing to the total.
   @Test func encodingKeepsTheHeaviestOwnersAndFoldsTheRest() throws {
     let hours = sixtyOwners()
     let decoded = try JSONDecoder().decode(OwnerHours.self, from: JSONEncoder().encode(hours))
 
-    #expect(decoded.secondsByOwner.count == OwnerHours.storedOwnerLimit + 1)
+    // Exactly the limit: the fold is a field of its own, not a 51st owner.
+    #expect(decoded.secondsByOwner.count == OwnerHours.storedOwnerLimit)
     // App00...App09 carry 1 through 10 seconds, so they are the ten dropped.
     let dropped = (1...10).reduce(0.0) { $0 + Double($1) }
-    #expect(abs(decoded.secondsByOwner[OwnerHours.foldedOwnerKey]! - dropped) < 0.0001)
+    #expect(abs(decoded.foldedSeconds - dropped) < 0.0001)
     #expect(decoded.secondsByOwner["App59"] == 60)
     #expect(decoded.totalSeconds == hours.totalSeconds)
-    #expect(abs(decoded.secondsByOwner.values.reduce(0, +) - hours.totalSeconds) < 0.0001)
+    #expect(
+      abs(decoded.secondsByOwner.values.reduce(0, +) + decoded.foldedSeconds - hours.totalSeconds)
+        < 0.0001
+    )
+  }
+
+  /// A store written before the fold had a field of its own carries it under an
+  /// owner key, and a build that did not filter that key drew it as the heaviest
+  /// app on the display. It is migrated out on decode and never written back.
+  @Test func aLegacyFoldedBucketIsMigratedOutOfTheOwnerList() throws {
+    let legacy: [String: Any] = [
+      "schemaVersion": OledStoreSchema.currentVersion,
+      "secondsByOwner": ["other/apps": 7200.0, "Slack": 3600.0],
+      "totalSeconds": 10800.0,
+    ]
+    let data = try JSONSerialization.data(withJSONObject: legacy)
+    let decoded = try JSONDecoder().decode(OwnerHours.self, from: data)
+
+    #expect(decoded.secondsByOwner == ["Slack": 3600])
+    #expect(decoded.foldedSeconds == 7200)
+    #expect(decoded.totalSeconds == 10800)
+    #expect(decoded.topOwners(limit: 5).map(\.owner) == ["Slack"])
+
+    // And it does not come back on the next write.
+    let rewritten = try JSONSerialization.jsonObject(
+      with: JSONEncoder().encode(decoded)) as? [String: Any]
+    let owners = try #require(rewritten?["secondsByOwner"] as? [String: Double])
+    #expect(owners["other/apps"] == nil)
   }
 
   /// Every five-minute write re-encodes what the last one wrote, so a fold that
@@ -197,10 +225,11 @@ struct OwnerHoursAccumulatorTests {
     #expect(twice == once)
   }
 
-  /// The bucket is a storage detail, and its key is not a name any app can have.
+  /// The fold is a storage detail and lives outside the owner map, so the owner
+  /// list needs no filter to keep it off screen: there is nothing there to skip.
   @Test func theFoldedBucketNeverReachesTheOwnerList() {
     let hours = OwnerHours(
-      secondsByOwner: [OwnerHours.foldedOwnerKey: 7200, "Slack": 3600], totalSeconds: 10800)
+      secondsByOwner: ["Slack": 3600], totalSeconds: 10800, foldedSeconds: 7200)
     #expect(hours.topOwners(limit: 5).map(\.owner) == ["Slack"])
   }
 }

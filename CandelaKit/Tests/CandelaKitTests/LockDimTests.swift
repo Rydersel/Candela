@@ -408,12 +408,16 @@ struct LockDimTests {
   }
 
   /// Three settings surfaces each picked their own staleness number, one of them
-  /// disagreeing with its own comment. Both windows are multiples of the
+  /// disagreeing with its own comment. Both windows are derived from the
   /// sampling interval now, and the stall warning's copy says "over 10 minutes".
+  ///
+  /// The liveness window sits BETWEEN captures rather than on one: at exactly
+  /// two intervals a single skipped capture put the dot out.
   @Test func stalenessWindowsAreMultiplesOfTheSamplingInterval() {
     #expect(OledCareCadence.sampling == .seconds(60))
     #expect(OledCareCadence.samplingSeconds == 60)
-    #expect(OledCareCadence.livenessWindowSeconds == 120)
+    #expect(OledCareCadence.livenessWindowSeconds == 150)
+    #expect(OledCareCadence.livenessWindowSeconds > 2 * OledCareCadence.samplingSeconds)
     #expect(OledCareCadence.stallWarningSeconds == 600)
   }
 

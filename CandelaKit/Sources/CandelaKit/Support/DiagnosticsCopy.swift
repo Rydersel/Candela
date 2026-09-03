@@ -496,10 +496,13 @@ public enum DiagnosticsCopy {
     return "Available"
   }
 
-  /// The claim itself, without the diagnostics row's verdict prefix or its two
-  /// causes: the menu-bar panel's greyed HDR button captions itself with this, and a
-  /// 280 pt row has no space for the full sentence. Shared rather than restated so
-  /// the surface a person meets first cannot drift from the one they meet second.
+  /// The claim itself, without the verdict prefix or its two causes. Extracted
+  /// so `hdrAvailability` states it once, and kept a separate builder because
+  /// the row it feeds is pinned on the exact sentence.
+  ///
+  /// The menu-bar panel does NOT use this: on a 280 pt row "has no HDR answer"
+  /// reads as the app not knowing, with none of the two causes below to explain
+  /// what it means. The panel names the observation instead.
   public static func hdrNoAnswer(app: String) -> String {
     "\(app) has no HDR answer for this display."
   }

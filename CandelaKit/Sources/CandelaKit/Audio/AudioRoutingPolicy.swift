@@ -6,12 +6,25 @@ public enum AudioRoutingPolicy {
   ///
   /// Diverges from the fork's DisplayManager.normalizedName on purpose: the fork
   /// also stripped every digit, which collapsed "MAG 341C" and "MAG 271C" to the
-  /// same string and routed one panel's volume keys at the other.
+  /// same string and routed one panel's volume keys at the other. A trailing
+  /// number that is not parenthesized is part of the model name for the same
+  /// reason: "UltraFine 27" and "UltraFine 32" are two displays.
+  ///
+  /// The parenthesized group goes only when its contents are ALL digits, which
+  /// is the shape CoreAudio's counter has. People name devices "Desk (left)" and
+  /// "Desk (right)", and a rule that dropped every trailing group made those one
+  /// device and routed the keys at whichever answered first.
   public static func normalizedName(_ name: String) -> String {
     var head = Substring(name)
     while head.last == " " { head = head.dropLast() }
     if head.last == ")", let open = head.lastIndex(of: "(") {
-      head = head[head.startIndex ..< open]
+      let contents = head[head.index(after: open) ..< head.index(before: head.endIndex)]
+      // `isASCII` as well as `isNumber`: the latter is true of every numeric
+      // scalar Unicode knows, so a device named with Eastern Arabic or fullwidth
+      // digits would lose its group and collide with its neighbour.
+      if !contents.isEmpty, contents.allSatisfy({ $0.isASCII && $0.isNumber }) {
+        head = head[head.startIndex ..< open]
+      }
     }
     return String(head.filter { !"() ".contains($0) })
   }

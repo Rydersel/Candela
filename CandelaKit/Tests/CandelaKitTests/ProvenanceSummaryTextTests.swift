@@ -135,7 +135,7 @@ struct ProvenanceSummaryTextTests {
       Runs: 1
       Not observed: 1
       Observed: 2
-      2026-05-09: 1 observed, 1 refused, 0 not observed on this panel class, 0 self-reported, control detected at 4 px
+      2026-05-09: 1 observed, 1 refused, 0 not observed, 0 self-reported, control detected at 4 px
       """
     #expect(ProvenanceSummaryText.render(try Self.fullRecord()) == expected)
   }

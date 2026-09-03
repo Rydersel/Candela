@@ -399,15 +399,17 @@ struct VirtualDisplaysPane: View {
       }
     }
     SettingsCardDivider()
-    SettingRow("Width and height can each be 320 to 8192.") {
+    SettingRow(caption: SettingsCaption(verbatim: Self.sizeRangeCaption)) {
       HStack {
         Text("Width and Height")
         Spacer()
         numberField(slot: slot, label: "Width", name: .virtualSlotWidth,
+                    maximum: VirtualDisplayIdentity.maxPixels.wide,
                     get: { $0.width }, set: { $0.width = $1 })
           .prefIdentifier(.virtualSlotWidth, slot: slot)
         Text("x").foregroundStyle(SettingsTheme.faintColor)
         numberField(slot: slot, label: "Height", name: .virtualSlotHeight,
+                    maximum: VirtualDisplayIdentity.maxPixels.high,
                     get: { $0.height }, set: { $0.height = $1 })
           .prefIdentifier(.virtualSlotHeight, slot: slot)
       }
@@ -421,17 +423,33 @@ struct VirtualDisplaysPane: View {
     }
   }
 
+  /// Read off the ceiling the engine clamps to, per axis, so the sentence cannot
+  /// go on promising a height the create path would quietly cut back. The Retina
+  /// half comes off the same constants: the mode is drawn at twice the logical
+  /// size, so it is the doubled size that has to fit the ceiling.
+  static var sizeRangeCaption: String {
+    let (wide, high) = VirtualDisplayIdentity.maxPixels
+    return "Width can be \(minimumPixels) to \(wide), height \(minimumPixels) to \(high); "
+      + "Retina is only available up to \(wide / 2) by \(high / 2), because the display is drawn at double the size."
+  }
+
+  /// Floors the value at something a desktop fits on. Ours, not the engine's:
+  /// `normalized` has no lower bound of its own.
+  static let minimumPixels = 320
+
   private func numberField(
-    slot: Int, label: String, name: PrefName,
+    slot: Int, label: String, name: PrefName, maximum: Int,
     get: @escaping (VirtualSlotDefinition) -> Int,
     set: @escaping (inout VirtualSlotDefinition, Int) -> Void
   ) -> some View {
     CommitOnBlurField(
       stored: { String(get(prefs.virtualSlot(slot))) },
       commit: { text in
-        // 320 floors the value at something a desktop fits on. The engine
-        // still normalizes to even and clamps to the pixel ceiling on create.
-        guard let value = Int(text), (320 ... 8192).contains(value) else { return }
+        // The engine still normalizes to even and clamps to the pixel ceiling on
+        // create; this keeps the field from accepting a number that would be
+        // silently cut back to a different display than the one typed.
+        guard let value = Int(text),
+              (Self.minimumPixels ... maximum).contains(value) else { return }
         var updated = prefs.virtualSlot(slot)
         set(&updated, value)
         prefs.setVirtualSlot(updated, slot: slot)

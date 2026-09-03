@@ -679,11 +679,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // hung teardown fall through to mach-port reclaim.
       let finished = DispatchSemaphore(value: 0)
       // The ceiling is derived from the work it bounds, not chosen next to it: a
-      // second literal drifts from the departure timeout it is meant to cover,
-      // and the old one held main for 4 s over a poll that could not run that
-      // long. One poll per live slot, plus a margin for the teardown itself.
+      // second literal drifts from the departure timeout it is meant to cover.
+      // Each slot costs a poll PLUS a full CG configuration transaction, since
+      // `destroy` breaks the mirrors this display masters before it polls, so
+      // the per-slot budget carries a margin for that transaction. Floored at
+      // the 4 s the old literal gave, which no teardown may come in under.
       let departureTimeout: TimeInterval = 1.5
-      let ceiling = departureTimeout * Double(max(1, virtualDisplayHost.live().count)) + 0.25
+      let ceiling = max(4, (departureTimeout + 0.75) * Double(max(1, virtualDisplayHost.live().count)))
       DispatchQueue.global(qos: .userInitiated).async {
         virtualDisplayHost.destroyAll(departureTimeout: departureTimeout)
         finished.signal()
@@ -960,6 +962,15 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // combined-mode dimming at quit, and safe mode never installed any, so
     // skipping it leaves the monitor where the user last put it.
     guard !isSafeMode else { return }
+    // Whether either leg actually SUBMITTED anything, read off the submission
+    // counter rather than inferred: `restoreFullRangeDDC` returns early on the
+    // native path, under forced software, and on a display whose DDC brightness
+    // is turned off, so a display list is no evidence that a write exists.
+    // Marked BEFORE the lock-dim release, not between the two: on an HDR
+    // display the release submits through the native leg and the restore below
+    // returns at its own native guard, so a mark taken after it would see no
+    // movement and skip the settle nap over a write still in flight.
+    let marks = model.displays.map { ($0, $0.controller.submissionMark()) }
     // AFTER the gamma reset and shade removal, which tear the software surfaces
     // down unconditionally, so the restore below leaves the user's value on a
     // clean surface. BEFORE the full-range restore: quitting while a display is
@@ -967,16 +978,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // `restoreFullRangeDDC` returns early on the native path, which is exactly
     // where an HDR display's lock dim lives.
     model.oledCare.endAllLockDims()
-    // Whether the restore actually SUBMITTED anything, read off the submission
-    // counter rather than inferred: `restoreFullRangeDDC` returns early on the
-    // native path, under forced software, and on a display whose DDC brightness
-    // is turned off, so a display list is no evidence that a write exists.
     var submittedRestore = false
-    for state in model.displays {
+    for (state, mark) in marks {
       // Quitting while DisplayManager is suspended (mid-reconfigure or asleep)
       // silently drops this at the epoch gate. Best-effort is the
       // restore-choreography contract.
-      let mark = state.controller.submissionMark()
       state.controller.restoreFullRangeDDC()
       submittedRestore = submittedRestore || state.controller.submissionMark() != mark
     }
