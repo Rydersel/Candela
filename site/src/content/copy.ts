@@ -336,6 +336,10 @@ export const faq: Array<{ q: string; a: string }> = [
     a: "MonitorControl handles daily controls well, while BetterDisplay is a deeper display toolbox. Candela's difference is the care layer: exposure maps, active OLED protection, checkups, and a record of panel use. If you run two display utilities, let only one control a panel's hardware settings.",
   },
   {
+    q: "My monitor has its own OLED care. Isn't that enough?",
+    a: "Keep it on; Candela never touches it. Pixel shift, static-screen dimming and the refresh cycle are the only protections that run inside the panel. But the monitor only sees a video signal. It cannot tell your Dock from a still photo, whether you are at the desk, or which display you are looking at, so it has to dim cautiously, and it keeps no record you can read. Candela works from what the Mac knows, so it can protect harder without getting in your way, and it shows you where the wear is going. Seatbelt and airbag: different situations, and you want both.",
+  },
+  {
     q: "What do I need to run it?",
     a: "macOS 14 Sonoma or later on an Apple Silicon Mac. Most DisplayPort, HDMI and USB-C connections carry the display controls Candela needs, but some docks and adapters block them. Diagnostics shows what each connected display supports.",
   },
