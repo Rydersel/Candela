@@ -269,8 +269,16 @@ struct DisplayHeroView: View {
   @ViewBuilder private var volumeLevelRow: some View {
     if variant == .external, state.volume.isAvailable {
       SettingsCardDivider()
-      levelRow(label: "Volume", caption: nil) { volumeSlider }
+      levelRow(label: "Volume", caption: volumeDisabledReason) { volumeSlider }
     }
+  }
+
+  /// Why the volume slider is refusing input, nil while it takes it. Shown as
+  /// the row's caption rather than only as a tooltip: a greyed control whose
+  /// reason is reachable only by hovering is a greyed control with no reason at
+  /// all for anyone who does not hover.
+  private var volumeDisabledReason: String? {
+    model.volumeSliderDisabledReason(state, displayName: name)
   }
 
   /// Not `SettingRow`: that publishes its caption as the control's accessibility
@@ -329,15 +337,24 @@ struct DisplayHeroView: View {
     ValueSliderRow(
       controller: state.volume,
       systemImage: "speaker.wave.2.fill",
-      accessibilityLabel: "\(name) volume",
+      // Contract 3 again: the caption beside this row is accessibility-hidden,
+      // so the reason has to ride in the label or VoiceOver gets a dimmed
+      // slider with no cause.
+      accessibilityLabel: volumeAccessibilityLabel,
       snapsToStops: appPrefs.enableSliderSnap,
       showsPercent: appPrefs.enableSliderPercent,
       mutedSystemImage: "speaker.slash.fill"
     )
-    .disabled(!model.volumeSliderEnabled(state))
     // Never greyed by CoreAudio. The monitor's own denial is only ONE of
-    // the two causes, so the reason comes from the policy that decided.
-    .help(model.volumeSliderDisabledReason(state, displayName: name) ?? "")
+    // the two causes, so the reason comes from the policy that decided, and it
+    // is drawn rather than hovered: `.help("")` on the enabled slider installed
+    // an empty tooltip on a control with nothing to explain.
+    .disabled(!model.volumeSliderEnabled(state))
+  }
+
+  private var volumeAccessibilityLabel: String {
+    guard let reason = volumeDisabledReason else { return "\(name) volume" }
+    return "\(name) volume. \(reason)"
   }
 
   /// Above black-screen for the keyboard and VoiceOver routes only (a11y

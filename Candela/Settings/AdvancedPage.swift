@@ -275,12 +275,16 @@ struct AdvancedPage: View {
 
   // MARK: - Combined Dimming
 
-  /// Greys with the other sections, with no carve-out. The handoff
-  /// point is reachable only from `.combined` and `.softwareOnly`, and both
-  /// blocked states route elsewhere: `.hardwareControlOff` to `.software`,
-  /// `.macOSDrivesBrightness` to `.native`. A live control here would be the
-  /// "looks functional while `ddcTrafficBlock` voids it" case the greying
+  /// The per-display handoff point greys with the other sections: it is
+  /// reachable only from `.combined` and `.softwareOnly`, and both blocked
+  /// states route elsewhere (`.hardwareControlOff` to `.software`,
+  /// `.macOSDrivesBrightness` to `.native`), so a live control there would be
+  /// the "looks functional while `ddcTrafficBlock` voids it" case the greying
   /// rule forbids.
+  ///
+  /// The enabler in the other branch does NOT grey. It writes an app-level
+  /// pref that applies to every display, and one display's blocked wire is no
+  /// reason to withhold a global switch.
   @ViewBuilder private var combinedDimmingSection: some View {
     SettingsCardSection(title: "Combined Dimming") {
       if appPrefs.combinedBrightness {
@@ -340,11 +344,11 @@ struct AdvancedPage: View {
           .buttonStyle(SettingsSecondaryButtonStyle())
           .accessibilityLabel("Turn On Dim Past the Display's Minimum")
           .prefIdentifier(.disableCombinedBrightness)
-          .disabled(isBlocked)
         }
       }
     }
-    .disabled(isBlocked)
+    // The handoff branch only. The enabler branch stays live under a block.
+    .disabled(isBlocked && appPrefs.combinedBrightness)
   }
 
   /// The engine's own range, never a literal pair: `DisplayPrefs` clamps writes
@@ -425,7 +429,9 @@ struct AdvancedPage: View {
           .prefIdentifier(.pollingCount, persistenceKey: persistenceKey)
         }
       } else {
-        // The same read-only-with-an-inline-enabler shape as Combined Dimming above.
+        // The same read-only-with-an-inline-enabler shape as Combined Dimming
+        // above, and ungreyed for the same reason: `startupAction` is app-level,
+        // so this display's blocked wire is no reason to withhold it.
         LabeledContent("Startup readback", value: "Off")
         SettingsCardDivider()
         SettingRow("A global setting: applies to every display.") {
@@ -436,11 +442,11 @@ struct AdvancedPage: View {
           .buttonStyle(SettingsSecondaryButtonStyle())
           .accessibilityLabel("Ask the Display at Startup")
           .prefIdentifier(.startupAction)
-          .disabled(isBlocked)
         }
       }
     }
-    .disabled(isBlocked)
+    // The retries branch only. The enabler branch stays live under a block.
+    .disabled(isBlocked && appPrefs.startupAction == .read)
   }
 
   /// NOT `DDCReadEvidence.worst(...)`: worst-wins folds a display whose
@@ -476,7 +482,10 @@ struct AdvancedPage: View {
         .accessibilityIdentifier("action.restoreAdvanced.\(persistenceKey)")
         .alert("Restore this display's advanced settings?", isPresented: $confirmingRestore) {
           Button("Restore", role: .destructive) { restoreAdvancedDefaults() }
+          // Cancel takes Return: without the explicit shortcut the destructive
+          // button holds the primary role.
           Button("Cancel", role: .cancel) {}
+            .keyboardShortcut(.defaultAction)
         } message: {
           // Names the scope in plain terms, including the unmute.
           Text("This turns hardware control and the volume indicator back on for \(state.display.name), switches software dimming back from a screen overlay to the color profile, clears its command tuning, control codes and response curves, and returns the dimming handoff and readback retries to their defaults. A display left muted in hardware is unmuted too, unless it is in HDR mode. Nothing else about this display changes.")

@@ -22,6 +22,12 @@ struct BannerRegion: View {
   @Environment(SettingsActions.self) private var actions
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+  /// Measured by `measureDomainFreshness()`, never in `body`. Re-measured on
+  /// the display change and on `prefsRevision`, which is every event that can
+  /// flip it: both resets bump it, so a wiped domain reads as fresh again
+  /// rather than staying stale behind a cache.
+  @State private var domainIsFresh: Bool?
+
   private var persistenceKey: String { state.display.persistenceKey }
   private var displayID: CGDirectDisplayID { state.display.id }
   private var coordinator: DisplayModeCoordinator { model.displayModes }
@@ -34,8 +40,8 @@ struct BannerRegion: View {
     // `DisplayPrefs` is plain UserDefaults, not observable; this re-runs the
     // strand and first-sight checks after a write anywhere.
     let _ = model.prefsRevision
-    // Read once and handed down: `hasAnyStoredValue` materialises the whole
-    // UserDefaults dictionary, and this region re-renders every countdown second.
+    // Read once and handed down, so the animation key and the rendered card
+    // cannot disagree.
     let cards = visibleCards
     // Spacing per card, not on the stack: a padded container would leave dead
     // space when every banner is absent, the usual state here.
@@ -58,6 +64,9 @@ struct BannerRegion: View {
       guard !isMuted, case .failed = model.muteRecoveryPhases[persistenceKey] else { return }
       model.setMuteRecoveryPhase(nil, for: persistenceKey)
     }
+    .onAppear { measureDomainFreshness() }
+    .onChange(of: persistenceKey) { _, _ in measureDomainFreshness() }
+    .onChange(of: model.prefsRevision) { _, _ in measureDomainFreshness() }
   }
 
   /// One banner's chrome, in the same content column as the page below. Applied
@@ -422,7 +431,18 @@ struct BannerRegion: View {
     // launch.
     persistenceKey != "builtIn"
       && !model.dismissedFirstSightKeys.contains(persistenceKey)
-      && !DisplayPrefs.hasAnyStoredValue(forKey: persistenceKey)
+      && domainIsFresh == true
+  }
+
+  /// Whether this display's prefs domain is empty, or nil until measured.
+  ///
+  /// `hasAnyStoredValue` materialises the whole UserDefaults dictionary and
+  /// scans it by suffix, and this region renders on two placements and
+  /// re-evaluates every countdown second, so it cannot run from `body`. nil
+  /// draws no banner: erring to silent for one frame beats flashing "first time
+  /// seeing this display" at a display that has settings.
+  private func measureDomainFreshness() {
+    domainIsFresh = !DisplayPrefs.hasAnyStoredValue(forKey: persistenceKey)
   }
 }
 

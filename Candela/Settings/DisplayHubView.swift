@@ -479,14 +479,28 @@ struct DisplayHubView: View {
   }
 
   /// Mirrors what the key path consults, so this row cannot say "On" about keys
-  /// that would move nothing. Two unavailability signals and either is enough:
-  /// `volume.isAvailable` is the pref side, `volumeSliderEnabled` is the
-  /// monitor's own denial. The Dell answers its capabilities with no VCP 0x62,
-  /// and "On" there would contradict the greyed slider two sections up.
+  /// that would move nothing, and names WHICH switch turned them off.
+  ///
+  /// The gates stay the two the key path reads, `volume.isAvailable` and
+  /// `volumeSliderEnabled`; only the WORDING is split, and the split reads the
+  /// prefs those two are built from rather than a second copy of their rule.
+  /// Three of the four causes are a switch in this app: hardware control off and
+  /// the volume command's own switch behind the first gate, "Always disabled"
+  /// behind the second. What is left of the second, the capabilities string
+  /// parsing cleanly with no VCP 0x62, is the display itself refusing, and
+  /// it is the only one worth reporting as the hardware's doing: telling a user
+  /// who set the switch themselves that their monitor said no sends them after a
+  /// cable.
   private var volumeKeysStatus: String {
-    if !state.volume.isAvailable || !model.volumeSliderEnabled(state) {
-      return "Not available on this display"
+    if !state.volume.isAvailable {
+      return prefs.forceSoftware
+        ? "Off: hardware control is off"
+        : "Off: the volume command is off"
     }
+    if prefs.audioSinkOverride == .forceNone {
+      return "Off: the volume slider is set to Always disabled"
+    }
+    if !model.volumeSliderEnabled(state) { return "Not available on this display" }
     if prefs.isDisabled { return "Off" }
     let mode = prefs.keyboardVolume
     let active = KeyModePolicy.watchesMediaKeys(mode) || KeyModePolicy.firesCustomShortcuts(mode)
@@ -655,7 +669,10 @@ struct DisplayHubView: View {
           .disabled(model.isResetting)
           .alert("Reset the settings for this display?", isPresented: $confirmingReset) {
             Button("Reset", role: .destructive) { resetDisplay() }
+            // Cancel takes Return: without the explicit shortcut the destructive
+            // button holds the primary role.
             Button("Cancel", role: .cancel) {}
+              .keyboardShortcut(.defaultAction)
           } message: {
             // Names the Advanced-page work explicitly, and names what is
             // NOT lost: the saved levels are the only source of truth on a
@@ -663,7 +680,7 @@ struct DisplayHubView: View {
             // at an unknown brightness. The pinned resolution and rotation are
             // macOS-visible state this button leaves alone, and counted hours are
             // wear data.
-            Text("This unmutes \(state.display.name), turns HDR off while it runs, and clears its \(AppInfo.productName) settings: name, menu bar visibility, keyboard, sound, OLED care, \(SynthesisCopy.optInTitle), and everything under Advanced, including control-code remaps and response curves. A size \(AppInfo.productName) was rendering for this display is taken down first, so the display goes back to one of its own; if that does not finish, the page says so and the rest of the reset still runs. HDR that was turned on in System Settings goes back on at the end. If the display cannot be reached at the time, nothing is sent to it that cannot be confirmed, so some of these may be left for you to change yourself. Saved brightness, volume and contrast levels are kept, and so are its counted hours of use. The remembered resolution and rotation are not changed.")
+            Text("This display is put into a known state first: \(state.display.name) is unmuted and HDR goes off while the reset runs. A size \(AppInfo.productName) was rendering for this display is taken down before that, so the display goes back to one of its own; if that does not finish, the page says so and the rest of the reset still runs. HDR that was turned on in System Settings goes back on at the end. If the display cannot be reached at the time, nothing is sent to it that cannot be confirmed, so some of these may be left for you to change yourself.\n\nThen its \(AppInfo.productName) settings are cleared: name, menu bar visibility, keyboard, sound, OLED care, \(SynthesisCopy.optInTitle), and everything under Advanced, including control-code remaps and response curves.\n\nSaved brightness, volume and contrast levels are kept, and so are its counted hours of use. The remembered resolution and rotation are not changed.")
           }
         Spacer(minLength: 0)
       }
