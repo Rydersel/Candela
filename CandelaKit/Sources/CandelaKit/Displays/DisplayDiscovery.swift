@@ -59,6 +59,10 @@ public enum DisplayDiscovery {
   /// fallback triple collides more easily when the serial is 0, so twins would
   /// share saved brightness. The fork disambiguated with CGDirectDisplayID at
   /// the cost of stability across ports and reboots.
+  ///
+  /// The fallback embeds the panel's serial number, so this value never goes
+  /// into a log at `.public` or into the diagnostics report. Log
+  /// `DisplayLogging.tag(for:)` instead.
   static func persistenceKey(from service: Arm64DDC.IOregService) -> String {
     if !service.edidUUID.isEmpty {
       return service.edidUUID

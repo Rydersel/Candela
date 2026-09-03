@@ -1819,8 +1819,8 @@ final class OledCareCoordinator: CheckupCareHolding {
     // safe mode, no sampling pass will carry this key to disk.
     saveExposureHistory(for: key)
     log.info("""
-    checkup showing booked: \(key, privacy: .public) \(luminance, privacy: .public) \
-    \(seconds, privacy: .public)s
+    checkup showing booked: \(DisplayLogging.tag(for: key), privacy: .public) \
+    \(luminance, privacy: .public) \(seconds, privacy: .public)s
     """)
   }
 
@@ -1889,7 +1889,8 @@ final class OledCareCoordinator: CheckupCareHolding {
       return .empty
     } catch {
       log.error("""
-      OLED care: stored model comparison for \(key, privacy: .public) is unreadable \
+      OLED care: stored model comparison for \
+      \(DisplayLogging.tag(for: key), privacy: .public) is unreadable \
       (\(error.localizedDescription, privacy: .public)); starting over
       """)
       return .empty
@@ -1921,7 +1922,8 @@ final class OledCareCoordinator: CheckupCareHolding {
       return .empty
     } catch {
       log.error("""
-      OLED care: stored exposure map for \(key, privacy: .public) is unreadable \
+      OLED care: stored exposure map for \
+      \(DisplayLogging.tag(for: key), privacy: .public) is unreadable \
       (\(error.localizedDescription, privacy: .public)); starting over
       """)
       return .empty
@@ -1944,7 +1946,8 @@ final class OledCareCoordinator: CheckupCareHolding {
       return .empty
     } catch {
       log.error("""
-      OLED care: stored per-app hours for \(key, privacy: .public) are unreadable \
+      OLED care: stored per-app hours for \
+      \(DisplayLogging.tag(for: key), privacy: .public) are unreadable \
       (\(error.localizedDescription, privacy: .public)); starting over
       """)
       return .empty
@@ -1954,7 +1957,8 @@ final class OledCareCoordinator: CheckupCareHolding {
   private func quarantine(_ key: String, reason: String, failure: OledStoreDecodeFailure) {
     unwritableExposureKeys.insert(key)
     log.error("""
-    OLED care: stored \(reason, privacy: .public) for \(key, privacy: .public) was written by a \
+    OLED care: stored \(reason, privacy: .public) for \
+    \(DisplayLogging.tag(for: key), privacy: .public) was written by a \
     schema this build does not read (\(String(describing: failure), privacy: .public)); keeping \
     the stored bytes and recording nothing new for this display until its history is deleted
     """)
@@ -1992,25 +1996,26 @@ final class OledCareCoordinator: CheckupCareHolding {
     // later one might. The dirty flag is still cleared above, so this display
     // simply records nothing until the user deletes its history.
     guard !unwritableExposureKeys.contains(key) else { return }
+    let tag = DisplayLogging.tag(for: key)
     if let map = accumulators[key]?.map {
       if let data = try? JSONEncoder().encode(map) {
         UserDefaults.standard.set(data, forKey: Self.exposureKeyName(key))
       } else {
-        log.error("OLED care: could not encode the exposure map for \(key, privacy: .public)")
+        log.error("OLED care: could not encode the exposure map for \(tag, privacy: .public)")
       }
     }
     if let hours = ownerHours[key]?.hours {
       if let data = try? JSONEncoder().encode(hours) {
         UserDefaults.standard.set(data, forKey: Self.ownerHoursKeyName(key))
       } else {
-        log.error("OLED care: could not encode the per-app hours for \(key, privacy: .public)")
+        log.error("OLED care: could not encode the per-app hours for \(tag, privacy: .public)")
       }
     }
     if let comparison = comparisons[key] {
       if let data = try? JSONEncoder().encode(comparison) {
         UserDefaults.standard.set(data, forKey: Self.modelComparisonKeyName(key))
       } else {
-        log.error("OLED care: could not encode the model comparison for \(key, privacy: .public)")
+        log.error("OLED care: could not encode the model comparison for \(tag, privacy: .public)")
       }
     }
   }

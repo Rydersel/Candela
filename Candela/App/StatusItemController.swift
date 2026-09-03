@@ -1199,9 +1199,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
           )
         }
         if !unmuteLanded {
-          log.error(
-            "reset: display \(state.display.persistenceKey, privacy: .public) could not be confirmed unmuted, so its mute state and strategy are kept across the wipe"
-          )
+          log.error("""
+            reset: display \
+            \(DisplayLogging.tag(for: state.display.persistenceKey), privacy: .public) \
+            could not be confirmed unmuted, so its mute state and strategy are kept \
+            across the wipe
+            """)
           // The STRATEGY AS IT STANDS, not a fixed value: restoring the wrong one
           // changes which wire a later unmute writes. Both are kept, because both
           // leave a panel silent: the dedicated command has no sender left once

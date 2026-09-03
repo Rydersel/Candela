@@ -845,7 +845,7 @@ struct DisplayHubView: View {
           writer.write(.enableMuteUnmute) { $0.enableMuteUnmute = false }
         } else {
           resetLog.error(
-            "reset on display \(state.display.persistenceKey, privacy: .public): the unmute could not be confirmed as applied, so its mute state and strategy were both left in place"
+            "reset on display \(DisplayLogging.tag(for: state.display.persistenceKey), privacy: .public): the unmute could not be confirmed as applied, so its mute state and strategy were both left in place"
           )
           // `toggleMute` cleared the stored flag on the way out and the panel
           // may still be muted, so put it back, both halves together. A live
@@ -856,7 +856,7 @@ struct DisplayHubView: View {
         }
       case .unknown:
         resetLog.error(
-          "reset on display \(state.display.persistenceKey, privacy: .public): HDR state unknown after the disengage, so the unmute and the mute-strategy change were both skipped; the display keeps its current mute state and strategy"
+          "reset on display \(DisplayLogging.tag(for: state.display.persistenceKey), privacy: .public): HDR state unknown after the disengage, so the unmute and the mute-strategy change were both skipped; the display keeps its current mute state and strategy"
         )
       }
 

@@ -141,7 +141,7 @@ enum CheckupLiveEnvironment {
         // clamp passes NaN through as full white. Nothing to book is better.
         guard let size = pixels[identityKey], size.0 > 0, size.1 > 0 else {
           log.error("""
-          checkup showing not booked: no pixel size for \(identityKey, privacy: .public)
+          checkup showing not booked: no pixel size for \(DisplayLogging.tag(for: identityKey), privacy: .public)
           """)
           return
         }
