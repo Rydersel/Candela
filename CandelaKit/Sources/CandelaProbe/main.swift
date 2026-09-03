@@ -38,7 +38,9 @@ usage: candela-probe [--display <id>] <subcommand>
   modes                                   merged mode list, marking CGS-revealed entries
   synthstops                              the synthesized-size ladder as the launch reapply computes it (needs --display)
   curated                                 what the default size picker shows, after curation
-  modeapply <ioModeID> [holdSeconds=5]    apply one mode by id at preview scope, then revert
+  modeapply <ioModeID> [holdSeconds=5] [session]
+                                          apply one mode by id at preview scope, then revert;
+                                          "session" keeps the mode after exit, and you put the display back
   identity                                EDID identity facts as the checkup reads them, as JSON
   refreshsweep                            apply every rate at the native size at preview scope, then restore
   checkup validate <file>                 verify an exported checkup report against its own hash
@@ -450,18 +452,18 @@ case "curated":
     }
   }
 case "modeapply":
-  // Applies one mode BY ID at preview scope, through the real configurator, so
-  // the revealed apply path and its post-commit verification are both exercised.
-  // Preview scope self-reverts when this process exits.
+  // Goes through the real configurator so the revealed apply path and its
+  // post-commit verification are exercised. Preview scope self-reverts on exit.
   guard arguments.count >= 2, let wanted = Int32(arguments[1]) else {
-    print("usage: candela-probe --display <id> modeapply <ioModeID> [holdSeconds=5]")
+    print("usage: candela-probe --display <id> modeapply <ioModeID> [holdSeconds=5] [session]")
+    print("  \"session\" keeps the mode after exit, and you put the display back")
     exit(2)
   }
-  let holdSeconds = arguments.count >= 3 ? UInt32(arguments[2]) ?? 5 : 5
-  // Third arg picks the scope. Session scope OUTLIVES this process, so the
-  // caller is responsible for putting the display back.
-  let applyScope: DisplayConfigScope =
-    (arguments.count >= 4 && arguments[3] == "session") ? .session : .preview
+  // Both trailing args are optional, so "session" is read wherever it lands.
+  // Session scope OUTLIVES this process; the caller puts the display back.
+  let trailing = arguments.dropFirst(2)
+  let holdSeconds = trailing.compactMap { UInt32($0) }.first ?? 5
+  let applyScope: DisplayConfigScope = trailing.contains("session") ? .session : .preview
   guard let target = displayFilter else {
     print("modeapply requires --display <id>")
     exit(2)
@@ -480,7 +482,11 @@ case "modeapply":
     print("after:  \(after.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID) \(String(format: "%g", $0.refreshHz)) Hz" } ?? "unknown")")
     print("scope: \(applyScope); holding \(holdSeconds)s...")
     sleep(holdSeconds)
-    print("exiting: preview scope reverts now.")
+    print(
+      applyScope == .session
+        ? "exiting: session scope keeps the mode; put the display back."
+        : "exiting: preview scope reverts now."
+    )
   } catch {
     print("apply FAILED: \(error)")
     exit(4)
