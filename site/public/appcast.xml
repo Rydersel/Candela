@@ -3,7 +3,8 @@
      into every shipped binary and must never move; this file lives in
      site/public/ so every site deploy carries it to that path. New releases
      add their signed <item> here, newest first. Archives live on GitHub
-     Releases, never beside this file. -->
+     Releases, never beside this file. Each <description> body starts at
+     column 0 because markdown reads indentation as a code block. -->
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
     <title>Candela Updates</title>
@@ -16,6 +17,11 @@
       <sparkle:version>1.0.1</sparkle:version>
       <sparkle:shortVersionString>1.0.1</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description sparkle:format="markdown"><![CDATA[
+## New
+- Menu bar: each enrolled display shows its care state under its name: whether OLED Care is on, the panel's hours, and how far its hottest area sits above the average. The figures are the Health pane's own, so the two never disagree.
+]]></description>
+      <sparkle:fullReleaseNotesLink>https://github.com/Rydersel/Candela/releases</sparkle:fullReleaseNotesLink>
       <enclosure
         url="https://github.com/Rydersel/Candela/releases/download/v1.0.1/Candela-1.0.1.zip"
         sparkle:edSignature="lurz85m4z4yBXry33x00uRo8jseRn1Wre2XFLmW+PA/bMu/1NEn9dQa2Rl3SX7Hg/8OqaV2V1VXnZn8O6mE9AQ==" length="5133690"
@@ -27,6 +33,17 @@
       <sparkle:version>1.0.0</sparkle:version>
       <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description sparkle:format="markdown"><![CDATA[
+## New
+- Health: per-panel lit hours and an exposure heat map of where bright, static content has been, kept in the panel's own geometry. Built from a coarse 24 by 10 luminance grid, so nothing on your screen is stored.
+- Protection: one-click auto-hide for the menu bar and the Dock, dimming when you step away and while the Mac is locked, a recommended enrollment preset per display, a keep-awake toggle, and display settings that survive a replug or a reboot.
+- Checkup: a guided diagnostic for any display, with solid colour fields for dead pixels, burn-in and uneven backlight, the monitor's own claims checked against what it does, an evidence grade on every result, and a report that exports as one integrity-checked file.
+- Controls: brightness, contrast and volume over DDC/CI from the menu bar, media keys and a HUD; software dimming below the hardware floor; an HDR toggle.
+- Sizes: every resolution the panel can show, including HiDPI sizes macOS does not list on standard-density panels, plus opt-in scaled sizes in between.
+- Arrangement: arrangement, mirroring and rotation from a canvas with saved layouts, and virtual displays.
+- Setup: a guided first run.
+]]></description>
+      <sparkle:fullReleaseNotesLink>https://github.com/Rydersel/Candela/releases</sparkle:fullReleaseNotesLink>
       <enclosure
         url="https://github.com/Rydersel/Candela/releases/download/v1.0.0/Candela-1.0.0.zip"
         sparkle:edSignature="WgRy3yRf3DvAHk00y2BOC4E1BqGGPEeksTn10NlnRWVDW2zVAbscbBuhyMNn+OPkxXCHUlZ2C+qgHMBLfRoTAw==" length="5126988"
