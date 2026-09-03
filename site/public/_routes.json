@@ -6,7 +6,8 @@
     "/guides/*",
     "/analytics/*",
     "/download",
-    "/github"
+    "/github",
+    "/appcast.xml"
   ],
   "exclude": []
 }

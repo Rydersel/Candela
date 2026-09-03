@@ -30,11 +30,11 @@ export function dayRange(days, today = new Date()) {
   return Array.from({ length: days }, (_, offset) => dayKey(new Date(end - (days - 1 - offset) * 86_400_000)))
 }
 
-const dailyMetrics = { pageview: 'pageviews', download_attempt: 'downloads', github_attempt: 'github' }
+const dailyMetrics = { pageview: 'pageviews', download_attempt: 'downloads', github_attempt: 'github', update_check: 'updates' }
 
 // Every day in the range appears, zero-filled, so a chart never hides a quiet day by skipping it
 function dailySeries(rows, days, today) {
-  const byDay = new Map(dayRange(days, today).map((day) => [day, { day, pageviews: 0, downloads: 0, github: 0 }]))
+  const byDay = new Map(dayRange(days, today).map((day) => [day, { day, pageviews: 0, downloads: 0, github: 0, updates: 0 }]))
   for (const row of rows ?? []) {
     const point = byDay.get(row.day)
     const field = dailyMetrics[row.metric]
@@ -75,6 +75,21 @@ function dimensionMap(groups, dimensionName) {
   return result
 }
 
+// A version's count on one day is near its installs (an install checks about
+// once a day), so the split on the latest day with checks is who has updated.
+// Summing the split over the whole range would keep an abandoned version on
+// top for weeks after everyone left it.
+function latestVersionSplit(rows) {
+  let day = null
+  const versions = {}
+  for (const row of rows ?? []) {
+    if (row.metric !== 'update_check') continue
+    if (day === null || row.day > day) { day = row.day; for (const key of Object.keys(versions)) delete versions[key] }
+    if (row.day === day) versions[row.placement] = (versions[row.placement] ?? 0) + Number(row.value)
+  }
+  return { day, versions }
+}
+
 function percentage(numerator, denominator) {
   return denominator === 0 ? 0 : Math.round((numerator / denominator) * 10_000) / 100
 }
@@ -95,6 +110,9 @@ export function buildReport(data, days, today = new Date()) {
     downloadAttempts: sum(data.counters, 'download_attempt'),
     uniqueDownloadWindows,
     downloadConversion: percentage(uniqueDownloadWindows, completedWindows),
+    updateChecks: sum(data.counters, 'update_check'),
+    versionsDay: latestVersionSplit(data.daily).day,
+    versions: latestVersionSplit(data.daily).versions,
     optOuts: sum(data.counters, 'opt_out'),
     droppedWrites: sum(data.counters, 'dropped_write'),
     cleanupRuns: sum(data.counters, 'cohorts_finalized'),
@@ -122,6 +140,7 @@ const reportRows = (report) => [
   ['Download attempts', report.downloadAttempts],
   ['Unique Download browser windows', report.uniqueDownloadWindows],
   ['Download conversion (%)', report.downloadConversion],
+  ['App update checks', report.updateChecks],
   ['Opt-outs', report.optOuts],
   ['Dropped writes recorded', report.droppedWrites],
   ['Cohorts finalized', report.cleanupRuns],
@@ -140,7 +159,8 @@ export function formatTable(report) {
   const dimensions = ['country', 'device', 'referrer'].flatMap((dimension) =>
     Object.entries(report.dimensions[dimension]).map(([valueName, value]) => [`${dimension}: ${valueName}`, value]),
   )
-  const allRows = [...rows, ...placements, ...dimensions]
+  const versions = Object.entries(report.versions).map(([version, value]) => [`checking in on ${report.versionsDay} from ${version}`, value])
+  const allRows = [...rows, ...placements, ...dimensions, ...versions]
   const width = Math.max(...allRows.map(([label]) => label.length))
   return allRows.map(([label, value]) => `${label.padEnd(width)}  ${value}`).join('\n')
 }
@@ -166,9 +186,9 @@ function barChart(points, field, colour) {
 <div class="axis"><span>${escapeHtml(first)}</span><span>peak ${max}</span><span>${escapeHtml(last)}</span></div>`
 }
 
-function breakdownTable(title, entries, colour) {
+function breakdownTable(title, entries, colour, empty = 'No completed windows yet.') {
   const rows = Object.entries(entries).sort((a, b) => b[1] - a[1])
-  if (rows.length === 0) return `<section><h2>${escapeHtml(title)}</h2><p class="empty">No completed windows yet.</p></section>`
+  if (rows.length === 0) return `<section><h2>${escapeHtml(title)}</h2><p class="empty">${escapeHtml(empty)}</p></section>`
   const max = Math.max(1, ...rows.map(([, value]) => value))
   const body = rows.map(([label, value]) => `<tr><th scope="row">${escapeHtml(label)}</th><td>${value}</td><td><div class="bar" style="width:${Math.round((value / max) * 100)}%;background:${colour}"></div></td></tr>`)
   return `<section><h2>${escapeHtml(title)}</h2><table>${body.join('')}</table></section>`
@@ -181,6 +201,7 @@ export function formatHtml(report, generatedAt = new Date()) {
     tile('Download attempts', report.downloadAttempts, `${report.uniqueDownloadWindows} unique windows, ${report.downloadConversion}% of completed`),
     tile('GitHub attempts', report.githubAttempts, `${report.uniqueGithubWindows} unique windows, ${report.githubConversion}% of completed`),
     tile('Completed windows', report.completedWindows, `${report.provisionalWindows} still provisional`),
+    tile('App update checks', report.updateChecks, report.versionsDay ? `${Object.keys(report.versions).length} version(s) checking in on ${report.versionsDay}` : 'none yet'),
     tile('Opt-outs', report.optOuts),
     tile('Dropped writes', report.droppedWrites, `${report.cleanupRuns} cohort rollups`),
   ]
@@ -188,8 +209,10 @@ export function formatHtml(report, generatedAt = new Date()) {
     ['Pageviews per day', 'pageviews', '#f2b544'],
     ['Download attempts per day', 'downloads', '#ff8a4c'],
     ['GitHub attempts per day', 'github', '#8fb3ff'],
+    ['App update checks per day', 'updates', '#9fd6a4'],
   ].map(([title, field, colour]) => `<section><h2>${title}</h2>${barChart(report.daily, field, colour)}</section>`)
   const breakdowns = [
+    breakdownTable(report.versionsDay ? `Checking in on ${report.versionsDay}, by version` : 'Checking in by version', report.versions, '#9fd6a4', 'No update checks yet.'),
     breakdownTable('Unique downloads by placement', report.placements.download, '#ff8a4c'),
     breakdownTable('Unique GitHub clicks by placement', report.placements.github, '#8fb3ff'),
     breakdownTable('Completed windows by country', report.dimensions.country, '#f2b544'),
@@ -284,7 +307,7 @@ export async function loadData(days, query = d1Query) {
       WHERE cohort_day >= '${cutoff}' AND expires_at <= ${now} GROUP BY referrer_host
     `),
     query(`SELECT COUNT(*) AS value FROM measurement_windows WHERE cohort_day >= '${cutoff}' AND expires_at > ${now}`),
-    query(`SELECT day, metric, SUM(value) AS value FROM daily_counters WHERE day >= '${cutoff}' AND metric IN ('pageview', 'download_attempt', 'github_attempt') GROUP BY day, metric ORDER BY day`),
+    query(`SELECT day, metric, placement, SUM(value) AS value FROM daily_counters WHERE day >= '${cutoff}' AND metric IN ('pageview', 'download_attempt', 'github_attempt', 'update_check') GROUP BY day, metric, placement ORDER BY day`),
   ])
   return {
     counters,

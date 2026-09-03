@@ -80,8 +80,11 @@ The report command requires a separate read-only token in
 - `/privacy/` describes both analytics systems and exposes the opt-out.
 - `/github?placement=hero` redirects to the fixed repository URL.
 - Videos and hashed assets bypass Functions and preserve immutable caching and
-  byte-range responses.
+  byte-range responses. The appcast is the one static file routed through
+  Functions, for the update-check count; its headers should match production's
+  on a preview deploy before that change ships.
 - The appcast enclosure and `RELEASE_DOWNLOAD_URL` identify the same archive.
+- `curl -A 'Candela/0.0.0 Sparkle/2.9.6' https://candela.fyi/appcast.xml` returns the feed unchanged, and the report's "App update checks" count moves by one under `other` (a version the feed does not list, so the real versions stay clean). The proof that the shipped app is counted is a deployed build checking in and its version moving.
 - `/guides/` lists every guide, and `curl -H 'Accept: text/markdown' https://candela.fyi/guides/<slug>/` returns Markdown.
 - The guide placement migration has been applied (`npm run d1:migrate:remote`) before the deploy that first sends `placement=guide`.
 - A Search Console domain property for candela.fyi is verified and receiving data before the guides section is announced anywhere.

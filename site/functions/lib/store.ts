@@ -78,6 +78,14 @@ export async function deleteMeasurement(db: D1Database, windowKey: string) {
   ])
 }
 
+// No window, no cookie: an install checks about once a day on its own, so a
+// day's count is near the installs on that version, and only near. Manual
+// checks and anyone with curl push it up (the request is unauthenticated); a
+// Mac asleep across the UTC day boundary, or an app not running, pushes it down.
+export async function recordUpdateCheck(db: D1Database, version: string, now = new Date()) {
+  await counter(db, now.toISOString().slice(0, 10), 'update_check', version).run()
+}
+
 export async function recordPreferenceChange(db: D1Database, metric: 'opt_out' | 'opt_in', now = new Date()) {
   await counter(db, now.toISOString().slice(0, 10), metric).run()
 }

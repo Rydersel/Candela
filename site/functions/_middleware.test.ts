@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
-import { onRequest } from './_middleware'
+import { readFileSync } from 'node:fs'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { onRequest, resetFeedVersionsForTests } from './_middleware'
 
 type TestContext = Parameters<typeof onRequest>[0]
 
@@ -150,5 +151,147 @@ describe('Markdown content negotiation for the guides section', () => {
       expect(fetch).not.toHaveBeenCalled()
       expect(response.headers.get('vary')).toBeNull()
     }
+  })
+})
+
+describe('update feed counting', () => {
+  type Statement = { query: string; values: unknown[]; run: () => Promise<unknown> }
+  function feedContext(userAgent: string | undefined, { method = 'GET', failing = false, feedMissing = false } = {}) {
+    const request = new Request('https://candela.fyi/appcast.xml', {
+      method,
+      headers: userAgent ? { 'user-agent': userAgent } : undefined,
+    })
+    const feed = '<?xml version="1.0"?><rss><item><sparkle:shortVersionString>1.0.1</sparkle:shortVersionString></item><item><sparkle:shortVersionString> 1.0.0 </sparkle:shortVersionString></item></rss>'
+    const next = vi.fn(async () => new Response(feed, { headers: { 'content-type': 'application/xml' } }))
+    const statements: Statement[] = []
+    const db = {
+      prepare(query: string) {
+        const statement: Statement = {
+          query,
+          values: [],
+          run: async () => { if (failing) throw new Error('d1 unavailable'); return { success: true } },
+        }
+        statements.push(statement)
+        return { bind(...values: unknown[]) { statement.values = values; return statement } }
+      },
+      batch: async () => [],
+    }
+    const points: unknown[] = []
+    const pending: Promise<unknown>[] = []
+    const context = {
+      request,
+      next,
+      env: {
+        ASSETS: { fetch: vi.fn(async () => feedMissing ? new Response('gone', { status: 404 }) : new Response(feed)) },
+        ANALYTICS_DB: db,
+        ANALYTICS_UPDATES: { writeDataPoint: (point: unknown) => { points.push(point) } },
+      },
+      waitUntil: (promise: Promise<unknown>) => { pending.push(promise) },
+    } as unknown as TestContext
+    return { context, feed, next, statements, points, pending }
+  }
+
+  // The known-version set is cached per isolate; every test starts cold.
+  beforeEach(() => { resetFeedVersionsForTests() })
+
+  it('serves the feed unchanged and counts a Sparkle check by app version', async () => {
+    const { context, feed, next, statements, points, pending } = feedContext('Candela/1.0.1 Sparkle/2.9.6')
+
+    const response = await onRequest(context)
+    await Promise.all(pending)
+
+    expect(await response.text()).toBe(feed)
+    expect(response.headers.get('content-type')).toBe('application/xml')
+    expect(next).toHaveBeenCalledTimes(1)
+    expect(statements).toHaveLength(1)
+    expect(statements[0].query).toContain('daily_counters')
+    expect(statements[0].values.slice(1)).toEqual(['update_check', '1.0.1'])
+    expect(statements[0].values[0]).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(points).toEqual([{ indexes: ['1.0.1'], blobs: ['1.0.1'], doubles: [1] }])
+  })
+
+  it('reads only the version out of the User-Agent', async () => {
+    const { context, statements, pending } = feedContext('Candela/1.0.1 Sparkle/2.9.6 (Macintosh; Intel Mac OS X 15_1)')
+    await onRequest(context)
+    await Promise.all(pending)
+    expect(statements[0].values.slice(1)).toEqual(['update_check', '1.0.1'])
+  })
+
+  it.each([
+    ['a browser', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 15_1) AppleWebKit/605.1.15'],
+    ['curl', 'curl/8.7.1'],
+    ['a made-up app name', 'Cendela/1.0.1 Sparkle/2.9.6'],
+    ['a version that is not a version', 'Candela/evil<script> Sparkle/2.9.6'],
+    ['a version longer than any real one', `Candela/${'9'.repeat(4000)} Sparkle/2.9.6`],
+    ['no User-Agent at all', undefined],
+  ])('does not count %s', async (_label, userAgent) => {
+    const { context, feed, next, statements, points } = feedContext(userAgent)
+
+    const response = await onRequest(context)
+
+    expect(await response.text()).toBe(feed)
+    expect(next).toHaveBeenCalledTimes(1)
+    expect(statements).toHaveLength(0)
+    expect(points).toHaveLength(0)
+  })
+
+  it.each([
+    ['a version the feed does not list', 'Candela/9.9.9 Sparkle/2.9.6'],
+    ['a spelling the feed does not list', 'Candela/01.0.1 Sparkle/2.9.6'],
+  ])('files %s under other, so the vocabulary stays closed', async (_label, userAgent) => {
+    const { context, statements, points, pending } = feedContext(userAgent)
+    await onRequest(context)
+    await Promise.all(pending)
+    expect(statements[0].values.slice(1)).toEqual(['update_check', 'other'])
+    expect(points).toEqual([{ indexes: ['other'], blobs: ['other'], doubles: [1] }])
+  })
+
+  it('files every version under other while the feed cannot be read, and retries next time', async () => {
+    const { context, statements, pending } = feedContext('Candela/1.0.1 Sparkle/2.9.6', { feedMissing: true })
+    await onRequest(context)
+    await Promise.all(pending)
+    expect(statements[0].values.slice(1)).toEqual(['update_check', 'other'])
+
+    const again = feedContext('Candela/1.0.1 Sparkle/2.9.6')
+    await onRequest(again.context)
+    await Promise.all(again.pending)
+    expect(again.statements[0].values.slice(1)).toEqual(['update_check', '1.0.1'])
+  })
+
+  it('reads the feed once per isolate, not once per check', async () => {
+    const first = feedContext('Candela/1.0.1 Sparkle/2.9.6')
+    await onRequest(first.context)
+    await Promise.all(first.pending)
+    const second = feedContext('Candela/1.0.0 Sparkle/2.9.6')
+    await onRequest(second.context)
+    await Promise.all(second.pending)
+    const fetches = (context: TestContext) => (context as unknown as { env: { ASSETS: { fetch: ReturnType<typeof vi.fn> } } }).env.ASSETS.fetch
+    expect(fetches(first.context)).toHaveBeenCalledTimes(1)
+    expect(fetches(second.context)).not.toHaveBeenCalled()
+    expect(second.statements[0].values.slice(1)).toEqual(['update_check', '1.0.0'])
+  })
+
+  it('routes the feed through Functions, or none of this runs', () => {
+    const routes = JSON.parse(readFileSync(new URL('../public/_routes.json', import.meta.url), 'utf8')) as { include: string[] }
+    expect(routes.include).toContain('/appcast.xml')
+  })
+
+  it('does not count a HEAD request, which is the publication check and not an install', async () => {
+    const { context, next, statements, points, pending } = feedContext('Candela/1.0.1 Sparkle/2.9.6', { method: 'HEAD' })
+    await onRequest(context)
+    await Promise.all(pending)
+    expect(next).toHaveBeenCalledTimes(1)
+    expect(statements).toHaveLength(0)
+    expect(points).toHaveLength(0)
+  })
+
+  it('still serves the feed when the database is down', async () => {
+    const { context, feed, next, pending } = feedContext('Candela/1.0.1 Sparkle/2.9.6', { failing: true })
+
+    const response = await onRequest(context)
+    await Promise.all(pending)
+
+    expect(await response.text()).toBe(feed)
+    expect(next).toHaveBeenCalledTimes(1)
   })
 })

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import * as reportModule from './analytics-report.mjs'
 
-const { buildReport, dayRange, formatCsv, formatHtml, parseArgs } = reportModule
+const { buildReport, dayRange, formatCsv, formatHtml, formatTable, parseArgs } = reportModule
 
 test('parseArgs accepts supported windows and CSV output', () => {
   assert.deepEqual(parseArgs(['--days', '7']), { days: 7, format: 'table', open: false })
@@ -30,9 +30,9 @@ test('buildReport zero-fills the per-day series across the whole range', () => {
 
   assert.deepEqual(dayRange(7, today), ['2026-08-27', '2026-08-28', '2026-08-29', '2026-08-30', '2026-08-31', '2026-09-01', '2026-09-02'])
   assert.equal(report.daily.length, 7)
-  assert.deepEqual(report.daily[4], { day: '2026-08-31', pageviews: 5, downloads: 2, github: 0 })
-  assert.deepEqual(report.daily[5], { day: '2026-09-01', pageviews: 0, downloads: 0, github: 0 })
-  assert.deepEqual(report.daily[6], { day: '2026-09-02', pageviews: 0, downloads: 0, github: 1 })
+  assert.deepEqual(report.daily[4], { day: '2026-08-31', pageviews: 5, downloads: 2, github: 0, updates: 0 })
+  assert.deepEqual(report.daily[5], { day: '2026-09-01', pageviews: 0, downloads: 0, github: 0, updates: 0 })
+  assert.deepEqual(report.daily[6], { day: '2026-09-02', pageviews: 0, downloads: 0, github: 1, updates: 0 })
   assert.equal(report.daily.reduce((sum, point) => sum + point.pageviews, 0), 5)
 })
 
@@ -48,14 +48,17 @@ test('formatHtml is self-contained and escapes values that come from the databas
     downloadAttempts: 5,
     uniqueDownloadWindows: 3,
     downloadConversion: 75,
+    updateChecks: 0,
+    versionsDay: null,
+    versions: {},
     optOuts: 0,
     droppedWrites: 0,
     cleanupRuns: 1,
     placements: { github: { hero: 2 }, download: { hero: 2, header: 1 } },
     dimensions: { country: { US: 3, unknown: 1 }, device: {}, referrer: { '<script>alert(1)</script>': 1 } },
     daily: [
-      { day: '2026-09-01', pageviews: 7, downloads: 3, github: 1 },
-      { day: '2026-09-02', pageviews: 5, downloads: 2, github: 2 },
+      { day: '2026-09-01', pageviews: 7, downloads: 3, github: 1, updates: 0 },
+      { day: '2026-09-02', pageviews: 5, downloads: 2, github: 2, updates: 0 },
     ],
   }, new Date('2026-09-02T10:30:00Z'))
 
@@ -64,7 +67,7 @@ test('formatHtml is self-contained and escapes values that come from the databas
   assert.doesNotMatch(html, /<script>alert/)
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/)
   assert.doesNotMatch(html, /<script|src="http|href="http/)
-  assert.equal((html.match(/<svg /g) ?? []).length, 3)
+  assert.equal((html.match(/<svg /g) ?? []).length, 4)
   assert.match(html, /<title>2026-09-01: 7<\/title>/)
   assert.match(html, /No completed windows yet\./)
   assert.match(html, /75% of completed/)
@@ -164,4 +167,42 @@ test('loadData keeps live aggregation queries within the D1 compound-select limi
     { metric: 'unique_windows', dimension_name: 'country', dimension_value: 'US', value: 4 },
   ])
   assert.equal(data.provisionalWindows, 2)
+})
+
+test('buildReport splits the app update checks by version on the latest day only', () => {
+  const today = new Date('2026-09-04T15:00:00Z')
+  const report = buildReport({
+    counters: [
+      { metric: 'update_check', placement: '1.0.0', value: 24 },
+      { metric: 'update_check', placement: '1.0.1', value: 12 },
+      { metric: 'pageview', placement: 'all', value: 3 },
+    ],
+    rollups: [],
+    liveCompleted: [],
+    provisionalWindows: 0,
+    daily: [
+      { day: '2026-09-03', metric: 'update_check', placement: '1.0.0', value: 20 },
+      { day: '2026-09-03', metric: 'update_check', placement: '1.0.1', value: 1 },
+      { day: '2026-09-04', metric: 'update_check', placement: '1.0.0', value: 4 },
+      { day: '2026-09-04', metric: 'update_check', placement: '1.0.1', value: 11 },
+      { day: '2026-09-04', metric: 'pageview', placement: 'all', value: 3 },
+    ],
+  }, 7, today)
+
+  assert.equal(report.updateChecks, 36)
+  assert.equal(report.versionsDay, '2026-09-04')
+  assert.deepEqual(report.versions, { '1.0.0': 4, '1.0.1': 11 })
+  assert.equal(report.daily[5].updates, 21)
+  assert.equal(report.daily[6].updates, 15)
+  assert.match(formatCsv(report), /"App update checks",36/)
+  assert.match(formatTable(report), /checking in on 2026-09-04 from 1\.0\.1\s+11/)
+  assert.match(formatHtml(report), /Checking in on 2026-09-04, by version/)
+})
+
+test('a report with no update checks yet says so instead of borrowing the windows copy', () => {
+  const report = buildReport({ counters: [], rollups: [], liveCompleted: [], provisionalWindows: 0, daily: [] }, 7, new Date('2026-09-04T15:00:00Z'))
+  assert.equal(report.versionsDay, null)
+  assert.deepEqual(report.versions, {})
+  assert.match(formatHtml(report), /No update checks yet\./)
+  assert.match(formatHtml(report), /none yet/)
 })
