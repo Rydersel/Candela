@@ -38,12 +38,12 @@ struct DisplayHubView: View {
 
   /// Drafts, not direct pref bindings: a `TextField` bound straight to a pref
   /// would write, fan out and bump `prefsRevision` on every keystroke,
-  /// re-rendering the pane mid-edit. Committed on Return and on focus loss; on
-  /// teardown the `@State` dies with the destination and nothing is scheduled.
+  /// re-rendering the pane mid-edit. Committed on Return, on focus loss and on
+  /// teardown (the `onDisappear` on each field says why).
   ///
   /// Seeded at identity creation and re-seeded on `prefsRevision` from `onChange`
   /// modifiers ON THE FIELDS themselves, so a re-seed cannot silently stop firing
-  /// and revive a wiped name on the next focus loss.
+  /// and revive a wiped name on the next commit, teardown included.
   @State private var nameDraft: String
   @State private var audioNameDraft: String
   @FocusState private var nameFocused: Bool
@@ -129,6 +129,9 @@ struct DisplayHubView: View {
             .onChange(of: nameFocused) { _, focused in
               if !focused { commitName() }
             }
+            // Teardown moves no focus (measured), so a sidebar click would drop a
+            // pending edit. Keyed per display, so this lands on the display that was showing.
+            .onDisappear { commitName() }
             .onChange(of: model.prefsRevision) { _, _ in
               guard !nameFocused else { return } // never fight a live edit
               nameDraft = prefs.friendlyName
@@ -454,6 +457,8 @@ struct DisplayHubView: View {
               .onChange(of: audioNameFocused) { _, focused in
                 if !focused { commitAudioName() }
               }
+              // Same teardown leg as the name field above.
+              .onDisappear { commitAudioName() }
               .onChange(of: model.prefsRevision) { _, _ in
                 guard !audioNameFocused else { return } // never fight a live edit
                 audioNameDraft = prefs.audioDeviceNameOverride
@@ -859,7 +864,7 @@ struct DisplayHubView: View {
     // One shared rule, in CandelaKit under test: blank under ANY whitespace
     // means "use the name the display reports".
     let trimmed = DisplayCardPolicy.normalizedFriendlyName(nameDraft)
-    nameDraft = trimmed
+    if nameDraft != trimmed { nameDraft = trimmed }
     guard trimmed != prefs.friendlyName else { return }
     writer.write(.friendlyName) { $0.friendlyName = trimmed }
   }
@@ -884,7 +889,7 @@ struct DisplayHubView: View {
 
   private func commitAudioName() {
     let trimmed = DisplayCardPolicy.normalizedFriendlyName(audioNameDraft)
-    audioNameDraft = trimmed
+    if audioNameDraft != trimmed { audioNameDraft = trimmed }
     guard trimmed != prefs.audioDeviceNameOverride else { return }
     // Fans out to a tap re-arm: `audioDeviceNameOverride` feeds
     // `AppModel.tapConfig` through `audioMatchingDisplays`.

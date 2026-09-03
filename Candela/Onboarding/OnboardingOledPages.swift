@@ -302,12 +302,17 @@ struct OnboardingCareDemo: View {
       stage = 2
       return
     }
+    // `Task.sleep` returns at once when cancelled, so re-check after each one;
+    // otherwise a cancelled task still animates the rest of the loop at teardown.
     while !Task.isCancelled {
       try? await Task.sleep(for: .seconds(1.6))
+      guard !Task.isCancelled else { return }
       withAnimation(.easeInOut(duration: 0.8)) { stage = 1 }
       try? await Task.sleep(for: .seconds(1.6))
+      guard !Task.isCancelled else { return }
       withAnimation(.easeInOut(duration: 1.2)) { stage = 2 }
       try? await Task.sleep(for: .seconds(2.2))
+      guard !Task.isCancelled else { return }
       withAnimation(.easeInOut(duration: 0.8)) { stage = 0 }
     }
   }
