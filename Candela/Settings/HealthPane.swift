@@ -171,6 +171,22 @@ struct HealthPane: View {
 
       SettingsCard {
         VStack(alignment: .leading, spacing: 0) {
+          // At the head of the card, because it governs every control under it:
+          // `reconcileEnrollment` drops every un-enrolled key, and observation
+          // and hours both default ON, so this card can show three switches
+          // reading ON for a display nothing is measuring. The prefs are
+          // legitimately set ahead of enrollment, so nothing here is disabled;
+          // the reveal is the way out.
+          if !DisplayPrefs(persistenceKey: key).oledCareEnrolled {
+            VStack(alignment: .leading, spacing: 8) {
+              OledInlineNote(Text(verbatim: "Measurement currently runs on displays enrolled in OLED care, and \(name(state)) is not enrolled. These settings are saved and start applying when it is."))
+              Button("Open OLED Care") { actions.reveal(.pane(.oledCare)) }
+                .buttonStyle(SettingsSecondaryButtonStyle())
+                .accessibilityLabel(Text(verbatim: "Open OLED Care for \(name(state))"))
+            }
+            .padding(.vertical, 8)
+            SettingsCardDivider()
+          }
           MeasurementControls(persistenceKey: key)
           SettingsCardDivider()
           HoursToggle(persistenceKey: key)
@@ -394,11 +410,16 @@ private struct MeasurementControls: View {
 
   /// Reads the comparison record because its paired-reading clock is the only
   /// per-sample timestamp the coordinator keeps. A missing grant has its own note.
+  ///
+  /// Ten sampling intervals, not the measuring dot's two: this note tells the
+  /// user macOS may have taken the grant away, so it waits until an ordinary run
+  /// of skipped captures cannot explain the gap. The note's own copy says "over
+  /// 10 minutes" and has to keep agreeing with this.
   private var isSamplingStalled: Bool {
     guard prefs.oledTelemetry, !model.isSafeMode, CGPreflightScreenCaptureAccess(),
       let last = model.oledCare.modelComparison(for: persistenceKey).lastPair
     else { return false }
-    return Date().timeIntervalSince(last) > 600
+    return Date().timeIntervalSince(last) > OledCareCadence.stallWarningSeconds
   }
 
   var body: some View {
@@ -417,7 +438,14 @@ private struct MeasurementControls: View {
             // The pref is written whether or not the grant arrives: macOS
             // returns false from the request that merely SHOWS the dialog, so
             // gating the switch on the return value leaves it stuck off.
-            if on { _ = CGRequestScreenCaptureAccess() }
+            //
+            // Not raised for an un-enrolled display. `reconcileEnrollment` drops
+            // every un-enrolled key, so the prompt would spend a system
+            // permission on a display that is not going to be sampled. Nothing
+            // raises it on enrollment (this switch and guided setup are still
+            // the only two prompting calls in the app), so the recovery is the
+            // missing-grant note below, which names System Settings.
+            if on, prefs.oledCareEnrolled { _ = CGRequestScreenCaptureAccess() }
             writer.write(.oledTelemetry) { $0.oledTelemetry = on }
           }
         ))

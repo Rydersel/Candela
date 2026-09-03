@@ -30,6 +30,12 @@ struct OledCareDisplayPage: View {
   /// every pref write and on every dim-state change).
   @State private var displaySleepMinutes: Int?
 
+  /// Sampled beside `displaySleepMinutes`, and for the same reason: `body`
+  /// re-evaluates on every pref write and every dim-state change, and a reading
+  /// taken there would make the note below flicker with the page rather than
+  /// describe what was true when it opened.
+  @State private var displaySleepAssertionHeld = false
+
   /// Slider drafts, live only while a drag is in progress. A `Slider` bound
   /// straight to a pref writes, fans out and bumps `prefsRevision` on every
   /// pixel of the drag, re-rendering the page under the user's pointer. Nil
@@ -147,6 +153,7 @@ struct OledCareDisplayPage: View {
     }
     .task {
       displaySleepMinutes = OledCareSignalSources.displaySleepMinutes()
+      displaySleepAssertionHeld = OledCareSignalSources.displaySleepAssertionHeld()
     }
   }
 
@@ -363,14 +370,16 @@ struct OledCareDisplayPage: View {
     }
   }
 
-  /// Live means the pipeline produced a reading inside the last two sampling
-  /// intervals, so a dead grant stills the dot within two minutes whatever the
-  /// prefs claim.
+  /// Live means the pipeline produced a reading inside
+  /// `OledCareCadence.livenessWindowSeconds`, so a dead grant stills the dot
+  /// within two minutes whatever the prefs claim. The window is the Kit's, not a
+  /// number chosen here: the comment used to say two intervals while the code
+  /// said three.
   private func isMeasuringLive(_ summary: PanelHealthSummary) -> Bool {
     guard !model.isSafeMode, prefs.oledTelemetry, CGPreflightScreenCaptureAccess(),
       let last = summary.lastSample
     else { return false }
-    return Date().timeIntervalSince(last) < 180
+    return Date().timeIntervalSince(last) < OledCareCadence.livenessWindowSeconds
   }
 
   /// What the engine is doing right now. `dimStates` is the coordinator's own
@@ -521,6 +530,12 @@ struct OledCareDisplayPage: View {
   /// staticness, and they live on the Health pane, so the caption names that
   /// pane instead of leaving the switch to do nothing silently.
   ///
+  /// The third condition is the display-sleep assertion: the coordinator gates
+  /// nomination on `!state.assertionHeld`, the same term idle dimming has, and
+  /// the reading is system-wide, so our own Keep Display Awake silences this
+  /// control as surely as a video does. The caption lists it; the note says when
+  /// it is the live reason.
+  ///
   /// The caption promises exactly what the code delivers. "Full-screen video is
   /// never dimmed" is the `fullScreenOwner` gate, read from the window list. It
   /// does NOT promise a WINDOWED video is safe, because bounds stability is not
@@ -529,13 +544,21 @@ struct OledCareDisplayPage: View {
   /// The pointer is not an input to `StaticRegionDetector` and the coordinator
   /// supplies none, so that sentence goes in when the falloff exists.
   private var detectionControls: some View {
-    SettingRow("Areas that stay bright and unchanged, like a toolbar or a sidebar, are dimmed a little while you work. Full-screen video is never dimmed. This needs both measurement settings on the Health pane: without them nothing is dimmed.") {
-      Toggle("Automatic static-region dimming", isOn: Binding(
-        get: { prefs.oledDetectionDimming },
-        set: { on in writer.write(.oledDetectionDimming) { $0.oledDetectionDimming = on } }
-      ))
-      .themedSwitch()
-      .prefIdentifier(.oledDetectionDimming, persistenceKey: persistenceKey)
+    SettingRow("Areas that stay bright and unchanged, like a toolbar or a sidebar, are dimmed a little while you work. Full-screen video is never dimmed, and nothing is dimmed while anything is holding the screen awake, including Keep Display Awake. This needs both measurement settings on the Health pane: without them nothing is dimmed.") {
+      VStack(alignment: .leading, spacing: 6) {
+        Toggle("Automatic static-region dimming", isOn: Binding(
+          get: { prefs.oledDetectionDimming },
+          set: { on in writer.write(.oledDetectionDimming) { $0.oledDetectionDimming = on } }
+        ))
+        .themedSwitch()
+        .prefIdentifier(.oledDetectionDimming, persistenceKey: persistenceKey)
+        // In the SAME row as the switch, the idle threshold's warning shape: a
+        // divider between a control and the sentence saying it does nothing
+        // turns the warning into what looks like an unrelated setting.
+        if prefs.oledDetectionDimming, displaySleepAssertionHeld {
+          OledInlineNote(Text("Something was holding the screen awake when this page opened: video playback, a call, or Keep Display Awake. Nothing is dimmed here for as long as that lasts."))
+        }
+      }
     }
   }
 

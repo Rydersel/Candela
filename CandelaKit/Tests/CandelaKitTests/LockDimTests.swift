@@ -380,6 +380,43 @@ struct LockDimTests {
     #expect(OledCareCadence.fast == .milliseconds(100))
   }
 
+  /// With nothing enrolled the tick returns at its empty guard, so the 2 s
+  /// wakeup bought a user who never opted in nothing at all. A pending
+  /// verification still outranks the idle cadence: those entries outlive the
+  /// state that issued them.
+  @Test func nothingEnrolledIdlesTheLoopUnlessAVerificationIsPending() {
+    #expect(
+      OledCareCadence.interval(
+        anyOverlayUp: false, anyLockDimEngaged: false, verificationPending: false,
+        anythingEnrolled: false
+      ) == OledCareCadence.idle
+    )
+    #expect(
+      OledCareCadence.interval(
+        anyOverlayUp: false, anyLockDimEngaged: false, verificationPending: true,
+        anythingEnrolled: false
+      ) == OledCareCadence.fast
+    )
+    // An enrolled display is still the 2 s cadence, untouched by the new term.
+    #expect(
+      OledCareCadence.interval(
+        anyOverlayUp: false, anyLockDimEngaged: false, verificationPending: false,
+        anythingEnrolled: true
+      ) == OledCareCadence.slow
+    )
+    #expect(OledCareCadence.idle == .seconds(30))
+  }
+
+  /// Three settings surfaces each picked their own staleness number, one of them
+  /// disagreeing with its own comment. Both windows are multiples of the
+  /// sampling interval now, and the stall warning's copy says "over 10 minutes".
+  @Test func stalenessWindowsAreMultiplesOfTheSamplingInterval() {
+    #expect(OledCareCadence.sampling == .seconds(60))
+    #expect(OledCareCadence.samplingSeconds == 60)
+    #expect(OledCareCadence.livenessWindowSeconds == 120)
+    #expect(OledCareCadence.stallWarningSeconds == 600)
+  }
+
   /// The engine can no longer ask for a lock-dim OVERLAY at all. The delivery
   /// ruling is structural rather than a convention the coordinator honours.
   @Test func theOverlayLayerCannotProduceALockDim() {

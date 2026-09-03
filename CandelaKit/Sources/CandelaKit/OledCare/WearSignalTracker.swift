@@ -60,6 +60,13 @@ public final class WearSignalTracker {
   private let versionKey: String
   private var slots: [Double]
   private var unwrittenSeconds: Double = 0
+  /// True once a tick has been booked into THIS instance. Constructing a tracker
+  /// is how a pane reads a histogram, so a visit to a settings page that only
+  /// looks at a display would otherwise write an all-zero array over nothing at
+  /// the next sleep or quit. Not `unwrittenSeconds`: that returns to 0 on every
+  /// write-through, so guarding on it alone would stop a real tracker flushing
+  /// its debounced tail at quit.
+  private var hasAccumulated = false
 
   public init(defaults: UserDefaults = .standard, persistenceKey: String) {
     self.defaults = defaults
@@ -113,6 +120,7 @@ public final class WearSignalTracker {
 
     slots[slot] += secondsSinceLastTick
     unwrittenSeconds += secondsSinceLastTick
+    hasAccumulated = true
     if unwrittenSeconds > Self.debounceSeconds { writeThrough() }
   }
 
@@ -184,6 +192,9 @@ public final class WearSignalTracker {
   public func reset() {
     slots = [Double](repeating: 0, count: Self.slotCount)
     unwrittenSeconds = 0
+    // Or the next flush re-creates the keys this just removed, which is what
+    // "leaves no key behind" promises not to happen.
+    hasAccumulated = false
     // Removed rather than zeroed, matching `PanelHoursTracker`: a settings
     // reset should leave no key behind, and every read here treats absence as
     // a fresh histogram.
@@ -191,8 +202,12 @@ public final class WearSignalTracker {
     defaults.removeObject(forKey: versionKey)
   }
 
-  /// The undebounced write, for termination and sleep.
-  public func flush() { writeThrough() }
+  /// The undebounced write, for termination and sleep. A tracker that has booked
+  /// nothing has nothing to say, so it writes nothing: see `hasAccumulated`.
+  public func flush() {
+    guard hasAccumulated else { return }
+    writeThrough()
+  }
 
   private func writeThrough() {
     defaults.set(slots, forKey: secondsKey)

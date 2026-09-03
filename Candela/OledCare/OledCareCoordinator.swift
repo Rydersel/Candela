@@ -179,8 +179,9 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// fast cadence and log an error ten times a second.
   private static let maxVerifyAttempts = 5
   /// Spec §4: one capture per enrolled display per 60 s, and the window list on
-  /// the same clock.
-  private static let samplingInterval: Duration = .seconds(60)
+  /// the same clock. The Kit holds the value because the settings surfaces judge
+  /// a reading stale against multiples of it.
+  private static let samplingInterval: Duration = OledCareCadence.sampling
   /// How often a DISPLAYED nomination re-checks window geometry. One second: a
   /// dim clearing within a second reads as cleanup, while a dim sitting on moved
   /// content for a whole sampling slot reads as burn-in, the symptom the feature
@@ -368,8 +369,14 @@ final class OledCareCoordinator: CheckupCareHolding {
     })
 
     reconcileEnrollment()
-    // start() is single-shot (the chrome guard above), so there is never a
-    // previous driver to cancel here.
+    startDriver()
+  }
+
+  /// Creates the loop, cancelling any previous one. `start()` is single-shot (its
+  /// chrome guard), so the only other caller is `reconcileEnrollment`, cutting an
+  /// idle sleep short when a display enrolls.
+  private func startDriver() {
+    driver?.cancel()
     driver = Task { @MainActor [weak self] in
       while !Task.isCancelled {
         // Strong self is confined to the non-suspending half of the iteration
@@ -506,10 +513,12 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// per-app panel-seconds, and the window attribution derived from them,
   /// cleared in one step, in memory and on disk.
   ///
-  /// The panel's TOTAL HOURS are deliberately NOT cleared. They are a different
-  /// measurement with its own reset path (`PanelHoursTracker.reset()`, driven
-  /// by the settings reset), and a control labelled for exposure history must
-  /// not silently destroy a lifetime counter. Per-app hours ARE cleared: they
+  /// The panel's TOTAL HOURS are deliberately NOT cleared, and neither is the
+  /// time-at-brightness histogram. Both are different measurements with their
+  /// own reset paths (`PanelHoursTracker.reset()` and
+  /// `WearSignalTracker.reset()`, driven by the settings reset), and a control
+  /// labelled for exposure history must not silently destroy a lifetime
+  /// counter. The confirmation dialog names both. Per-app hours ARE cleared: they
   /// are derived from the same observations as the map, and leaving them would
   /// let the health view keep naming apps for a history the user just deleted.
   func clearExposureHistory(for persistenceKey: String) {
@@ -615,12 +624,11 @@ final class OledCareCoordinator: CheckupCareHolding {
     // Same reason, same moment: a live wear tracker's debounced write-through
     // would re-persist the histogram the wipe just removed.
     //
-    // DISCARDED as well as reset, unlike `trackers`, because `flush()` writes
-    // unconditionally: `reset()` alone leaves the object here, so the first
-    // sleep or quit AFTER the latch clears re-creates `oledWearSeconds` as an
-    // all-zero histogram, exactly what `reset()` promises not to leave behind.
-    // (A `guard !resetting` in `flushExposureHistory` does NOT fix it: every
-    // caller is already excluded by the latch.)
+    // DISCARDED as well as reset, unlike `trackers`: the objects held here
+    // describe a domain that no longer exists, and a pane that wants one after
+    // the wipe gets a fresh tracker off the wiped keys. `reset()` alone is now
+    // enough to stop the write (it clears the tracker's accumulation flag, so
+    // `flush()` is a no-op), but the discard is the statement of intent.
     for tracker in wearTrackers.values { tracker.reset() }
     wearTrackers.removeAll()
   }
@@ -694,6 +702,10 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// standby their tracker, since the panel stopped being driven).
   private func reconcileEnrollment() {
     guard let model else { return }
+    // The driver sleeps on the idle cadence only where this was true at the last
+    // `cadence()`, so it is the exact condition under which a new enrollment
+    // would otherwise wait up to 30 s for its first tick.
+    let wasIdle = states.isEmpty
     var seen: Set<String> = []
     for displayState in model.displays {
       let key = displayState.display.persistenceKey
@@ -768,6 +780,12 @@ final class OledCareCoordinator: CheckupCareHolding {
       }
       dropState(for: key)
     }
+
+    // Restarting is what cuts the in-flight sleep short; the fresh task ticks
+    // before it sleeps, so the first tick after an enrollment is prompt. Guarded
+    // on `driver` because `start()` reconciles BEFORE creating the loop, and
+    // this must not create it early.
+    if wasIdle, !states.isEmpty, driver != nil { startDriver() }
   }
 
   private func dropState(for key: String) {
@@ -824,7 +842,8 @@ final class OledCareCoordinator: CheckupCareHolding {
     // Drained independently of `states`: these entries outlive the state that
     // issued them by design (I-2), including across a reset.
     drainPendingRemovalVerifications()
-    // Users who never enroll pay nothing past this line.
+    // Users who never enroll do no work past this line, and `cadence()` drops the
+    // loop to `OledCareCadence.idle` so they do not pay for the wakeup either.
     guard !states.isEmpty else { return }
     let idleSeconds = OledCareSignalSources.systemIdleSeconds()
     let assertionHeld = OledCareSignalSources.displaySleepAssertionHeld()
@@ -1021,12 +1040,18 @@ final class OledCareCoordinator: CheckupCareHolding {
 
   /// A given-up verify drops the fast cadence only when nothing is wanted (the
   /// strand case); a wanted dim keeps it, whichever way it is delivered.
+  ///
+  /// `anythingEnrolled` is the whole of the idle cadence: with no enrolled
+  /// display `tick()` returns at its empty guard, so the 2 s wakeup bought
+  /// nothing for a user who never opted in. A pending removal verification still
+  /// outranks it, since those entries outlive the state that issued them.
   private func cadence() -> Duration {
     OledCareCadence.interval(
       anyOverlayUp: states.values.contains { $0.lastAppliedAlpha != nil },
       anyLockDimEngaged: states.values.contains(where: \.lockDimEngaged),
       verificationPending: states.values.contains(where: \.needsVerify)
-        || !pendingRemovalVerifications.isEmpty
+        || !pendingRemovalVerifications.isEmpty,
+      anythingEnrolled: !states.isEmpty
     )
   }
 

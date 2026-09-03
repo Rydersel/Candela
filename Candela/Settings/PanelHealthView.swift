@@ -141,7 +141,7 @@ struct PanelHealthView: View {
     } message: {
       Text(
         verbatim:
-          "The accumulated brightness map for \(displayName), and the per-app display time derived from the same observations, are removed from this Mac. This display's total hours of use are a separate count and are not affected."
+          "The accumulated brightness map for \(displayName), and the per-app display time derived from the same observations, are removed from this Mac. Two other counts are kept and are not affected: this display's total hours of use, and its record of time spent at each brightness."
       )
     }
   }
@@ -336,7 +336,13 @@ struct PanelHealthView: View {
         // describing exactly the drawn map.
         .frame(width: mapSize.width, height: mapSize.height)
         .frame(maxWidth: .infinity)
-        PanelExposureLegend()
+        // Per lens, because the scales are different: history is normalized to
+        // this panel's own peak, the live lens is absolute luminance.
+        if surfaceMode == .now {
+          PanelExposureLegend(low: "Darker", high: "Brighter")
+        } else {
+          PanelExposureLegend()
+        }
         if surfaceMode == .now, let live {
           Text(verbatim: "Reading from \(live.at.formatted(date: .omitted, time: .standard)); brightness of what the display was showing.")
             .font(.caption)
@@ -376,19 +382,26 @@ struct PanelHealthView: View {
   }
 
   /// Caption under a blank surface, per lens.
+  ///
+  /// Same order as `confidenceNote`, and for the same reason: Safe Mode, a
+  /// missing grant and measuring-off each stop readings dead, so the live
+  /// lens's "one lands within a minute" is only true below all three. Above
+  /// them it promised a reading that could never arrive while the banner over
+  /// the map said the opposite.
   private func mapPlaceholder(_ summary: PanelHealthSummary, mode: SurfaceMode) -> String {
-    if mode == .now {
-      return "No reading this session yet. One lands within a minute while this display is awake, in use, and Screen Recording is granted."
-    }
     if model.isSafeMode {
       return "Paused for this session (Safe Mode). History recorded before it is kept."
     }
     if summary.confidence != .estimated, screenRecordingMissing {
       return "Waiting on Screen Recording; no readings are being taken."
     }
-    return summary.confidence == .estimated
-      ? "Not shown while measuring is off. The history recorded so far is kept."
-      : "Nothing measured to draw yet. Readings are taken once a minute while this display is awake and in use."
+    if summary.confidence == .estimated {
+      return "Not shown while measuring is off. The history recorded so far is kept."
+    }
+    if mode == .now {
+      return "No reading this session yet. One lands within a minute while this display is awake and in use."
+    }
+    return "Nothing measured to draw yet. Readings are taken once a minute while this display is awake and in use."
   }
 
   /// Current window rectangles over the surface. Same layer policy as the
@@ -671,19 +684,26 @@ struct PanelExposureMap: View {
 }
 
 /// The ramp's key, since a heat map with no key is a picture rather than a
-/// reading. "less/more" and not a unit: the scale is each cell against this
-/// panel's own peak, which has no absolute meaning.
+/// reading. Never a unit: neither scale has an absolute meaning to put on it.
+///
+/// The ends are callers' words because the two lenses do not share a scale.
+/// History is each cell against the panel's own peak, accumulated; the live
+/// lens is the raw linear luminance of one frame. One legend speaking for both
+/// described whichever it was not drawn under.
 struct PanelExposureLegend: View {
+  var low: String = "Less lit"
+  var high: String = "More lit"
+
   var body: some View {
     HStack(spacing: 8) {
-      Text("Less lit")
+      Text(verbatim: low)
       LinearGradient(
         colors: stride(from: 0.0, through: 1.0, by: 0.1).map(PanelExposureScale.color),
         startPoint: .leading, endPoint: .trailing
       )
       .frame(height: 6)
       .clipShape(RoundedRectangle(cornerRadius: 3))
-      Text("More lit")
+      Text(verbatim: high)
     }
     .font(.caption)
     .foregroundStyle(SettingsTheme.faintColor)
