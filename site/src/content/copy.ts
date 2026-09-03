@@ -337,7 +337,7 @@ export const faq: Array<{ q: string; a: string }> = [
   },
   {
     q: "My monitor has its own OLED care. Isn't that enough?",
-    a: "Keep it on; Candela never touches it. Pixel shift, static-screen dimming and the refresh cycle are the only protections that run inside the panel. But the monitor only sees a video signal. It cannot tell your Dock from a still photo, whether you are at the desk, or which display you are looking at, so it has to dim cautiously, and it keeps no record you can read. Candela works from what the Mac knows, so it can protect harder without getting in your way, and it shows you where the wear is going. Seatbelt and airbag: different situations, and you want both.",
+    a: "Keep it on; Candela never touches it. Pixel shift, static-screen dimming and the refresh cycle are the only protections that run inside the panel. But the monitor only sees a video signal. It cannot tell your Dock from a still photo, whether you are at the desk, or which display you are looking at, so it has to dim cautiously, and it keeps no record you can read. Candela works from what the Mac knows, so it can protect harder without getting in your way, and it shows you where the wear is going. Think of it like a seatbelt and an airbag: both are protection, they cover different situations, and you would still want both in a car.",
   },
   {
     q: "What do I need to run it?",
