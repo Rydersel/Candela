@@ -265,6 +265,73 @@ struct SynthesisGateTests {
     #expect(fixture.synthesis.refusalReason(for: engaged) == nil)
   }
 
+  /// The pref-free teardown refuses a gate it could not claim, as the opt-out
+  /// already did. It is the mirror hotkey's unwind, so without this it tore a
+  /// set down behind another feature's open reconfiguration and answered true,
+  /// leaving its caller to stage a raw mirror change over the result.
+  ///
+  /// The whole-app reset is the one caller that presses on: it is wiping the
+  /// domain and rebuilding, so a set left standing there would outlive
+  /// everything that knows about it.
+  @Test func aRefusedGateStopsTheUnwindUnlessTheResetForcesIt() async throws {
+    let fixture = Fixture()
+    defer { fixture.forgetPrefs() }
+    let display = try fixture.configured(Self.panelID)
+    let stop = try #require(fixture.modes.catalogs[Self.panelID]?.syntheticStops.first)
+
+    _ = await fixture.synthesis.engage(stop, on: display)
+    #expect(fixture.synthesis.isEngaged(displayID: Self.panelID))
+
+    // Held by another feature across both calls below.
+    let held = await fixture.gate.claim(.mirroring)
+    #expect(held.isGranted, "the fixture's own control")
+
+    let refused = await fixture.synthesis.disengageAllForReset()
+    #expect(!refused)
+    #expect(
+      fixture.synthesis.isEngaged(displayID: Self.panelID),
+      "a refusal must leave the set exactly where it found it"
+    )
+
+    let forced = await fixture.synthesis.disengageAllForReset(force: true)
+    #expect(forced)
+    #expect(fixture.synthesis.pairings.isEmpty)
+
+    // Still ours: the forced pass never took the claim, so it must not have
+    // given one back either.
+    await fixture.gate.release(.mirroring)
+  }
+
+  /// Both slots taken, and the attended guard answers what the unattended one
+  /// already answered: the reapply pass has skipped on `freeSlots` since it was
+  /// written, while the picker offered the stops anyway and let the engine
+  /// refuse at the allocation.
+  ///
+  /// The engaged panel is the half that makes this a slot question rather than a
+  /// blanket one: an engage tears its own pairing down before it allocates, so
+  /// its slot is free by the time it asks.
+  @Test func aThirdDisplayIsRefusedOnceBothSynthesisSlotsAreTaken() async throws {
+    let fixture = Fixture(secondPanel: true)
+    defer { fixture.forgetPrefs() }
+    let first = try fixture.configured(Self.panelID)
+    let second = try fixture.configured(Self.secondPanelID)
+    let stop = try #require(fixture.modes.catalogs[Self.panelID]?.syntheticStops.first)
+
+    _ = await fixture.synthesis.engage(stop, on: first)
+    _ = await fixture.synthesis.engage(stop, on: second)
+    #expect(fixture.synthesis.freeSlots == 0, "the fixture's own control")
+
+    // Never attached to the world: the guard is asked about the display it is
+    // handed, and a third panel on this rig would only be scenery.
+    let third = ConfiguredDisplay(
+      id: 11,
+      identity: DisplayConfigIdentity(vendor: 0x3669, model: 3, serial: 3, isBuiltIn: false),
+      name: "MAG341C 3", isBuiltIn: false
+    )
+    #expect(fixture.synthesis.refusalReason(for: third) == .engine(.noFreeSlot))
+    #expect(fixture.synthesis.refusalReason(for: first) == nil)
+  }
+
   /// The control for the test above: with nothing selected the gate is free, so
   /// the refusal there is about the operation rather than about a gate that
   /// refuses everything.

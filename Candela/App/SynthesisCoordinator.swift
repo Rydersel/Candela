@@ -258,6 +258,14 @@ final class SynthesisCoordinator {
     guard offersSyntheticSizes(displayID: display.id) else { return .notOffered }
     if isInUserMirrorSet(display) { return .alreadyMirrored }
     if isHDREngaged(display.id) { return .hdrEngaged }
+    // Last, where `SynthesisReapplyPolicy` puts it. An ENGAGED display is never
+    // refused for it: `ModeSynthesisEngine.engage` takes that display's own
+    // pairing down before it allocates, so the slot is free by the time it asks.
+    //
+    // `.engine(.noFreeSlot)` rather than a reason of its own: the engine already
+    // answers this at the allocation, and one fact told two ways would need a
+    // second sentence saying the same thing.
+    if freeSlots == 0, !isEngaged(displayID: display.id) { return .engine(.noFreeSlot) }
     return nil
   }
 
@@ -472,8 +480,13 @@ final class SynthesisCoordinator {
   /// Returns false when it REFUSED, which is not the same as "nothing came
   /// down": the pairing table is empty for the whole of an engage, so a caller
   /// that reads the table to judge the teardown has to read this first.
+  ///
+  /// `force` belongs to the whole-app reset alone: it presses on through a
+  /// refused gate claim because it is wiping the domain and rebuilding anyway,
+  /// so a set left standing would outlive everything that knows about it. Every
+  /// other caller takes the refusal, the hotkey's unwind included.
   @discardableResult
-  func disengageAllForReset() async -> Bool {
+  func disengageAllForReset(force: Bool = false) async -> Bool {
     // Checked FIRST: the snapshot below is empty for the whole multi-second
     // engage, so it answers "nothing is engaged" about a machine that is about
     // to have a synthesis set on it.
@@ -489,6 +502,13 @@ final class SynthesisCoordinator {
     // teardown that matters.
     _ = await endOutstandingPreview()
     let claimed = await gate.claim(.displayModes).refusedBy == nil
+    // A refused claim means another feature is mid-reconfiguration, and a
+    // teardown staged behind its back is the raw change every other path here
+    // refuses. `disengageForOptOut` returns false on the same answer.
+    guard claimed || force else {
+      log.error("synthesis: the reconfiguration gate refused the teardown claim; nothing was taken down")
+      return false
+    }
     let engaged = pairings
     // Through the driver, so the panel comes back on the mode the user chose
     // rather than the HiDPI twin the engage tail re-timed it onto; the driver

@@ -1308,6 +1308,11 @@ final class DisplayModeCoordinator {
     }
     switch await session.begin(mode: mode, on: displayID) {
     case .success:
+      // Cancelled BEFORE the await, not after `startCountdown()`: the previous
+      // preview's driver is still looping, and a tick landing during `adopt`
+      // knocks seconds off the fresh preview. This narrows the window rather
+      // than closing it.
+      stopCountdown()
       await adopt(.clear)
       startCountdown()
     case let .failure(error):
@@ -1427,6 +1432,11 @@ final class DisplayModeCoordinator {
       size, onPhysical: displayID, identityKey: display.identity.key
     ) {
     case .success:
+      // Cancelled BEFORE the await, not after the start below: the previous
+      // preview's driver is still looping, and a tick landing during `adopt`
+      // knocks seconds off the fresh preview. This narrows the window rather
+      // than closing it.
+      stopCountdown()
       await adopt(.clear, synthesis: .clear)
       // Guarded on a preview actually standing, which a successful engage does
       // not guarantee: the engage runs its own departure sweep when it lands, and

@@ -5,12 +5,15 @@ import Testing
 
 @Suite("Display rotation")
 struct DisplayRotationTests {
-  private func display(_ id: CGDirectDisplayID, builtIn: Bool = false) -> ConfiguredDisplay {
+  private func display(
+    _ id: CGDirectDisplayID, builtIn: Bool = false, mirroring: CGDirectDisplayID? = nil
+  ) -> ConfiguredDisplay {
     ConfiguredDisplay(
       id: id,
       identity: DisplayConfigIdentity(vendor: 0x3669, model: 0x3DD0, serial: 0, isBuiltIn: builtIn),
       name: "Display \(id)",
-      isBuiltIn: builtIn
+      isBuiltIn: builtIn,
+      mirrorsDisplay: mirroring ?? kCGNullDirectDisplay
     )
   }
 
@@ -79,6 +82,27 @@ struct DisplayRotationTests {
       currentRotation: .standard, isSupported: true
     )
     #expect(decision == .refused(.displayGone))
+  }
+
+  /// The refusal the policy had the flag for and never read: a slave's pixels
+  /// come from its master, and the request looks ordinary right up to the apply.
+  ///
+  /// The MASTER of the same set is untouched, which is the half that makes this
+  /// a carve-out rather than a blanket "anything mirrored is off limits": it
+  /// owns the framebuffer, so its glass is its own to turn.
+  @Test func aMirrorSlaveIsRefusedWhileItsMasterIsStillRotatable() {
+    let set = [display(1), display(2, mirroring: 1)]
+    #expect(RotationPolicy.decide(
+      display: 2, to: .ninety, in: set, currentRotation: .standard, isSupported: true
+    ) == .refused(.mirrored))
+    #expect(RotationPolicy.decide(
+      display: 1, to: .ninety, in: set, currentRotation: .standard, isSupported: true
+    ) == .rotate(RotationRequest(display: 1, from: .standard, to: .ninety)))
+    // And a standalone display is unchanged by the new guard.
+    #expect(RotationPolicy.decide(
+      display: 2, to: .ninety, in: [display(1), display(2)],
+      currentRotation: .standard, isSupported: true
+    ) == .rotate(RotationRequest(display: 2, from: .standard, to: .ninety)))
   }
 
   /// A missing current angle reaching the policy: no readable current angle means no honest "from"

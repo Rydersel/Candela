@@ -56,6 +56,12 @@ public enum RotationRefusal: Sendable, Equatable {
   /// The requested angle is already the current one. No countdown opens: a no-op
   /// that starts a 30-second timer is a bug, not a courtesy.
   case unchanged(DisplayRotation)
+  /// The display is a mirror SLAVE. Its framebuffer belongs to the display it
+  /// mirrors, so what a rotation of the glass achieves here is not something
+  /// this feature can verify. Refused rather than attempted, on the flag
+  /// `ModeReapplyPolicy` already defers on; `ArrangementPlan` refuses the same
+  /// display by another route.
+  case mirrored
 }
 
 /// A rotation that policy has approved. Carries `from` because the revert path
@@ -89,7 +95,12 @@ public enum RotationPolicy {
     isSupported: Bool
   ) -> RotationDecision {
     guard isSupported else { return .refused(.unavailable) }
-    guard displays.contains(where: { $0.id == display }) else { return .refused(.displayGone) }
+    guard let entry = displays.first(where: { $0.id == display }) else {
+      return .refused(.displayGone)
+    }
+    // Ahead of the angle questions: a slave's reported angle is readable and a
+    // request against it looks ordinary, which is how this reached the apply.
+    guard !entry.isMirrorSlave else { return .refused(.mirrored) }
     guard let current = currentRotation else { return .refused(.unreadable) }
     guard current != requested else { return .refused(.unchanged(current)) }
     return .rotate(RotationRequest(display: display, from: current, to: requested))

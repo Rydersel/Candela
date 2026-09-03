@@ -24,7 +24,19 @@ struct RotationRows: View {
   let state: AppModel.DisplayState
   let coordinator: RotationCoordinator
 
+  /// Read for the mirror sample only. `MirroringCoordinator` is this app's ONE
+  /// definition of "mirrored"; a second sample taken here would disagree with it
+  /// exactly when it matters.
+  @Environment(AppModel.self) private var model
+
   private var displayID: CGDirectDisplayID { state.id }
+
+  /// A mirror slave's framebuffer belongs to the display it mirrors, so
+  /// `RotationPolicy` refuses it. Greyed with the reason rather than left live
+  /// and refusing: the click would only produce a report.
+  private var isMirrorSlave: Bool {
+    model.mirroring.topology.displays.contains { $0.id == displayID && $0.isMirrorSlave }
+  }
 
   var body: some View {
     // No control at all rather than a dead one. A picker that cannot
@@ -40,11 +52,15 @@ struct RotationRows: View {
       }
       // A rotation takes up to a second; without this the window accepts a
       // second selection on top of the first.
-      .disabled(coordinator.isApplying)
+      .disabled(coordinator.isApplying || isMirrorSlave)
 
-      // The display reports a non-right angle, so the picker above is showing
-      // a fallback rather than the truth. Say so.
-      if coordinator.rotation(of: displayID) == nil {
+      // One caption at a time, mirror state first: it is the reason the control
+      // above is dead, and the angle it shows is beside the point while it is.
+      if isMirrorSlave {
+        SettingsCaption(RotationCopy.refusal(.mirrored))
+      } else if coordinator.rotation(of: displayID) == nil {
+        // The display reports a non-right angle, so the picker above is showing
+        // a fallback rather than the truth. Say so.
         SettingsCaption(RotationCopy.refusal(.unreadable))
       }
     }

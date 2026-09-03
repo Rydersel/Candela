@@ -427,7 +427,11 @@ final class AppModel {
     // that outlived it would stand until quit with every control that knew about
     // it already rebuilt. The engine's table is stale for the rest of the session
     // either way, so the log line is what a later report has to explain it by.
-    if await synthesis.disengageAllForReset() == false {
+    //
+    // `force` for the same reason, one step earlier: a gate claim held by
+    // another feature does not get to leave a set standing through a reset that
+    // is about to rebuild the controller which would have taken it down.
+    if await synthesis.disengageAllForReset(force: true) == false {
       log.error("reset: the synthesis engine refused its teardown; the virtual displays go down without it")
     }
     let host = virtualDisplays
