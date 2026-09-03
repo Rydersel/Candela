@@ -2,6 +2,7 @@ import AppKit
 // @preconcurrency: same mutable-C-global import quirk as AccessibilityPermission.
 @preconcurrency import ApplicationServices
 import CandelaKit
+import Observation
 import os
 import ServiceManagement
 import SwiftUI
@@ -186,11 +187,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     menu.addItem(panelItem)
 
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    item.button?.image = NSImage(systemSymbolName: "sun.max", accessibilityDescription: "Candela")
     item.menu = menu
     // Fork parity: the icon can be ⌘-dragged off the bar, and we persist that.
     item.behavior = .removalAllowed
     statusItem = item
+    updateStatusItemImage()
+    trackKeepAwake()
 
     // Panel controls that have to end this tracking session reach it through
     // here: the gear button (a window cannot take focus while it runs) and
@@ -676,11 +678,17 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // and DDC traffic on a process that is going away. The bounded wait lets a
       // hung teardown fall through to mach-port reclaim.
       let finished = DispatchSemaphore(value: 0)
+      // The ceiling is derived from the work it bounds, not chosen next to it: a
+      // second literal drifts from the departure timeout it is meant to cover,
+      // and the old one held main for 4 s over a poll that could not run that
+      // long. One poll per live slot, plus a margin for the teardown itself.
+      let departureTimeout: TimeInterval = 1.5
+      let ceiling = departureTimeout * Double(max(1, virtualDisplayHost.live().count)) + 0.25
       DispatchQueue.global(qos: .userInitiated).async {
-        virtualDisplayHost.destroyAll(departureTimeout: 1.5)
+        virtualDisplayHost.destroyAll(departureTimeout: departureTimeout)
         finished.signal()
       }
-      _ = finished.wait(timeout: .now() + 4)
+      _ = finished.wait(timeout: .now() + ceiling)
     }
 
     // Nobody else calls this. A no-op while the version key is absent (first
@@ -959,17 +967,24 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // `restoreFullRangeDDC` returns early on the native path, which is exactly
     // where an HDR display's lock dim lives.
     model.oledCare.endAllLockDims()
+    // Whether the restore actually SUBMITTED anything, read off the submission
+    // counter rather than inferred: `restoreFullRangeDDC` returns early on the
+    // native path, under forced software, and on a display whose DDC brightness
+    // is turned off, so a display list is no evidence that a write exists.
+    var submittedRestore = false
     for state in model.displays {
       // Quitting while DisplayManager is suspended (mid-reconfigure or asleep)
       // silently drops this at the epoch gate. Best-effort is the
       // restore-choreography contract.
+      let mark = state.controller.submissionMark()
       state.controller.restoreFullRangeDDC()
+      submittedRestore = submittedRestore || state.controller.submissionMark() != mark
     }
     // Best-effort barrier: the coalescer drains on the global executor, so a
     // short main-thread nap gives the ~20 ms/display DDC transactions time to
     // land before exit. Awaiting the main-actor waiters here would deadlock,
     // since terminate is synchronous on main.
-    if !model.displays.isEmpty {
+    if submittedRestore {
       Thread.sleep(forTimeInterval: 0.25)
     }
   }
@@ -1220,6 +1235,14 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // that follows cannot observe a stale ON.
     try? await SMAppService.mainApp.unregister()
 
+    // ---- 3b. Sparkle keeps its settings in OUR defaults domain under its own
+    //          schema (`SUEnableAutomaticChecks` and friends), so the wipe below
+    //          takes the update preference with it. The button clears Candela's
+    //          settings; whether the app checks for updates is not one of the
+    //          things it offers to change, so it is read here and written back
+    //          after.
+    let automaticUpdateChecks = updaterModel.automaticallyChecksForUpdates
+
     // ---- 4. The wipe itself.
     UserDefaults.standard.removePersistentDomain(
       forName: Bundle.main.bundleIdentifier ?? "com.rydersel.Candela"
@@ -1241,6 +1264,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       prefs.enableMuteUnmute = usedMuteCommand
       prefs.muted = true
     }
+
+    // ---- 4c. The update preference back, through Sparkle rather than by
+    //          writing its key: the updater is the store, and a key written
+    //          behind it would not reach the running scheduler.
+    updaterModel.automaticallyChecksForUpdates = automaticUpdateChecks
 
     // ---- 5. Rebuild, do NOT merely refresh. `refresh()` would reuse every
     //         controller for a still-connected display and leave it holding
@@ -1312,6 +1340,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     settingsActions.rearmTap()
     updateStatusItemVisibility()
     model.notePrefsChanged()
+    // The About pane's toggle and its "Last checked" line are mirrors of
+    // Sparkle's own state, and the wipe moved that state underneath them.
+    updaterModel.refreshFromUpdater()
     // Post-reset state IS first-run state: prefsSchemaVersion is gone, so
     // onboarding re-runs.
     settingsActions.postReset()
@@ -1406,6 +1437,36 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     let config = model.tapConfig
     mediaKeyTap.update(config: config)
     model.noteTapArmed(config)
+  }
+
+  /// The bar glyph, filled while a keep-awake assertion is held. Keep Display
+  /// Awake defeats a power setting the user chose and suppresses OLED care's
+  /// idle dim, blackout and unfocused dim for the session, so a hold that is
+  /// only visible with the panel open is a hold nobody remembers taking.
+  ///
+  /// A refused assertion leaves `isOn` false and the glyph idle, which is the
+  /// honest reading: nothing is held.
+  private func updateStatusItemImage() {
+    guard let statusItem else { return }
+    let isHeld = model.keepAwake.isOn
+    statusItem.button?.image = NSImage(
+      systemSymbolName: isHeld ? "sun.max.fill" : "sun.max",
+      accessibilityDescription: isHeld ? "Candela, keeping the display awake" : "Candela")
+  }
+
+  /// Re-arms after every change, the pattern `OnboardingLiveApplier` uses:
+  /// `withObservationTracking` fires its `onChange` once, before the write
+  /// lands, so the new value is read on the hop rather than in the callback.
+  private func trackKeepAwake() {
+    withObservationTracking {
+      _ = model.keepAwake.isOn
+    } onChange: { [weak self] in
+      Task { @MainActor in
+        guard let self else { return }
+        self.updateStatusItemImage()
+        self.trackKeepAwake()
+      }
+    }
   }
 
   /// Applies the `menuIcon` mode to the status item. Called at launch, after

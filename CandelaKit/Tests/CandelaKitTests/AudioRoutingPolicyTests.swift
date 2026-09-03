@@ -3,13 +3,24 @@ import Testing
 
 @Suite("Audio routing policy")
 struct AudioRoutingPolicyTests {
-  // MARK: - Name normalization (fork DisplayManager.normalizedName)
+  // MARK: - Name normalization
 
-  @Test func normalizationStripsParensSpacesAndDigits() {
-    #expect(AudioRoutingPolicy.normalizedName("MAG 341C (2)") == "MAGC")
-    #expect(AudioRoutingPolicy.normalizedName("MAG341C") == "MAGC")
-    #expect(AudioRoutingPolicy.normalizedName("LG UltraFine 27") == "LGUltraFine")
+  @Test func normalizationDropsTheDuplicateSuffixAndKeepsDigits() {
+    #expect(AudioRoutingPolicy.normalizedName("MAG 341C (2)") == "MAG341C")
+    #expect(AudioRoutingPolicy.normalizedName("MAG341C") == "MAG341C")
+    #expect(AudioRoutingPolicy.normalizedName("LG UltraFine 27") == "LGUltraFine27")
     #expect(AudioRoutingPolicy.normalizedName("") == "")
+  }
+
+  /// The digit strip this replaced turned every "MAG n41C" into "MAGC", so a
+  /// press aimed at one panel of a family could land on its sibling.
+  @Test func sameFamilyPanelsDoNotCollide() {
+    #expect(AudioRoutingPolicy.displayMatchesDevice(
+      deviceName: "MAG 341C (2)", rawDisplayName: "MAG341C", nameOverride: ""
+    ))
+    #expect(!AudioRoutingPolicy.displayMatchesDevice(
+      deviceName: "MAG 271C", rawDisplayName: "MAG 341C", nameOverride: ""
+    ))
   }
 
   @Test func matchingComparesNormalizedForms() {
@@ -23,7 +34,7 @@ struct AudioRoutingPolicyTests {
 
   @Test func overrideWinsOverTheRawDisplayName() {
     #expect(AudioRoutingPolicy.displayMatchesDevice(
-      deviceName: "USB DAC 2", rawDisplayName: "MAG341C", nameOverride: "USB DAC"
+      deviceName: "USB DAC (2)", rawDisplayName: "MAG341C", nameOverride: "USB DAC"
     ))
     // Empty override falls back to the raw name, not to "matches everything".
     #expect(!AudioRoutingPolicy.displayMatchesDevice(

@@ -21,9 +21,13 @@ public actor Arm64DDCService: DDCWriting {
 
   public func write(command: UInt8, value: UInt16) async -> Bool {
     // start/end pair also exposes the per-transaction duration (~30 ms).
-    dragPerfLog.log("ddc.write.start value=\(value)")
+    // `.info`, not the default level: a drag submits these at up to 60 Hz and
+    // the default level persists every one to disk. Not `.debug` either, which
+    // `log show` cannot see at all, and the app-regression harness parses
+    // `ddc.write.end` out of a `log show --info --debug` window.
+    dragPerfLog.info("ddc.write.start value=\(value)")
     let ok = Arm64DDC.write(service: box.service, command: command, value: value)
-    dragPerfLog.log("ddc.write.end value=\(value) ok=\(ok)")
+    dragPerfLog.info("ddc.write.end value=\(value) ok=\(ok)")
     return ok
   }
 

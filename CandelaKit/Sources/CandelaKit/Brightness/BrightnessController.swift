@@ -2429,7 +2429,7 @@ actor BrightnessWriteCoalescer {
 
   private func drain() async {
     while let write = await nextTarget() {
-      dragPerfLog.log(
+      dragPerfLog.info(
         "coalescer.target \(String(describing: write.target), privacy: .public) gen=\(write.generation)"
       )
       // Epoch gate: a target stamped before a display reconfiguration must not land

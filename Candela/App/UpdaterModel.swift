@@ -53,4 +53,18 @@ final class UpdaterModel {
   func checkForUpdates() {
     controller.checkForUpdates(nil)
   }
+
+  /// Re-reads everything mirrored here from the updater. For the settings reset,
+  /// which removes the whole defaults domain and takes Sparkle's keys with it:
+  /// without this the About pane keeps showing the toggle and the check date
+  /// that were true before the wipe.
+  ///
+  /// The toggle is assigned only when it differs, so a refresh does not send a
+  /// redundant write back through `didSet`.
+  func refreshFromUpdater() {
+    let automatic = controller.updater.automaticallyChecksForUpdates
+    if automaticallyChecksForUpdates != automatic { automaticallyChecksForUpdates = automatic }
+    lastUpdateCheckDate = controller.updater.lastUpdateCheckDate
+    canCheckForUpdates = controller.updater.canCheckForUpdates
+  }
 }

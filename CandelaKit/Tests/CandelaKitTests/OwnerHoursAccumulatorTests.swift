@@ -164,4 +164,43 @@ struct OwnerHoursAccumulatorTests {
 
     #expect(try JSONDecoder().decode(OwnerHours.self, from: legacyData) == acc.hours)
   }
+
+  // MARK: - The encode-time owner cap
+
+  private func sixtyOwners() -> OwnerHours {
+    var seconds: [String: Double] = [:]
+    for index in 0..<60 { seconds[String(format: "App%02d", index)] = Double(index + 1) }
+    return OwnerHours(secondsByOwner: seconds, totalSeconds: seconds.values.reduce(0, +))
+  }
+
+  /// The store is rewritten every five minutes and never forgets an app, so
+  /// without a cap the prefs blob grows for the life of the machine. The fold
+  /// keeps the per-owner seconds summing to the total.
+  @Test func encodingKeepsTheHeaviestOwnersAndFoldsTheRest() throws {
+    let hours = sixtyOwners()
+    let decoded = try JSONDecoder().decode(OwnerHours.self, from: JSONEncoder().encode(hours))
+
+    #expect(decoded.secondsByOwner.count == OwnerHours.storedOwnerLimit + 1)
+    // App00...App09 carry 1 through 10 seconds, so they are the ten dropped.
+    let dropped = (1...10).reduce(0.0) { $0 + Double($1) }
+    #expect(abs(decoded.secondsByOwner[OwnerHours.foldedOwnerKey]! - dropped) < 0.0001)
+    #expect(decoded.secondsByOwner["App59"] == 60)
+    #expect(decoded.totalSeconds == hours.totalSeconds)
+    #expect(abs(decoded.secondsByOwner.values.reduce(0, +) - hours.totalSeconds) < 0.0001)
+  }
+
+  /// Every five-minute write re-encodes what the last one wrote, so a fold that
+  /// was not idempotent would eat one more owner on every save.
+  @Test func anAlreadyFoldedStoreReEncodesToItself() throws {
+    let once = try JSONDecoder().decode(OwnerHours.self, from: JSONEncoder().encode(sixtyOwners()))
+    let twice = try JSONDecoder().decode(OwnerHours.self, from: JSONEncoder().encode(once))
+    #expect(twice == once)
+  }
+
+  /// The bucket is a storage detail, and its key is not a name any app can have.
+  @Test func theFoldedBucketNeverReachesTheOwnerList() {
+    let hours = OwnerHours(
+      secondsByOwner: [OwnerHours.foldedOwnerKey: 7200, "Slack": 3600], totalSeconds: 10800)
+    #expect(hours.topOwners(limit: 5).map(\.owner) == ["Slack"])
+  }
 }
