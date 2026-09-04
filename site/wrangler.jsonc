@@ -2,9 +2,6 @@
   "name": "candela-site",
   "compatibility_date": "2026-09-01",
   "pages_build_output_dir": "./dist",
-  "vars": {
-    "RELEASE_DOWNLOAD_URL": "https://github.com/Rydersel/Candela/releases/download/v1.0.0/Candela-1.0.0.dmg"
-  },
   "analytics_engine_datasets": [
     { "binding": "ANALYTICS_PAGEVIEWS", "dataset": "candela_site_pageviews" },
     { "binding": "ANALYTICS_DOWNLOADS", "dataset": "candela_site_downloads" },

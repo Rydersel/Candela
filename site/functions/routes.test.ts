@@ -34,26 +34,24 @@ class Database implements D1Database {
 
 const events: Record<string, unknown[]> = { pageviews: [], downloads: [], github: [] }
 
-function context(request: Request, db = new Database()): FunctionContext {
+const feed = '<?xml version="1.0"?><rss><channel>'
+  + '<item><sparkle:version>1.0.1</sparkle:version><enclosure url="https://github.com/Rydersel/Candela/releases/download/v1.0.1/Candela-1.0.1.zip" length="1" type="application/octet-stream"/></item>'
+  + '<item><sparkle:version>1.0.0</sparkle:version><enclosure url="https://github.com/Rydersel/Candela/releases/download/v1.0.0/Candela-1.0.0.zip" length="1" type="application/octet-stream"/></item>'
+  + '</channel></rss>'
+const latestDmg = 'https://github.com/Rydersel/Candela/releases/download/v1.0.1/Candela-1.0.1.dmg'
+
+function context(request: Request, db = new Database(), feedMissing = false): FunctionContext {
   return {
     request,
     env: {
+      ASSETS: { fetch: async () => feedMissing ? new Response('gone', { status: 404 }) : new Response(feed) },
       ANALYTICS_DB: db,
       ANALYTICS_SIGNING_KEY: 'a-test-secret-that-is-long-enough-for-hmac',
-      RELEASE_DOWNLOAD_URL: 'https://candela.fyi/Candela-1.0.0.dmg',
       ANALYTICS_PAGEVIEWS: { writeDataPoint: (event) => { events.pageviews.push(event) } },
       ANALYTICS_DOWNLOADS: { writeDataPoint: (event) => { events.downloads.push(event) } },
       ANALYTICS_GITHUB: { writeDataPoint: (event) => { events.github.push(event) } },
     },
   }
-}
-
-// No RELEASE_DOWNLOAD_URL, so the built-in fallback answers. It shipped
-// pointing at a release that did not exist, and nothing exercised this branch.
-function contextWithoutReleaseUrl(request: Request): FunctionContext {
-  const value = context(request)
-  delete value.env.RELEASE_DOWNLOAD_URL
-  return value
 }
 
 function post(path: string, cookie?: string) {
@@ -116,7 +114,7 @@ describe('analytics routes', () => {
       redirect: 'manual',
     }), new Database(true)))
     expect(failed.status).toBe(302)
-    expect(failed.headers.get('location')).toBe('https://candela.fyi/Candela-1.0.0.dmg')
+    expect(failed.headers.get('location')).toBe(latestDmg)
 
     const db = new Database()
     const before = events.github.length
@@ -158,14 +156,22 @@ describe('analytics routes', () => {
     expect(events.downloads.slice(before)).toContainEqual({ indexes: ['guide'], blobs: ['guide', 'unknown', 'unknown'], doubles: [1] })
   })
 
-  it('falls back to the current release archive when no download URL is configured', async () => {
-    const response = await download(contextWithoutReleaseUrl(new Request('https://candela.fyi/download', {
+  it('sends the download to the newest disk image the appcast lists', async () => {
+    const response = await download(context(new Request('https://candela.fyi/download', {
       headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' },
       redirect: 'manual',
     })))
     expect(response.status).toBe(302)
-    expect(response.headers.get('location')).toBe(
-      'https://github.com/Rydersel/Candela/releases/download/v1.0.0/Candela-1.0.0.dmg',
-    )
+    expect(response.headers.get('location')).toBe(latestDmg)
+  })
+
+  // A pinned fallback URL once shipped one release behind; the releases page cannot go stale.
+  it('falls back to the releases page when the appcast cannot be read', async () => {
+    const response = await download(context(new Request('https://candela.fyi/download', {
+      headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' },
+      redirect: 'manual',
+    }), new Database(), true))
+    expect(response.status).toBe(302)
+    expect(response.headers.get('location')).toBe('https://github.com/Rydersel/Candela/releases/latest')
   })
 })

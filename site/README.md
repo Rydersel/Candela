@@ -47,10 +47,11 @@ npx wrangler pages secret put ANALYTICS_SIGNING_KEY --project-name candela-site
 The signing value must be a freshly generated high-entropy secret. Production
 and preview must not share it.
 
-`RELEASE_DOWNLOAD_URL` is a committed var in `wrangler.jsonc`, because it is a
-public URL rather than a secret. It must match the current enclosure in
-`public/appcast.xml` before Download is enabled. A Pages secret of the same name
-overrides it if one is ever needed.
+`/download` needs no configuration: it reads `public/appcast.xml`, takes the
+highest version listed, and redirects to the disk image beside that item's
+enclosure (the same URL with `.dmg` in place of `.zip`). A release is live on
+the download buttons the moment its appcast item deploys. If the feed cannot
+be read, the redirect lands on the GitHub releases page instead.
 
 Apply and deploy from this `site/` directory. Running the Pages deploy from the
 repository root omits `site/functions` and silently produces a static-only
@@ -83,7 +84,7 @@ The report command requires a separate read-only token in
   byte-range responses. The appcast is the one static file routed through
   Functions, for the update-check count; its headers should match production's
   on a preview deploy before that change ships.
-- The appcast enclosure and `RELEASE_DOWNLOAD_URL` identify the same archive.
+- `curl -sI https://candela.fyi/download` redirects to the disk image of the newest appcast item, and that disk image exists on the release.
 - `curl -A 'Candela/0.0.0 Sparkle/2.9.6' https://candela.fyi/appcast.xml` returns the feed unchanged, and the report's "App update checks" count moves by one under `other` (a version the feed does not list, so the real versions stay clean). The proof that the shipped app is counted is a deployed build checking in and its version moving.
 - `/guides/` lists every guide, and `curl -H 'Accept: text/markdown' https://candela.fyi/guides/<slug>/` returns Markdown.
 - The guide placement migration has been applied (`npm run d1:migrate:remote`) before the deploy that first sends `placement=guide`.
