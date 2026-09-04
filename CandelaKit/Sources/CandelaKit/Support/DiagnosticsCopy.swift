@@ -491,9 +491,16 @@ public enum DiagnosticsCopy {
       return "Unavailable: macOS did not load the framework \(app) needs for HDR brightness"
     }
     guard supportsHDR else {
-      return "Unavailable: \(app) has no HDR answer for this display. Either it lists no HDR modes, or macOS did not load the framework \(app) asks. From here the two look the same."
+      return "Unavailable: \(hdrNoAnswer(app: app)) Either it lists no HDR modes, or macOS did not load the framework \(app) asks. From here the two look the same."
     }
     return "Available"
+  }
+
+  /// The claim without its two causes; the row that uses it is pinned on the
+  /// exact sentence. The menu-bar panel does not use it: alone it reads as the
+  /// app not knowing.
+  public static func hdrNoAnswer(app: String) -> String {
+    "\(app) has no HDR answer for this display."
   }
 
   // MARK: - Right now

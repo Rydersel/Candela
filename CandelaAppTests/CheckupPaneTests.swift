@@ -101,6 +101,14 @@ struct CheckupPaneTests {
     #expect(CheckupHistoryScope.defaultKey([]) == nil)
   }
 
+  /// The predicate only: the branch that reads it sits in an `.onChange` in
+  /// `body` with no seam a host-free test can reach, so a swap at the call site
+  /// goes unnoticed here.
+  @Test func theEveryDisplaySweepPredicateIsFalseOnceTheScopeWasPickedByHand() {
+    #expect(CheckupHistoryScope.needsEveryDisplay(chosenByHand: false))
+    #expect(!CheckupHistoryScope.needsEveryDisplay(chosenByHand: true))
+  }
+
   private func report(
     identityVerdict: CheckupVerdict, serial: String? = nil, nativeWidth: Int = 3840,
     nativeHeight: Int = 2160, maxRefreshHz: Double? = 120

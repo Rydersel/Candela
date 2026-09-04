@@ -1,10 +1,24 @@
 /// Pure volume-key routing decisions: no CoreAudio here, so every branch
 /// is unit-testable.
 public enum AudioRoutingPolicy {
-  /// Fork DisplayManager.normalizedName: strip parens, spaces, and digits, so
-  /// "MAG 341C (2)" matches "MAG341C" and duplicate-counter suffixes vanish.
+  /// Drops CoreAudio's duplicate-counter suffix, then whitespace and parens, so
+  /// "MAG 341C (2)" matches "MAG341C".
+  ///
+  /// Digits stay, unlike the fork: stripping them collapsed "MAG 341C" and "MAG
+  /// 271C" and routed one panel's keys at the other. Only an all-digit group is
+  /// a counter; "Desk (left)" and "Desk (right)" are two devices.
   public static func normalizedName(_ name: String) -> String {
-    name.filter { !"() 0123456789".contains($0) }
+    var head = Substring(name)
+    while head.last == " " { head = head.dropLast() }
+    if head.last == ")", let open = head.lastIndex(of: "(") {
+      let contents = head[head.index(after: open) ..< head.index(before: head.endIndex)]
+      // `isNumber` alone is true of every Unicode digit, so "(٢)" would lose its
+      // group and collide with "(٣)".
+      if !contents.isEmpty, contents.allSatisfy({ $0.isASCII && $0.isNumber }) {
+        head = head[head.startIndex ..< open]
+      }
+    }
+    return String(head.filter { !"() ".contains($0) })
   }
 
   /// Per-display match against the default output device; `audioDeviceNameOverride`

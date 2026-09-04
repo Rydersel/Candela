@@ -64,6 +64,9 @@ struct SettingsSidebar: View {
             // A headerless break: a header's worth of air with nothing
             // said, so the utility rows do not read as another section.
             .padding(.top, section.gapAbove && index == 0 ? 18 : 0)
+            // The shortcut's only trace: the buttons carrying it are zero-size
+            // and hidden from accessibility, and the menu bar is not ours.
+            .help(optional: Self.commandHint(for: id))
           }
         }
 
@@ -88,12 +91,18 @@ struct SettingsSidebar: View {
         if model.displays.isEmpty {
           // Without this, someone seeing only "Built-in Display" cannot tell
           // an undetected monitor from a broken app.
-          Text("No external displays connected")
-            .font(.callout)
-            .foregroundStyle(SettingsTheme.faintColor)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 8)
-            .padding(.top, 4)
+          VStack(alignment: .leading, spacing: 4) {
+            Text("No external displays connected")
+              .font(.callout)
+            // Discovery drops anything without an IOAVService, so such a monitor
+            // is attached, visible, and absent from this list.
+            Text("Displays connected over DisplayLink, AirPlay or Sidecar carry no DDC channel, so \(AppInfo.productName) cannot control them and does not list them.")
+              .font(.caption)
+          }
+          .foregroundStyle(SettingsTheme.faintColor)
+          .fixedSize(horizontal: false, vertical: true)
+          .padding(.horizontal, 8)
+          .padding(.top, 4)
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -151,6 +160,13 @@ struct SettingsSidebar: View {
       .padding(.leading, 14)
       .padding(.top, 18)
       .padding(.bottom, 6)
+  }
+
+  /// Spelled out because `.help` becomes the row's accessibility hint. Nil past
+  /// the ninth row, where the shortcuts stop.
+  private static func commandHint(for id: PaneID) -> Text? {
+    guard let index = SettingsRegistry.paneOrder.firstIndex(of: id), index < 9 else { return nil }
+    return Text(verbatim: "Command \(index + 1)")
   }
 
   /// One selectable row, drawing its own selection pill.
@@ -213,9 +229,9 @@ struct SettingsSidebar: View {
     accent: SettingsAccent, ordinal: Int? = nil
   ) -> some View {
     // The SAME resolution the panel uses, so a rename moves the sidebar, the
-    // panel header, the slider's label and the HUD together. The detail pane's
-    // title deliberately does not follow: it stays the hardware name, so
-    // renaming does not relabel the window you are editing it in.
+    // panel header, the slider's label, the HUD and the window title together.
+    // The window no longer draws its title, so keeping the hardware name there
+    // only left the Window menu and VoiceOver naming a display nobody renamed.
     let prefs = DisplayPrefs(persistenceKey: display.persistenceKey)
     let resolved = DisplayOrdering.title(
       friendlyName: prefs.friendlyName, hardwareName: display.name
@@ -335,5 +351,11 @@ private struct SidebarRowButton<Content: View>: View {
     .buttonStyle(.plain)
     .onHover { hovering = $0 }
     .animation(SettingsTheme.hoverMotion, value: hovering)
+  }
+}
+
+private extension View {
+  @ViewBuilder func help(optional text: Text?) -> some View {
+    if let text { help(text) } else { self }
   }
 }

@@ -115,9 +115,29 @@ struct ProvenanceEnvelopeTests {
     #expect(try CheckupStore(directory: dir).load(url: url).validate())
   }
 
+  /// With no EDID read, the display's name is all there is to fall back on.
   @Test func exportFileNameCarriesModelAndDay() throws {
     let e = try envelope()
     #expect(ProvenanceEnvelope.exportFileName(for: e.record)
       == "Candela Provenance DELL U2725QE 2026-05-09.candela-provenance.json")
+  }
+
+  /// The panel's model wins over the user's label, sanitized like a checkup export.
+  @Test func exportFileNamePrefersTheModelAndSanitizesIt() throws {
+    let sample = ProvenanceRecordTests.sampleRecord()
+    let record = ProvenanceRecord(
+      exportedAt: sample.exportedAt, appBuild: sample.appBuild, macOSBuild: sample.macOSBuild,
+      identity: ProvenanceIdentity(
+        persistenceKey: sample.identity.persistenceKey,
+        displayName: "Ryder's desk",
+        edid: CheckupDisplayIdentity(
+          identityKey: "k1", vendorID: 1, modelID: 2, serial: nil, manufactureWeek: nil,
+          manufactureYear: nil, nativePixelWidth: 1, nativePixelHeight: 1, maxRefreshHz: nil,
+          supportsPQEOTF: false, supportsHDRGammaEOTF: false, productName: "AW/34: DW"),
+        hardware: sample.identity.hardware),
+      hours: sample.hours, exposure: sample.exposure, checkups: sample.checkups)
+    let name = ProvenanceEnvelope.exportFileName(for: record)
+    #expect(name == "Candela Provenance AW_34_ DW 2026-05-09.candela-provenance.json")
+    #expect(!name.contains("Ryder"))
   }
 }

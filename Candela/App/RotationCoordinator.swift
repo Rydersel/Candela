@@ -47,6 +47,9 @@ final class RotationCoordinator {
   /// outstanding. Not defaulted: a per-coordinator default would compile, run,
   /// and exclude nobody.
   @ObservationIgnored private let gate: DisplayReconfigurationGate
+  /// The raw mirroring flag cannot tell a rendered size from a user's mirror,
+  /// and the two get different refusals.
+  @ObservationIgnored private let topologyStore: any MirrorTopologyProviding
   @ObservationIgnored private let session: RotationPreviewSession
   @ObservationIgnored private let queue = PreviewQueue()
   @ObservationIgnored private let countdown = PreviewCountdownDriver()
@@ -62,10 +65,12 @@ final class RotationCoordinator {
 
   init(
     gate: DisplayReconfigurationGate,
+    topologyStore: any MirrorTopologyProviding,
     configurator: any DisplayConfiguring = CoreGraphicsDisplayConfigurator(),
     timeoutSeconds: Int = 30
   ) {
     self.gate = gate
+    self.topologyStore = topologyStore
     self.configurator = configurator
     session = RotationPreviewSession(configurator: configurator, timeoutSeconds: timeoutSeconds)
     // A rotation fires this notification itself, so besides departures this is
@@ -107,6 +112,11 @@ final class RotationCoordinator {
   /// cannot work.
   var canRotate: Bool { configurator.canRotate }
 
+  /// The flag `rotate` hands `RotationPolicy`, read off the coordinator's own store.
+  func isSynthesizedSize(_ displayID: CGDirectDisplayID) -> Bool {
+    MirroringPredicates.isSynthesized(topologyStore.topology(), displayID: displayID)
+  }
+
   func rotation(of displayID: CGDirectDisplayID) -> DisplayRotation? {
     configurator.rotation(of: displayID)
   }
@@ -127,7 +137,8 @@ final class RotationCoordinator {
       to: requested,
       in: configurator.displays(),
       currentRotation: configurator.rotation(of: displayID),
-      isSupported: configurator.canRotate
+      isSupported: configurator.canRotate,
+      isSynthesizedSize: isSynthesizedSize(displayID)
     )
     switch decision {
     case let .refused(refusal):

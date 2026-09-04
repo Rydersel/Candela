@@ -51,6 +51,7 @@ struct AmbientBrightnessRow: View {
           set: { request($0, for: displayID) }
         ))
         .themedSwitch()
+        .accessibilityLabel("Automatically adjust brightness")
       }
       // macOS can move this setting underneath us with no notification, so
       // re-read on appear, on activation (the trip to System Settings and back)

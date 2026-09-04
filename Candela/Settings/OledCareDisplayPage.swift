@@ -27,8 +27,13 @@ struct OledCareDisplayPage: View {
 
   /// `pmset -g` costs a 79 ms process spawn [MEASURED 2026-08-06]. Read ONCE
   /// per page appearance into state, never from `body` (which re-evaluates on
-  /// every pref write and on every dim-state change).
+  /// every pref write and on every dim-state change) and never under the
+  /// dim-state task id.
   @State private var displaySleepMinutes: Int?
+
+  /// Not read in `body` (it re-evaluates on every pref write). Re-sampled on the
+  /// engine's dim state, the one live signal an assertion actually moves.
+  @State private var displaySleepAssertionHeld = false
 
   /// Slider drafts, live only while a drag is in progress. A `Slider` bound
   /// straight to a pref writes, fans out and bumps `prefsRevision` on every
@@ -77,6 +82,7 @@ struct OledCareDisplayPage: View {
             set: { on in writer.write(.oledCareEnrolled) { $0.oledCareEnrolled = on } }
           ))
           .themedSwitch()
+          .accessibilityLabel("Enroll this display in OLED care")
           // Deliberately the hub toggle's identifier: same setting, same
           // display, never both in the rendered tree, so a walk finds one.
           .prefIdentifier(.oledCareEnrolled, persistenceKey: persistenceKey)
@@ -145,8 +151,10 @@ struct OledCareDisplayPage: View {
         }
       }
     }
-    .task {
-      displaySleepMinutes = OledCareSignalSources.displaySleepMinutes()
+    // Two tasks: keyed together, every dim transition would re-spawn pmset.
+    .task { displaySleepMinutes = OledCareSignalSources.displaySleepMinutes() }
+    .task(id: model.oledCare.dimStates[persistenceKey]) {
+      displaySleepAssertionHeld = OledCareSignalSources.displaySleepAssertionHeld()
     }
   }
 
@@ -363,14 +371,13 @@ struct OledCareDisplayPage: View {
     }
   }
 
-  /// Live means the pipeline produced a reading inside the last two sampling
-  /// intervals, so a dead grant stills the dot within two minutes whatever the
-  /// prefs claim.
+  /// Live means a reading landed inside `OledCareCadence.livenessWindowSeconds`,
+  /// so a dead grant stills the dot within minutes whatever the prefs claim.
   private func isMeasuringLive(_ summary: PanelHealthSummary) -> Bool {
     guard !model.isSafeMode, prefs.oledTelemetry, CGPreflightScreenCaptureAccess(),
       let last = summary.lastSample
     else { return false }
-    return Date().timeIntervalSince(last) < 180
+    return Date().timeIntervalSince(last) < OledCareCadence.livenessWindowSeconds
   }
 
   /// What the engine is doing right now. `dimStates` is the coordinator's own
@@ -441,6 +448,7 @@ struct OledCareDisplayPage: View {
         set: { on in writer.write(.oledLockDim) { $0.oledLockDim = on } }
       ))
       .themedSwitch()
+      .accessibilityLabel("Dim while the screen is locked")
       .prefIdentifier(.oledLockDim, persistenceKey: persistenceKey)
     }
   }
@@ -456,6 +464,7 @@ struct OledCareDisplayPage: View {
         set: { on in writer.write(.oledBlackoutEnabled) { $0.oledBlackoutEnabled = on } }
       ))
       .themedSwitch()
+      .accessibilityLabel("Turn the screen black after longer")
       .prefIdentifier(.oledBlackoutEnabled, persistenceKey: persistenceKey)
     }
     if prefs.oledBlackoutEnabled {
@@ -487,6 +496,7 @@ struct OledCareDisplayPage: View {
         set: { on in writer.write(.oledUnfocusedDimEnabled) { $0.oledUnfocusedDimEnabled = on } }
       ))
       .themedSwitch()
+      .accessibilityLabel("Dim while this display has nothing in focus")
       .prefIdentifier(.oledUnfocusedDimEnabled, persistenceKey: persistenceKey)
     }
     if prefs.oledUnfocusedDimEnabled {
@@ -521,6 +531,10 @@ struct OledCareDisplayPage: View {
   /// staticness, and they live on the Health pane, so the caption names that
   /// pane instead of leaving the switch to do nothing silently.
   ///
+  /// The assertion gate is system-wide, so our own Keep Display Awake silences
+  /// this control as surely as a video does. The caption lists it; the note
+  /// says when it is the live reason.
+  ///
   /// The caption promises exactly what the code delivers. "Full-screen video is
   /// never dimmed" is the `fullScreenOwner` gate, read from the window list. It
   /// does NOT promise a WINDOWED video is safe, because bounds stability is not
@@ -529,13 +543,21 @@ struct OledCareDisplayPage: View {
   /// The pointer is not an input to `StaticRegionDetector` and the coordinator
   /// supplies none, so that sentence goes in when the falloff exists.
   private var detectionControls: some View {
-    SettingRow("Areas that stay bright and unchanged, like a toolbar or a sidebar, are dimmed a little while you work. Full-screen video is never dimmed. This needs both measurement settings on the Health pane: without them nothing is dimmed.") {
-      Toggle("Automatic static-region dimming", isOn: Binding(
-        get: { prefs.oledDetectionDimming },
-        set: { on in writer.write(.oledDetectionDimming) { $0.oledDetectionDimming = on } }
-      ))
-      .themedSwitch()
-      .prefIdentifier(.oledDetectionDimming, persistenceKey: persistenceKey)
+    SettingRow("Areas that stay bright and unchanged, like a toolbar or a sidebar, are dimmed a little while you work. Full-screen video is never dimmed, and nothing is dimmed while anything is holding the screen awake, including Keep Display Awake. This needs both measurement settings on the Health pane: without them nothing is dimmed.") {
+      VStack(alignment: .leading, spacing: 6) {
+        Toggle("Automatic static-region dimming", isOn: Binding(
+          get: { prefs.oledDetectionDimming },
+          set: { on in writer.write(.oledDetectionDimming) { $0.oledDetectionDimming = on } }
+        ))
+        .themedSwitch()
+        .accessibilityLabel("Automatic static-region dimming")
+        .prefIdentifier(.oledDetectionDimming, persistenceKey: persistenceKey)
+        // Same row as the switch: a divider would make the warning read as an
+        // unrelated setting.
+        if prefs.oledDetectionDimming, displaySleepAssertionHeld {
+          OledInlineNote(Text("Something is holding the screen awake: video playback, a call, or Keep Display Awake. Nothing is dimmed here for as long as that lasts."))
+        }
+      }
     }
   }
 

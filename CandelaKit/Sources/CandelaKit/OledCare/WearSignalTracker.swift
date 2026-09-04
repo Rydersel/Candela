@@ -60,6 +60,10 @@ public final class WearSignalTracker {
   private let versionKey: String
   private var slots: [Double]
   private var unwrittenSeconds: Double = 0
+  /// Panes read a histogram by constructing a tracker, so without this a look at
+  /// a display wrote an all-zero array at the next quit. Not `unwrittenSeconds`:
+  /// that is 0 after every write-through, and the debounced tail still needs flushing.
+  private var hasAccumulated = false
 
   public init(defaults: UserDefaults = .standard, persistenceKey: String) {
     self.defaults = defaults
@@ -113,6 +117,7 @@ public final class WearSignalTracker {
 
     slots[slot] += secondsSinceLastTick
     unwrittenSeconds += secondsSinceLastTick
+    hasAccumulated = true
     if unwrittenSeconds > Self.debounceSeconds { writeThrough() }
   }
 
@@ -184,6 +189,8 @@ public final class WearSignalTracker {
   public func reset() {
     slots = [Double](repeating: 0, count: Self.slotCount)
     unwrittenSeconds = 0
+    // Or the next flush re-creates the keys removed below.
+    hasAccumulated = false
     // Removed rather than zeroed, matching `PanelHoursTracker`: a settings
     // reset should leave no key behind, and every read here treats absence as
     // a fresh histogram.
@@ -191,8 +198,12 @@ public final class WearSignalTracker {
     defaults.removeObject(forKey: versionKey)
   }
 
-  /// The undebounced write, for termination and sleep.
-  public func flush() { writeThrough() }
+  /// The undebounced write, for termination and sleep. Skipped for a tracker
+  /// that booked nothing; see `hasAccumulated`.
+  public func flush() {
+    guard hasAccumulated else { return }
+    writeThrough()
+  }
 
   private func writeThrough() {
     defaults.set(slots, forKey: secondsKey)

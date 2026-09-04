@@ -392,6 +392,19 @@ struct DiagnosticsCopyTests {
         == "Unavailable: macOS did not load the framework Candela needs for HDR brightness")
   }
 
+  /// The menu-bar panel captions its greyed HDR button with this, and the row above
+  /// opens with it. Pinned as one string so the short surface cannot start blaming
+  /// the display while the long one still does not.
+  @Test func theShortHDRSentenceIsTheOpeningOfTheLongOne() {
+    #expect(
+      DiagnosticsCopy.hdrNoAnswer(app: Self.app)
+        == "Candela has no HDR answer for this display.")
+    #expect(
+      DiagnosticsCopy.hdrAvailability(
+        displayServicesAvailable: true, supportsHDR: false, app: Self.app)
+        .contains(DiagnosticsCopy.hdrNoAnswer(app: Self.app)))
+  }
+
   // MARK: - Verdict
 
   /// The arms are an ORDER, not a set, and testing each with the others neutral
@@ -836,6 +849,7 @@ struct DiagnosticsCopyTests {
       DiagnosticsCopy.mirroring(isMirrorSlave: true, isSynthesized: true),
       DiagnosticsCopy.hdrState(engaged: true),
       DiagnosticsCopy.hdrState(engaged: false),
+      DiagnosticsCopy.hdrNoAnswer(app: app),
       DiagnosticsCopy.writeGate(isSending: true),
       DiagnosticsCopy.writeGate(isSending: false),
       DiagnosticsCopy.nativeBrightness(isAvailable: true, app: app),

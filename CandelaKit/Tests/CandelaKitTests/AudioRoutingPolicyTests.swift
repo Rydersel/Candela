@@ -3,13 +3,55 @@ import Testing
 
 @Suite("Audio routing policy")
 struct AudioRoutingPolicyTests {
-  // MARK: - Name normalization (fork DisplayManager.normalizedName)
+  // MARK: - Name normalization
 
-  @Test func normalizationStripsParensSpacesAndDigits() {
-    #expect(AudioRoutingPolicy.normalizedName("MAG 341C (2)") == "MAGC")
-    #expect(AudioRoutingPolicy.normalizedName("MAG341C") == "MAGC")
-    #expect(AudioRoutingPolicy.normalizedName("LG UltraFine 27") == "LGUltraFine")
+  @Test func normalizationDropsTheDuplicateSuffixAndKeepsDigits() {
+    #expect(AudioRoutingPolicy.normalizedName("MAG 341C (2)") == "MAG341C")
+    #expect(AudioRoutingPolicy.normalizedName("MAG341C") == "MAG341C")
+    #expect(AudioRoutingPolicy.normalizedName("LG UltraFine 27") == "LGUltraFine27")
     #expect(AudioRoutingPolicy.normalizedName("") == "")
+  }
+
+  /// Only an all-digit group is a counter: "(left)" and "(right)" are two devices.
+  @Test func aParenthesizedWordIsPartOfTheNameAndOnlyACounterIsDropped() {
+    #expect(AudioRoutingPolicy.normalizedName("Desk (left)") == "Deskleft")
+    #expect(AudioRoutingPolicy.normalizedName("Desk (right)") == "Deskright")
+    #expect(
+      AudioRoutingPolicy.normalizedName("Desk (left)")
+        != AudioRoutingPolicy.normalizedName("Desk (right)")
+    )
+    #expect(!AudioRoutingPolicy.displayMatchesDevice(
+      deviceName: "Desk (left)", rawDisplayName: "Desk (right)", nameOverride: ""
+    ))
+    // Mixed contents are not a counter either.
+    #expect(AudioRoutingPolicy.normalizedName("Studio (2b)") == "Studio2b")
+    #expect(AudioRoutingPolicy.normalizedName("Studio ()") == "Studio")
+    // CoreAudio's counter is ASCII; `isNumber` alone would drop Eastern Arabic
+    // digits too.
+    #expect(AudioRoutingPolicy.normalizedName("Desk (٢)") == "Desk٢")
+    #expect(
+      AudioRoutingPolicy.normalizedName("Desk (٢)")
+        != AudioRoutingPolicy.normalizedName("Desk (٣)")
+    )
+  }
+
+  /// A bare trailing number is part of the model name.
+  @Test func aBareTrailingNumberIsPartOfTheModelName() {
+    #expect(AudioRoutingPolicy.normalizedName("UltraFine 27") == "UltraFine27")
+    #expect(AudioRoutingPolicy.normalizedName("UltraFine 32") == "UltraFine32")
+    #expect(!AudioRoutingPolicy.displayMatchesDevice(
+      deviceName: "UltraFine 27", rawDisplayName: "UltraFine 32", nameOverride: ""
+    ))
+  }
+
+  /// The old digit strip turned every "MAG n41C" into "MAGC".
+  @Test func sameFamilyPanelsDoNotCollide() {
+    #expect(AudioRoutingPolicy.displayMatchesDevice(
+      deviceName: "MAG 341C (2)", rawDisplayName: "MAG341C", nameOverride: ""
+    ))
+    #expect(!AudioRoutingPolicy.displayMatchesDevice(
+      deviceName: "MAG 271C", rawDisplayName: "MAG 341C", nameOverride: ""
+    ))
   }
 
   @Test func matchingComparesNormalizedForms() {
@@ -23,7 +65,7 @@ struct AudioRoutingPolicyTests {
 
   @Test func overrideWinsOverTheRawDisplayName() {
     #expect(AudioRoutingPolicy.displayMatchesDevice(
-      deviceName: "USB DAC 2", rawDisplayName: "MAG341C", nameOverride: "USB DAC"
+      deviceName: "USB DAC (2)", rawDisplayName: "MAG341C", nameOverride: "USB DAC"
     ))
     // Empty override falls back to the raw name, not to "matches everything".
     #expect(!AudioRoutingPolicy.displayMatchesDevice(

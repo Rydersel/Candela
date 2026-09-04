@@ -9,8 +9,21 @@ import Foundation
 public struct OwnerHours: Equatable, Sendable, Codable {
   public private(set) var secondsByOwner: [String: Double]
   public private(set) var totalSeconds: Double
+  /// Time from owners past `storedOwnerLimit`, kept out of `secondsByOwner` so
+  /// no reader can render the fold as an app. Older decoders skip the key, so
+  /// the schema version does not move for it.
+  public private(set) var foldedSeconds: Double
 
   public static let empty = OwnerHours(secondsByOwner: [:], totalSeconds: 0)
+
+  /// Owners surviving an encode. The store never forgets an app, so without a
+  /// cap the prefs blob grows without bound.
+  static let storedOwnerLimit = 50
+
+  /// Where older builds put the fold, inside `secondsByOwner`, where readers drew
+  /// it as the heaviest app. Migrated out on decode, never written again. The "/"
+  /// makes it impossible as a real process name.
+  static let legacyFoldedOwnerKey = "other/apps"
 
   /// Descending by seconds, ties broken by owner name so the view does not
   /// reshuffle between equal-weight renders.
@@ -27,6 +40,25 @@ public struct OwnerHours: Equatable, Sendable, Codable {
       .map { (owner: $0.key, hours: $0.value / 3600) }
   }
 
+  /// Idempotent: a store at or under the limit folds nothing, so a rewrite of a
+  /// rewrite does not eat one more owner.
+  private static func capped(_ seconds: [String: Double]) -> (kept: [String: Double], folded: Double) {
+    guard seconds.count > storedOwnerLimit else { return (seconds, 0) }
+    let ranked = seconds.sorted { lhs, rhs in
+      lhs.value != rhs.value ? lhs.value > rhs.value : lhs.key < rhs.key
+    }
+    var kept = [String: Double](minimumCapacity: storedOwnerLimit)
+    var folded = 0.0
+    for (index, entry) in ranked.enumerated() {
+      if index < storedOwnerLimit {
+        kept[entry.key] = entry.value
+      } else {
+        folded += entry.value
+      }
+    }
+    return (kept, folded)
+  }
+
   fileprivate mutating func add(_ secondsAdded: [String: Double], totalAdded: Double) {
     for (owner, seconds) in secondsAdded {
       secondsByOwner[owner, default: 0] += seconds
@@ -41,13 +73,18 @@ public struct OwnerHours: Equatable, Sendable, Codable {
     case schemaVersion = "schemaVersion"
     case secondsByOwner = "secondsByOwner"
     case totalSeconds = "totalSeconds"
+    case foldedSeconds = "foldedSeconds"
   }
 
   public func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
+    // Not bumped for `foldedSeconds`: the version gates older decoders out, and
+    // they only lose the folded total by skipping the key.
     try container.encode(OledStoreSchema.currentVersion, forKey: .schemaVersion)
-    try container.encode(secondsByOwner, forKey: .secondsByOwner)
+    let capped = Self.capped(secondsByOwner)
+    try container.encode(capped.kept, forKey: .secondsByOwner)
     try container.encode(totalSeconds, forKey: .totalSeconds)
+    try container.encode(foldedSeconds + capped.folded, forKey: .foldedSeconds)
   }
 
   public init(from decoder: Decoder) throws {
@@ -57,15 +94,22 @@ public struct OwnerHours: Equatable, Sendable, Codable {
       throw OledStoreDecodeFailure.unsupportedVersion(
         found: version, supported: OledStoreSchema.currentVersion)
     }
-    self.secondsByOwner = try container.decode([String: Double].self, forKey: .secondsByOwner)
+    var stored = try container.decode([String: Double].self, forKey: .secondsByOwner)
+    // Absent until this build rewrites the store; before the field existed the
+    // fold sat under the legacy key.
+    let carried = try container.decodeIfPresent(Double.self, forKey: .foldedSeconds) ?? 0
+    let legacy = stored.removeValue(forKey: Self.legacyFoldedOwnerKey) ?? 0
+    self.secondsByOwner = stored
     self.totalSeconds = try container.decode(Double.self, forKey: .totalSeconds)
+    self.foldedSeconds = carried + legacy
   }
 
   /// Internal, not private: replaces the memberwise init that adding
   /// `init(from:)` suppressed, and the tests reach it through `@testable`.
-  init(secondsByOwner: [String: Double], totalSeconds: Double) {
+  init(secondsByOwner: [String: Double], totalSeconds: Double, foldedSeconds: Double = 0) {
     self.secondsByOwner = secondsByOwner
     self.totalSeconds = totalSeconds
+    self.foldedSeconds = foldedSeconds
   }
 }
 

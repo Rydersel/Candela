@@ -53,4 +53,13 @@ final class UpdaterModel {
   func checkForUpdates() {
     controller.checkForUpdates(nil)
   }
+
+  /// For the settings reset, whose wipe takes Sparkle's keys with it. The toggle
+  /// is assigned only on change, so nothing echoes back through `didSet`.
+  func refreshFromUpdater() {
+    let automatic = controller.updater.automaticallyChecksForUpdates
+    if automaticallyChecksForUpdates != automatic { automaticallyChecksForUpdates = automatic }
+    lastUpdateCheckDate = controller.updater.lastUpdateCheckDate
+    canCheckForUpdates = controller.updater.canCheckForUpdates
+  }
 }

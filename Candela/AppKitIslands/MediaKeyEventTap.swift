@@ -226,12 +226,13 @@ final class MediaKeyEventTap {
     thread.name = "MediaKeyEventTap"
     thread.start()
 
-    // The deadman switch, in two threads. A PROBER makes a cheap WindowServer
-    // round-trip every 2 s (`CGWindowListCopyWindowInfo`, a real RPC unlike
-    // display-bounds reads, which are locally cached) and posts the self-ping
-    // described below. A MONITOR checks each second for a committed revocation
-    // (AX poll, covering toggles the notification path misses) and for a probe
-    // stuck over 5 s; either invalidates the port through the nonisolated
+    // The deadman switch, in two threads. A PROBER polls the grant every 0.5 s
+    // (`AXIsProcessTrustedWithOptions`, covering committed revocations the
+    // notification path misses) and posts the synthetic self-ping described
+    // below every 2 s, so the liveness evidence comes from our own event stream
+    // rather than from any WindowServer call. A MONITOR compares clocks each
+    // second and makes no calls of its own: a ping unanswered over 5 s, or a
+    // probe in flight that long, invalidates the port through the nonisolated
     // teardown, the same kernel-level release as process death.
     //
     // 5 s tolerates the platform's legitimate stalls: mode changes and rotation

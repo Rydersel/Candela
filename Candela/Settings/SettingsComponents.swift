@@ -65,12 +65,17 @@ enum SafetySentence {
   /// Why no DDC command is reaching this display. Here rather than on
   /// `AdvancedPage` because the HDR half is both spoken in a control label and
   /// shown as the page's caption, and two copies would drift.
+  ///
+  /// Scoped to the HARDWARE settings, not to everything under it: the sections
+  /// below also hold controls that turn the block itself off, and a blanket
+  /// "the settings below have no effect" would be telling the reader that the
+  /// way out does not work either.
   static func trafficBlockExplanation(_ block: DDCTrafficBlock) -> String {
     switch block {
     case .macOSDrivesBrightness:
-      "This display is in HDR mode. macOS is setting its brightness directly, so the settings below have no effect until HDR turns off."
+      "This display is in HDR mode. macOS is setting its brightness directly, so this display's hardware settings below have no effect until HDR turns off."
     case .hardwareControlOff:
-      "Hardware (DDC) control is off for this display, so the settings below have no effect."
+      "Hardware (DDC) control is off for this display, so this display's hardware settings below have no effect."
     }
   }
 }

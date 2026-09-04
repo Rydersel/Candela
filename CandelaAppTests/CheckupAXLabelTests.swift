@@ -174,10 +174,11 @@ struct CheckupAXLabelTests {
     #expect(expectAllSpeak(secondDot, "the second dot page") == expected)
   }
 
-  @Test func theSummaryPageSpeaksItsTwoWaysOutOfTheReport() {
+  /// Export leads: it stays first in the reading order it is emphasized in.
+  @Test func theSummaryPageSpeaksItsActionsAndItsWayOut() {
     let flow = CheckupFixture.flow()
     let labels = expectAllSpeak(CheckupSummaryPage(model: flow), "the summary page")
-    #expect(labels == [CheckupCopy.export, CheckupCopy.copySummary])
+    #expect(labels == [CheckupCopy.export, CheckupCopy.copySummary, CheckupCopy.done])
   }
 
   /// An `NSButton` falls back to its title when no label was set, so blanking the

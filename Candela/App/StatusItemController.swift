@@ -2,6 +2,7 @@ import AppKit
 // @preconcurrency: same mutable-C-global import quirk as AccessibilityPermission.
 @preconcurrency import ApplicationServices
 import CandelaKit
+import Observation
 import os
 import ServiceManagement
 import SwiftUI
@@ -186,11 +187,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     menu.addItem(panelItem)
 
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    item.button?.image = NSImage(systemSymbolName: "sun.max", accessibilityDescription: "Candela")
     item.menu = menu
     // Fork parity: the icon can be ⌘-dragged off the bar, and we persist that.
     item.behavior = .removalAllowed
     statusItem = item
+    updateStatusItemImage()
+    trackKeepAwake()
 
     // Panel controls that have to end this tracking session reach it through
     // here: the gear button (a window cannot take focus while it runs) and
@@ -676,11 +678,15 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // and DDC traffic on a process that is going away. The bounded wait lets a
       // hung teardown fall through to mach-port reclaim.
       let finished = DispatchSemaphore(value: 0)
+      // Per slot: the departure poll plus a CG transaction, since `destroy`
+      // breaks the mirrors it masters before polling. Floored at 4 s.
+      let departureTimeout: TimeInterval = 1.5
+      let ceiling = max(4, (departureTimeout + 0.75) * Double(max(1, virtualDisplayHost.live().count)))
       DispatchQueue.global(qos: .userInitiated).async {
-        virtualDisplayHost.destroyAll(departureTimeout: 1.5)
+        virtualDisplayHost.destroyAll(departureTimeout: departureTimeout)
         finished.signal()
       }
-      _ = finished.wait(timeout: .now() + 4)
+      _ = finished.wait(timeout: .now() + ceiling)
     }
 
     // Nobody else calls this. A no-op while the version key is absent (first
@@ -784,7 +790,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // bar, where it aims at the top edge the bar slides out of. Pointing beats
     // auto-opening the panel (tried first): with the bar hidden, a programmatic
     // performClick shows a disembodied menu that teaches nothing.
-    controller.onFinishedByButton = { [weak self] in
+    controller.onFirstRunClosed = { [weak self] in
       Task { @MainActor in
         try? await Task.sleep(for: .milliseconds(400))
         self?.showSetupLandingCallout()
@@ -952,6 +958,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // combined-mode dimming at quit, and safe mode never installed any, so
     // skipping it leaves the monitor where the user last put it.
     guard !isSafeMode else { return }
+    // Submission counters, not the display list: `restoreFullRangeDDC` returns
+    // early on several paths, so a display is no evidence of a write. Marked
+    // before the lock-dim release, whose native-leg write the mark must cover.
+    let marks = model.displays.map { ($0, $0.controller.submissionMark()) }
     // AFTER the gamma reset and shade removal, which tear the software surfaces
     // down unconditionally, so the restore below leaves the user's value on a
     // clean surface. BEFORE the full-range restore: quitting while a display is
@@ -959,17 +969,19 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // `restoreFullRangeDDC` returns early on the native path, which is exactly
     // where an HDR display's lock dim lives.
     model.oledCare.endAllLockDims()
-    for state in model.displays {
+    var submittedRestore = false
+    for (state, mark) in marks {
       // Quitting while DisplayManager is suspended (mid-reconfigure or asleep)
       // silently drops this at the epoch gate. Best-effort is the
       // restore-choreography contract.
       state.controller.restoreFullRangeDDC()
+      submittedRestore = submittedRestore || state.controller.submissionMark() != mark
     }
     // Best-effort barrier: the coalescer drains on the global executor, so a
     // short main-thread nap gives the ~20 ms/display DDC transactions time to
     // land before exit. Awaiting the main-actor waiters here would deadlock,
     // since terminate is synchronous on main.
-    if !model.displays.isEmpty {
+    if submittedRestore {
       Thread.sleep(forTimeInterval: 0.25)
     }
   }
@@ -1184,9 +1196,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
           )
         }
         if !unmuteLanded {
-          log.error(
-            "reset: display \(state.display.persistenceKey, privacy: .public) could not be confirmed unmuted, so its mute state and strategy are kept across the wipe"
-          )
+          log.error("""
+            reset: display \
+            \(DisplayLogging.tag(for: state.display.persistenceKey), privacy: .public) \
+            could not be confirmed unmuted, so its mute state and strategy are kept \
+            across the wipe
+            """)
           // The STRATEGY AS IT STANDS, not a fixed value: restoring the wrong one
           // changes which wire a later unmute writes. Both are kept, because both
           // leave a panel silent: the dedicated command has no sender left once
@@ -1220,6 +1235,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // that follows cannot observe a stale ON.
     try? await SMAppService.mainApp.unregister()
 
+    // ---- 3b. Sparkle stores its keys in our defaults domain, so the wipe would
+    //          take the update preference, which this button does not offer to
+    //          change. Read here, written back after.
+    let automaticUpdateChecks = updaterModel.automaticallyChecksForUpdates
+
     // ---- 4. The wipe itself.
     UserDefaults.standard.removePersistentDomain(
       forName: Bundle.main.bundleIdentifier ?? "com.rydersel.Candela"
@@ -1241,6 +1261,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       prefs.enableMuteUnmute = usedMuteCommand
       prefs.muted = true
     }
+
+    // ---- 4c. Through Sparkle, not its key: a key written behind the updater
+    //          never reaches the running scheduler.
+    updaterModel.automaticallyChecksForUpdates = automaticUpdateChecks
 
     // ---- 5. Rebuild, do NOT merely refresh. `refresh()` would reuse every
     //         controller for a still-connected display and leave it holding
@@ -1312,6 +1336,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     settingsActions.rearmTap()
     updateStatusItemVisibility()
     model.notePrefsChanged()
+    // The About pane mirrors Sparkle's state, which the wipe just moved.
+    updaterModel.refreshFromUpdater()
     // Post-reset state IS first-run state: prefsSchemaVersion is gone, so
     // onboarding re-runs.
     settingsActions.postReset()
@@ -1406,6 +1432,31 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     let config = model.tapConfig
     mediaKeyTap.update(config: config)
     model.noteTapArmed(config)
+  }
+
+  /// Filled while a keep-awake assertion is held: it suppresses every OLED care
+  /// dim for the session, so a hold visible only inside the panel is one nobody
+  /// remembers taking. A refused assertion leaves `isOn` false and the glyph idle.
+  private func updateStatusItemImage() {
+    guard let statusItem else { return }
+    let isHeld = model.keepAwake.isOn
+    statusItem.button?.image = NSImage(
+      systemSymbolName: isHeld ? "sun.max.fill" : "sun.max",
+      accessibilityDescription: isHeld ? "Candela, keeping the display awake" : "Candela")
+  }
+
+  /// `withObservationTracking` fires once, before the write lands, so the value
+  /// is read on the hop and the tracking re-armed there.
+  private func trackKeepAwake() {
+    withObservationTracking {
+      _ = model.keepAwake.isOn
+    } onChange: { [weak self] in
+      Task { @MainActor in
+        guard let self else { return }
+        self.updateStatusItemImage()
+        self.trackKeepAwake()
+      }
+    }
   }
 
   /// Applies the `menuIcon` mode to the status item. Called at launch, after

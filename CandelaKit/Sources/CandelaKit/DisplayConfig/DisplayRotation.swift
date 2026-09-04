@@ -56,6 +56,13 @@ public enum RotationRefusal: Sendable, Equatable {
   /// The requested angle is already the current one. No countdown opens: a no-op
   /// that starts a 30-second timer is a bug, not a courtesy.
   case unchanged(DisplayRotation)
+  /// A mirror slave's framebuffer belongs to its master, so what a rotation
+  /// achieves cannot be verified. Refused on the flag `ModeReapplyPolicy` defers on.
+  case mirrored
+  /// A rendered size is a mirror pairing onto a virtual display: refused for
+  /// `mirrored`'s reason, but its own case because the user paired nothing and
+  /// the way out is the size control.
+  case synthesizedSize
 }
 
 /// A rotation that policy has approved. Carries `from` because the revert path
@@ -80,16 +87,27 @@ public enum RotationDecision: Sendable, Equatable {
 /// The whole decision, in one pure function, for the same reason
 /// `MirrorTopologyPolicy` is one: it is the part worth testing exhaustively, and
 /// it must not be able to drift from what the UI claims.
+///
+/// `isSynthesizedSize` is a flag because the pairing lives in `MirrorTopology`,
+/// which this decision does not take.
 public enum RotationPolicy {
   public static func decide(
     display: CGDirectDisplayID,
     to requested: DisplayRotation,
     in displays: [ConfiguredDisplay],
     currentRotation: DisplayRotation?,
-    isSupported: Bool
+    isSupported: Bool,
+    isSynthesizedSize: Bool
   ) -> RotationDecision {
     guard isSupported else { return .refused(.unavailable) }
-    guard displays.contains(where: { $0.id == display }) else { return .refused(.displayGone) }
+    guard let entry = displays.first(where: { $0.id == display }) else {
+      return .refused(.displayGone)
+    }
+    // Before the angle checks, which a slave passes. Synthesis first: such a
+    // display is also a raw slave, and the mirroring answer names a display
+    // nobody paired.
+    if isSynthesizedSize { return .refused(.synthesizedSize) }
+    guard !entry.isMirrorSlave else { return .refused(.mirrored) }
     guard let current = currentRotation else { return .refused(.unreadable) }
     guard current != requested else { return .refused(.unchanged(current)) }
     return .rotate(RotationRequest(display: display, from: current, to: requested))

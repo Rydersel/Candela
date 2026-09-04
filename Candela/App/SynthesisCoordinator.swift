@@ -258,6 +258,9 @@ final class SynthesisCoordinator {
     guard offersSyntheticSizes(displayID: display.id) else { return .notOffered }
     if isInUserMirrorSet(display) { return .alreadyMirrored }
     if isHDREngaged(display.id) { return .hdrEngaged }
+    // An engaged display is exempt: `engage` frees its own slot before it
+    // allocates. Reuses the engine's reason rather than minting a twin.
+    if freeSlots == 0, !isEngaged(displayID: display.id) { return .engine(.noFreeSlot) }
     return nil
   }
 
@@ -472,8 +475,25 @@ final class SynthesisCoordinator {
   /// Returns false when it REFUSED, which is not the same as "nothing came
   /// down": the pairing table is empty for the whole of an engage, so a caller
   /// that reads the table to judge the teardown has to read this first.
+  ///
+  /// `force` is for the whole-app reset only. It waits up to `forcedClaimWait`
+  /// for a refused gate rather than barging: a teardown staged behind a live
+  /// configuration produces a success nobody achieved. Past the wait it goes on
+  /// unclaimed, logging the holder, because the reset wipes and rebuilds anyway
+  /// and a set left standing would outlive everything that knows about it.
+  ///
+  /// The wait covers mirroring, rotation and arrangement only: synthesis and the
+  /// mode coordinator share the `.displayModes` claimant, so a mode preview or
+  /// apply is granted here, not refused. `isWorking` answers for those, re-read
+  /// after the claim because the first reading predates the awaits.
+  ///
+  /// The window and retry delay are parameters only so a test can collapse them.
   @discardableResult
-  func disengageAllForReset() async -> Bool {
+  func disengageAllForReset(
+    force: Bool = false,
+    forcedClaimWait: Duration = .seconds(2),
+    forcedClaimRetryDelay: Duration = .milliseconds(100)
+  ) async -> Bool {
     // Checked FIRST: the snapshot below is empty for the whole multi-second
     // engage, so it answers "nothing is engaged" about a machine that is about
     // to have a synthesis set on it.
@@ -488,7 +508,35 @@ final class SynthesisCoordinator {
     // with nothing left that knows about it. The disengage below is the
     // teardown that matters.
     _ = await endOutstandingPreview()
-    let claimed = await gate.claim(.displayModes).refusedBy == nil
+    var refusedBy = await gate.claim(.displayModes).refusedBy
+    // Another feature is mid-reconfiguration. Every other path refuses here;
+    // the reset waits, since holders usually clear well inside the window.
+    if refusedBy != nil, force {
+      let deadline = ContinuousClock.now.advanced(by: forcedClaimWait)
+      while refusedBy != nil, ContinuousClock.now < deadline {
+        try? await Task.sleep(for: forcedClaimRetryDelay)
+        refusedBy = await gate.claim(.displayModes).refusedBy
+      }
+    }
+    // Re-read: the first reading predates the stand-down, the claim hop and any
+    // wait, and the gate cannot cover this, since a mode preview or apply shares
+    // the `.displayModes` claimant and is granted alongside us.
+    //
+    // No release on this path: the running sequence shares the claim and hands
+    // the gate back through the funnel when it finishes.
+    guard !isWorking else {
+      log.error("synthesis: a hardware sequence started before the teardown could begin; nothing was taken down")
+      return false
+    }
+    let claimed = refusedBy == nil
+    guard claimed || force else {
+      log.error("synthesis: the reconfiguration gate refused the teardown claim; nothing was taken down")
+      return false
+    }
+    if let holder = refusedBy {
+      // The only record that this teardown overlapped someone else's configuration.
+      log.error("synthesis reset: \(holder.rawValue, privacy: .public) still held the reconfiguration gate after the wait; the teardown goes ahead without the claim")
+    }
     let engaged = pairings
     // Through the driver, so the panel comes back on the mode the user chose
     // rather than the HiDPI twin the engage tail re-timed it onto; the driver

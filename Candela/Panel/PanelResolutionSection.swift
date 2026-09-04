@@ -272,8 +272,9 @@ struct PanelResolutionSection: View {
     // rows while the screen did not change and nothing said why.
     //
     // Nothing is lost by closing: the confirmation window was built to outlive
-    // this menu, so the answer is already somewhere else. Sliders and the HDR
-    // toggle stay put because they are in-place adjustments, not choices.
+    // this menu, so the answer is already somewhere else. Sliders stay put: a
+    // drag is an in-place adjustment nothing waits on. The HDR button ends
+    // tracking too, for the starvation reason above rather than for this one.
     PanelMenu.endTracking()
   }
 }

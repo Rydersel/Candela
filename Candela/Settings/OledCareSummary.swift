@@ -546,8 +546,8 @@ struct OledTelemetryTicker: View {
 }
 
 /// The breathing measurement indicator. It may only breathe while readings
-/// genuinely land (`lastSample` within two sampling intervals), so the motion IS
-/// the telemetry: a dead grant stills it within two minutes.
+/// genuinely land (`lastSample` within `OledCareCadence.livenessWindowSeconds`),
+/// so the motion IS the telemetry: a dead grant stills it within a few minutes.
 struct OledMeasuringDot: View {
   let live: Bool
 

@@ -4,6 +4,13 @@ import CandelaKit
 /// (no em dashes, no key names, no verdict on the display) can be checked at once.
 enum CheckupCopy {
 
+  // MARK: - Getting ready
+
+  /// The window's first frame: the environment read can take seconds on a panel
+  /// that answers DDC.
+  static let preparingTitle = "Getting ready"
+  static let preparingBody = "Reading what each attached display answers."
+
   // MARK: - Scenario
 
   static let scenarioTitle = "What is this checkup for?"
@@ -65,11 +72,12 @@ enum CheckupCopy {
   static let hdrEngagedLine =
     "This display is in HDR mode, which stops DDC: readback checks will be recorded as not observed. Turn HDR off and run the checkup again to have them run."
 
-  /// Quoted on the pick page and in the mid-run failure; both come from the missing NSScreen.
-  static let mirroringReason = "mirroring another display; a field cannot be shown on it"
+  /// All the failure observes is a missing `NSScreen`; mirroring is the usual
+  /// cause, not the only one.
+  static let noScreenReason = "macOS reports no screen for this display right now"
 
   static let fieldNotShown =
-    "This field could not be shown on the display: \(mirroringReason). Nothing was recorded for it."
+    "This field could not be shown: \(noScreenReason). The usual cause is mirroring, since a mirrored display has no screen of its own to draw on. Nothing was recorded for it."
 
   // MARK: - Plan
 
@@ -80,6 +88,11 @@ enum CheckupCopy {
   static func planWorstCase(seconds: Int) -> String {
     "The visual fields take at most \(seconds / 60) minutes if every one is shown three times. Nothing runs until you continue."
   }
+
+  /// The mode legs blank the panel once per rate; unwarned, that reads as the
+  /// app breaking the display.
+  static let planModeSweep =
+    "The display will go dark for a moment as each resolution and refresh rate is tested, once per rate. It is put back to the mode it started in before the visual fields begin."
 
   // MARK: - The measured legs
 
@@ -270,6 +283,8 @@ enum CheckupCopy {
 
   static let export = "Export report"
   static let copySummary = "Copy summary"
+  /// Closes the window; the run is already saved.
+  static let done = "Done"
   static let copied = "Copied"
   static let exportFailed = "The report could not be saved."
   static let acknowledge = "OK"
@@ -335,20 +350,21 @@ enum CheckupCopy {
   /// Every fixed string plus one sample of each parameterised one, so the copy
   /// rules can be asserted over the surface rather than over a reviewer's memory.
   static var allStringsForTest: [String] {
-    [scenarioTitle, scenarioSubtitle, scenarioNew, scenarioUsed, scenarioRecheck, pickTitle,
-     pickSubtitle, pickEmpty, planTitle, planSubtitle, identityTitle, capabilitiesTitle,
+    [preparingTitle, preparingBody,
+     scenarioTitle, scenarioSubtitle, scenarioNew, scenarioUsed, scenarioRecheck, pickTitle,
+     pickSubtitle, pickEmpty, planTitle, planSubtitle, planModeSweep, identityTitle, capabilitiesTitle,
      nativeModeTitle, refreshTitle, hdrTitle, running, refusalNote, plantDisclosureTitle,
      plantDisclosure, plantMissedTwice, showAgain, showAgainCap, start, continueLabel, back,
      answerPrompt, recordedPrefix, answerNothing, answerOne, answerMore, answerRound,
      answerNotRound, tapHint, secondDotTitle, secondDotPrompt, onlyDisplayStrip, summaryTitle,
-     summaryComplete, export, copySummary, copied, exportFailed, acknowledge,
+     summaryComplete, export, copySummary, done, copied, exportFailed, acknowledge,
      attestationNote, serialLabel, manufacturedLabel, nativeResolutionLabel,
      maximumRefreshLabel, hdrFlagsLabel, macOSLabel, notReported, flagPresent, flagAbsent,
      identityNotRead, manufactured(week: 51, year: 2025), hdrFlagsLine(pq: true, hdrGamma: false),
      completionLine(.complete), completionLine(.incomplete(reason: closedReason)),
      headerSentence, plantMissed(size: 4), planWorstCase(seconds: 600), secondsLeft(1),
      secondsLeft(20), summaryIncomplete(reason: closedReason), closedReason, fieldWindowTitle,
-     detectedAt(pixels: 4), hdrEngagedLine, mirroringReason, fieldNotShown,
+     detectedAt(pixels: 4), hdrEngagedLine, noScreenReason, fieldNotShown,
      pixelSizeLine(width: 3840, height: 2160),
      occlusionLine(fieldIDs: [CheckupCheckID.field(.black), CheckupCheckID.field(.gray7)]) ?? "",
      CheckupScenario.allCases.map(scenarioWords).joined(separator: " ")]

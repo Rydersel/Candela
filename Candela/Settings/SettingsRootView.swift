@@ -141,7 +141,13 @@ struct SettingsRootView: View {
     // the scene's own title at the LEADING edge next to the Back button, and it
     // LINGERS after the pop. With no dependency that changes with the path,
     // `updateNSView` never fires for a push and cannot re-hide it.
-    .background(SettingsWindowConfigurator(title: currentTitle, navigationToken: currentPathDepth))
+    // The title's `prefsRevision` read lives in the leaf: read here it re-ran
+    // the whole shell on every pref write.
+    .background(
+      SettingsWindowTitleHost(
+        displayKey: presentation.displayKey,
+        fallbackTitle: selectedPaneTitle,
+        navigationToken: currentPathDepth))
     // Debug screenshot hook: the window has no URL scheme and cannot be driven
     // by clicking without an Accessibility grant, so a capture run names its
     // destination through an env var and this adopts it once, where the
@@ -299,24 +305,14 @@ struct SettingsRootView: View {
     )
   }
 
-  /// Resolved from `presentation` rather than read back from the panes, so the
-  /// title always names what is on screen. Display destinations use the
-  /// display's own name.
-  private var currentTitle: String {
-    switch presentation {
-    case let .display(key, _):
-      // The `??` covers the same-frame race, not a second policy:
-      // `presentation` already established the key is connected.
-      model.allControlledStates
-        .first { $0.display.persistenceKey == key }
-        .map(\.display.name) ?? SettingsRegistry.descriptor(for: .general).title
-    case .pane:
-      if case let .pane(id) = selection {
-        SettingsRegistry.descriptor(for: id).title
-      } else {
-        // The fallback case, which `detailRoot` renders General for.
-        SettingsRegistry.descriptor(for: .general).title
-      }
+  /// The pane title, and the fallback for a display; the display half lives in
+  /// `SettingsWindowTitleHost` to keep the rename dependency off this view.
+  private var selectedPaneTitle: String {
+    if case let .pane(id) = selection {
+      SettingsRegistry.descriptor(for: id).title
+    } else {
+      // The fallback case, which `detailRoot` renders General for.
+      SettingsRegistry.descriptor(for: .general).title
     }
   }
 
@@ -725,6 +721,41 @@ enum SettingsWindowMetrics {
   static let idealHeight: CGFloat = 680
 
   static var minContentSize: NSSize { NSSize(width: minWidth, height: minHeight) }
+}
+
+/// Hosts the configurator and resolves the title, so the shell's only
+/// `prefsRevision` dependency is this leaf that draws nothing. A rename is a pref
+/// write with no observation of its own, so the title has to hang off the
+/// revision, and read in the shell it re-ran the whole window per pref write.
+///
+/// Display destinations use the resolved name: the window draws no title of its
+/// own, so this reaches only the Window menu and VoiceOver, where the hardware
+/// name would be a display nobody renamed.
+private struct SettingsWindowTitleHost: View {
+  let displayKey: String?
+  /// Also covers the same-frame race where the key has left the connected states.
+  let fallbackTitle: String
+  let navigationToken: Int
+
+  @Environment(AppModel.self) private var model
+
+  var body: some View {
+    SettingsWindowConfigurator(title: title, navigationToken: navigationToken)
+  }
+
+  private var title: String {
+    guard let displayKey else { return fallbackTitle }
+    // The revision read that this view exists to contain.
+    _ = model.prefsRevision
+    return
+      model.allControlledStates
+      .first { $0.display.persistenceKey == displayKey }
+      .map {
+        DisplayOrdering.title(
+          friendlyName: DisplayPrefs(persistenceKey: displayKey).friendlyName,
+          hardwareName: $0.display.name)
+      } ?? fallbackTitle
+  }
 }
 
 /// The window chrome a `Settings` scene does not offer: the `.resizable` and

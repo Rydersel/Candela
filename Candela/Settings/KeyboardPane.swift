@@ -154,6 +154,7 @@ struct KeyboardPane: View {
             set: { setInterceptAlternateKeys($0) }
           ))
           .themedSwitch()
+          .accessibilityLabel("Also accept F14 and F15")
           .prefIdentifier(.disableAltBrightnessKeys)
         }
       }

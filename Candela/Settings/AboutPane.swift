@@ -28,14 +28,17 @@ struct AboutPane: View {
         // The sentence belongs to the row, not the button: `SettingsActionRow`
         // republishes it as the control's accessibility hint (contract 3).
         SettingsActionRow(verbatim: checkNowLine, dividerFollows: true) {
+          // SwiftUI does not publish a `Button` title to accessibility.
           Button("Check for Updates") { updater.checkForUpdates() }
             .buttonStyle(SettingsPrimaryButtonStyle())
+            .accessibilityLabel("Check for Updates")
             .disabled(!updater.canCheckForUpdates)
         }
         SettingsCardDivider()
         SettingRow("When this is on, \(AppInfo.productName) checks about once a day, in the background.") {
           Toggle("Check for updates automatically", isOn: $updater.automaticallyChecksForUpdates)
             .themedSwitch()
+            .accessibilityLabel("Check for updates automatically")
         }
         SettingsCardDivider()
         // Holds however the toggle above is set, so it sits under both rows
