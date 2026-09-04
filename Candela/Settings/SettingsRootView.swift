@@ -142,6 +142,12 @@ struct SettingsRootView: View {
     // LINGERS after the pop. With no dependency that changes with the path,
     // `updateNSView` never fires for a push and cannot re-hide it.
     .background(SettingsWindowConfigurator(title: currentTitle, navigationToken: currentPathDepth))
+    .onAppear {
+      if let pending = SettingsOpener.pendingSelection {
+        SettingsOpener.pendingSelection = nil
+        selection = pending
+      }
+    }
     // Debug screenshot hook: the window has no URL scheme and cannot be driven
     // by clicking without an Accessibility grant, so a capture run names its
     // destination through an env var and this adopts it once, where the
@@ -972,6 +978,15 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
 /// and puts the window back behind the frontmost app (measured).
 @MainActor
 enum SettingsOpener {
+  /// Set before `open()`: the window comes up inside that call and its
+  /// `onAppear` reads this once, so a later assignment misses it.
+  static var pendingSelection: SettingsDestination?
+
+  static func open(at destination: SettingsDestination) {
+    pendingSelection = destination
+    open()
+  }
+
   static func open() {
     // The gear button lives inside the panel's menu tracking session, and no
     // window can take focus while one runs. `PanelMenu` is the one holder,
