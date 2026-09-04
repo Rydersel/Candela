@@ -12,6 +12,67 @@
     <description>Update feed for Candela.</description>
     <language>en</language>
     <item>
+      <title>Version 1.0.2</title>
+      <pubDate>Fri, 04 Sep 2026 21:00:36 +0000</pubDate>
+      <sparkle:version>1.0.2</sparkle:version>
+      <sparkle:shortVersionString>1.0.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description sparkle:format="markdown"><![CDATA[
+## Changed
+- Checkup: exported reports are named after the panel's model instead of the name you gave the display.
+- Controls: log lines identify a display by a short stable tag instead of its serial number.
+
+## Fixed
+- Menu bar: the HDR button responds when clicked instead of waiting for the panel to close.
+- Menu bar: a display with no HDR modes says so under its greyed HDR button.
+- Menu bar: the Accessibility banner's Open Settings link brings System Settings forward.
+- Menu bar: the hidden-display hint names the pane that holds the switch for the display you hid.
+- Menu bar: the empty state says that displays reached over DisplayLink, AirPlay or Sidecar carry no DDC channel.
+- Menu bar: the symbol fills while Keep Display Awake is holding the display.
+- Controls: a brightness or volume key no longer writes persisted log records on every DDC write.
+- Controls: audio-device matching keeps the digits in a monitor's name, so two monitors from one family no longer take each other's volume keys.
+- Settings: Return cancels the two per-display reset alerts instead of running the reset.
+- Settings: the app-wide Dim Past the Display's Minimum and Ask the Display at Startup switches stay available while one display's hardware control is blocked.
+- Settings: the HDR caption on Advanced names only this display's hardware settings.
+- Settings: the Sound card says Off and names the switch when a Candela setting is why the volume keys are unavailable.
+- Settings: a greyed volume slider shows its reason beneath it.
+- Settings: a display's name and audio-device fields keep their text when the page changes.
+- Settings: removing a virtual display asks first.
+- Settings: the virtual display size fields state their accepted range, and the Custom size item appears only when no preset matches.
+- Settings: the window title follows a renamed display.
+- Settings: the sidebar shortcuts are named in tooltips.
+- Settings: All Sizes shows a sentence instead of an empty card when a display reports no modes.
+- Settings: Reset All keeps the automatic update check choice, and About shows the true value afterwards.
+- Settings: every switch and text field announces its label to VoiceOver.
+- Settings: quitting no longer waits four seconds when no virtual display needs taking down.
+- Health: the Heat Map's Right now lens no longer promises a reading while measuring is off, Safe Mode is on, or the Screen Recording grant is missing.
+- Health: each Heat Map lens carries its own legend.
+- Health: the Measurement card says when the display it shows is not enrolled.
+- Health: visiting the pane no longer writes an empty wear record for an idle display.
+- Health: Delete History names the two counts it keeps, total hours and time at each brightness.
+- Health: per-app time is capped to the heaviest apps so the record stops growing without bound.
+- Protection: the static-region dimming row names the held-screen case and shows a note while a call, a video or Keep Display Awake is holding the display.
+- Protection: a display showing a rendered size refuses rotation with a reason that points at the size control.
+- Sizes: an expired preview countdown no longer reads as still running.
+- Sizes: starting a preview on a second display no longer shortens its countdown.
+- Sizes: a rendered size is refused up front when no slot is free.
+- Sizes: the mirror shortcut no longer takes a rendered size down while another display change is in flight.
+- Checkup: a field left unanswered counts as not observed rather than as an attestation.
+- Checkup: a mark reported after a missed control is kept beside the inconclusive grade.
+- Checkup: the summary page has Done beside Export.
+- Checkup: the plan page says the display will go dark briefly for each resolution and refresh rate tested.
+- Checkup: a field that could not be shown says what was observed instead of assuming mirroring.
+- Setup: skipping Setup on a first run still shows where the app lives in the menu bar.
+- Setup: the care demo stops when Setup is cancelled.
+- Setup: the Setup window no longer redraws its background while it is not the active window.
+]]></description>
+      <sparkle:fullReleaseNotesLink>https://github.com/Rydersel/Candela/releases</sparkle:fullReleaseNotesLink>
+      <enclosure
+        url="https://github.com/Rydersel/Candela/releases/download/v1.0.2/Candela-1.0.2.zip"
+        sparkle:edSignature="1jWsegHn/BfGnfY3gCTgOOs8fgRW+0a1WqsGwMFDSEnUwcxMUKXTylZVPxbkwd5uoumUFoG9ILJYL+xzF5WwCw==" length="5198176"
+        type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Version 1.0.1</title>
       <pubDate>Thu, 03 Sep 2026 00:12:04 +0000</pubDate>
       <sparkle:version>1.0.1</sparkle:version>
