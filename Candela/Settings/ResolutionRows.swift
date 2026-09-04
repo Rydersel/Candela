@@ -290,6 +290,7 @@ struct RememberResolutionRow: View {
           }
         ))
         .themedSwitch()
+        .accessibilityLabel("Remember this resolution")
         .prefIdentifier(.rememberDisplayMode, persistenceKey: persistenceKey)
         switch Self.pinnedRow(
           isRemembering: coordinator.isRemembering(displayID),

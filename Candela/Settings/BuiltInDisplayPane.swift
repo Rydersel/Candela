@@ -51,6 +51,7 @@ struct BuiltInDisplayPane: View {
             set: { enabled in writer.write(.isDisabled) { $0.isDisabled = !enabled } }
           ))
           .themedSwitch()
+          .accessibilityLabel("Control this display with the keyboard")
           .prefIdentifier(.isDisabled, persistenceKey: "builtIn")
         }
       }

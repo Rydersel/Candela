@@ -289,6 +289,7 @@ struct PanelHealthView: View {
         // with the SYSTEM accent when on.
         Toggle("Windows", isOn: $showsWindowGhosts)
           .themedSwitch(spreads: false)
+          .accessibilityLabel("Windows")
           .help("Outline the windows on this display, from the same permission-free snapshot app attribution uses.")
         Spacer(minLength: 0)
       }

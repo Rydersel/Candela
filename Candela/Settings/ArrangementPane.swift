@@ -377,6 +377,7 @@ struct ArrangementPane: View {
           }
         ))
         .themedSwitch()
+        .accessibilityLabel("Remember how these displays are arranged")
         .prefIdentifier(.restoreArrangement)
       }
       // The mirror hooks hang HERE, on the one row of this section that is

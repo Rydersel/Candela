@@ -86,6 +86,7 @@ struct OledCareDisplayPage: View {
             set: { on in writer.write(.oledCareEnrolled) { $0.oledCareEnrolled = on } }
           ))
           .themedSwitch()
+          .accessibilityLabel("Enroll this display in OLED care")
           // Deliberately the hub toggle's identifier: same setting, same
           // display, never both in the rendered tree, so a walk finds one.
           .prefIdentifier(.oledCareEnrolled, persistenceKey: persistenceKey)
@@ -456,6 +457,7 @@ struct OledCareDisplayPage: View {
         set: { on in writer.write(.oledLockDim) { $0.oledLockDim = on } }
       ))
       .themedSwitch()
+      .accessibilityLabel("Dim while the screen is locked")
       .prefIdentifier(.oledLockDim, persistenceKey: persistenceKey)
     }
   }
@@ -471,6 +473,7 @@ struct OledCareDisplayPage: View {
         set: { on in writer.write(.oledBlackoutEnabled) { $0.oledBlackoutEnabled = on } }
       ))
       .themedSwitch()
+      .accessibilityLabel("Turn the screen black after longer")
       .prefIdentifier(.oledBlackoutEnabled, persistenceKey: persistenceKey)
     }
     if prefs.oledBlackoutEnabled {
@@ -502,6 +505,7 @@ struct OledCareDisplayPage: View {
         set: { on in writer.write(.oledUnfocusedDimEnabled) { $0.oledUnfocusedDimEnabled = on } }
       ))
       .themedSwitch()
+      .accessibilityLabel("Dim while this display has nothing in focus")
       .prefIdentifier(.oledUnfocusedDimEnabled, persistenceKey: persistenceKey)
     }
     if prefs.oledUnfocusedDimEnabled {
@@ -557,6 +561,7 @@ struct OledCareDisplayPage: View {
           set: { on in writer.write(.oledDetectionDimming) { $0.oledDetectionDimming = on } }
         ))
         .themedSwitch()
+        .accessibilityLabel("Automatic static-region dimming")
         .prefIdentifier(.oledDetectionDimming, persistenceKey: persistenceKey)
         // In the SAME row as the switch, the idle threshold's warning shape: a
         // divider between a control and the sentence saying it does nothing

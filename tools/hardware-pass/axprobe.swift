@@ -108,7 +108,7 @@ guard AXUIElementCopyAttributeValue(
 // "Candela " prefix: the settings window is normally named for its current pane
 // but was measured reporting "Candela Settings", and a prefix rule throws the
 // real window away exactly then.
-let decoys = ["Candela Gamma Activity Enforcer", "Candela OLED Care Overlay"]
+let decoys = ["Candela Gamma Activity Enforcer", "Candela OLED Care Overlay", "Candela Window Shade"]
 
 // Filter to real windows FIRST. Measured 2026-08-18 with the settings window
 // closed: AXWindows on this app answers with two elements whose AXRole is

@@ -39,6 +39,7 @@ struct AboutPane: View {
         SettingRow("When this is on, \(AppInfo.productName) checks about once a day, in the background.") {
           Toggle("Check for updates automatically", isOn: $updater.automaticallyChecksForUpdates)
             .themedSwitch()
+            .accessibilityLabel("Check for updates automatically")
         }
         SettingsCardDivider()
         // Holds however the toggle above is set, so it sits under both rows

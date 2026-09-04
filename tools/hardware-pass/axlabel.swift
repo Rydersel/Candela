@@ -98,7 +98,7 @@ guard AXUIElementCopyAttributeValue(
 // AXApplication, both titled "Candela". They survive any title-based exclusion,
 // and walking one walks the whole application tree, so every line printed would
 // come from somewhere other than the window this claims to be reading.
-let decoys = ["Candela Gamma Activity Enforcer", "Candela OLED Care Overlay"]
+let decoys = ["Candela Gamma Activity Enforcer", "Candela OLED Care Overlay", "Candela Window Shade"]
 let settings = windows.first { window in
   guard string(window, kAXRoleAttribute as String) == "AXWindow" else { return false }
   let name = string(window, kAXTitleAttribute as String)

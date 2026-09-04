@@ -138,6 +138,7 @@ struct AppMenuPane: View {
         }
       ))
       .themedSwitch()
+      .accessibilityLabel("Show the built-in display in the menu bar")
       .prefIdentifier(.hideBuiltInDisplay)
     }
   }
@@ -155,6 +156,7 @@ struct AppMenuPane: View {
         }
       ))
       .themedSwitch()
+      .accessibilityLabel("Show Keep Display Awake in the menu bar")
       .prefIdentifier(.hideKeepAwake)
     }
   }
@@ -171,6 +173,7 @@ struct AppMenuPane: View {
         }
       ))
       .themedSwitch()
+      .accessibilityLabel("Show an All Displays brightness slider")
       .prefIdentifier(.hideCombinedBrightness)
     }
   }
@@ -185,6 +188,7 @@ struct AppMenuPane: View {
         }
       ))
       .themedSwitch()
+      .accessibilityLabel("Show a contrast slider")
       .prefIdentifier(.showContrast)
     }
   }
@@ -201,6 +205,7 @@ struct AppMenuPane: View {
         }
       ))
       .themedSwitch()
+      .accessibilityLabel("Snap to 25% steps")
       .prefIdentifier(.enableSliderSnap)
     }
   }
@@ -219,6 +224,7 @@ struct AppMenuPane: View {
         }
       ))
       .themedSwitch()
+      .accessibilityLabel("Show percentages")
       .prefIdentifier(.enableSliderPercent)
     }
   }

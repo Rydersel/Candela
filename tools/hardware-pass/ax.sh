@@ -27,7 +27,7 @@
 # (measured 2026-09-01: both cases read as the settings window being gone).
 # axprobe reaches INTO them, which is how Keep is pressed. Any window that can
 # be open beside settings belongs on this list.
-BIND='set cands to (every window whose name does not start with "Candela Gamma Activity Enforcer" and name does not start with "Candela OLED Care Overlay" and name does not start with "Display resolution" and name does not start with "Display orientation" and name does not start with "Display mirroring" and name does not start with "Candela Checkup" and name is not "Display Health" and name is not "Heat Map" and name is not "Candela Setup")
+BIND='set cands to (every window whose name does not start with "Candela Gamma Activity Enforcer" and name does not start with "Candela OLED Care Overlay" and name does not start with "Candela Window Shade" and name does not start with "Display resolution" and name does not start with "Display orientation" and name does not start with "Display mirroring" and name does not start with "Candela Checkup" and name is not "Display Health" and name is not "Heat Map" and name is not "Candela Setup")
     if (count of cands) is not 1 then
       set seen to ""
       repeat with x in windows

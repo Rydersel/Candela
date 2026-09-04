@@ -243,6 +243,7 @@ struct VirtualDisplaysPane: View {
                                                     name: .virtualSlotRecreateAtLaunch,
                                                     keyPath: \.recreateAtLaunch))
           .themedSwitch()
+          .accessibilityLabel("Come Back at Launch")
           .prefIdentifier(.virtualSlotRecreateAtLaunch, slot: slot)
       }
       SettingsCardDivider()
@@ -419,6 +420,7 @@ struct VirtualDisplaysPane: View {
       Toggle("Retina (HiDPI)", isOn: binding(slot: slot,
                                              name: .virtualSlotHiDPI, keyPath: \.hiDPI))
         .themedSwitch()
+        .accessibilityLabel("Retina (HiDPI)")
         .prefIdentifier(.virtualSlotHiDPI, slot: slot)
     }
   }

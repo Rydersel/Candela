@@ -443,6 +443,7 @@ private struct MeasurementControls: View {
           }
         ))
         .themedSwitch()
+        .accessibilityLabel("Measure how bright each part of this display is")
         .prefIdentifier(.oledTelemetry, persistenceKey: persistenceKey)
         // What "the resolution of this grid" means, at the size it means it.
         PanelGridMark()
@@ -478,6 +479,7 @@ private struct MeasurementControls: View {
         set: { on in writer.write(.oledWindowObservation) { $0.oledWindowObservation = on } }
       ))
       .themedSwitch()
+      .accessibilityLabel("Note which apps are on this display")
       .prefIdentifier(.oledWindowObservation, persistenceKey: persistenceKey)
     }
   }
@@ -509,6 +511,7 @@ private struct HoursToggle: View {
         set: { on in writer.write(.oledHoursTracking) { $0.oledHoursTracking = on } }
       ))
       .themedSwitch()
+      .accessibilityLabel("Count hours of use")
       .prefIdentifier(.oledHoursTracking, persistenceKey: persistenceKey)
     }
   }

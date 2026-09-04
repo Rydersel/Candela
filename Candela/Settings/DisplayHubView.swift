@@ -124,6 +124,9 @@ struct DisplayHubView: View {
       SettingRow("Shown in the menu bar.") {
         HStack(spacing: 2) {
           TextField("Name", text: $nameDraft, prompt: Text(verbatim: state.display.name))
+            // The row's own label. Without it the field publishes no
+            // description at all, so it announces as a bare text field.
+            .accessibilityLabel("Name")
             .focused($nameFocused)
             .onSubmit { commitName() }
             .onChange(of: nameFocused) { _, focused in
@@ -183,6 +186,7 @@ struct DisplayHubView: View {
           set: { shown in writer.write(.hideDisplay) { $0.hideDisplay = !shown } }
         ))
         .themedSwitch()
+        .accessibilityLabel("Show in the menu bar")
         .prefIdentifier(.hideDisplay, persistenceKey: persistenceKey)
       }
 
@@ -196,6 +200,7 @@ struct DisplayHubView: View {
           set: { shown in writer.write(.hideVolumeSlider) { $0.hideVolumeSlider = !shown } }
         ))
         .themedSwitch()
+        .accessibilityLabel("Show the volume slider in the menu bar")
         .prefIdentifier(.hideVolumeSlider, persistenceKey: persistenceKey)
       }
     }
@@ -211,6 +216,7 @@ struct DisplayHubView: View {
           set: { enabled in writer.write(.isDisabled) { $0.isDisabled = !enabled } }
         ))
         .themedSwitch()
+        .accessibilityLabel("Use brightness and volume keys for this display")
         .prefIdentifier(.isDisabled, persistenceKey: persistenceKey)
       }
     }
@@ -343,6 +349,7 @@ struct DisplayHubView: View {
           set: { on in setMoreSizes(on, on: catalog.display) }
         ))
         .themedSwitch()
+        .accessibilityLabel(SynthesisCopy.optInTitle)
         // An engage or teardown is a multi-second hardware sequence, and a
         // second flip queued behind one answers a question nobody is asking any
         // more. Courtesy, not the guard: the engine is non-reentrant and the
@@ -451,6 +458,9 @@ struct DisplayHubView: View {
         LabeledContent("Audio device name") {
           HStack(spacing: 8) {
             TextField("", text: $audioNameDraft, prompt: Text("Automatic"))
+              // The surrounding `LabeledContent` draws the label but publishes
+              // none, so the field names itself.
+              .accessibilityLabel("Audio device name")
               .settingsEditableContent()
               .focused($audioNameFocused)
               .onSubmit { commitAudioName() }
@@ -528,6 +538,7 @@ struct DisplayHubView: View {
           set: { on in writer.write(.oledCareEnrolled) { $0.oledCareEnrolled = on } }
         ))
         .themedSwitch()
+        .accessibilityLabel("Enroll this display in OLED care")
         .prefIdentifier(.oledCareEnrolled, persistenceKey: persistenceKey)
       }
 

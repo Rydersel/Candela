@@ -95,6 +95,14 @@
         ("brightness", value(controller.brightness)),
         ("hdrEngaged", yesNo(controller.isHDREngaged)),
         ("hdrSupported", yesNo(controller.supportsHDR)),
+        ("hdrProbed", yesNo(controller.hdrCapabilityProbed)),
+        // The caption the greyed HDR button carries, from the same pure helper
+        // the row calls, so a rig leg can read the reason without a hover.
+        ("hdrRefusal", quoted(PanelView.hdrRefusalReason(
+          isShowingSynthesizedSize: model.synthesis.isEngaged(displayID: state.display.id),
+          isHDREngaged: controller.isHDREngaged,
+          supportsHDR: controller.supportsHDR,
+          capabilityProbed: controller.hdrCapabilityProbed) ?? "none")),
         ("hdrMode", controller.hdrMode == .off ? "off" : "alwaysOn"),
         // The verdict and the caption, from the same accessors the row's body
         // calls: the only way a rig leg can assert a degraded panel says so.

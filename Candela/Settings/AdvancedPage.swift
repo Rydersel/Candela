@@ -158,6 +158,7 @@ struct AdvancedPage: View {
           }
         ))
         .themedSwitch()
+        .accessibilityLabel("Dim with a screen overlay")
         .prefIdentifier(.avoidGamma, persistenceKey: persistenceKey)
       }
 
@@ -171,6 +172,7 @@ struct AdvancedPage: View {
           set: { shown in writer.write(.hideOsd) { $0.hideOsd = !shown } }
         ))
         .themedSwitch()
+        .accessibilityLabel("Show the volume indicator")
         .prefIdentifier(.hideOsd, persistenceKey: persistenceKey)
       }
       // The hooks hang on the row above, which always renders: on the caption
@@ -257,6 +259,8 @@ struct AdvancedPage: View {
           stored: { storedRemapText(command) },
           commit: { commitRemap(command, $0) },
           prompt: Text("Standard"),
+          // The surrounding `LabeledContent` draws this but publishes none.
+          fieldLabel: Text(verbatim: "\(DDCCommandCopy.title(command)) control code"),
           // Not a `SettingRow` caption: the sub-group's one caption covers
           // every control, and repeating it per field would read as separate
           // settings.
