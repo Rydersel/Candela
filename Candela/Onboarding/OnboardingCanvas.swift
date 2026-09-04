@@ -56,10 +56,8 @@ struct OnboardingCanvas: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.controlActiveState) private var activeState
 
-  /// When the window stopped being key, and how long it has spent that way.
-  /// The drift reads a clock with that time discounted, so a pause costs two
-  /// blurred layers at 30 fps and nothing else: coming back resumes the motion
-  /// instead of jumping it forward by however long the person was away.
+  /// Off-key time is discounted from the drift clock, so coming back resumes the
+  /// motion instead of jumping it forward.
   @State private var offKeySince: Date?
   @State private var offKeyTotal: TimeInterval = 0
 
@@ -73,8 +71,7 @@ struct OnboardingCanvas: View {
           blobs(at: drift(at: context.date))
         }
       } else {
-        // Nothing off-key is being looked at: behind another app, minimized or
-        // on another Space, the window has resigned key either way.
+        // Off-key covers behind another app, minimized and another Space alike.
         blobs(at: drift(at: offKeySince ?? .now))
       }
       // Vignette keeps edges dark so content owns the middle.

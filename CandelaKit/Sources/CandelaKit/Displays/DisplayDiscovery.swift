@@ -60,9 +60,8 @@ public enum DisplayDiscovery {
   /// share saved brightness. The fork disambiguated with CGDirectDisplayID at
   /// the cost of stability across ports and reboots.
   ///
-  /// The fallback embeds the panel's serial number, so this value never goes
-  /// into a log at `.public` or into the diagnostics report. Log
-  /// `DisplayLogging.tag(for:)` instead.
+  /// The fallback embeds the panel's serial number, so log
+  /// `DisplayLogging.tag(for:)` instead of this value.
   static func persistenceKey(from service: Arm64DDC.IOregService) -> String {
     if !service.edidUUID.isEmpty {
       return service.edidUUID

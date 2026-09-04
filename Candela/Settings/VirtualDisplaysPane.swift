@@ -31,8 +31,8 @@ struct VirtualDisplaysPane: View {
   /// the sync lands.
   @State private var shownIssue: ShownIssue?
 
-  /// The slot whose removal is being confirmed. Held as the slot rather than a
-  /// flag, so the alert cannot survive a slot switch and delete the wrong one.
+  /// The slot, not a flag, so the alert cannot survive a slot switch and delete
+  /// the wrong one.
   @State private var removingSlot: Int?
 
   private struct ShownIssue: Equatable {
@@ -391,9 +391,7 @@ struct VirtualDisplaysPane: View {
         ForEach(Self.presets.indices, id: \.self) { index in
           Text(Self.presets[index].label).tag(index)
         }
-        // Only while it describes the state. Listed all the time it is an item
-        // that cannot be chosen, since a size becomes custom by being typed
-        // into the fields below.
+        // Only while it describes the state: it cannot be chosen, only typed into.
         if presetIndex == nil {
           Text("Custom").tag(-1)
         }
@@ -425,18 +423,16 @@ struct VirtualDisplaysPane: View {
     }
   }
 
-  /// Read off the ceiling the engine clamps to, per axis, so the sentence cannot
-  /// go on promising a height the create path would quietly cut back. The Retina
-  /// half comes off the same constants: the mode is drawn at twice the logical
-  /// size, so it is the doubled size that has to fit the ceiling.
+  /// Off the engine's per-axis ceiling, so the caption cannot promise a height
+  /// the create path would cut back. Retina is drawn at double size, so the
+  /// doubled size is what has to fit.
   static var sizeRangeCaption: String {
     let (wide, high) = VirtualDisplayIdentity.maxPixels
     return "Width can be \(minimumPixels) to \(wide), height \(minimumPixels) to \(high); "
       + "Retina is only available up to \(wide / 2) by \(high / 2), because the display is drawn at double the size."
   }
 
-  /// Floors the value at something a desktop fits on. Ours, not the engine's:
-  /// `normalized` has no lower bound of its own.
+  /// Something a desktop fits on. Ours: `normalized` has no lower bound.
   static let minimumPixels = 320
 
   private func numberField(
@@ -447,9 +443,8 @@ struct VirtualDisplaysPane: View {
     CommitOnBlurField(
       stored: { String(get(prefs.virtualSlot(slot))) },
       commit: { text in
-        // The engine still normalizes to even and clamps to the pixel ceiling on
-        // create; this keeps the field from accepting a number that would be
-        // silently cut back to a different display than the one typed.
+        // The engine clamps on create anyway; this stops the field accepting a
+        // size it would silently cut back.
         guard let value = Int(text),
               (Self.minimumPixels ... maximum).contains(value) else { return }
         var updated = prefs.virtualSlot(slot)
@@ -475,9 +470,8 @@ struct VirtualDisplaysPane: View {
         // says why) or the last session ended without come-back-at-launch.
         // Create and Apply are the same write through the same path and never
         // appear together, so they share one identifier.
-        // SwiftUI does not publish a `Button`'s own title to the accessibility
-        // layer, so each title here is stated twice or the button announces as
-        // a bare "button".
+        // SwiftUI does not publish a `Button` title to accessibility; without
+        // the label it announces as "button".
         Button("Create Display") { setConfigured(true, slot: slot) }
           .buttonStyle(SettingsPrimaryButtonStyle())
           .accessibilityLabel("Create Display")
@@ -491,10 +485,8 @@ struct VirtualDisplaysPane: View {
           .accessibilityIdentifier("action.slotApply.\(slot)")
       }
       Spacer(minLength: 16)
-      // Trailing ellipsis: the click opens the confirmation, and the
-      // `.destructive` role belongs on the button that does the removing.
-      // Removal clears the slot's stored keys, the minted identity included, so
-      // it is not something a stray click may do.
+      // Confirmed first: removal clears the slot's keys, minted identity included.
+      // The `.destructive` role belongs on the button that removes.
       Button("Remove Display…") { removingSlot = slot }
         .buttonStyle(SettingsDangerButtonStyle())
         .accessibilityLabel("Remove Display…")
@@ -511,10 +503,8 @@ struct VirtualDisplaysPane: View {
             .keyboardShortcut(.defaultAction)
           Button("Remove", role: .destructive) { remove(slot: slot) }
         } message: {
-          // Names the slot's stored settings, since the tile and every field on
-          // this card go with it, and says what a later Create does and does not
-          // bring back: the slot's identity is minted fresh, so macOS meets a
-          // display it has not seen before.
+          // A later Create mints a fresh identity, so macOS meets a display it has
+          // not seen; the message says so.
           Text("The display stops and this slot goes back to its defaults: the name, the size, Retina and Come Back at Launch. Any windows on it move to your other displays. A virtual display created here afterwards counts as a new one, so macOS does not restore this display's place in your arrangement.")
         }
     }

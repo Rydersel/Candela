@@ -496,13 +496,9 @@ public enum DiagnosticsCopy {
     return "Available"
   }
 
-  /// The claim itself, without the verdict prefix or its two causes. Extracted
-  /// so `hdrAvailability` states it once, and kept a separate builder because
-  /// the row it feeds is pinned on the exact sentence.
-  ///
-  /// The menu-bar panel does NOT use this: on a 280 pt row "has no HDR answer"
-  /// reads as the app not knowing, with none of the two causes below to explain
-  /// what it means. The panel names the observation instead.
+  /// The claim without its two causes; the row that uses it is pinned on the
+  /// exact sentence. The menu-bar panel does not use it: alone it reads as the
+  /// app not knowing.
   public static func hdrNoAnswer(app: String) -> String {
     "\(app) has no HDR answer for this display."
   }

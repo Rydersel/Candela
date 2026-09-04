@@ -13,9 +13,8 @@ final class VolumeFeedbackSound {
     fileURLWithPath: "/System/Library/LoginPlugins/BezelServices.loginPlugin/Contents/Resources/volume.aiff"
   )
 
-  /// Built once and retained: this fires on every volume keypress, and the fork's
-  /// per-press player re-read and re-decoded the file each time. A local would
-  /// also deallocate mid-play.
+  /// Built once: the fork re-decoded the file on every keypress. Retained
+  /// because a local would deallocate mid-play.
   private lazy var player: AVAudioPlayer? = {
     let player = try? AVAudioPlayer(contentsOf: Self.soundURL)
     player?.volume = 1
@@ -31,10 +30,8 @@ final class VolumeFeedbackSound {
     player.play()
   }
 
-  /// The global domain is in every app's defaults search list, the same route
-  /// `_HIHideMenuBar` is read by. The fork parsed
-  /// `~/Library/Preferences/.GlobalPreferences.plist` per keypress instead, which
-  /// also reads behind cfprefsd's cache.
+  /// The global domain is on every app's defaults search list; the fork parsed
+  /// the plist per keypress, behind cfprefsd's cache.
   private static func feedbackEnabled() -> Bool {
     UserDefaults.standard.bool(forKey: "com.apple.sound.beep.feedback")
   }

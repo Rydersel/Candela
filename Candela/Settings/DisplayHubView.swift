@@ -124,8 +124,7 @@ struct DisplayHubView: View {
       SettingRow("Shown in the menu bar.") {
         HStack(spacing: 2) {
           TextField("Name", text: $nameDraft, prompt: Text(verbatim: state.display.name))
-            // The row's own label. Without it the field publishes no
-            // description at all, so it announces as a bare text field.
+            // Without it the field announces as a bare text field.
             .accessibilityLabel("Name")
             .focused($nameFocused)
             .onSubmit { commitName() }
@@ -458,8 +457,7 @@ struct DisplayHubView: View {
         LabeledContent("Audio device name") {
           HStack(spacing: 8) {
             TextField("", text: $audioNameDraft, prompt: Text("Automatic"))
-              // The surrounding `LabeledContent` draws the label but publishes
-              // none, so the field names itself.
+              // `LabeledContent` draws the label but publishes none.
               .accessibilityLabel("Audio device name")
               .settingsEditableContent()
               .focused($audioNameFocused)
@@ -489,18 +487,11 @@ struct DisplayHubView: View {
   }
 
   /// Mirrors what the key path consults, so this row cannot say "On" about keys
-  /// that would move nothing, and names WHICH switch turned them off.
-  ///
-  /// The gates stay the two the key path reads, `volume.isAvailable` and
-  /// `volumeSliderEnabled`; only the WORDING is split, and the split reads the
-  /// prefs those two are built from rather than a second copy of their rule.
-  /// Three of the four causes are a switch in this app: hardware control off and
-  /// the volume command's own switch behind the first gate, "Always disabled"
-  /// behind the second. What is left of the second, the capabilities string
-  /// parsing cleanly with no VCP 0x62, is the display itself refusing, and
-  /// it is the only one worth reporting as the hardware's doing: telling a user
-  /// who set the switch themselves that their monitor said no sends them after a
-  /// cable.
+  /// that would move nothing, and names which switch turned them off. The gates
+  /// stay the two the key path reads; only the wording splits, off the prefs
+  /// those gates are built from. Only the display's own refusal (a capabilities
+  /// string with no VCP 0x62) is blamed on hardware: telling someone who set the
+  /// switch that their monitor said no sends them after a cable.
   private var volumeKeysStatus: String {
     if !state.volume.isAvailable {
       return prefs.forceSoftware
@@ -680,8 +671,8 @@ struct DisplayHubView: View {
           .disabled(model.isResetting)
           .alert("Reset the settings for this display?", isPresented: $confirmingReset) {
             Button("Reset", role: .destructive) { resetDisplay() }
-            // Cancel takes Return: without the explicit shortcut the destructive
-            // button holds the primary role.
+            // Cancel takes Return; otherwise the destructive button holds the
+            // primary role.
             Button("Cancel", role: .cancel) {}
               .keyboardShortcut(.defaultAction)
           } message: {

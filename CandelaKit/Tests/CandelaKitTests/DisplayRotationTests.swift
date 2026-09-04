@@ -84,12 +84,8 @@ struct DisplayRotationTests {
     #expect(decision == .refused(.displayGone))
   }
 
-  /// The refusal the policy had the flag for and never read: a slave's pixels
-  /// come from its master, and the request looks ordinary right up to the apply.
-  ///
-  /// The MASTER of the same set is untouched, which is the half that makes this
-  /// a carve-out rather than a blanket "anything mirrored is off limits": it
-  /// owns the framebuffer, so its glass is its own to turn.
+  /// A slave's pixels come from its master, so it is refused; the master owns
+  /// the framebuffer and stays rotatable.
   @Test func aMirrorSlaveIsRefusedWhileItsMasterIsStillRotatable() {
     let set = [display(1), display(2, mirroring: 1)]
     #expect(RotationPolicy.decide(
@@ -100,17 +96,15 @@ struct DisplayRotationTests {
       display: 1, to: .ninety, in: set, currentRotation: .standard,
       isSupported: true, isSynthesizedSize: false
     ) == .rotate(RotationRequest(display: 1, from: .standard, to: .ninety)))
-    // And a standalone display is unchanged by the new guard.
+    // A standalone display is unaffected.
     #expect(RotationPolicy.decide(
       display: 2, to: .ninety, in: [display(1), display(2)],
       currentRotation: .standard, isSupported: true, isSynthesizedSize: false
     ) == .rotate(RotationRequest(display: 2, from: .standard, to: .ninety)))
   }
 
-  /// A display running a size this app renders sets the raw mirroring flag, so
-  /// without its own arm it would be refused as mirroring and told to look for a
-  /// display it is showing. Same set membership, two different answers, decided
-  /// by the flag the caller states.
+  /// A rendered size sets the raw mirroring flag, so without its own arm it would
+  /// be refused as mirroring. Same set, two answers, decided by the caller's flag.
   @Test func aDisplayShowingARenderedSizeIsRefusedForThatRatherThanForMirroring() {
     let set = [display(1), display(2, mirroring: 1)]
     #expect(RotationPolicy.decide(

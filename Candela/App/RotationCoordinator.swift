@@ -47,9 +47,8 @@ final class RotationCoordinator {
   /// outstanding. Not defaulted: a per-coordinator default would compile, run,
   /// and exclude nobody.
   @ObservationIgnored private let gate: DisplayReconfigurationGate
-  /// The pairing sample the synthesis carve-out reads. The raw mirroring flag on
-  /// `ConfiguredDisplay` cannot tell a size this app renders from a mirror the
-  /// user set up, and the two get different refusals.
+  /// The raw mirroring flag cannot tell a rendered size from a user's mirror,
+  /// and the two get different refusals.
   @ObservationIgnored private let topologyStore: any MirrorTopologyProviding
   @ObservationIgnored private let session: RotationPreviewSession
   @ObservationIgnored private let queue = PreviewQueue()
@@ -113,9 +112,7 @@ final class RotationCoordinator {
   /// cannot work.
   var canRotate: Bool { configurator.canRotate }
 
-  /// Whether this display is showing a size the app renders for it. The row
-  /// reads this rather than sampling a topology of its own, so the caption it
-  /// shows and the refusal the policy would return cannot disagree.
+  /// The flag `rotate` hands `RotationPolicy`, read off the coordinator's own store.
   func isSynthesizedSize(_ displayID: CGDirectDisplayID) -> Bool {
     MirroringPredicates.isSynthesized(topologyStore.topology(), displayID: displayID)
   }

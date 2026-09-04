@@ -16,11 +16,8 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
   private let model: AppModel
   private let actions: SettingsActions
   private let onCompletion: () -> Void
-  /// Fires after a FIRST-RUN Setup window closes, by any route: "Start Using …",
-  /// Skip Setup, ⌘W or the red close button. Every one of them leaves a
-  /// first-run user looking at a desktop with no window and no Dock icon, which
-  /// is the whole reason the landing callout exists. A Setup re-run from
-  /// Settings stays quiet: that user already knows where the app lives.
+  /// Fires after a first-run Setup window closes by any route: each leaves a new
+  /// user with no window and no Dock icon. A re-run from Settings stays quiet.
   var onFirstRunClosed: (() -> Void)?
   /// Constructed once and reused like the window, which is only safe because
   /// `isEnabled` is a LIVE read of `SMAppService.mainApp.status`. No copy
@@ -202,9 +199,8 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     // observation loop dies rather than staying armed behind a closed window. An
     // answer still waiting on its first preview observation survives this.
     applier?.cancel()
-    // Read from the harvest this presentation was built on, BEFORE
-    // `onCompletion` records the schema version a later harvest would read back
-    // as "not a first run".
+    // Before `onCompletion`, which records the schema version that makes a later
+    // read say "not a first run".
     let wasFirstRun = flowModel?.environment.isFirstRun ?? false
     onCompletion()
     if wasFirstRun {

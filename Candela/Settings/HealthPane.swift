@@ -171,12 +171,10 @@ struct HealthPane: View {
 
       SettingsCard {
         VStack(alignment: .leading, spacing: 0) {
-          // At the head of the card, because it governs every control under it:
-          // `reconcileEnrollment` drops every un-enrolled key, and observation
-          // and hours both default ON, so this card can show three switches
-          // reading ON for a display nothing is measuring. The prefs are
-          // legitimately set ahead of enrollment, so nothing here is disabled;
-          // the reveal is the way out.
+          // Heads the card because it governs every control under it: observation
+          // and hours default ON, but `reconcileEnrollment` drops un-enrolled keys,
+          // so three switches can read ON for a display nothing measures. The
+          // prefs are legitimately set ahead of enrollment, so nothing is disabled.
           if !DisplayPrefs(persistenceKey: key).oledCareEnrolled {
             VStack(alignment: .leading, spacing: 8) {
               OledInlineNote(Text(verbatim: "Measurement currently runs on displays enrolled in OLED care, and \(name(state)) is not enrolled. These settings are saved and start applying when it is."))
@@ -411,10 +409,8 @@ private struct MeasurementControls: View {
   /// Reads the comparison record because its paired-reading clock is the only
   /// per-sample timestamp the coordinator keeps. A missing grant has its own note.
   ///
-  /// Ten sampling intervals, not the measuring dot's two: this note tells the
-  /// user macOS may have taken the grant away, so it waits until an ordinary run
-  /// of skipped captures cannot explain the gap. The note's own copy says "over
-  /// 10 minutes" and has to keep agreeing with this.
+  /// The stall window, not the liveness one: this note accuses macOS of taking
+  /// the grant. Its copy says "over 10 minutes" and must keep agreeing.
   private var isSamplingStalled: Bool {
     guard prefs.oledTelemetry, !model.isSafeMode, CGPreflightScreenCaptureAccess(),
       let last = model.oledCare.modelComparison(for: persistenceKey).lastPair

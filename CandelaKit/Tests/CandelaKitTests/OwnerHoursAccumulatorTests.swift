@@ -173,14 +173,13 @@ struct OwnerHoursAccumulatorTests {
     return OwnerHours(secondsByOwner: seconds, totalSeconds: seconds.values.reduce(0, +))
   }
 
-  /// The store is rewritten every five minutes and never forgets an app, so
-  /// without a cap the prefs blob grows for the life of the machine. The fold
-  /// keeps the per-owner seconds plus the folded field summing to the total.
+  /// Without a cap the prefs blob grows for the life of the machine. Kept plus
+  /// folded must still sum to the total.
   @Test func encodingKeepsTheHeaviestOwnersAndFoldsTheRest() throws {
     let hours = sixtyOwners()
     let decoded = try JSONDecoder().decode(OwnerHours.self, from: JSONEncoder().encode(hours))
 
-    // Exactly the limit: the fold is a field of its own, not a 51st owner.
+    // Exactly the limit: the fold is a field of its own, not an extra owner.
     #expect(decoded.secondsByOwner.count == OwnerHours.storedOwnerLimit)
     // App00...App09 carry 1 through 10 seconds, so they are the ten dropped.
     let dropped = (1...10).reduce(0.0) { $0 + Double($1) }
@@ -193,9 +192,8 @@ struct OwnerHoursAccumulatorTests {
     )
   }
 
-  /// A store written before the fold had a field of its own carries it under an
-  /// owner key, and a build that did not filter that key drew it as the heaviest
-  /// app on the display. It is migrated out on decode and never written back.
+  /// Older stores carry the fold under an owner key, which drew as the heaviest
+  /// app. Migrated out on decode, never written back.
   @Test func aLegacyFoldedBucketIsMigratedOutOfTheOwnerList() throws {
     let legacy: [String: Any] = [
       "schemaVersion": OledStoreSchema.currentVersion,
@@ -217,16 +215,16 @@ struct OwnerHoursAccumulatorTests {
     #expect(owners["other/apps"] == nil)
   }
 
-  /// Every five-minute write re-encodes what the last one wrote, so a fold that
-  /// was not idempotent would eat one more owner on every save.
+  /// Each write re-encodes the last, so a non-idempotent fold eats one more
+  /// owner per save.
   @Test func anAlreadyFoldedStoreReEncodesToItself() throws {
     let once = try JSONDecoder().decode(OwnerHours.self, from: JSONEncoder().encode(sixtyOwners()))
     let twice = try JSONDecoder().decode(OwnerHours.self, from: JSONEncoder().encode(once))
     #expect(twice == once)
   }
 
-  /// The fold is a storage detail and lives outside the owner map, so the owner
-  /// list needs no filter to keep it off screen: there is nothing there to skip.
+  /// The fold lives outside the owner map, so the list needs no filter to keep
+  /// it off screen.
   @Test func theFoldedBucketNeverReachesTheOwnerList() {
     let hours = OwnerHours(
       secondsByOwner: ["Slack": 3600], totalSeconds: 10800, foldedSeconds: 7200)

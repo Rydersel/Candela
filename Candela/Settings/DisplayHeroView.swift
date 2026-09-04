@@ -273,10 +273,8 @@ struct DisplayHeroView: View {
     }
   }
 
-  /// Why the volume slider is refusing input, nil while it takes it. Shown as
-  /// the row's caption rather than only as a tooltip: a greyed control whose
-  /// reason is reachable only by hovering is a greyed control with no reason at
-  /// all for anyone who does not hover.
+  /// Drawn as the row's caption, not only a tooltip: a reason reachable only by
+  /// hovering is no reason for anyone who does not hover.
   private var volumeDisabledReason: String? {
     model.volumeSliderDisabledReason(state, displayName: name)
   }
@@ -337,18 +335,16 @@ struct DisplayHeroView: View {
     ValueSliderRow(
       controller: state.volume,
       systemImage: "speaker.wave.2.fill",
-      // Contract 3 again: the caption beside this row is accessibility-hidden,
-      // so the reason has to ride in the label or VoiceOver gets a dimmed
-      // slider with no cause.
+      // The caption beside this row is accessibility-hidden, so the reason rides
+      // in the label or VoiceOver gets a dimmed slider with no cause.
       accessibilityLabel: volumeAccessibilityLabel,
       snapsToStops: appPrefs.enableSliderSnap,
       showsPercent: appPrefs.enableSliderPercent,
       mutedSystemImage: "speaker.slash.fill"
     )
     // Never greyed by CoreAudio. The monitor's own denial is only ONE of
-    // the two causes, so the reason comes from the policy that decided, and it
-    // is drawn rather than hovered: `.help("")` on the enabled slider installed
-    // an empty tooltip on a control with nothing to explain.
+    // the two causes, so the reason comes from the policy that decided. Drawn,
+    // not hovered: `.help("")` installed an empty tooltip on the enabled slider.
     .disabled(!model.volumeSliderEnabled(state))
   }
 

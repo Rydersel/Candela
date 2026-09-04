@@ -101,14 +101,9 @@ struct CheckupPaneTests {
     #expect(CheckupHistoryScope.defaultKey([]) == nil)
   }
 
-  /// The sweep that feeds `defaultKey` decodes every stored run for every
-  /// display, and the pane re-ran it every time the window came back to the
-  /// front. It buys the default scope and nothing else.
-  ///
-  /// The PREDICATE only. The pane's branch that reads it lives inside an
-  /// `.onChange(of: activeState)` in `body` with no seam a host-free test can
-  /// reach, so nothing here would notice the two arms being swapped at the call
-  /// site. Named for what it pins rather than for the behaviour it implies.
+  /// The predicate only: the branch that reads it sits in an `.onChange` in
+  /// `body` with no seam a host-free test can reach, so a swap at the call site
+  /// goes unnoticed here.
   @Test func theEveryDisplaySweepPredicateIsFalseOnceTheScopeWasPickedByHand() {
     #expect(CheckupHistoryScope.needsEveryDisplay(chosenByHand: false))
     #expect(!CheckupHistoryScope.needsEveryDisplay(chosenByHand: true))

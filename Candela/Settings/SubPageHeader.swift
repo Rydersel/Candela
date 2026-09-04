@@ -82,10 +82,8 @@ private struct BackButton: View {
     .onHover { hovering = $0 }
     .animation(SettingsTheme.hoverMotion, value: hovering)
     .accessibilityLabel(Text("Back"))
-    // The shortcut has no other trace: the button carrying it is zero-size and
-    // hidden from accessibility, and the window draws no menu item for it.
-    // Spelled out: VoiceOver reads a bare "[" as "left bracket" or skips it
-    // outright, so the punctuation form announces a shortcut nobody can press.
+    // The shortcut's only trace: its button is zero-size and hidden from
+    // accessibility. Spelled out because VoiceOver skips a bare "[".
     .help(Text(verbatim: "Command with the left bracket key"))
   }
 }

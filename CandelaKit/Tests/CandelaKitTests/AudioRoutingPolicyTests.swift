@@ -12,9 +12,7 @@ struct AudioRoutingPolicyTests {
     #expect(AudioRoutingPolicy.normalizedName("") == "")
   }
 
-  /// The counter suffix is all digits, so a parenthesized word survives: people
-  /// name two devices "(left)" and "(right)", and collapsing those to one name
-  /// sends both displays' volume keys wherever the match landed first.
+  /// Only an all-digit group is a counter: "(left)" and "(right)" are two devices.
   @Test func aParenthesizedWordIsPartOfTheNameAndOnlyACounterIsDropped() {
     #expect(AudioRoutingPolicy.normalizedName("Desk (left)") == "Deskleft")
     #expect(AudioRoutingPolicy.normalizedName("Desk (right)") == "Deskright")
@@ -28,9 +26,8 @@ struct AudioRoutingPolicyTests {
     // Mixed contents are not a counter either.
     #expect(AudioRoutingPolicy.normalizedName("Studio (2b)") == "Studio2b")
     #expect(AudioRoutingPolicy.normalizedName("Studio ()") == "Studio")
-    // CoreAudio's counter is ASCII. `isNumber` alone is true of every numeric
-    // scalar Unicode has, so a device named with Eastern Arabic digits lost its
-    // group and collided with the neighbour it was named apart from.
+    // CoreAudio's counter is ASCII; `isNumber` alone would drop Eastern Arabic
+    // digits too.
     #expect(AudioRoutingPolicy.normalizedName("Desk (٢)") == "Desk٢")
     #expect(
       AudioRoutingPolicy.normalizedName("Desk (٢)")
@@ -38,8 +35,7 @@ struct AudioRoutingPolicyTests {
     )
   }
 
-  /// A model name can end in a number, so a bare trailing digit group stays: the
-  /// two sizes of one product line are different displays.
+  /// A bare trailing number is part of the model name.
   @Test func aBareTrailingNumberIsPartOfTheModelName() {
     #expect(AudioRoutingPolicy.normalizedName("UltraFine 27") == "UltraFine27")
     #expect(AudioRoutingPolicy.normalizedName("UltraFine 32") == "UltraFine32")
@@ -48,8 +44,7 @@ struct AudioRoutingPolicyTests {
     ))
   }
 
-  /// The digit strip this replaced turned every "MAG n41C" into "MAGC", so a
-  /// press aimed at one panel of a family could land on its sibling.
+  /// The old digit strip turned every "MAG n41C" into "MAGC".
   @Test func sameFamilyPanelsDoNotCollide() {
     #expect(AudioRoutingPolicy.displayMatchesDevice(
       deviceName: "MAG 341C (2)", rawDisplayName: "MAG341C", nameOverride: ""

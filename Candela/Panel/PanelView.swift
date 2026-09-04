@@ -227,11 +227,8 @@ struct PanelView: View {
     DisplayPrefs(persistenceKey: persistenceKey)
   }
 
-  /// Which pane holds the switch that brings a hidden display back. The
-  /// built-in's lives on Menu Bar and an external's on the display's own page,
-  /// so one sentence cannot serve both, and a rig with both kinds hidden needs
-  /// both named: pointing only at Displays sends a clamshell user looking for a
-  /// switch that is not there.
+  /// The built-in's switch lives on Menu Bar, an external's on its own page, so
+  /// pointing only at Displays sends a clamshell user to a switch that is not there.
   static func unhideHint(builtInHidden: Bool, externalsHidden: Bool) -> String {
     switch (builtInHidden, externalsHidden) {
     case (true, true):
@@ -252,16 +249,14 @@ struct PanelView: View {
     VStack(spacing: 4) {
       if model.displays.isEmpty, model.builtIn == nil {
         Text("No controllable displays")
-        // Discovery keeps only displays that answer with an IOAVService, so a
-        // DisplayLink or AirPlay panel never reaches the panel at all and the
-        // line above reads as a fault in the app.
+        // Discovery drops anything without an IOAVService, so a DisplayLink or
+        // AirPlay panel never appears here and the line above reads as a fault.
         emptyCaption(
           "Displays on DisplayLink, AirPlay or Sidecar have no DDC channel, so they cannot be controlled."
         )
       } else {
         Text("Every display is hidden")
-        // Nothing is visible in this branch, so every display that EXISTS is a
-        // display that is hidden.
+        // Nothing is visible here, so every display that exists is hidden.
         emptyCaption(Self.unhideHint(
           builtInHidden: model.builtIn != nil && !Self.showsBuiltIn(model),
           externalsHidden: !model.displays.isEmpty
@@ -275,8 +270,7 @@ struct PanelView: View {
     .padding(.vertical, 6)
   }
 
-  /// `fixedSize` on the vertical axis only: the panel is a fixed 280 pt wide, so
-  /// a caption that wraps must be allowed the height its wrap needs.
+  /// The panel is fixed-width, so a wrapping caption needs its height freed.
   private func emptyCaption(_ text: String) -> some View {
     Text(verbatim: text)
       .font(.system(size: 11))
@@ -334,13 +328,9 @@ struct PanelView: View {
         .fixedSize(horizontal: false, vertical: true)
       Spacer(minLength: 8)
       Button("Open Settings…") {
-        // No window can take focus while a menu tracking session runs, so
-        // without this System Settings opens behind whatever is frontmost. Same
-        // constraint `SettingsOpener` states for the footer's gear.
-        //
-        // Queued rather than called straight after, the shape both sibling
-        // buttons use: `endTracking` asks the session to end, and a synchronous
-        // open on the next line still runs inside it.
+        // No window can take focus during menu tracking, so System Settings would
+        // open behind the frontmost app. Queued: `endTracking` only asks the
+        // session to end, and a synchronous open still runs inside it.
         PanelMenu.endTracking()
         Task { @MainActor in AccessibilityPermission.openSystemSettings() }
       }
@@ -456,14 +446,9 @@ extension PanelView {
   /// unavailable in the state it recovers from.
   /// `BrightnessController.setHDRMode` enforces the same asymmetry.
   ///
-  /// The capability arm comes before the synthesized-size one: a display that reports
-  /// no HDR modes would not gain HDR by dropping the size, so naming the size there
-  /// would send a person to do something that changes nothing.
-  ///
-  /// `capabilityProbed` is the whole of the guard against libel. `supportsHDR` is
-  /// false before the async refresh answers as well as after it answers no, and a
-  /// caption on the first reading calls an HDR display incapable for as long as the
-  /// refresh takes.
+  /// Capability before size: dropping the size would not bring HDR to a display
+  /// with no HDR modes. `capabilityProbed` guards the unprobed reading, where
+  /// `supportsHDR` is false only because the refresh has not answered.
   static func hdrRefusalReason(
     isShowingSynthesizedSize: Bool, isHDREngaged: Bool,
     supportsHDR: Bool, capabilityProbed: Bool
@@ -476,24 +461,13 @@ extension PanelView {
     return SynthesisCopy.hdrBlockedBySynthesizedSize
   }
 
-  /// The panel's own sentence for a display that reports no HDR modes. Not
-  /// `DiagnosticsCopy.hdrNoAnswer`, which is written for a row that goes on to
-  /// give both causes: on its own "has no HDR answer" reads as the app not
-  /// knowing rather than as the display having nothing to offer.
+  /// Not `DiagnosticsCopy.hdrNoAnswer`: alone, "has no HDR answer" reads as the
+  /// app not knowing.
   static let hdrNoModesCaption = "No HDR modes were found for this display."
 
-  /// Whether the panel's HDR button is live. The unprobed reading is grey, which
-  /// is what shipped before the caption existed: `supportsHDR` is false until the
-  /// async refresh answers, so a button enabled on that reading is one a click
-  /// reaches a moment before the app knows whether the display has HDR at all.
-  /// Grey and uncaptioned for that moment, then the probe brings both.
-  ///
-  /// The engaged escape outranks all of it, the same asymmetry `hdrRefusalReason`
-  /// keeps: with HDR live this button IS the way out, and a way out that greys
-  /// itself in the state it exists to leave is not one. A panel swap drops the
-  /// probe flag while the engaged and capability caches still answer for the
-  /// display that left, so without this arm the exit went grey for the length of
-  /// the reconfiguration refresh.
+  /// Grey and uncaptioned until the probe answers. Engaged outranks everything,
+  /// as in `hdrRefusalReason`: this button is the way out of HDR, and a panel
+  /// swap drops the probe flag while the engaged cache still reads true.
   static func hdrButtonIsEnabled(
     isHDREngaged: Bool, capabilityProbed: Bool, supportsHDR: Bool, refusalReason: String?
   ) -> Bool {
@@ -582,10 +556,8 @@ private struct DisplayHeaderRow: View {
   private var hdrModeButton: some View {
     Button {
       Task { await controller.setHDRMode(nextMode) }
-      // ENDING TRACKING IS THE POINT OF THIS LINE, not a courtesy, and the same
-      // rule the Resolution and Mirroring rows state at length: tracking starves
-      // the main-actor work the Task above queues, so the click looks dead until
-      // the panel is dismissed and every queued toggle then fires at once.
+      // Tracking starves the main-actor work queued above: without this the click
+      // looks dead until the panel closes, then every queued toggle fires at once.
       PanelMenu.endTracking()
     } label: {
       Text(modeLabel)

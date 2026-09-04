@@ -24,28 +24,21 @@ struct RotationRows: View {
   let state: AppModel.DisplayState
   let coordinator: RotationCoordinator
 
-  /// Read for the mirror sample only. `MirroringCoordinator` is this app's ONE
-  /// definition of "mirrored"; a second sample taken here would disagree with it
-  /// exactly when it matters.
+  /// For the mirror sample only: `MirroringCoordinator` is the one definition of
+  /// "mirrored".
   @Environment(AppModel.self) private var model
 
   private var displayID: CGDirectDisplayID { state.id }
 
-  /// A mirror slave's framebuffer belongs to the display it mirrors, so
-  /// `RotationPolicy` refuses it. Greyed with the reason rather than left live
-  /// and refusing: the click would only produce a report.
+  /// `RotationPolicy` refuses a slave, so greyed with the reason rather than left
+  /// live to produce a report.
   private var isMirrorSlave: Bool {
     model.mirroring.topology.displays.contains { $0.id == displayID && $0.isMirrorSlave }
   }
 
-  /// A display showing a size the app renders is mechanically a slave too, so it
-  /// is refused as well. Kept apart from `isMirrorSlave` because the sentence
-  /// differs: the user paired nothing here, and the way out is the size control.
-  ///
-  /// Off the same coordinator sample as `isMirrorSlave`, not the raw store the
-  /// policy reads: that one is an observation dependency and it unions in a
-  /// pairing the store has not been told about yet, so the caption can never
-  /// lag the flag it explains.
+  /// Mechanically a slave too, but with its own sentence: the user paired
+  /// nothing, and the way out is the size control. Off the coordinator sample,
+  /// not the raw store, so the caption cannot lag the flag it explains.
   private var isSynthesizedSize: Bool {
     MirroringPredicates.isSynthesized(model.mirroring.topology, displayID: displayID)
   }
@@ -66,11 +59,8 @@ struct RotationRows: View {
       // second selection on top of the first.
       .disabled(coordinator.isApplying || isMirrorSlave || isSynthesizedSize)
 
-      // One caption at a time, pairing state first: it is the reason the control
-      // above is dead, and the angle it shows is beside the point while it is.
-      // The synthesis arm ahead of the mirror arm, in the policy's order: such a
-      // display sets the raw flag too, and the mirroring sentence would name a
-      // display the user does not have.
+      // Pairing state first, in the policy's order: a synthesized display sets
+      // the raw mirror flag too, and that sentence names a display nobody paired.
       if isSynthesizedSize {
         SettingsCaption(RotationCopy.refusal(.synthesizedSize))
       } else if isMirrorSlave {

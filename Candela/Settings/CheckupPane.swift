@@ -63,11 +63,8 @@ enum CheckupHistoryScope {
     return (candidates.first { !$0.isBuiltIn } ?? candidates.first)?.key
   }
 
-  /// Whether reloading the history has to read every display's runs. Only the
-  /// default scope needs them: it follows the most recent run anywhere, so a
-  /// run finishing on another display moves the history to it. A scope the user
-  /// picked stays put, and reading the whole store to confirm that decodes every
-  /// stored run for nothing.
+  /// Only the default scope follows the newest run anywhere; a hand-picked scope
+  /// stays put, so reading every display's runs for it decodes them for nothing.
   static func needsEveryDisplay(chosenByHand: Bool) -> Bool { !chosenByHand }
 }
 
@@ -103,9 +100,8 @@ struct CheckupPane: View {
   }
 
   var body: some View {
-    // `DisplayPrefs` is plain UserDefaults and not observable, and the scope
-    // picker is NAMED through it, so without this read a rename elsewhere in
-    // the window leaves the old name in the menu.
+    // `DisplayPrefs` is not observable and the scope picker is named through it;
+    // without this a rename leaves the old name in the menu.
     let _ = model.prefsRevision
     SettingsPageScaffold {
       SettingsPageHeader(title: CheckupPaneCopy.title, subtitle: CheckupPaneCopy.subtitle)
@@ -124,9 +120,8 @@ struct CheckupPane: View {
     }
     .onChange(of: activeState) { _, state in
       guard state != .inactive else { return }
-      // The sweep decodes every stored run for every display, and the only
-      // thing it buys is the default scope. Once the scope was picked by hand
-      // it cannot move, so coming back to the window reads one display.
+      // `refresh()` decodes every display's runs, and only the default scope
+      // needs that.
       if CheckupHistoryScope.needsEveryDisplay(chosenByHand: chosenByHand) {
         refresh()
       } else {
@@ -141,9 +136,8 @@ struct CheckupPane: View {
     SettingsCardSection(title: CheckupPaneCopy.runTitle) {
       VStack(alignment: .leading, spacing: 10) {
         SettingsRowNote(verbatim: CheckupPaneCopy.runNote)
-        // Stated twice on purpose: SwiftUI does not publish a `Button`'s own
-        // title to the accessibility layer, so without this the button
-        // announces as a bare "button".
+        // SwiftUI does not publish a `Button` title to accessibility; without
+        // this it announces as "button".
         Button(CheckupPaneCopy.run) { actions.openCheckup() }
           .buttonStyle(SettingsPrimaryButtonStyle())
           .accessibilityLabel(Text(verbatim: CheckupPaneCopy.run))
@@ -351,10 +345,8 @@ private struct CheckupHistoryRow: View {
         .fixedSize(horizontal: false, vertical: true)
 
       HStack(spacing: 8) {
-        // Every title is stated twice: SwiftUI publishes none of them to the
-        // accessibility layer, and a list of runs whose buttons all announce as
-        // "button" is unusable. The details label follows the visible one, so
-        // the spoken title says which way the row is about to go.
+        // Same as the Run button above. The details label follows the visible
+        // title so the spoken one says which way the row goes.
         Button(CheckupPaneCopy.export) { export() }
           .buttonStyle(SettingsSecondaryButtonStyle())
           .accessibilityLabel(Text(verbatim: CheckupPaneCopy.export))

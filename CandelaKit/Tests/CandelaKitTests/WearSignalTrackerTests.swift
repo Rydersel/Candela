@@ -165,10 +165,8 @@ struct WearSignalTrackerTests {
     #expect(second.secondsByBucket()[4] == 120)
   }
 
-  /// Constructing a tracker is how a settings pane READS a display's histogram,
-  /// so a visit to the Health pane creates one for a display nothing is
-  /// measuring. Flushing that at sleep or quit wrote an all-zero array and
-  /// created the key.
+  /// A pane reads a histogram by constructing a tracker; flushing that at quit
+  /// wrote an all-zero array and created the key.
   @Test func aTrackerThatBookedNothingWritesNothingAtFlush() {
     let defaults = InMemoryDefaults()
     tracker(defaults).flush()
@@ -185,9 +183,8 @@ struct WearSignalTrackerTests {
     #expect(tracker(defaults).totalSeconds == 1)
   }
 
-  /// The guard is accumulation, never `unwrittenSeconds`: a tracker past its
-  /// debounce has written through and holds nothing unwritten, and it still has
-  /// to flush at quit or every later tick's tail is lost.
+  /// Guarded on accumulation, not `unwrittenSeconds`: a written-through tracker
+  /// holds nothing unwritten and still owes its tail at quit.
   @Test func aTrackerWrittenThroughAndThenIdleStillFlushes() {
     let defaults = InMemoryDefaults()
     let t = tracker(defaults)
@@ -199,8 +196,7 @@ struct WearSignalTrackerTests {
     #expect(tracker(defaults).totalSeconds == 90)
   }
 
-  /// A tracker kept alive past a reset must not re-create the keys the reset
-  /// removed, which is the whole of `resetLeavesNoKeyBehind`'s promise.
+  /// A tracker alive past a reset must not re-create the keys the reset removed.
   @Test func aFlushAfterAResetLeavesNoKeyBehind() {
     let defaults = InMemoryDefaults()
     let t = tracker(defaults)

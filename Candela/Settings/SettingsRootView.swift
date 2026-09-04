@@ -141,11 +141,8 @@ struct SettingsRootView: View {
     // the scene's own title at the LEADING edge next to the Back button, and it
     // LINGERS after the pop. With no dependency that changes with the path,
     // `updateNSView` never fires for a push and cannot re-hide it.
-    // The title resolves inside a leaf view, which is where the `prefsRevision`
-    // read lives. A rename is a pref write and `DisplayPrefs` has no observation
-    // of its own, so something has to depend on the revision; read at this level
-    // it re-ran the entire shell, canvas included, on every pref write anywhere
-    // in the app.
+    // The title's `prefsRevision` read lives in the leaf: read here it re-ran
+    // the whole shell on every pref write.
     .background(
       SettingsWindowTitleHost(
         displayKey: presentation.displayKey,
@@ -308,9 +305,8 @@ struct SettingsRootView: View {
     )
   }
 
-  /// The title for a pane destination, and the fallback for a display one. The
-  /// display half lives in `SettingsWindowTitleHost`, which is what keeps the
-  /// rename dependency off this view.
+  /// The pane title, and the fallback for a display; the display half lives in
+  /// `SettingsWindowTitleHost` to keep the rename dependency off this view.
   private var selectedPaneTitle: String {
     if case let .pane(id) = selection {
       SettingsRegistry.descriptor(for: id).title
@@ -727,25 +723,17 @@ enum SettingsWindowMetrics {
   static var minContentSize: NSSize { NSSize(width: minWidth, height: minHeight) }
 }
 
-/// Resolves the window title and hosts the configurator, so the only view in the
-/// shell itself that depends on `prefsRevision` is this leaf; the sidebar and
-/// the panes keep their own reads.
+/// Hosts the configurator and resolves the title, so the shell's only
+/// `prefsRevision` dependency is this leaf that draws nothing. A rename is a pref
+/// write with no observation of its own, so the title has to hang off the
+/// revision, and read in the shell it re-ran the whole window per pref write.
 ///
-/// A rename is a pref write and `DisplayPrefs` has no observation of its own, so
-/// the title has to hang off the revision. Read in the shell's body that
-/// dependency re-ran the sidebar, the canvas and the detail column on every pref
-/// write in the app; read here it re-runs one background view that draws nothing.
-///
-/// Resolved from the presented display rather than read back from the panes, so
-/// the title always names what is on screen. Display destinations use the name
-/// the sidebar and the switcher resolve: the window draws no title of its own
-/// any more, so this reaches the Window menu and VoiceOver, where the hardware
+/// Display destinations use the resolved name: the window draws no title of its
+/// own, so this reaches only the Window menu and VoiceOver, where the hardware
 /// name would be a display nobody renamed.
 private struct SettingsWindowTitleHost: View {
-  /// The display the detail column is presenting; nil for a pane destination.
   let displayKey: String?
-  /// Used for a pane destination, and for the same-frame race where the key is
-  /// no longer among the connected states.
+  /// Also covers the same-frame race where the key has left the connected states.
   let fallbackTitle: String
   let navigationToken: Int
 

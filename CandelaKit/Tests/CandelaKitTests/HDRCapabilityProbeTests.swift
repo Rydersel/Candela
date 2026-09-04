@@ -1,10 +1,8 @@
 import Testing
 @testable import CandelaKit
 
-/// `supportsHDR` false reads the same for "asked, no HDR modes" and for "not asked
-/// yet", so anything that captions the greyed HDR button needs a second fact: whether
-/// the capability refresh has answered at all. Without it the panel calls an HDR
-/// display incapable for as long as the first refresh takes.
+/// `supportsHDR` false reads the same for "no HDR modes" and "not asked yet", so
+/// a caption on the greyed button needs to know whether the refresh answered.
 @MainActor
 @Suite("HDR capability probe")
 struct HDRCapabilityProbeTests {
@@ -30,8 +28,7 @@ struct HDRCapabilityProbeTests {
     #expect(h.controller.supportsHDR)
   }
 
-  /// A different panel on the same port: the old verdict is not a fact about the new
-  /// display, so the caption goes quiet until the reconfiguration's refresh answers.
+  /// A different panel on the same port: the old verdict is not a fact about it.
   @Test func aPanelSwapRetractsTheAnswer() async {
     let h = Harness(hdrSupported: true)
     await h.prime()
@@ -41,9 +38,8 @@ struct HDRCapabilityProbeTests {
     #expect(h.controller.hdrCapabilityProbed == false)
   }
 
-  /// Rebinding the SAME panel is the every-pass case (`AppModel.performRefresh` runs
-  /// it on wake, reconfiguration and menu open), and dropping the answer there would
-  /// blank the caption several times a session.
+  /// A same-panel rebind happens on every refresh pass; dropping the answer
+  /// there would blank the caption several times a session.
   @Test func aPlainRebindKeepsTheAnswer() async {
     let h = Harness(hdrSupported: false)
     await h.prime()

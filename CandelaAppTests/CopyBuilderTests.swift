@@ -617,10 +617,8 @@ struct CopyBuilderTests {
     #expect(RotationCopy.previewSubtitle(name: "", to: .ninety) == "90°")
   }
 
-  /// The caption is derived from the ceiling the engine clamps to, per axis. It
-  /// said "320 to 8192" on both for a while, which was false for height: a 6000
-  /// the field accepted came back as 4320. The Retina half is the same ceiling
-  /// read against the doubled framebuffer the host requires it to fit.
+  /// Per axis: one literal for both promised a height the create path cut back.
+  /// Retina reads the same ceiling against the doubled framebuffer.
   @Test @MainActor func theVirtualDisplaySizeCaptionReadsTheRealCeilingOnEachAxis() {
     let caption = VirtualDisplaysPane.sizeRangeCaption
     #expect(caption.contains(String(VirtualDisplayIdentity.maxPixels.wide)))
@@ -642,10 +640,8 @@ struct CopyBuilderTests {
     #expect(render(RotationCopy.refusal(.unchanged(.ninety))).contains("already in this orientation"))
     // Says what the display is doing, never that the person mirrored it.
     #expect(render(RotationCopy.refusal(.mirrored)).contains("showing another display's image"))
-    // And the synthesis arm never borrows that sentence: a rendered size puts a
-    // panel in the same set with nobody having asked for mirroring, so it names
-    // the size and the control that turns it off. This is the settings row's
-    // caption there too.
+    // The synthesis arm never borrows that sentence: nobody asked for mirroring,
+    // so it names the size control instead.
     let synthesized = render(RotationCopy.refusal(.synthesizedSize))
     #expect(synthesized.contains("renders"))
     #expect(!synthesized.contains("another display's image"))

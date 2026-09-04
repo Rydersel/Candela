@@ -340,10 +340,8 @@ struct PanelRowModelTests {
     ) == nil)
   }
 
-  /// The button greys on the capability, so the caption is the only thing
-  /// standing between a person and a grey control with no reason on it. It is
-  /// the panel's own sentence, not the diagnostics row's: that one is written to
-  /// be read with the two causes that follow it there.
+  /// The panel's own sentence, not the diagnostics row's, which is written to be
+  /// read with the two causes that follow it there.
   @Test func theHDRButtonExplainsItselfOnADisplayThatReportsNoHDRModes() {
     #expect(PanelView.hdrRefusalReason(
       isShowingSynthesizedSize: false, isHDREngaged: false,
@@ -378,10 +376,8 @@ struct PanelRowModelTests {
     ) == nil)
   }
 
-  /// The greying and the caption move together, which is the whole point of
-  /// reading the probe flag here: before it lands the button is grey and silent,
-  /// after it lands a display with no HDR modes is grey and says so, and one
-  /// that has them is live.
+  /// Greying and caption move together: grey and silent before the probe lands,
+  /// grey and captioned after a no, live after a yes.
   @Test func theHDRButtonGreysUntilTheProbeAnswersAndThenAgreesWithItsCaption() {
     func enabled(supportsHDR: Bool, probed: Bool) -> Bool {
       PanelView.hdrButtonIsEnabled(
@@ -408,9 +404,8 @@ struct PanelRowModelTests {
     ))
   }
 
-  /// With HDR live this button is the ONLY way out of it, so nothing greys it.
-  /// A panel swap drops the probe flag while the engaged cache still reads true,
-  /// which is exactly the reading that used to take the exit away.
+  /// With HDR live this button is the only way out. A panel swap drops the probe
+  /// flag while the engaged cache still reads true, which used to grey the exit.
   @Test func theHDRExitStaysLiveEvenWhileTheProbeIsOutstanding() {
     for probed in [false, true] {
       for supportsHDR in [false, true] {
@@ -632,8 +627,7 @@ struct PanelEmptyStateTests {
     #expect(hint.contains("Menu Bar") == false)
   }
 
-  /// A clamshell rig that later opens with both kinds hidden. Naming only
-  /// Displays sends someone looking for the built-in's switch where it is not.
+  /// A clamshell rig opened later with both kinds hidden.
   @Test func bothKindsHiddenNamesBothPanes() {
     let hint = PanelView.unhideHint(builtInHidden: true, externalsHidden: true)
     #expect(hint.contains("Menu Bar"))

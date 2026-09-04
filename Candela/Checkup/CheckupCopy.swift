@@ -6,9 +6,8 @@ enum CheckupCopy {
 
   // MARK: - Getting ready
 
-  /// The window's first frame. The environment read behind it is up to 128 I2C
-  /// fragment reads on a panel that answers, so the window is up well before it
-  /// has a flow to show.
+  /// The window's first frame: the environment read can take seconds on a panel
+  /// that answers DDC.
   static let preparingTitle = "Getting ready"
   static let preparingBody = "Reading what each attached display answers."
 
@@ -73,9 +72,8 @@ enum CheckupCopy {
   static let hdrEngagedLine =
     "This display is in HDR mode, which stops DDC: readback checks will be recorded as not observed. Turn HDR off and run the checkup again to have them run."
 
-  /// All the failure actually observes: `OverlayWindow.screen(for:)` found no
-  /// `NSScreen`. Mirroring is the usual cause, not the only one, so the copy
-  /// states the observation and offers mirroring as the thing to check.
+  /// All the failure observes is a missing `NSScreen`; mirroring is the usual
+  /// cause, not the only one.
   static let noScreenReason = "macOS reports no screen for this display right now"
 
   static let fieldNotShown =
@@ -91,9 +89,8 @@ enum CheckupCopy {
     "The visual fields take at most \(seconds / 60) minutes if every one is shown three times. Nothing runs until you continue."
   }
 
-  /// The mode legs re-sync the display once for the native resolution and once
-  /// per advertised rate, so the panel blanks several times before the fields
-  /// start. Unwarned, that reads as the app breaking the display.
+  /// The mode legs blank the panel once per rate; unwarned, that reads as the
+  /// app breaking the display.
   static let planModeSweep =
     "The display will go dark for a moment as each resolution and refresh rate is tested, once per rate. It is put back to the mode it started in before the visual fields begin."
 
@@ -286,8 +283,7 @@ enum CheckupCopy {
 
   static let export = "Export report"
   static let copySummary = "Copy summary"
-  /// The summary's only exit. The run is already saved by the time this page is
-  /// up, so it closes the window and ends nothing.
+  /// Closes the window; the run is already saved.
   static let done = "Done"
   static let copied = "Copied"
   static let exportFailed = "The report could not be saved."

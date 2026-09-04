@@ -16,9 +16,8 @@ struct DisplayLoggingTests {
     #expect(tag.allSatisfy { $0.isHexDigit && !$0.isUppercase })
   }
 
-  /// Pinned, not just self-consistent: a tag that changed between builds would
-  /// break the one thing it is for, correlating a display's lines across
-  /// sessions.
+  /// Pinned: a tag that changed between builds could not correlate a display
+  /// across sessions.
   @Test func tagIsPinnedToTheKeyBytes() {
     #expect(DisplayLogging.tag(for: Self.tripleKey) == "cee121a0")
     #expect(DisplayLogging.tag(for: Self.uuidKey) == "8b0f6bee")
@@ -36,17 +35,13 @@ struct DisplayLoggingTests {
       != DisplayLogging.tag(for: Self.tripleKey))
   }
 
-  /// Over a 12-character serial the assertion below could not fail: an
-  /// 8-character tag cannot contain it however the tag is built, so a truncating
-  /// implementation that leaked the key outright would still pass. A two-letter
-  /// key is short enough to fit, and the tag is asserted against every prefix of
-  /// it, which is what a truncating implementation would produce.
+  /// An 8-char tag cannot contain a 12-char serial however it is built, so the
+  /// short key is what makes a truncating leak fail here.
   @Test func tagCarriesNeitherTheSerialNorTheKey() {
     #expect(!DisplayLogging.tag(for: Self.tripleKey).contains(Self.serial))
     #expect(!DisplayLogging.tag(for: Self.tripleKey).contains("MSIMAG341C"))
 
-    // Lowercase hex, so the assertions below are not passing on a case
-    // mismatch the tag alphabet makes free.
+    // Lowercase, so a case mismatch cannot make these pass.
     let short = "ab"
     let tag = DisplayLogging.tag(for: short)
     for length in 1...short.count {

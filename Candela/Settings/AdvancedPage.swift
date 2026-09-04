@@ -286,9 +286,8 @@ struct AdvancedPage: View {
   /// the "looks functional while `ddcTrafficBlock` voids it" case the greying
   /// rule forbids.
   ///
-  /// The enabler in the other branch does NOT grey. It writes an app-level
-  /// pref that applies to every display, and one display's blocked wire is no
-  /// reason to withhold a global switch.
+  /// The enabler branch does NOT grey: it writes an app-level pref, and one
+  /// display's blocked wire is no reason to withhold a global switch.
   @ViewBuilder private var combinedDimmingSection: some View {
     SettingsCardSection(title: "Combined Dimming") {
       if appPrefs.combinedBrightness {
@@ -433,9 +432,8 @@ struct AdvancedPage: View {
           .prefIdentifier(.pollingCount, persistenceKey: persistenceKey)
         }
       } else {
-        // The same read-only-with-an-inline-enabler shape as Combined Dimming
-        // above, and ungreyed for the same reason: `startupAction` is app-level,
-        // so this display's blocked wire is no reason to withhold it.
+        // Same shape as Combined Dimming above, ungreyed for the same reason:
+        // `startupAction` is app-level.
         LabeledContent("Startup readback", value: "Off")
         SettingsCardDivider()
         SettingRow("A global setting: applies to every display.") {
@@ -449,9 +447,8 @@ struct AdvancedPage: View {
         }
       }
     }
-    // The retries branch only. The enabler branch stays live under a block, and
-    // so does the never-answered verdict: greying a statement of fact says the
-    // fact is unavailable rather than that a control is.
+    // The retries branch only. The enabler stays live, and so does the
+    // never-answered verdict: greying a fact says the fact is unavailable.
     .disabled(isBlocked && !readbackNeverAnswered && appPrefs.startupAction == .read)
   }
 
@@ -488,8 +485,8 @@ struct AdvancedPage: View {
         .accessibilityIdentifier("action.restoreAdvanced.\(persistenceKey)")
         .alert("Restore this display's advanced settings?", isPresented: $confirmingRestore) {
           Button("Restore", role: .destructive) { restoreAdvancedDefaults() }
-          // Cancel takes Return: without the explicit shortcut the destructive
-          // button holds the primary role.
+          // Cancel takes Return; otherwise the destructive button holds the
+          // primary role.
           Button("Cancel", role: .cancel) {}
             .keyboardShortcut(.defaultAction)
         } message: {

@@ -31,12 +31,8 @@ struct OledCareDisplayPage: View {
   /// dim-state task id.
   @State private var displaySleepMinutes: Int?
 
-  /// Sampled beside `displaySleepMinutes`, and for the same reason: `body`
-  /// re-evaluates on every pref write, and a reading taken there would make the
-  /// note below flicker with the page. Re-sampled on the engine's dim state
-  /// instead, which is the page's one live signal and the state an assertion
-  /// actually moves, so the note describes now rather than the moment the page
-  /// opened.
+  /// Not read in `body` (it re-evaluates on every pref write). Re-sampled on the
+  /// engine's dim state, the one live signal an assertion actually moves.
   @State private var displaySleepAssertionHeld = false
 
   /// Slider drafts, live only while a drag is in progress. A `Slider` bound
@@ -155,9 +151,7 @@ struct OledCareDisplayPage: View {
         }
       }
     }
-    // Two tasks, not one: the pmset spawn is a per-appearance reading, while the
-    // assertion is a cheap IOKit query that has to follow the engine's dim state.
-    // Keyed together, every dim transition re-spawns pmset.
+    // Two tasks: keyed together, every dim transition would re-spawn pmset.
     .task { displaySleepMinutes = OledCareSignalSources.displaySleepMinutes() }
     .task(id: model.oledCare.dimStates[persistenceKey]) {
       displaySleepAssertionHeld = OledCareSignalSources.displaySleepAssertionHeld()
@@ -377,11 +371,8 @@ struct OledCareDisplayPage: View {
     }
   }
 
-  /// Live means the pipeline produced a reading inside
-  /// `OledCareCadence.livenessWindowSeconds`, so a dead grant stills the dot
-  /// within a few minutes whatever the prefs claim. The window is the Kit's, not
-  /// a number chosen here: the comment used to say two intervals while the code
-  /// said three.
+  /// Live means a reading landed inside `OledCareCadence.livenessWindowSeconds`,
+  /// so a dead grant stills the dot within minutes whatever the prefs claim.
   private func isMeasuringLive(_ summary: PanelHealthSummary) -> Bool {
     guard !model.isSafeMode, prefs.oledTelemetry, CGPreflightScreenCaptureAccess(),
       let last = summary.lastSample
@@ -540,11 +531,9 @@ struct OledCareDisplayPage: View {
   /// staticness, and they live on the Health pane, so the caption names that
   /// pane instead of leaving the switch to do nothing silently.
   ///
-  /// The third condition is the display-sleep assertion: the coordinator gates
-  /// nomination on `!state.assertionHeld`, the same term idle dimming has, and
-  /// the reading is system-wide, so our own Keep Display Awake silences this
-  /// control as surely as a video does. The caption lists it; the note says when
-  /// it is the live reason.
+  /// The assertion gate is system-wide, so our own Keep Display Awake silences
+  /// this control as surely as a video does. The caption lists it; the note
+  /// says when it is the live reason.
   ///
   /// The caption promises exactly what the code delivers. "Full-screen video is
   /// never dimmed" is the `fullScreenOwner` gate, read from the window list. It
@@ -563,9 +552,8 @@ struct OledCareDisplayPage: View {
         .themedSwitch()
         .accessibilityLabel("Automatic static-region dimming")
         .prefIdentifier(.oledDetectionDimming, persistenceKey: persistenceKey)
-        // In the SAME row as the switch, the idle threshold's warning shape: a
-        // divider between a control and the sentence saying it does nothing
-        // turns the warning into what looks like an unrelated setting.
+        // Same row as the switch: a divider would make the warning read as an
+        // unrelated setting.
         if prefs.oledDetectionDimming, displaySleepAssertionHeld {
           OledInlineNote(Text("Something is holding the screen awake: video playback, a call, or Keep Display Awake. Nothing is dimmed here for as long as that lasts."))
         }

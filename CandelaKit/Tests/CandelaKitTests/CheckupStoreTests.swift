@@ -27,8 +27,7 @@ struct CheckupStoreTests {
     #expect(try store.load(url: newer).validate())
   }
 
-  /// The display's own name, spaces and all: this is what the save panel offers,
-  /// so it reads the way the display is written on its own box.
+  /// Spaces kept: this is what the save panel offers.
   @Test func exportFileNameCarriesModelAndDate() {
     let name = CheckupStore.exportFileName(for: report(started: 800_000_000))
     #expect(name.hasPrefix("Candela Checkup DELL U2725QE 2026-05-09"))
@@ -50,8 +49,7 @@ struct CheckupStoreTests {
     #expect(name.hasPrefix("Candela Checkup AW_34_ DW 2026-05-09"))
   }
 
-  /// A leading dot would hide the exported file in Finder, and a person looking
-  /// for what they just saved would not find it.
+  /// A leading dot would hide the export in Finder.
   @Test func exportFileNameNeverStartsTheModelWithADot() {
     #expect(CheckupStore.safeFileName(".hidden") == "_hidden")
     #expect(CheckupStore.safeFileName("DELL U2725QE") == "DELL U2725QE")

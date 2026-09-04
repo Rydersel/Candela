@@ -384,11 +384,9 @@ struct PanelHealthView: View {
 
   /// Caption under a blank surface, per lens.
   ///
-  /// Same order as `confidenceNote`, and for the same reason: Safe Mode, a
-  /// missing grant and measuring-off each stop readings dead, so the live
-  /// lens's "one lands within a minute" is only true below all three. Above
-  /// them it promised a reading that could never arrive while the banner over
-  /// the map said the opposite.
+  /// Same order as `confidenceNote`: Safe Mode, a missing grant and measuring-off
+  /// all stop readings, so the live lens's "within a minute" is only true below
+  /// them.
   private func mapPlaceholder(_ summary: PanelHealthSummary, mode: SurfaceMode) -> String {
     if model.isSafeMode {
       return "Paused for this session (Safe Mode). History recorded before it is kept."
@@ -397,9 +395,8 @@ struct PanelHealthView: View {
       return "Waiting on Screen Recording; no readings are being taken."
     }
     if summary.confidence == .estimated {
-      // The kept-history half belongs to the lenses that draw history. The live
-      // lens draws the last minute, and a reassurance about a record it does not
-      // show reads as an answer to a question nobody asked.
+      // The live lens draws no history, so the kept-history reassurance is not
+      // for it.
       return mode == .now
         ? "Not shown while measuring is off."
         : "Not shown while measuring is off. The history recorded so far is kept."
@@ -690,12 +687,9 @@ struct PanelExposureMap: View {
 }
 
 /// The ramp's key, since a heat map with no key is a picture rather than a
-/// reading. Never a unit: neither scale has an absolute meaning to put on it.
-///
-/// The ends are callers' words because the two lenses do not share a scale.
-/// History is each cell against the panel's own peak, accumulated; the live
-/// lens is the raw linear luminance of one frame. One legend speaking for both
-/// described whichever it was not drawn under.
+/// reading. Never a unit: neither scale has an absolute meaning. The ends are the
+/// caller's because history (each cell against the panel's peak) and the live
+/// lens (one frame's raw luminance) do not share a scale.
 struct PanelExposureLegend: View {
   var low: String = "Less lit"
   var high: String = "More lit"

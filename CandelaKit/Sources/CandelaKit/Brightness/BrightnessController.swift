@@ -159,11 +159,8 @@ public final class BrightnessController: PendingWireDraining {
   /// displays.
   public var supportsHDR: Bool { cachedSupportsHDR }
 
-  /// Whether the capability refresh has answered yet, same publishing pattern as
-  /// `supportsHDR`. `supportsHDR` false reads the same for "asked, no HDR modes" and
-  /// for "not asked yet", so anything that EXPLAINS the false (rather than just
-  /// disabling on it) has to wait for this, or it tells an HDR display it has no HDR
-  /// in the window before the first refresh lands.
+  /// `supportsHDR` false reads the same for "no HDR modes" and "not asked yet";
+  /// anything that explains the false has to wait for this.
   public var hdrCapabilityProbed: Bool { cachedHDRProbed }
 
   /// Whether HDR is live on the display right now, same pattern as `supportsHDR`.
@@ -1813,9 +1810,8 @@ public final class BrightnessController: PendingWireDraining {
       syncDeadband.reset()
       // Same rule as the read evidence directly above: a verdict earned by the
       // panel that was here is not a fact about the one that replaced it. The HDR
-      // caches keep the old answer until the reconfiguration's refresh supersedes
-      // them; dropping the PROBED flag is what stops anything explaining that
-      // stale answer as though it were about the panel now on the wire.
+      // caches keep the stale answer until the refresh lands; dropping the probed
+      // flag stops anything explaining it as the new panel's.
       resetWireHealth()
       cachedHDRProbed = false
     }

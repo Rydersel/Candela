@@ -258,13 +258,8 @@ final class SynthesisCoordinator {
     guard offersSyntheticSizes(displayID: display.id) else { return .notOffered }
     if isInUserMirrorSet(display) { return .alreadyMirrored }
     if isHDREngaged(display.id) { return .hdrEngaged }
-    // Last, where `SynthesisReapplyPolicy` puts it. An ENGAGED display is never
-    // refused for it: `ModeSynthesisEngine.engage` takes that display's own
-    // pairing down before it allocates, so the slot is free by the time it asks.
-    //
-    // `.engine(.noFreeSlot)` rather than a reason of its own: the engine already
-    // answers this at the allocation, and one fact told two ways would need a
-    // second sentence saying the same thing.
+    // An engaged display is exempt: `engage` frees its own slot before it
+    // allocates. Reuses the engine's reason rather than minting a twin.
     if freeSlots == 0, !isEngaged(displayID: display.id) { return .engine(.noFreeSlot) }
     return nil
   }
@@ -481,25 +476,18 @@ final class SynthesisCoordinator {
   /// down": the pairing table is empty for the whole of an engage, so a caller
   /// that reads the table to judge the teardown has to read this first.
   ///
-  /// `force` belongs to the whole-app reset alone, and it is a bounded WAIT
-  /// rather than a barge: a teardown staged behind a live configuration is the
-  /// interleaving that produces a success nobody achieved, so the reset retries
-  /// the claim for `forcedClaimWait` before it gives up on it. Only then does it
-  /// go on without one, naming the holder at `.error`, because the reset is
-  /// wiping the domain and rebuilding anyway and a set left standing would
-  /// outlive everything that knows about it. Every other caller takes the
-  /// refusal outright, the hotkey's unwind included.
+  /// `force` is for the whole-app reset only. It waits up to `forcedClaimWait`
+  /// for a refused gate rather than barging: a teardown staged behind a live
+  /// configuration produces a success nobody achieved. Past the wait it goes on
+  /// unclaimed, logging the holder, because the reset wipes and rebuilds anyway
+  /// and a set left standing would outlive everything that knows about it.
   ///
-  /// **The wait covers mirroring, rotation and arrangement, and those only.**
-  /// The gate is re-entrant per claimant and synthesis claims `.displayModes`,
-  /// the same claimant the mode coordinator uses, so a mode preview or apply is
-  /// granted here rather than refused and nothing is ever waited out for it.
-  /// `isWorking` is the check that answers for those, and it is re-checked after
-  /// the claim as well as before it: the top-of-function reading is older by the
-  /// preview stand-down, the claim's actor hop and, when forced, the wait.
+  /// The wait covers mirroring, rotation and arrangement only: synthesis and the
+  /// mode coordinator share the `.displayModes` claimant, so a mode preview or
+  /// apply is granted here, not refused. `isWorking` answers for those, re-read
+  /// after the claim because the first reading predates the awaits.
   ///
-  /// The window and the retry delay are parameters so a test can collapse them;
-  /// nothing in the app passes them.
+  /// The window and retry delay are parameters only so a test can collapse them.
   @discardableResult
   func disengageAllForReset(
     force: Bool = false,
@@ -521,12 +509,8 @@ final class SynthesisCoordinator {
     // teardown that matters.
     _ = await endOutstandingPreview()
     var refusedBy = await gate.claim(.displayModes).refusedBy
-    // A refused claim means another feature is mid-reconfiguration, and a
-    // teardown staged behind its back is the raw change every other path here
-    // refuses. `disengageForOptOut` returns false on the same answer.
-    //
-    // The reset waits it out instead. Most holders are a preview or a mode
-    // apply, both of which clear in well under the window.
+    // Another feature is mid-reconfiguration. Every other path refuses here;
+    // the reset waits, since holders usually clear well inside the window.
     if refusedBy != nil, force {
       let deadline = ContinuousClock.now.advanced(by: forcedClaimWait)
       while refusedBy != nil, ContinuousClock.now < deadline {
@@ -534,14 +518,12 @@ final class SynthesisCoordinator {
         refusedBy = await gate.claim(.displayModes).refusedBy
       }
     }
-    // The top-of-function reading is stale by the stand-down, the claim's hop and
-    // any forced wait, and the gate cannot stand in for it: a mode preview or
-    // apply claims `.displayModes` too, so it is granted alongside this teardown
-    // instead of refusing it.
+    // Re-read: the first reading predates the stand-down, the claim hop and any
+    // wait, and the gate cannot cover this, since a mode preview or apply shares
+    // the `.displayModes` claimant and is granted alongside us.
     //
-    // Nothing is handed back on this path on purpose. The sequence now running
-    // shares the claimant, so a release here would take the gate out from under
-    // it; it comes back through the funnel when that sequence finishes.
+    // No release on this path: the running sequence shares the claim and hands
+    // the gate back through the funnel when it finishes.
     guard !isWorking else {
       log.error("synthesis: a hardware sequence started before the teardown could begin; nothing was taken down")
       return false
@@ -552,8 +534,7 @@ final class SynthesisCoordinator {
       return false
     }
     if let holder = refusedBy {
-      // Unclaimed and going ahead regardless, so the log line is the only record
-      // that this teardown overlapped someone else's configuration.
+      // The only record that this teardown overlapped someone else's configuration.
       log.error("synthesis reset: \(holder.rawValue, privacy: .public) still held the reconfiguration gate after the wait; the teardown goes ahead without the claim")
     }
     let engaged = pairings

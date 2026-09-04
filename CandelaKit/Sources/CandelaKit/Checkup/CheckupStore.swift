@@ -35,16 +35,13 @@ public struct CheckupStore: Sendable {
     return f.string(from: date)
   }
 
-  /// For a directory this app creates and reads back. Flattens everything
-  /// unusual, spaces included, because nobody ever sees these names.
+  /// For directory names nobody sees; flattens spaces too.
   static func safe(_ s: String) -> String {
     s.map { $0.isLetter || $0.isNumber || $0 == "-" ? String($0) : "_" }.joined()
   }
 
-  /// For a name a person meets in a save panel, which is a different job:
-  /// `safe` would hand them "DELL_U2725QE" over a display called DELL U2725QE.
-  /// Only what a path component genuinely cannot carry goes, plus a leading dot,
-  /// which would hide the file.
+  /// For a save panel, where `safe` would offer "DELL_U2725QE". Only what a path
+  /// component cannot carry goes, plus a leading dot, which hides the file.
   static func safeFileName(_ s: String) -> String {
     let replaced = String(s.map { $0 == "/" || $0 == ":" ? "_" : $0 })
     return replaced.hasPrefix(".") ? "_" + String(replaced.dropFirst()) : replaced
@@ -92,10 +89,8 @@ public struct CheckupStore: Sendable {
     }.sorted { $0.startedAt > $1.startedAt }
   }
 
-  /// A product name is whatever the panel's EDID says, and a slash or a colon in
-  /// it would reach the save panel as a path. Through the filename sanitizer,
-  /// NOT the folder one: the folder never leaves the app, and this is the name
-  /// the save panel offers.
+  /// The product name is whatever the EDID says, and a slash in it would reach
+  /// the save panel as a path.
   public static func exportFileName(for report: CheckupReport) -> String {
     let model = report.identity.productName.isEmpty ? "Display" : report.identity.productName
     return "Candela Checkup \(safeFileName(model)) \(day(report.startedAt)).candela-checkup.json"

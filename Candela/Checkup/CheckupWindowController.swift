@@ -40,10 +40,9 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
     // user's place in a run. Read before ordering front, which makes it visible.
     let needsFlow = !window.isVisible
     if needsFlow {
-      // Both before the window is visible: the environment read can take
-      // seconds, and an empty window that fills in and then jumps to centre
-      // reads as a glitch. On a re-presentation this also clears the previous
-      // run's summary, which would otherwise sit there through the read.
+      // Before the window shows: the read can take seconds, and a window that
+      // fills in then jumps to centre reads as a glitch. Also clears a previous
+      // run's summary.
       window.contentView = NSHostingView(rootView: CheckupPreparingView())
       window.center()
     }
@@ -77,8 +76,8 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
       window: fieldWindow, beforeShow: { [weak self] entry in self?.moveOffTarget(entry) })
     let model = CheckupFlowModel(environment: environment)
     model.onSaved = onSaved
-    // `windowShouldClose` does not abandon on the summary, so the close this
-    // routes to leaves the saved report exactly as it stands.
+    // `windowShouldClose` does not abandon on the summary, so the saved report
+    // is untouched.
     model.onClose = { [weak window] in window?.performClose(nil) }
     self.model = model
 

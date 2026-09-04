@@ -94,9 +94,8 @@ struct AllModesPage: View {
       // nothing, so no empty state flashes on every push.
       if let catalog {
         if catalog.all.isEmpty {
-          // An enumerated display with nothing in it. Without this the page
-          // draws a Show control over a titled, empty card, which reads as a
-          // list that failed to load.
+          // Without this the page draws a Show control over an empty card, which
+          // reads as a list that failed to load.
           SettingsRowNote(verbatim: Self.noModesNote)
         } else {
           listControls(catalog)
@@ -128,8 +127,8 @@ struct AllModesPage: View {
 
   // MARK: - Controls
 
-  /// Word for word what `DisplaySizeRows` says on the hub for the same display,
-  /// so the two surfaces do not describe one silent panel two ways.
+  /// Word for word what the hub's size rows say, so one silent panel is not
+  /// described two ways.
   static let noModesNote =
     "\(AppInfo.productName) found no resolutions it can switch between on this display."
 

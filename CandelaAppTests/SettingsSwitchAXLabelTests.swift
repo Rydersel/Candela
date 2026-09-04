@@ -5,14 +5,10 @@ import Foundation
 import SwiftUI
 import Testing
 
-/// Reads the accessibility tree a settings page publishes, not its source.
-///
-/// `themedSwitch` stands a real `Toggle` in through
-/// `accessibilityRepresentation`, and the representation is handed
-/// `configuration.label` as a VIEW. Measured 2026-09-03 against the deployed
-/// app: that view does not become a description, so a switch row announces as a
-/// bare checkbox unless the call site adds `.accessibilityLabel`. This suite is
-/// what keeps the two rows it names from losing theirs again.
+/// Reads the accessibility tree a page publishes, not its source. `themedSwitch`
+/// hands its representation `configuration.label` as a view, which never becomes
+/// a description, so a switch announces as a bare checkbox unless the call site
+/// adds `.accessibilityLabel`.
 @MainActor
 @Suite("Settings switch accessibility labels")
 struct SettingsSwitchAXLabelTests {
@@ -54,8 +50,7 @@ struct SettingsSwitchAXLabelTests {
     labels(view, role: .checkBox, height: height)
   }
 
-  /// Proves the walk can fail, and pins the defect this sweep fixed: the same
-  /// row without the explicit label publishes nothing to read.
+  /// Proves the walk can fail: the same row without the label publishes nothing.
   @Test func aThemedSwitchSpeaksOnlyWhenTheCallSiteLabelsIt() {
     let bare = SettingsCardSection(title: "Probe") {
       SettingRow("What this switch changes.") {
@@ -94,8 +89,7 @@ struct SettingsSwitchAXLabelTests {
     #expect(!spoken.contains(""))
   }
 
-  /// A text field publishes no description of its own either, and the
-  /// `LabeledContent` around one draws its label without publishing it. The
+  /// `LabeledContent` draws a field's label without publishing it. The
   /// control-code fields are the page's only fields.
   @Test func theAdvancedPageFieldsSpeakTheirOwnCopy() {
     let spoken = labels(advancedPage(), role: .textField)

@@ -174,8 +174,7 @@ struct CheckupAXLabelTests {
     #expect(expectAllSpeak(secondDot, "the second dot page") == expected)
   }
 
-  /// Two ways out of the report, and the way out of the window. Export leads,
-  /// and it stays first in the reading order it is emphasized in.
+  /// Export leads: it stays first in the reading order it is emphasized in.
   @Test func theSummaryPageSpeaksItsActionsAndItsWayOut() {
     let flow = CheckupFixture.flow()
     let labels = expectAllSpeak(CheckupSummaryPage(model: flow), "the summary page")

@@ -22,12 +22,9 @@ struct BannerRegion: View {
   @Environment(SettingsActions.self) private var actions
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-  /// Measured by `measureDomainFreshness()`, never in `body`. Re-measured on
-  /// the display change, on `prefsRevision` (both resets bump it, so a wiped
-  /// domain reads as fresh again rather than staying stale behind a cache), and
-  /// on this display's brightness, because the engine's own store writes
-  /// `combinedBrightness.<key>` through `UserDefaults` directly and bumps
-  /// nothing. Without that last one a slider drag no longer retires the banner.
+  /// Never measured in `body`; see `measureDomainFreshness()`. Brightness is a
+  /// trigger because the engine writes its level straight to `UserDefaults`
+  /// with no revision bump, and a drag has to retire the banner.
   @State private var domainIsFresh: Bool?
 
   private var persistenceKey: String { state.display.persistenceKey }
@@ -69,13 +66,9 @@ struct BannerRegion: View {
     .onAppear { measureDomainFreshness() }
     .onChange(of: persistenceKey) { _, _ in measureDomainFreshness() }
     .onChange(of: model.prefsRevision) { _, _ in measureDomainFreshness() }
-    // The engine's stored level is written straight to `UserDefaults` with no
-    // revision bump, so this is the only signal that a drag has just filled the
-    // domain this banner calls empty. Gated on the fresh state: this fires at
-    // drag rate and the scan is a whole-domain dictionary walk, so once the
-    // domain reads as stored there is no question left to ask. It can only read
-    // fresh again through a wipe, and both resets bump `prefsRevision`, which
-    // re-measures above.
+    // Fires at drag rate and the scan walks the whole domain, so stop once the
+    // domain reads as stored: only a wipe makes it fresh again, and both resets
+    // bump `prefsRevision`.
     .onChange(of: state.controller.brightness) { _, _ in
       guard domainIsFresh != false else { return }
       measureDomainFreshness()
@@ -447,18 +440,10 @@ struct BannerRegion: View {
       && domainIsFresh == true
   }
 
-  /// Whether this display's prefs domain is empty, or nil until measured.
-  ///
-  /// `hasAnyStoredValue` materialises the whole UserDefaults dictionary and
-  /// scans it by suffix, and this region renders on two placements and
-  /// re-evaluates every countdown second, so it cannot run from `body`. nil
-  /// draws no banner: erring to silent for one frame beats flashing "first time
-  /// seeing this display" at a display that has settings.
-  ///
-  /// The two cheap terms of `showsFirstSight` are checked FIRST, and they answer
-  /// for the built-in and for every dismissed display without a scan: the banner
-  /// cannot show for either, so the dictionary walk would be work with no
-  /// question behind it.
+  /// `hasAnyStoredValue` walks the whole UserDefaults dictionary and this region
+  /// re-renders every countdown second, so it cannot run from `body`. nil draws
+  /// no banner: a silent frame beats flashing "first time" at a configured display.
+  /// The cheap terms go first so the built-in and dismissed displays skip the scan.
   private func measureDomainFreshness() {
     guard persistenceKey != "builtIn",
           !model.dismissedFirstSightKeys.contains(persistenceKey)

@@ -234,10 +234,8 @@ struct ThemedSegments: View {
           .shadow(color: .black.opacity(isOn ? 0.25 : 0), radius: 2, y: 1)
       }
       .buttonStyle(.plain)
-      // SwiftUI does not publish a `Button`'s own title to the accessibility
-      // layer, so without this every segment announces as a bare "button". Here
-      // rather than at each `ThemedSegments` call site, so no segmented control
-      // in the window can be built without one.
+      // SwiftUI does not publish a `Button` title to accessibility, so without
+      // this every segment announces as "button". Here so no call site can forget.
       .accessibilityLabel(Text(verbatim: label))
       // Selection is carried by weight and fill, neither of which a screen
       // reader can see.

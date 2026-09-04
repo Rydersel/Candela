@@ -56,17 +56,12 @@ public enum RotationRefusal: Sendable, Equatable {
   /// The requested angle is already the current one. No countdown opens: a no-op
   /// that starts a 30-second timer is a bug, not a courtesy.
   case unchanged(DisplayRotation)
-  /// The display is a mirror SLAVE. Its framebuffer belongs to the display it
-  /// mirrors, so what a rotation of the glass achieves here is not something
-  /// this feature can verify. Refused rather than attempted, on the flag
-  /// `ModeReapplyPolicy` already defers on; `ArrangementPlan` refuses the same
-  /// display by another route.
+  /// A mirror slave's framebuffer belongs to its master, so what a rotation
+  /// achieves cannot be verified. Refused on the flag `ModeReapplyPolicy` defers on.
   case mirrored
-  /// The display is running a size the app renders for it, which is a mirror
-  /// pairing onto a virtual display. Mechanically a slave, so it is refused for
-  /// `mirrored`'s reason, but it gets its own case because the user mirrored
-  /// nothing: naming the other display would name one they do not have, and the
-  /// way out is the size control rather than a mirroring control.
+  /// A rendered size is a mirror pairing onto a virtual display: refused for
+  /// `mirrored`'s reason, but its own case because the user paired nothing and
+  /// the way out is the size control.
   case synthesizedSize
 }
 
@@ -93,9 +88,8 @@ public enum RotationDecision: Sendable, Equatable {
 /// `MirrorTopologyPolicy` is one: it is the part worth testing exhaustively, and
 /// it must not be able to drift from what the UI claims.
 ///
-/// `isSynthesizedSize` arrives as a flag rather than being derived here: the
-/// pairing lives in `MirrorTopology`, which this decision does not take, and a
-/// caller that has to state it cannot silently inherit the raw mirroring answer.
+/// `isSynthesizedSize` is a flag because the pairing lives in `MirrorTopology`,
+/// which this decision does not take.
 public enum RotationPolicy {
   public static func decide(
     display: CGDirectDisplayID,
@@ -109,11 +103,9 @@ public enum RotationPolicy {
     guard let entry = displays.first(where: { $0.id == display }) else {
       return .refused(.displayGone)
     }
-    // Ahead of the angle questions: a slave's reported angle is readable and a
-    // request against it looks ordinary, which is how this reached the apply.
-    // The synthesis arm first, because such a display is also a raw slave and
-    // the mirroring answer would send the user looking for a display they never
-    // paired.
+    // Before the angle checks, which a slave passes. Synthesis first: such a
+    // display is also a raw slave, and the mirroring answer names a display
+    // nobody paired.
     if isSynthesizedSize { return .refused(.synthesizedSize) }
     guard !entry.isMirrorSlave else { return .refused(.mirrored) }
     guard let current = currentRotation else { return .refused(.unreadable) }

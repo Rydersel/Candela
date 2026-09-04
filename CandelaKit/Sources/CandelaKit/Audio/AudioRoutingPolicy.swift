@@ -4,24 +4,16 @@ public enum AudioRoutingPolicy {
   /// Drops CoreAudio's duplicate-counter suffix, then whitespace and parens, so
   /// "MAG 341C (2)" matches "MAG341C".
   ///
-  /// Diverges from the fork's DisplayManager.normalizedName on purpose: the fork
-  /// also stripped every digit, which collapsed "MAG 341C" and "MAG 271C" to the
-  /// same string and routed one panel's volume keys at the other. A trailing
-  /// number that is not parenthesized is part of the model name for the same
-  /// reason: "UltraFine 27" and "UltraFine 32" are two displays.
-  ///
-  /// The parenthesized group goes only when its contents are ALL digits, which
-  /// is the shape CoreAudio's counter has. People name devices "Desk (left)" and
-  /// "Desk (right)", and a rule that dropped every trailing group made those one
-  /// device and routed the keys at whichever answered first.
+  /// Digits stay, unlike the fork: stripping them collapsed "MAG 341C" and "MAG
+  /// 271C" and routed one panel's keys at the other. Only an all-digit group is
+  /// a counter; "Desk (left)" and "Desk (right)" are two devices.
   public static func normalizedName(_ name: String) -> String {
     var head = Substring(name)
     while head.last == " " { head = head.dropLast() }
     if head.last == ")", let open = head.lastIndex(of: "(") {
       let contents = head[head.index(after: open) ..< head.index(before: head.endIndex)]
-      // `isASCII` as well as `isNumber`: the latter is true of every numeric
-      // scalar Unicode knows, so a device named with Eastern Arabic or fullwidth
-      // digits would lose its group and collide with its neighbour.
+      // `isNumber` alone is true of every Unicode digit, so "(٢)" would lose its
+      // group and collide with "(٣)".
       if !contents.isEmpty, contents.allSatisfy({ $0.isASCII && $0.isNumber }) {
         head = head[head.startIndex ..< open]
       }

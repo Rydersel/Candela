@@ -97,9 +97,8 @@ struct CheckupPageScaffold<Content: View, Actions: View>: View {
 
 // MARK: - Getting ready
 
-/// The window's content until the environment read returns. Same backdrop and
-/// heading as every page, so what arrives after it is a fill rather than a
-/// replacement.
+/// Shown until the environment read returns. Same backdrop and heading as every
+/// page, so the flow reads as a fill rather than a replacement.
 struct CheckupPreparingView: View {
   var body: some View {
     ZStack {
@@ -471,12 +470,8 @@ struct CheckupSummaryPage: View {
       }
     } actions: {
       VStack(spacing: 10) {
-        // Export carries the emphasis. It is the thing this flow exists to
-        // produce: a report nobody saves is a run that left nothing behind, and
-        // the save rate is a metric this feature is judged on. Done keeps its
-        // place at the foot, where every other page's way onward sits, and its
-        // Return shortcut, but it is styled as the exit it is rather than as
-        // the action to take.
+        // Export carries the emphasis: a report nobody saves is a run that left
+        // nothing behind. Done keeps the foot and Return, styled as an exit.
         HStack(spacing: 10) {
           Button(CheckupCopy.export) { export() }
             .buttonStyle(OnboardingPrimaryButtonStyle(accent: CheckupStyle.accent))

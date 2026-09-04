@@ -122,9 +122,7 @@ struct ProvenanceEnvelopeTests {
       == "Candela Provenance DELL U2725QE 2026-05-09.candela-provenance.json")
   }
 
-  /// The panel's own model wins over whatever the user called the display, and
-  /// a product name that could split a path is sanitized the way a checkup
-  /// export sanitizes it.
+  /// The panel's model wins over the user's label, sanitized like a checkup export.
   @Test func exportFileNamePrefersTheModelAndSanitizesIt() throws {
     let sample = ProvenanceRecordTests.sampleRecord()
     let record = ProvenanceRecord(

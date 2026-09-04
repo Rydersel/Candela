@@ -678,12 +678,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // and DDC traffic on a process that is going away. The bounded wait lets a
       // hung teardown fall through to mach-port reclaim.
       let finished = DispatchSemaphore(value: 0)
-      // The ceiling is derived from the work it bounds, not chosen next to it: a
-      // second literal drifts from the departure timeout it is meant to cover.
-      // Each slot costs a poll PLUS a full CG configuration transaction, since
-      // `destroy` breaks the mirrors this display masters before it polls, so
-      // the per-slot budget carries a margin for that transaction. Floored at
-      // the 4 s the old literal gave, which no teardown may come in under.
+      // Per slot: the departure poll plus a CG transaction, since `destroy`
+      // breaks the mirrors it masters before polling. Floored at 4 s.
       let departureTimeout: TimeInterval = 1.5
       let ceiling = max(4, (departureTimeout + 0.75) * Double(max(1, virtualDisplayHost.live().count)))
       DispatchQueue.global(qos: .userInitiated).async {
@@ -962,14 +958,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // combined-mode dimming at quit, and safe mode never installed any, so
     // skipping it leaves the monitor where the user last put it.
     guard !isSafeMode else { return }
-    // Whether either leg actually SUBMITTED anything, read off the submission
-    // counter rather than inferred: `restoreFullRangeDDC` returns early on the
-    // native path, under forced software, and on a display whose DDC brightness
-    // is turned off, so a display list is no evidence that a write exists.
-    // Marked BEFORE the lock-dim release, not between the two: on an HDR
-    // display the release submits through the native leg and the restore below
-    // returns at its own native guard, so a mark taken after it would see no
-    // movement and skip the settle nap over a write still in flight.
+    // Submission counters, not the display list: `restoreFullRangeDDC` returns
+    // early on several paths, so a display is no evidence of a write. Marked
+    // before the lock-dim release, whose native-leg write the mark must cover.
     let marks = model.displays.map { ($0, $0.controller.submissionMark()) }
     // AFTER the gamma reset and shade removal, which tear the software surfaces
     // down unconditionally, so the restore below leaves the user's value on a
@@ -1244,12 +1235,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // that follows cannot observe a stale ON.
     try? await SMAppService.mainApp.unregister()
 
-    // ---- 3b. Sparkle keeps its settings in OUR defaults domain under its own
-    //          schema (`SUEnableAutomaticChecks` and friends), so the wipe below
-    //          takes the update preference with it. The button clears Candela's
-    //          settings; whether the app checks for updates is not one of the
-    //          things it offers to change, so it is read here and written back
-    //          after.
+    // ---- 3b. Sparkle stores its keys in our defaults domain, so the wipe would
+    //          take the update preference, which this button does not offer to
+    //          change. Read here, written back after.
     let automaticUpdateChecks = updaterModel.automaticallyChecksForUpdates
 
     // ---- 4. The wipe itself.
@@ -1274,9 +1262,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       prefs.muted = true
     }
 
-    // ---- 4c. The update preference back, through Sparkle rather than by
-    //          writing its key: the updater is the store, and a key written
-    //          behind it would not reach the running scheduler.
+    // ---- 4c. Through Sparkle, not its key: a key written behind the updater
+    //          never reaches the running scheduler.
     updaterModel.automaticallyChecksForUpdates = automaticUpdateChecks
 
     // ---- 5. Rebuild, do NOT merely refresh. `refresh()` would reuse every
@@ -1349,8 +1336,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     settingsActions.rearmTap()
     updateStatusItemVisibility()
     model.notePrefsChanged()
-    // The About pane's toggle and its "Last checked" line are mirrors of
-    // Sparkle's own state, and the wipe moved that state underneath them.
+    // The About pane mirrors Sparkle's state, which the wipe just moved.
     updaterModel.refreshFromUpdater()
     // Post-reset state IS first-run state: prefsSchemaVersion is gone, so
     // onboarding re-runs.
@@ -1448,13 +1434,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     model.noteTapArmed(config)
   }
 
-  /// The bar glyph, filled while a keep-awake assertion is held. Keep Display
-  /// Awake defeats a power setting the user chose and suppresses OLED care's
-  /// idle dim, blackout and unfocused dim for the session, so a hold that is
-  /// only visible with the panel open is a hold nobody remembers taking.
-  ///
-  /// A refused assertion leaves `isOn` false and the glyph idle, which is the
-  /// honest reading: nothing is held.
+  /// Filled while a keep-awake assertion is held: it suppresses every OLED care
+  /// dim for the session, so a hold visible only inside the panel is one nobody
+  /// remembers taking. A refused assertion leaves `isOn` false and the glyph idle.
   private func updateStatusItemImage() {
     guard let statusItem else { return }
     let isHeld = model.keepAwake.isOn
@@ -1463,9 +1445,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       accessibilityDescription: isHeld ? "Candela, keeping the display awake" : "Candela")
   }
 
-  /// Re-arms after every change, the pattern `OnboardingLiveApplier` uses:
-  /// `withObservationTracking` fires its `onChange` once, before the write
-  /// lands, so the new value is read on the hop rather than in the callback.
+  /// `withObservationTracking` fires once, before the write lands, so the value
+  /// is read on the hop and the tracking re-armed there.
   private func trackKeepAwake() {
     withObservationTracking {
       _ = model.keepAwake.isOn

@@ -9,26 +9,20 @@ import Foundation
 public struct OwnerHours: Equatable, Sendable, Codable {
   public private(set) var secondsByOwner: [String: Double]
   public private(set) var totalSeconds: Double
-  /// Time from owners past `storedOwnerLimit`, kept out of `secondsByOwner`
-  /// entirely so nothing that reads that dictionary can render the fold as an
-  /// app. It is a sibling field an older decoder does not know and skips, which
-  /// is why the schema version does not move for it.
+  /// Time from owners past `storedOwnerLimit`, kept out of `secondsByOwner` so
+  /// no reader can render the fold as an app. Older decoders skip the key, so
+  /// the schema version does not move for it.
   public private(set) var foldedSeconds: Double
 
   public static let empty = OwnerHours(secondsByOwner: [:], totalSeconds: 0)
 
-  /// How many named owners survive an encode. The store is written every five
-  /// minutes and never forgets an app, so a machine that meets thousands of
-  /// them would grow the prefs blob without bound.
+  /// Owners surviving an encode. The store never forgets an app, so without a
+  /// cap the prefs blob grows without bound.
   static let storedOwnerLimit = 50
 
-  /// Where a build before `foldedSeconds` existed put the fold: INSIDE
-  /// `secondsByOwner`, where a reader that did not know to skip it drew it as
-  /// the heaviest app on the display. Kept as a decode-time migration only, and
-  /// never written again.
-  ///
-  /// A macOS file name cannot contain "/", so no process can ever have reported
-  /// this as its owner name and the bucket holds nothing but folded time.
+  /// Where older builds put the fold, inside `secondsByOwner`, where readers drew
+  /// it as the heaviest app. Migrated out on decode, never written again. The "/"
+  /// makes it impossible as a real process name.
   static let legacyFoldedOwnerKey = "other/apps"
 
   /// Descending by seconds, ties broken by owner name so the view does not
@@ -46,9 +40,8 @@ public struct OwnerHours: Equatable, Sendable, Codable {
       .map { (owner: $0.key, hours: $0.value / 3600) }
   }
 
-  /// Keeps the heaviest `storedOwnerLimit` named owners whole and returns what
-  /// the rest carry, for the caller to add to `foldedSeconds`. Idempotent: a
-  /// store already at or under the limit folds nothing more.
+  /// Idempotent: a store at or under the limit folds nothing, so a rewrite of a
+  /// rewrite does not eat one more owner.
   private static func capped(_ seconds: [String: Double]) -> (kept: [String: Double], folded: Double) {
     guard seconds.count > storedOwnerLimit else { return (seconds, 0) }
     let ranked = seconds.sorted { lhs, rhs in
@@ -85,9 +78,8 @@ public struct OwnerHours: Equatable, Sendable, Codable {
 
   public func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
-    // NOT bumped for `foldedSeconds`: the version gates a decoder OUT, and an
-    // older build reading this store is meant to go on working. It skips the key
-    // it does not know, which costs it the folded total and nothing else.
+    // Not bumped for `foldedSeconds`: the version gates older decoders out, and
+    // they only lose the folded total by skipping the key.
     try container.encode(OledStoreSchema.currentVersion, forKey: .schemaVersion)
     let capped = Self.capped(secondsByOwner)
     try container.encode(capped.kept, forKey: .secondsByOwner)
@@ -103,9 +95,8 @@ public struct OwnerHours: Equatable, Sendable, Codable {
         found: version, supported: OledStoreSchema.currentVersion)
     }
     var stored = try container.decode([String: Double].self, forKey: .secondsByOwner)
-    // Absent on a store this build has not rewritten yet, and on one written
-    // before the field existed, where the fold sits under the legacy key.
-    // Migrated out here so nothing downstream has to know the key.
+    // Absent until this build rewrites the store; before the field existed the
+    // fold sat under the legacy key.
     let carried = try container.decodeIfPresent(Double.self, forKey: .foldedSeconds) ?? 0
     let legacy = stored.removeValue(forKey: Self.legacyFoldedOwnerKey) ?? 0
     self.secondsByOwner = stored

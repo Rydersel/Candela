@@ -380,10 +380,8 @@ struct LockDimTests {
     #expect(OledCareCadence.fast == .milliseconds(100))
   }
 
-  /// With nothing enrolled the tick returns at its empty guard, so the 2 s
-  /// wakeup bought a user who never opted in nothing at all. A pending
-  /// verification still outranks the idle cadence: those entries outlive the
-  /// state that issued them.
+  /// A pending verification outranks the idle cadence: those entries outlive
+  /// the state that issued them.
   @Test func nothingEnrolledIdlesTheLoopUnlessAVerificationIsPending() {
     #expect(
       OledCareCadence.interval(
@@ -397,7 +395,7 @@ struct LockDimTests {
         anythingEnrolled: false
       ) == OledCareCadence.fast
     )
-    // An enrolled display is still the 2 s cadence, untouched by the new term.
+    // An enrolled display keeps the slow cadence.
     #expect(
       OledCareCadence.interval(
         anyOverlayUp: false, anyLockDimEngaged: false, verificationPending: false,
@@ -407,12 +405,9 @@ struct LockDimTests {
     #expect(OledCareCadence.idle == .seconds(30))
   }
 
-  /// Three settings surfaces each picked their own staleness number, one of them
-  /// disagreeing with its own comment. Both windows are derived from the
-  /// sampling interval now, and the stall warning's copy says "over 10 minutes".
-  ///
-  /// The liveness window sits BETWEEN captures rather than on one: at exactly
-  /// two intervals a single skipped capture put the dot out.
+  /// Both windows derive from the sampling interval; the stall warning's copy
+  /// says "over 10 minutes". The liveness window sits between captures: at
+  /// exactly two intervals one skipped capture put the dot out.
   @Test func stalenessWindowsAreMultiplesOfTheSamplingInterval() {
     #expect(OledCareCadence.sampling == .seconds(60))
     #expect(OledCareCadence.samplingSeconds == 60)
