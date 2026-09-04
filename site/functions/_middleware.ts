@@ -5,11 +5,7 @@ import type { AnalyticsEnv } from './lib/runtime'
 type Context = {
   request: Request
   next: () => Promise<Response>
-  env: Partial<AnalyticsEnv> & {
-    ASSETS: {
-      fetch(request: Request): Promise<Response>
-    }
-  }
+  env: Partial<AnalyticsEnv> & Pick<AnalyticsEnv, 'ASSETS'>
   waitUntil?: (promise: Promise<unknown>) => void
 }
 

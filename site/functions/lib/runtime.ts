@@ -27,10 +27,16 @@ export type AnalyticsEngineDataset = {
   writeDataPoint(event: { blobs?: string[]; doubles?: number[]; indexes?: string[] }): void
 }
 
+// Pages' static asset binding. It skips the Functions router, so the middleware
+// never counts an appcast read through it as an update check.
+export type StaticAssets = {
+  fetch(request: Request): Promise<Response>
+}
+
 export type AnalyticsEnv = {
+  ASSETS: StaticAssets
   ANALYTICS_DB: D1Database
   ANALYTICS_SIGNING_KEY: string
-  RELEASE_DOWNLOAD_URL?: string
   // One dataset per counted event, so the dashboard's dataset picker is the
   // chart picker.
   ANALYTICS_PAGEVIEWS?: AnalyticsEngineDataset
