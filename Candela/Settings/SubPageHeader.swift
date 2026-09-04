@@ -82,5 +82,8 @@ private struct BackButton: View {
     .onHover { hovering = $0 }
     .animation(SettingsTheme.hoverMotion, value: hovering)
     .accessibilityLabel(Text("Back"))
+    // The shortcut's only trace: its button is zero-size and hidden from
+    // accessibility. Spelled out because VoiceOver skips a bare "[".
+    .help(Text(verbatim: "Command with the left bracket key"))
   }
 }

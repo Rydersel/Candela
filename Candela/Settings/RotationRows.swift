@@ -24,7 +24,24 @@ struct RotationRows: View {
   let state: AppModel.DisplayState
   let coordinator: RotationCoordinator
 
+  /// For the mirror sample only: `MirroringCoordinator` is the one definition of
+  /// "mirrored".
+  @Environment(AppModel.self) private var model
+
   private var displayID: CGDirectDisplayID { state.id }
+
+  /// `RotationPolicy` refuses a slave, so greyed with the reason rather than left
+  /// live to produce a report.
+  private var isMirrorSlave: Bool {
+    model.mirroring.topology.displays.contains { $0.id == displayID && $0.isMirrorSlave }
+  }
+
+  /// Mechanically a slave too, but with its own sentence: the user paired
+  /// nothing, and the way out is the size control. Off the coordinator sample,
+  /// not the raw store, so the caption cannot lag the flag it explains.
+  private var isSynthesizedSize: Bool {
+    MirroringPredicates.isSynthesized(model.mirroring.topology, displayID: displayID)
+  }
 
   var body: some View {
     // No control at all rather than a dead one. A picker that cannot
@@ -40,11 +57,17 @@ struct RotationRows: View {
       }
       // A rotation takes up to a second; without this the window accepts a
       // second selection on top of the first.
-      .disabled(coordinator.isApplying)
+      .disabled(coordinator.isApplying || isMirrorSlave || isSynthesizedSize)
 
-      // The display reports a non-right angle, so the picker above is showing
-      // a fallback rather than the truth. Say so.
-      if coordinator.rotation(of: displayID) == nil {
+      // Pairing state first, in the policy's order: a synthesized display sets
+      // the raw mirror flag too, and that sentence names a display nobody paired.
+      if isSynthesizedSize {
+        SettingsCaption(RotationCopy.refusal(.synthesizedSize))
+      } else if isMirrorSlave {
+        SettingsCaption(RotationCopy.refusal(.mirrored))
+      } else if coordinator.rotation(of: displayID) == nil {
+        // The display reports a non-right angle, so the picker above is showing
+        // a fallback rather than the truth. Say so.
         SettingsCaption(RotationCopy.refusal(.unreadable))
       }
     }

@@ -519,6 +519,75 @@ struct CheckupFlowModelTests {
     flow.startShowing()
     #expect(booked.filter { $0.0 == .gray7 }.count == 3)
   }
+
+  /// A field the run walked past is nobody's attestation. Filing it as one
+  /// inflates the self-reported count with a sentence the user never said.
+  @Test func aFieldNobodyAnsweredIsNotObservedRatherThanSelfReported() async throws {
+    let flow = CheckupFlowModel(environment: environment(presenter: FakePresenter(), entry: entry()))
+    await toFirstField(flow)
+    #expect(flow.page == .witness)
+    await flow.advance()                                  // the card was never shown
+    let unanswered = try #require(flow.claims.first { $0.id == CheckupCheckID.field(.witness) })
+    #expect(unanswered.verdict == .notObserved("no answer given"))
+
+    // The control: a field the user did answer is still recorded as their own report.
+    await flow.advance()
+    flow.startShowing()
+    flow.answer(.oneMark, tappedRegion: flow.plantRegionForTest)
+    let answered = try #require(flow.claims.first { $0.id == CheckupCheckID.field(.black) })
+    #expect(answered.verdict.kind == "selfReported")
+  }
+
+  /// The rule forbids recording the session as clean, not recording what the person
+  /// saw. The grade stays inconclusive and the report rides along with it.
+  @Test func aMarkReportedAfterAMissedControlIsKeptBesideTheUngradedReason() async throws {
+    let flow = CheckupFlowModel(environment: environment(presenter: FakePresenter(), entry: entry()))
+    await toFirstField(flow); flow.startShowing(); flow.answer(.roundAndUncut, tappedRegion: nil); await flow.advance()
+    flow.startShowing(); flow.answer(.nothing, tappedRegion: nil)   // missed at 4 px
+    flow.startShowing(); flow.answer(.nothing, tappedRegion: nil)   // missed at 8 px
+    #expect(flow.plantRecord?.missed == true)
+
+    await flow.advance()
+    #expect(flow.page == .fieldInstruction(.red))
+    flow.startShowing()
+    flow.answer(.oneMark, tappedRegion: (x: 640, y: 480))
+    let red = try #require(flow.claims.first { $0.id == CheckupCheckID.field(.red) })
+    #expect(red.verdict.kind == "inconclusive")
+    #expect(red.verdict.text.contains(CheckupFlowModel.ungradedText))
+    #expect(red.verdict.text.contains("defect reported at 640,480 px"))
+
+    // The control: with nothing reported, the reason stands alone.
+    await flow.advance()
+    #expect(flow.page == .fieldInstruction(.green))
+    flow.startShowing()
+    flow.answer(.nothing, tappedRegion: nil)
+    let green = try #require(flow.claims.first { $0.id == CheckupCheckID.field(.green) })
+    #expect(green.verdict == .inconclusive(CheckupFlowModel.ungradedText))
+  }
+
+  /// The summary is the one page with nothing left to abandon, so its Done goes
+  /// through the close seam and the saved report is untouched.
+  @Test func theSummarysDoneAsksTheWindowToClose() async throws {
+    let flow = CheckupFlowModel(environment: environment(presenter: FakePresenter(), entry: entry()))
+    var closes = 0
+    flow.onClose = { closes += 1 }
+    await toFirstField(flow)
+    flow.startShowing(); flow.answer(.roundAndUncut, tappedRegion: nil)
+    await flow.advance()
+    for kind in CheckupFieldKind.protocolOrder {
+      #expect(flow.page == .fieldInstruction(kind))
+      flow.startShowing()
+      flow.answer(.nothing, tappedRegion: nil)
+      await flow.advance()
+    }
+    await flow.advance()
+    #expect(flow.page == .summary)
+    let saved = try #require(flow.report)
+    flow.close()
+    #expect(closes == 1)
+    #expect(flow.report == saved)
+    #expect(flow.page == .summary)
+  }
 }
 
 /// Suspends a runner leg until the test lets it finish, so an exit can land

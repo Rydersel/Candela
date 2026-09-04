@@ -179,8 +179,8 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// fast cadence and log an error ten times a second.
   private static let maxVerifyAttempts = 5
   /// Spec §4: one capture per enrolled display per 60 s, and the window list on
-  /// the same clock.
-  private static let samplingInterval: Duration = .seconds(60)
+  /// the same clock. Kit-owned so the settings panes can derive staleness from it.
+  private static let samplingInterval: Duration = OledCareCadence.sampling
   /// How often a DISPLAYED nomination re-checks window geometry. One second: a
   /// dim clearing within a second reads as cleanup, while a dim sitting on moved
   /// content for a whole sampling slot reads as burn-in, the symptom the feature
@@ -368,8 +368,13 @@ final class OledCareCoordinator: CheckupCareHolding {
     })
 
     reconcileEnrollment()
-    // start() is single-shot (the chrome guard above), so there is never a
-    // previous driver to cancel here.
+    startDriver()
+  }
+
+  /// Also called from `reconcileEnrollment`, to cut an idle sleep short when a
+  /// display enrolls.
+  private func startDriver() {
+    driver?.cancel()
     driver = Task { @MainActor [weak self] in
       while !Task.isCancelled {
         // Strong self is confined to the non-suspending half of the iteration
@@ -506,10 +511,10 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// per-app panel-seconds, and the window attribution derived from them,
   /// cleared in one step, in memory and on disk.
   ///
-  /// The panel's TOTAL HOURS are deliberately NOT cleared. They are a different
-  /// measurement with its own reset path (`PanelHoursTracker.reset()`, driven
-  /// by the settings reset), and a control labelled for exposure history must
-  /// not silently destroy a lifetime counter. Per-app hours ARE cleared: they
+  /// Total hours and the time-at-brightness histogram are NOT cleared: each has
+  /// its own reset path off the settings reset, and a control labelled for
+  /// exposure history must not destroy a lifetime counter. The confirmation
+  /// dialog names both. Per-app hours ARE cleared: they
   /// are derived from the same observations as the map, and leaving them would
   /// let the health view keep naming apps for a history the user just deleted.
   func clearExposureHistory(for persistenceKey: String) {
@@ -615,12 +620,8 @@ final class OledCareCoordinator: CheckupCareHolding {
     // Same reason, same moment: a live wear tracker's debounced write-through
     // would re-persist the histogram the wipe just removed.
     //
-    // DISCARDED as well as reset, unlike `trackers`, because `flush()` writes
-    // unconditionally: `reset()` alone leaves the object here, so the first
-    // sleep or quit AFTER the latch clears re-creates `oledWearSeconds` as an
-    // all-zero histogram, exactly what `reset()` promises not to leave behind.
-    // (A `guard !resetting` in `flushExposureHistory` does NOT fix it: every
-    // caller is already excluded by the latch.)
+    // Discarded as well as reset, unlike `trackers`: a pane that wants one after
+    // the wipe gets a fresh tracker off the wiped keys.
     for tracker in wearTrackers.values { tracker.reset() }
     wearTrackers.removeAll()
   }
@@ -694,6 +695,8 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// standby their tracker, since the panel stopped being driven).
   private func reconcileEnrollment() {
     guard let model else { return }
+    // The condition under which the driver is asleep on the idle cadence.
+    let wasIdle = states.isEmpty
     var seen: Set<String> = []
     for displayState in model.displays {
       let key = displayState.display.persistenceKey
@@ -768,6 +771,10 @@ final class OledCareCoordinator: CheckupCareHolding {
       }
       dropState(for: key)
     }
+
+    // Restarting cuts the idle sleep short; the fresh task ticks before it
+    // sleeps. `driver != nil`: `start()` reconciles before creating the loop.
+    if wasIdle, !states.isEmpty, driver != nil { startDriver() }
   }
 
   private func dropState(for key: String) {
@@ -824,7 +831,8 @@ final class OledCareCoordinator: CheckupCareHolding {
     // Drained independently of `states`: these entries outlive the state that
     // issued them by design (I-2), including across a reset.
     drainPendingRemovalVerifications()
-    // Users who never enroll pay nothing past this line.
+    // Users who never enroll do no work past this line; `cadence()` idles the
+    // loop for them too.
     guard !states.isEmpty else { return }
     let idleSeconds = OledCareSignalSources.systemIdleSeconds()
     let assertionHeld = OledCareSignalSources.displaySleepAssertionHeld()
@@ -1021,12 +1029,17 @@ final class OledCareCoordinator: CheckupCareHolding {
 
   /// A given-up verify drops the fast cadence only when nothing is wanted (the
   /// strand case); a wanted dim keeps it, whichever way it is delivered.
+  ///
+  /// With nothing enrolled `tick()` returns at its empty guard, so the loop
+  /// idles; a pending removal verification still outranks that, since those
+  /// entries outlive the state that issued them.
   private func cadence() -> Duration {
     OledCareCadence.interval(
       anyOverlayUp: states.values.contains { $0.lastAppliedAlpha != nil },
       anyLockDimEngaged: states.values.contains(where: \.lockDimEngaged),
       verificationPending: states.values.contains(where: \.needsVerify)
-        || !pendingRemovalVerifications.isEmpty
+        || !pendingRemovalVerifications.isEmpty,
+      anythingEnrolled: !states.isEmpty
     )
   }
 
@@ -1794,8 +1807,8 @@ final class OledCareCoordinator: CheckupCareHolding {
     // safe mode, no sampling pass will carry this key to disk.
     saveExposureHistory(for: key)
     log.info("""
-    checkup showing booked: \(key, privacy: .public) \(luminance, privacy: .public) \
-    \(seconds, privacy: .public)s
+    checkup showing booked: \(DisplayLogging.tag(for: key), privacy: .public) \
+    \(luminance, privacy: .public) \(seconds, privacy: .public)s
     """)
   }
 
@@ -1864,7 +1877,8 @@ final class OledCareCoordinator: CheckupCareHolding {
       return .empty
     } catch {
       log.error("""
-      OLED care: stored model comparison for \(key, privacy: .public) is unreadable \
+      OLED care: stored model comparison for \
+      \(DisplayLogging.tag(for: key), privacy: .public) is unreadable \
       (\(error.localizedDescription, privacy: .public)); starting over
       """)
       return .empty
@@ -1896,7 +1910,8 @@ final class OledCareCoordinator: CheckupCareHolding {
       return .empty
     } catch {
       log.error("""
-      OLED care: stored exposure map for \(key, privacy: .public) is unreadable \
+      OLED care: stored exposure map for \
+      \(DisplayLogging.tag(for: key), privacy: .public) is unreadable \
       (\(error.localizedDescription, privacy: .public)); starting over
       """)
       return .empty
@@ -1919,7 +1934,8 @@ final class OledCareCoordinator: CheckupCareHolding {
       return .empty
     } catch {
       log.error("""
-      OLED care: stored per-app hours for \(key, privacy: .public) are unreadable \
+      OLED care: stored per-app hours for \
+      \(DisplayLogging.tag(for: key), privacy: .public) are unreadable \
       (\(error.localizedDescription, privacy: .public)); starting over
       """)
       return .empty
@@ -1929,7 +1945,8 @@ final class OledCareCoordinator: CheckupCareHolding {
   private func quarantine(_ key: String, reason: String, failure: OledStoreDecodeFailure) {
     unwritableExposureKeys.insert(key)
     log.error("""
-    OLED care: stored \(reason, privacy: .public) for \(key, privacy: .public) was written by a \
+    OLED care: stored \(reason, privacy: .public) for \
+    \(DisplayLogging.tag(for: key), privacy: .public) was written by a \
     schema this build does not read (\(String(describing: failure), privacy: .public)); keeping \
     the stored bytes and recording nothing new for this display until its history is deleted
     """)
@@ -1967,25 +1984,26 @@ final class OledCareCoordinator: CheckupCareHolding {
     // later one might. The dirty flag is still cleared above, so this display
     // simply records nothing until the user deletes its history.
     guard !unwritableExposureKeys.contains(key) else { return }
+    let tag = DisplayLogging.tag(for: key)
     if let map = accumulators[key]?.map {
       if let data = try? JSONEncoder().encode(map) {
         UserDefaults.standard.set(data, forKey: Self.exposureKeyName(key))
       } else {
-        log.error("OLED care: could not encode the exposure map for \(key, privacy: .public)")
+        log.error("OLED care: could not encode the exposure map for \(tag, privacy: .public)")
       }
     }
     if let hours = ownerHours[key]?.hours {
       if let data = try? JSONEncoder().encode(hours) {
         UserDefaults.standard.set(data, forKey: Self.ownerHoursKeyName(key))
       } else {
-        log.error("OLED care: could not encode the per-app hours for \(key, privacy: .public)")
+        log.error("OLED care: could not encode the per-app hours for \(tag, privacy: .public)")
       }
     }
     if let comparison = comparisons[key] {
       if let data = try? JSONEncoder().encode(comparison) {
         UserDefaults.standard.set(data, forKey: Self.modelComparisonKeyName(key))
       } else {
-        log.error("OLED care: could not encode the model comparison for \(key, privacy: .public)")
+        log.error("OLED care: could not encode the model comparison for \(tag, privacy: .public)")
       }
     }
   }

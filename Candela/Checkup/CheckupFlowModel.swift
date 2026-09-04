@@ -34,6 +34,9 @@ final class CheckupFlowModel {
 
   /// The save seam: the pane's store in the app, a recorder in the suite.
   var onSaved: (CheckupReportEnvelope) -> Void = { _ in }
+  /// The close seam: the window is the AppKit island, so Done asks rather than
+  /// performs.
+  var onClose: () -> Void = {}
 
   /// The one field the control is planted on. Optional only because `first(where:)` is.
   static let plantedField = CheckupFieldKind.protocolOrder.first { $0.carriesPlant }
@@ -182,8 +185,15 @@ final class CheckupFlowModel {
       finish(.complete)
 
     case .summary:
+      // Unreachable: `finish` sets `finished` before this page, so the guard
+      // above returned.
       break
     }
+  }
+
+  /// The summary's Done. The report is already saved, so nothing is abandoned.
+  func close() {
+    onClose()
   }
 
   func back() {
@@ -407,10 +417,14 @@ final class CheckupFlowModel {
     kind: CheckupFieldKind, plant: CheckupPlant?, answer: CheckupFieldAnswer,
     tappedRegion: (x: Int, y: Int)?
   ) {
-    // With the control missed, nothing on the pixel sweep can be graded,
-    // and a report must not print an attestation as if it could be.
+    // With the control missed nothing can be graded, and a report must not print
+    // an attestation as if it could be. The person's own report still rides
+    // along: the rule forbids recording the session as clean, not what they saw.
     if kind.carriesPlant, plantRecord?.missed == true {
-      recordField(kind, verdict: .inconclusive(Self.ungradedText))
+      recordField(
+        kind,
+        verdict: .inconclusive(
+          Self.ungraded(with: Self.reportedMark(answer, region: tappedRegion))))
       page = instructionPage(for: kind)
       return
     }
@@ -488,9 +502,26 @@ final class CheckupFlowModel {
   }
 
   /// A pixel field's attestation only means something at a known sensitivity;
-  /// with the control missed it is inconclusive whatever the user reported.
+  /// with the control missed the grade is inconclusive, with the report kept
+  /// beside the reason.
   private func gradedVerdict(_ kind: CheckupFieldKind, _ verdict: CheckupVerdict) -> CheckupVerdict {
-    kind.carriesPlant && plantRecord?.missed == true ? .inconclusive(Self.ungradedText) : verdict
+    guard kind.carriesPlant, plantRecord?.missed == true else { return verdict }
+    return .inconclusive(Self.ungraded(with: verdict.text))
+  }
+
+  static func ungraded(with reported: String?) -> String {
+    guard let reported, !reported.isEmpty else { return ungradedText }
+    return "\(ungradedText); \(reported)"
+  }
+
+  /// Nil when no mark was reported, so nothing is appended to the ungraded reason.
+  static func reportedMark(
+    _ answer: CheckupFieldAnswer, region: (x: Int, y: Int)?
+  ) -> String? {
+    switch answer {
+    case .oneMark, .moreThanOne: defectText(region)
+    case .nothing, .roundAndUncut, .notRound: nil
+    }
   }
 
   static func defectText(_ region: (x: Int, y: Int)?) -> String {
@@ -622,9 +653,10 @@ final class CheckupFlowModel {
     ])
   }
 
+  /// Nobody attested to anything, so `notObserved`, never a self-report.
   private func recordUnanswered(_ kind: CheckupFieldKind) {
     guard !claims.contains(where: { $0.id == CheckupCheckID.field(kind) }) else { return }
-    recordField(kind, verdict: gradedVerdict(kind, .selfReported("no answer given")))
+    recordField(kind, verdict: gradedVerdict(kind, .notObserved("no answer given")))
   }
 
   private func instructionPage(for kind: CheckupFieldKind) -> CheckupPage {

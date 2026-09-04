@@ -31,6 +31,10 @@ struct VirtualDisplaysPane: View {
   /// the sync lands.
   @State private var shownIssue: ShownIssue?
 
+  /// The slot, not a flag, so the alert cannot survive a slot switch and delete
+  /// the wrong one.
+  @State private var removingSlot: Int?
+
   private struct ShownIssue: Equatable {
     var slot: Int
     var failure: VirtualDisplayFailure?
@@ -239,6 +243,7 @@ struct VirtualDisplaysPane: View {
                                                     name: .virtualSlotRecreateAtLaunch,
                                                     keyPath: \.recreateAtLaunch))
           .themedSwitch()
+          .accessibilityLabel("Come Back at Launch")
           .prefIdentifier(.virtualSlotRecreateAtLaunch, slot: slot)
       }
       SettingsCardDivider()
@@ -386,19 +391,24 @@ struct VirtualDisplaysPane: View {
         ForEach(Self.presets.indices, id: \.self) { index in
           Text(Self.presets[index].label).tag(index)
         }
-        Text("Custom").tag(-1)
+        // Only while it describes the state: it cannot be chosen, only typed into.
+        if presetIndex == nil {
+          Text("Custom").tag(-1)
+        }
       }
     }
     SettingsCardDivider()
-    SettingRow {
+    SettingRow(caption: SettingsCaption(verbatim: Self.sizeRangeCaption)) {
       HStack {
         Text("Width and Height")
         Spacer()
         numberField(slot: slot, label: "Width", name: .virtualSlotWidth,
+                    maximum: VirtualDisplayIdentity.maxPixels.wide,
                     get: { $0.width }, set: { $0.width = $1 })
           .prefIdentifier(.virtualSlotWidth, slot: slot)
         Text("x").foregroundStyle(SettingsTheme.faintColor)
         numberField(slot: slot, label: "Height", name: .virtualSlotHeight,
+                    maximum: VirtualDisplayIdentity.maxPixels.high,
                     get: { $0.height }, set: { $0.height = $1 })
           .prefIdentifier(.virtualSlotHeight, slot: slot)
       }
@@ -408,21 +418,35 @@ struct VirtualDisplaysPane: View {
       Toggle("Retina (HiDPI)", isOn: binding(slot: slot,
                                              name: .virtualSlotHiDPI, keyPath: \.hiDPI))
         .themedSwitch()
+        .accessibilityLabel("Retina (HiDPI)")
         .prefIdentifier(.virtualSlotHiDPI, slot: slot)
     }
   }
 
+  /// Off the engine's per-axis ceiling, so the caption cannot promise a height
+  /// the create path would cut back. Retina is drawn at double size, so the
+  /// doubled size is what has to fit.
+  static var sizeRangeCaption: String {
+    let (wide, high) = VirtualDisplayIdentity.maxPixels
+    return "Width can be \(minimumPixels) to \(wide), height \(minimumPixels) to \(high); "
+      + "Retina is only available up to \(wide / 2) by \(high / 2), because the display is drawn at double the size."
+  }
+
+  /// Something a desktop fits on. Ours: `normalized` has no lower bound.
+  static let minimumPixels = 320
+
   private func numberField(
-    slot: Int, label: String, name: PrefName,
+    slot: Int, label: String, name: PrefName, maximum: Int,
     get: @escaping (VirtualSlotDefinition) -> Int,
     set: @escaping (inout VirtualSlotDefinition, Int) -> Void
   ) -> some View {
     CommitOnBlurField(
       stored: { String(get(prefs.virtualSlot(slot))) },
       commit: { text in
-        // 320 floors the value at something a desktop fits on. The engine
-        // still normalizes to even and clamps to the pixel ceiling on create.
-        guard let value = Int(text), (320 ... 8192).contains(value) else { return }
+        // The engine clamps on create anyway; this stops the field accepting a
+        // size it would silently cut back.
+        guard let value = Int(text),
+              (Self.minimumPixels ... maximum).contains(value) else { return }
         var updated = prefs.virtualSlot(slot)
         set(&updated, value)
         prefs.setVirtualSlot(updated, slot: slot)
@@ -437,26 +461,52 @@ struct VirtualDisplaysPane: View {
   private func actionRow(slot: Int, definition: VirtualSlotDefinition, live: VirtualDisplayHandle?) -> some View {
     let drifted = live.map { $0.spec != definition.spec.normalized } ?? false
     let busy = model.virtualSlotBusy.contains(slot)
+    // A `String`, so the display's own name goes in verbatim rather than as a
+    // lookup key.
+    let removalTitle = "Remove \(definition.name)?"
     HStack(spacing: 8) {
       if live == nil {
         // A tile with no running display: the create failed (the status row
         // says why) or the last session ended without come-back-at-launch.
         // Create and Apply are the same write through the same path and never
         // appear together, so they share one identifier.
+        // SwiftUI does not publish a `Button` title to accessibility; without
+        // the label it announces as "button".
         Button("Create Display") { setConfigured(true, slot: slot) }
           .buttonStyle(SettingsPrimaryButtonStyle())
+          .accessibilityLabel("Create Display")
           .accessibilityIdentifier("action.slotApply.\(slot)")
       } else if drifted {
         // The apply path is destroy-and-recreate under the same
         // slot, so the button names that rather than acting on the field edit.
         Button("Apply and Recreate") { setConfigured(true, slot: slot) }
           .buttonStyle(SettingsPrimaryButtonStyle())
+          .accessibilityLabel("Apply and Recreate")
           .accessibilityIdentifier("action.slotApply.\(slot)")
       }
       Spacer(minLength: 16)
-      Button("Remove Display") { remove(slot: slot) }
+      // Confirmed first: removal clears the slot's keys, minted identity included.
+      // The `.destructive` role belongs on the button that removes.
+      Button("Remove Display…") { removingSlot = slot }
         .buttonStyle(SettingsDangerButtonStyle())
+        .accessibilityLabel("Remove Display…")
         .accessibilityIdentifier("action.slotRemove.\(slot)")
+        .alert(
+          removalTitle,
+          isPresented: Binding(
+            get: { removingSlot == slot },
+            set: { if !$0 { removingSlot = nil } })
+        ) {
+          // Cancel holds Return: a destructive action never takes the primary
+          // role.
+          Button("Cancel", role: .cancel) {}
+            .keyboardShortcut(.defaultAction)
+          Button("Remove", role: .destructive) { remove(slot: slot) }
+        } message: {
+          // A later Create mints a fresh identity, so macOS meets a display it has
+          // not seen; the message says so.
+          Text("The display stops and this slot goes back to its defaults: the name, the size, Retina and Come Back at Launch. Any windows on it move to your other displays. A virtual display created here afterwards counts as a new one, so macOS does not restore this display's place in your arrangement.")
+        }
     }
     .padding(.vertical, 8)
     .disabled(busy)

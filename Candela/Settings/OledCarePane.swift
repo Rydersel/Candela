@@ -165,6 +165,7 @@ struct OledCarePane: View {
               }
             ))
             .themedSwitch()
+            .accessibilityLabel("Automatically hide the menu bar")
             if menuBarRefused != nil {
               OledInlineNote(Text("macOS did not take that change. Menu bar auto-hiding can also be set in System Settings > Control Center."))
             }
@@ -183,6 +184,7 @@ struct OledCarePane: View {
               }
             ))
             .themedSwitch()
+            .accessibilityLabel("Automatically hide the Dock")
             if dockRefused != nil {
               OledInlineNote(Text("macOS did not take that change. Dock auto-hiding can also be set in System Settings > Desktop & Dock."))
             }

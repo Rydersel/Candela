@@ -237,7 +237,7 @@ final class AppModel {
   /// other two it persists nothing, since a rotation is already system state the
   /// instant it applies.
   @ObservationIgnored private(set) lazy var rotation = RotationCoordinator(
-    gate: reconfigurationGate
+    gate: reconfigurationGate, topologyStore: mirrorTopology
   )
 
   /// The display arrangement, its preview countdown, and the layout on screen.
@@ -427,7 +427,11 @@ final class AppModel {
     // that outlived it would stand until quit with every control that knew about
     // it already rebuilt. The engine's table is stale for the rest of the session
     // either way, so the log line is what a later report has to explain it by.
-    if await synthesis.disengageAllForReset() == false {
+    //
+    // `force`: a claim held by another feature must not leave a set standing
+    // through a reset that rebuilds the controller which would take it down. It
+    // waits for the claim and only goes on unclaimed once the wait runs out.
+    if await synthesis.disengageAllForReset(force: true) == false {
       log.error("reset: the synthesis engine refused its teardown; the virtual displays go down without it")
     }
     let host = virtualDisplays

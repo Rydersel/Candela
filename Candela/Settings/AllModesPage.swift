@@ -93,8 +93,14 @@ struct AllModesPage: View {
       // A nil catalog is "not enumerated yet", NOT "no modes". It renders as
       // nothing, so no empty state flashes on every push.
       if let catalog {
-        listControls(catalog)
-        modeList(catalog)
+        if catalog.all.isEmpty {
+          // Without this the page draws a Show control over an empty card, which
+          // reads as a list that failed to load.
+          SettingsRowNote(verbatim: Self.noModesNote)
+        } else {
+          listControls(catalog)
+          modeList(catalog)
+        }
       }
     })
     // Enumeration is several CoreGraphics round-trips, so it runs once per
@@ -120,6 +126,11 @@ struct AllModesPage: View {
   }
 
   // MARK: - Controls
+
+  /// Word for word what the hub's size rows say, so one silent panel is not
+  /// described two ways.
+  static let noModesNote =
+    "\(AppInfo.productName) found no resolutions it can switch between on this display."
 
   @ViewBuilder private func listControls(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
     SettingsCardSection {

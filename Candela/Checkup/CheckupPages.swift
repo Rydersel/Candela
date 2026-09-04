@@ -95,6 +95,28 @@ struct CheckupPageScaffold<Content: View, Actions: View>: View {
   }
 }
 
+// MARK: - Getting ready
+
+/// Shown until the environment read returns. Same backdrop and heading as every
+/// page, so the flow reads as a fill rather than a replacement.
+struct CheckupPreparingView: View {
+  var body: some View {
+    ZStack {
+      CheckupBackdrop()
+      VStack(spacing: 22) {
+        OnboardingHeading(
+          title: CheckupCopy.preparingTitle, subtitle: CheckupCopy.preparingBody)
+        ProgressView()
+          .controlSize(.small)
+      }
+      .frame(maxWidth: CheckupStyle.pageWidth)
+      .padding(.horizontal, 24)
+    }
+    .frame(minWidth: 720, minHeight: 560)
+    .preferredColorScheme(.dark)
+  }
+}
+
 // MARK: - Scenario
 
 struct CheckupScenarioPage: View {
@@ -202,11 +224,15 @@ struct CheckupPlanPage: View {
           }
           .frame(maxWidth: .infinity, alignment: .leading)
         }
-        Text(CheckupCopy.planWorstCase(seconds: CheckupPlan.worstCaseFieldSeconds))
+        Text(CheckupCopy.planModeSweep)
           .font(.callout)
           .foregroundStyle(OnboardingStyle.bodyColor)
           .fixedSize(horizontal: false, vertical: true)
           .padding(.top, 6)
+        Text(CheckupCopy.planWorstCase(seconds: CheckupPlan.worstCaseFieldSeconds))
+          .font(.callout)
+          .foregroundStyle(OnboardingStyle.bodyColor)
+          .fixedSize(horizontal: false, vertical: true)
       }
     } actions: {
       CheckupAdvanceButton(model: model, title: CheckupCopy.continueLabel)
@@ -444,6 +470,8 @@ struct CheckupSummaryPage: View {
       }
     } actions: {
       VStack(spacing: 10) {
+        // Export carries the emphasis: a report nobody saves is a run that left
+        // nothing behind. Done keeps the foot and Return, styled as an exit.
         HStack(spacing: 10) {
           Button(CheckupCopy.export) { export() }
             .buttonStyle(OnboardingPrimaryButtonStyle(accent: CheckupStyle.accent))
@@ -452,11 +480,16 @@ struct CheckupSummaryPage: View {
             .buttonStyle(OnboardingSecondaryButtonStyle())
             .accessibilityLabel(Text(verbatim: CheckupCopy.copySummary))
         }
-        if justCopied {
-          Text(CheckupCopy.copied)
-            .font(.caption)
-            .foregroundStyle(OnboardingStyle.faintColor)
-        }
+        Text(CheckupCopy.copied)
+          .font(.caption)
+          .foregroundStyle(OnboardingStyle.faintColor)
+          // Laid out either way: confirming a copy must not shove Done down.
+          .opacity(justCopied ? 1 : 0)
+          .accessibilityHidden(!justCopied)
+        Button(CheckupCopy.done) { model.close() }
+          .buttonStyle(OnboardingSecondaryButtonStyle())
+          .keyboardShortcut(.defaultAction)
+          .accessibilityLabel(Text(verbatim: CheckupCopy.done))
       }
       .alert(
         CheckupCopy.exportFailed,

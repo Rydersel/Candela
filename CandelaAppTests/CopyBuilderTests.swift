@@ -617,14 +617,34 @@ struct CopyBuilderTests {
     #expect(RotationCopy.previewSubtitle(name: "", to: .ninety) == "90°")
   }
 
+  /// Per axis: one literal for both promised a height the create path cut back.
+  /// Retina reads the same ceiling against the doubled framebuffer.
+  @Test @MainActor func theVirtualDisplaySizeCaptionReadsTheRealCeilingOnEachAxis() {
+    let caption = VirtualDisplaysPane.sizeRangeCaption
+    #expect(caption.contains(String(VirtualDisplayIdentity.maxPixels.wide)))
+    #expect(caption.contains(String(VirtualDisplayIdentity.maxPixels.high)))
+    #expect(caption.contains(String(VirtualDisplaysPane.minimumPixels)))
+    #expect(VirtualDisplayIdentity.maxPixels.high != VirtualDisplayIdentity.maxPixels.wide)
+    #expect(caption.contains("Retina"))
+    #expect(caption.contains(String(VirtualDisplayIdentity.maxPixels.wide / 2)))
+    #expect(caption.contains(String(VirtualDisplayIdentity.maxPixels.high / 2)))
+  }
+
   @Test func rotationRefusalStatesItsOwnReasonForEveryCase() {
     let rendered = Self.allRotationRefusals.map { render(RotationCopy.refusal($0)) }
-    #expect(rendered.count == 4)
-    #expect(Set(rendered).count == 4)
+    #expect(rendered.count == 6)
+    #expect(Set(rendered).count == 6)
     #expect(render(RotationCopy.refusal(.unavailable)) == render(RotationCopy.unavailable))
     #expect(render(RotationCopy.refusal(.displayGone)).contains("disconnected before the change could be made"))
     #expect(render(RotationCopy.refusal(.unreadable)).contains("does not recognize"))
     #expect(render(RotationCopy.refusal(.unchanged(.ninety))).contains("already in this orientation"))
+    // Says what the display is doing, never that the person mirrored it.
+    #expect(render(RotationCopy.refusal(.mirrored)).contains("showing another display's image"))
+    // The synthesis arm never borrows that sentence: nobody asked for mirroring,
+    // so it names the size control instead.
+    let synthesized = render(RotationCopy.refusal(.synthesizedSize))
+    #expect(synthesized.contains("renders"))
+    #expect(!synthesized.contains("another display's image"))
   }
 
   @Test func rotationCountdownAndFixedSentences() {
@@ -1129,7 +1149,8 @@ struct CopyBuilderTests {
   }
 
   private static let allRotationRefusals: [RotationRefusal] = [
-    .unavailable, .displayGone, .unreadable, .unchanged(.ninety),
+    .unavailable, .displayGone, .unreadable, .unchanged(.ninety), .mirrored,
+    .synthesizedSize,
   ]
 
   private static func guardRotationRefusal(_ refusal: RotationRefusal) -> Int {
@@ -1138,6 +1159,8 @@ struct CopyBuilderTests {
     case .displayGone: 1
     case .unreadable: 2
     case .unchanged: 3
+    case .mirrored: 4
+    case .synthesizedSize: 5
     }
   }
 
@@ -1253,7 +1276,7 @@ struct CopyBuilderTests {
     #expect(Set(Self.allBrightnessPaths.map(Self.guardBrightnessPath)).count == 8)
     #expect(Set(Self.allReadEvidence.map(Self.guardReadEvidence)).count == 4)
     #expect(Set(Self.allMirrorRefusals.map(Self.guardMirrorRefusal)).count == 8)
-    #expect(Set(Self.allRotationRefusals.map(Self.guardRotationRefusal)).count == 4)
+    #expect(Set(Self.allRotationRefusals.map(Self.guardRotationRefusal)).count == 6)
     #expect(Set(Self.allModeReapplyNotices.map(Self.guardModeReapplyNotice)).count == 3)
     #expect(Set(Self.allStartFailureReasons.map(Self.guardStartFailureReason)).count == 2)
     #expect(Set(Self.allLockDimSkips.map(Self.guardLockDimSkip)).count == 4)

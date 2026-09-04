@@ -49,21 +49,30 @@ enum OnboardingAct: Equatable {
 
 /// The persistent layer under every page: a near-black ground, two
 /// drifting glow blobs in the act's hues, and a vignette. Slow movement
-/// always; Reduce Motion stills it entirely.
+/// while the window is being looked at; Reduce Motion stills it entirely.
 struct OnboardingCanvas: View {
   var act: OnboardingAct
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.controlActiveState) private var activeState
+
+  /// Off-key time is discounted from the drift clock, so coming back resumes the
+  /// motion instead of jumping it forward.
+  @State private var offKeySince: Date?
+  @State private var offKeyTotal: TimeInterval = 0
 
   var body: some View {
     ZStack {
       Color(red: 0.035, green: 0.035, blue: 0.06)
       if reduceMotion {
         blobs(at: 0)
-      } else {
+      } else if activeState == .key {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
-          blobs(at: context.date.timeIntervalSinceReferenceDate)
+          blobs(at: drift(at: context.date))
         }
+      } else {
+        // Off-key covers behind another app, minimized and another Space alike.
+        blobs(at: drift(at: offKeySince ?? .now))
       }
       // Vignette keeps edges dark so content owns the middle.
       RadialGradient(
@@ -74,6 +83,19 @@ struct OnboardingCanvas: View {
     .animation(.easeInOut(duration: 1.4), value: act)
     .ignoresSafeArea()
     .accessibilityHidden(true)
+    .onAppear { if activeState != .key, offKeySince == nil { offKeySince = .now } }
+    .onChange(of: activeState) { _, state in
+      if state == .key {
+        if let since = offKeySince { offKeyTotal += Date.now.timeIntervalSince(since) }
+        offKeySince = nil
+      } else if offKeySince == nil {
+        offKeySince = .now
+      }
+    }
+  }
+
+  private func drift(at date: Date) -> TimeInterval {
+    date.timeIntervalSinceReferenceDate - offKeyTotal
   }
 
   private func blobs(at time: TimeInterval) -> some View {

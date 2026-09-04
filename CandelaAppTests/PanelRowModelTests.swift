@@ -314,17 +314,20 @@ struct PanelRowModelTests {
 
   @Test func theHDRButtonExplainsItselfWhileASynthesizedSizeIsShowing() {
     let reason = PanelView.hdrRefusalReason(
-      isShowingSynthesizedSize: true, isHDREngaged: false
+      isShowingSynthesizedSize: true, isHDREngaged: false,
+      supportsHDR: true, capabilityProbed: true
     )
     #expect(reason == SynthesisCopy.hdrBlockedBySynthesizedSize)
   }
 
   @Test func theHDRButtonIsUnrefusedWithNoSizeEngaged() {
     #expect(PanelView.hdrRefusalReason(
-      isShowingSynthesizedSize: false, isHDREngaged: false
+      isShowingSynthesizedSize: false, isHDREngaged: false,
+      supportsHDR: true, capabilityProbed: true
     ) == nil)
     #expect(PanelView.hdrRefusalReason(
-      isShowingSynthesizedSize: false, isHDREngaged: true
+      isShowingSynthesizedSize: false, isHDREngaged: true,
+      supportsHDR: true, capabilityProbed: true
     ) == nil)
   }
 
@@ -332,8 +335,95 @@ struct PanelRowModelTests {
   /// display out of the HDR-over-a-size combination is never the greyed one.
   @Test func theHDRExitIsOfferedEvenWithASizeEngaged() {
     #expect(PanelView.hdrRefusalReason(
-      isShowingSynthesizedSize: true, isHDREngaged: true
+      isShowingSynthesizedSize: true, isHDREngaged: true,
+      supportsHDR: true, capabilityProbed: true
     ) == nil)
+  }
+
+  /// The panel's own sentence, not the diagnostics row's, which is written to be
+  /// read with the two causes that follow it there.
+  @Test func theHDRButtonExplainsItselfOnADisplayThatReportsNoHDRModes() {
+    #expect(PanelView.hdrRefusalReason(
+      isShowingSynthesizedSize: false, isHDREngaged: false,
+      supportsHDR: false, capabilityProbed: true
+    ) == PanelView.hdrNoModesCaption)
+  }
+
+  /// The libel case: `supportsHDR` reads false before the async capability refresh
+  /// answers, so an unprobed display must say nothing rather than say no.
+  @Test func theHDRButtonSaysNothingBeforeTheCapabilityRefreshLands() {
+    #expect(PanelView.hdrRefusalReason(
+      isShowingSynthesizedSize: false, isHDREngaged: false,
+      supportsHDR: false, capabilityProbed: false
+    ) == nil)
+  }
+
+  /// A size engaged on a display with no HDR modes: dropping the size would not
+  /// bring HDR, so the caption names the capability rather than the size.
+  @Test func theCapabilityRefusalOutranksTheSizeRefusal() {
+    #expect(PanelView.hdrRefusalReason(
+      isShowingSynthesizedSize: true, isHDREngaged: false,
+      supportsHDR: false, capabilityProbed: true
+    ) == PanelView.hdrNoModesCaption)
+  }
+
+  /// HDR live on a display whose last probe said it has none: the exit stays
+  /// offered and unexplained, the recovery-control rule the engaged guard exists for.
+  @Test func theHDRExitIsOfferedEvenWhenTheProbeSaysNoHDR() {
+    #expect(PanelView.hdrRefusalReason(
+      isShowingSynthesizedSize: false, isHDREngaged: true,
+      supportsHDR: false, capabilityProbed: true
+    ) == nil)
+  }
+
+  /// Greying and caption move together: grey and silent before the probe lands,
+  /// grey and captioned after a no, live after a yes.
+  @Test func theHDRButtonGreysUntilTheProbeAnswersAndThenAgreesWithItsCaption() {
+    func enabled(supportsHDR: Bool, probed: Bool) -> Bool {
+      PanelView.hdrButtonIsEnabled(
+        isHDREngaged: false, capabilityProbed: probed, supportsHDR: supportsHDR,
+        refusalReason: PanelView.hdrRefusalReason(
+          isShowingSynthesizedSize: false, isHDREngaged: false,
+          supportsHDR: supportsHDR, capabilityProbed: probed
+        )
+      )
+    }
+    // Unprobed, either reading of a cache nothing has filled for this panel yet.
+    #expect(!enabled(supportsHDR: false, probed: false))
+    #expect(!enabled(supportsHDR: true, probed: false))
+    #expect(!enabled(supportsHDR: false, probed: true))
+    #expect(enabled(supportsHDR: true, probed: true))
+  }
+
+  /// A refusal greys the button even where the capability is there, which is how
+  /// the synthesized-size caption gets a control to sit under.
+  @Test func aRefusalGreysAnOtherwiseCapableHDRButton() {
+    #expect(!PanelView.hdrButtonIsEnabled(
+      isHDREngaged: false, capabilityProbed: true, supportsHDR: true,
+      refusalReason: SynthesisCopy.hdrBlockedBySynthesizedSize
+    ))
+  }
+
+  /// With HDR live this button is the only way out. A panel swap drops the probe
+  /// flag while the engaged cache still reads true, which used to grey the exit.
+  @Test func theHDRExitStaysLiveEvenWhileTheProbeIsOutstanding() {
+    for probed in [false, true] {
+      for supportsHDR in [false, true] {
+        #expect(PanelView.hdrButtonIsEnabled(
+          isHDREngaged: true, capabilityProbed: probed, supportsHDR: supportsHDR,
+          refusalReason: PanelView.hdrRefusalReason(
+            isShowingSynthesizedSize: true, isHDREngaged: true,
+            supportsHDR: supportsHDR, capabilityProbed: probed
+          )
+        ))
+      }
+    }
+  }
+
+  /// Says what was looked for and not found, never that the app does not know.
+  @Test func theNoHDRCaptionNamesTheObservationRatherThanTheAppsIgnorance() {
+    #expect(PanelView.hdrNoModesCaption == "No HDR modes were found for this display.")
+    #expect(PanelView.hdrNoModesCaption != DiagnosticsCopy.hdrNoAnswer(app: AppInfo.productName))
   }
 
   /// The sentence is the mirror of the synthesized-size refusal, and it names
@@ -517,5 +607,30 @@ struct CombinedBrightnessRowTests {
     #expect(a.controller.brightness == 0.4)
     #expect(b.controller.brightness == 0.4)
     #expect(row.value == 0.4)
+  }
+}
+
+/// The empty state's second line names a pane, and the two panes are different
+/// pages: a laptop sent to Displays finds no switch there.
+@Suite("Panel empty state")
+@MainActor
+struct PanelEmptyStateTests {
+  @Test func aHiddenBuiltInAloneIsUndoneOnTheMenuBarPane() {
+    let hint = PanelView.unhideHint(builtInHidden: true, externalsHidden: false)
+    #expect(hint.contains("Menu Bar"))
+    #expect(hint.contains("Displays") == false)
+  }
+
+  @Test func aHiddenExternalIsUndoneOnItsOwnPage() {
+    let hint = PanelView.unhideHint(builtInHidden: false, externalsHidden: true)
+    #expect(hint.contains("Displays"))
+    #expect(hint.contains("Menu Bar") == false)
+  }
+
+  /// A clamshell rig opened later with both kinds hidden.
+  @Test func bothKindsHiddenNamesBothPanes() {
+    let hint = PanelView.unhideHint(builtInHidden: true, externalsHidden: true)
+    #expect(hint.contains("Menu Bar"))
+    #expect(hint.contains("Displays"))
   }
 }

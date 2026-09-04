@@ -83,6 +83,7 @@ struct KeyboardTargetingPage: View {
           set: { setFineScaleBrightness($0) }
         ))
         .themedSwitch()
+        .accessibilityLabel("Fine steps for brightness and contrast")
         .prefIdentifier(.useFineScaleBrightness)
         .disabled(prefs.keyboardBrightness == .disabled)
       }
@@ -97,6 +98,7 @@ struct KeyboardTargetingPage: View {
           set: { setFineScaleVolume($0) }
         ))
         .themedSwitch()
+        .accessibilityLabel("Fine steps for volume")
         .prefIdentifier(.useFineScaleVolume)
         .disabled(prefs.keyboardVolume == .disabled)
       }
@@ -116,6 +118,7 @@ struct KeyboardTargetingPage: View {
           set: { setSeparateCombinedScale($0) }
         ))
         .themedSwitch()
+        .accessibilityLabel("Extra-fine steps while combined dimming is active")
         .prefIdentifier(.separateCombinedScale)
         .disabled(prefs.keyboardBrightness == .disabled)
       }

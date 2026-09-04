@@ -59,9 +59,11 @@ public struct CheckupSummary: Equatable, Sendable {
   public var controlMissed = false
   public var demonstratedSomething: Bool { observed > 0 || refused > 0 }
 
+  /// A count, never a diagnosis: the not-observed bucket also holds every field
+  /// nobody answered, and each claim carries its own reason in the body.
   public var line: String {
     var parts = ["\(observed) observed", "\(refused) refused",
-                 "\(notObserved) not observed on this panel class",
+                 "\(notObserved) not observed",
                  "\(selfReported) self-reported"]
     if inconclusive > 0 { parts.append("\(inconclusive) inconclusive") }
     if let px = controlDetectedAt { parts.append("control detected at \(px) px") }

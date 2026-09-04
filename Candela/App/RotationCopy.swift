@@ -59,6 +59,8 @@ enum RotationCopy {
     case .displayGone: "That display disconnected before the change could be made."
     case .unreadable: "This display reports an orientation Candela does not recognize, so it will not offer to change it."
     case .unchanged: "That display is already in this orientation."
+    case .mirrored: "This display is showing another display's image. \(AppInfo.productName) will not rotate it."
+    case .synthesizedSize: "Turn off the size \(AppInfo.productName) renders to rotate this display."
     }
   }
 

@@ -171,6 +171,20 @@ struct HealthPane: View {
 
       SettingsCard {
         VStack(alignment: .leading, spacing: 0) {
+          // Heads the card because it governs every control under it: observation
+          // and hours default ON, but `reconcileEnrollment` drops un-enrolled keys,
+          // so three switches can read ON for a display nothing measures. The
+          // prefs are legitimately set ahead of enrollment, so nothing is disabled.
+          if !DisplayPrefs(persistenceKey: key).oledCareEnrolled {
+            VStack(alignment: .leading, spacing: 8) {
+              OledInlineNote(Text(verbatim: "Measurement currently runs on displays enrolled in OLED care, and \(name(state)) is not enrolled. These settings are saved and start applying when it is."))
+              Button("Open OLED Care") { actions.reveal(.pane(.oledCare)) }
+                .buttonStyle(SettingsSecondaryButtonStyle())
+                .accessibilityLabel(Text(verbatim: "Open OLED Care for \(name(state))"))
+            }
+            .padding(.vertical, 8)
+            SettingsCardDivider()
+          }
           MeasurementControls(persistenceKey: key)
           SettingsCardDivider()
           HoursToggle(persistenceKey: key)
@@ -394,11 +408,14 @@ private struct MeasurementControls: View {
 
   /// Reads the comparison record because its paired-reading clock is the only
   /// per-sample timestamp the coordinator keeps. A missing grant has its own note.
+  ///
+  /// The stall window, not the liveness one: this note accuses macOS of taking
+  /// the grant. Its copy says "over 10 minutes" and must keep agreeing.
   private var isSamplingStalled: Bool {
     guard prefs.oledTelemetry, !model.isSafeMode, CGPreflightScreenCaptureAccess(),
       let last = model.oledCare.modelComparison(for: persistenceKey).lastPair
     else { return false }
-    return Date().timeIntervalSince(last) > 600
+    return Date().timeIntervalSince(last) > OledCareCadence.stallWarningSeconds
   }
 
   var body: some View {
@@ -422,6 +439,7 @@ private struct MeasurementControls: View {
           }
         ))
         .themedSwitch()
+        .accessibilityLabel("Measure how bright each part of this display is")
         .prefIdentifier(.oledTelemetry, persistenceKey: persistenceKey)
         // What "the resolution of this grid" means, at the size it means it.
         PanelGridMark()
@@ -457,6 +475,7 @@ private struct MeasurementControls: View {
         set: { on in writer.write(.oledWindowObservation) { $0.oledWindowObservation = on } }
       ))
       .themedSwitch()
+      .accessibilityLabel("Note which apps are on this display")
       .prefIdentifier(.oledWindowObservation, persistenceKey: persistenceKey)
     }
   }
@@ -488,6 +507,7 @@ private struct HoursToggle: View {
         set: { on in writer.write(.oledHoursTracking) { $0.oledHoursTracking = on } }
       ))
       .themedSwitch()
+      .accessibilityLabel("Count hours of use")
       .prefIdentifier(.oledHoursTracking, persistenceKey: persistenceKey)
     }
   }

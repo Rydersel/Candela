@@ -22,6 +22,11 @@ struct BannerRegion: View {
   @Environment(SettingsActions.self) private var actions
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+  /// Never measured in `body`; see `measureDomainFreshness()`. Brightness is a
+  /// trigger because the engine writes its level straight to `UserDefaults`
+  /// with no revision bump, and a drag has to retire the banner.
+  @State private var domainIsFresh: Bool?
+
   private var persistenceKey: String { state.display.persistenceKey }
   private var displayID: CGDirectDisplayID { state.display.id }
   private var coordinator: DisplayModeCoordinator { model.displayModes }
@@ -34,8 +39,8 @@ struct BannerRegion: View {
     // `DisplayPrefs` is plain UserDefaults, not observable; this re-runs the
     // strand and first-sight checks after a write anywhere.
     let _ = model.prefsRevision
-    // Read once and handed down: `hasAnyStoredValue` materialises the whole
-    // UserDefaults dictionary, and this region re-renders every countdown second.
+    // Read once and handed down, so the animation key and the rendered card
+    // cannot disagree.
     let cards = visibleCards
     // Spacing per card, not on the stack: a padded container would leave dead
     // space when every banner is absent, the usual state here.
@@ -57,6 +62,16 @@ struct BannerRegion: View {
     .onChange(of: state.volume.isMuted) { _, isMuted in
       guard !isMuted, case .failed = model.muteRecoveryPhases[persistenceKey] else { return }
       model.setMuteRecoveryPhase(nil, for: persistenceKey)
+    }
+    .onAppear { measureDomainFreshness() }
+    .onChange(of: persistenceKey) { _, _ in measureDomainFreshness() }
+    .onChange(of: model.prefsRevision) { _, _ in measureDomainFreshness() }
+    // Fires at drag rate and the scan walks the whole domain, so stop once the
+    // domain reads as stored: only a wipe makes it fresh again, and both resets
+    // bump `prefsRevision`.
+    .onChange(of: state.controller.brightness) { _, _ in
+      guard domainIsFresh != false else { return }
+      measureDomainFreshness()
     }
   }
 
@@ -422,7 +437,21 @@ struct BannerRegion: View {
     // launch.
     persistenceKey != "builtIn"
       && !model.dismissedFirstSightKeys.contains(persistenceKey)
-      && !DisplayPrefs.hasAnyStoredValue(forKey: persistenceKey)
+      && domainIsFresh == true
+  }
+
+  /// `hasAnyStoredValue` walks the whole UserDefaults dictionary and this region
+  /// re-renders every countdown second, so it cannot run from `body`. nil draws
+  /// no banner: a silent frame beats flashing "first time" at a configured display.
+  /// The cheap terms go first so the built-in and dismissed displays skip the scan.
+  private func measureDomainFreshness() {
+    guard persistenceKey != "builtIn",
+          !model.dismissedFirstSightKeys.contains(persistenceKey)
+    else {
+      domainIsFresh = false
+      return
+    }
+    domainIsFresh = !DisplayPrefs.hasAnyStoredValue(forKey: persistenceKey)
   }
 }
 

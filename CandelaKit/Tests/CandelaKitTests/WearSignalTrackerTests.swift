@@ -165,6 +165,49 @@ struct WearSignalTrackerTests {
     #expect(second.secondsByBucket()[4] == 120)
   }
 
+  /// A pane reads a histogram by constructing a tracker; flushing that at quit
+  /// wrote an all-zero array and created the key.
+  @Test func aTrackerThatBookedNothingWritesNothingAtFlush() {
+    let defaults = InMemoryDefaults()
+    tracker(defaults).flush()
+    #expect(defaults.object(forKey: "oledWearSeconds.panel-a") == nil)
+    #expect(defaults.object(forKey: "oledWearSchema.panel-a") == nil)
+  }
+
+  @Test func oneAccumulatedSecondIsEnoughToFlush() {
+    let defaults = InMemoryDefaults()
+    let t = tracker(defaults)
+    t.noteTick(dimState: .active, effectiveLevel: 0.8, secondsSinceLastTick: 1)
+    t.flush()
+    #expect(defaults.object(forKey: "oledWearSeconds.panel-a") != nil)
+    #expect(tracker(defaults).totalSeconds == 1)
+  }
+
+  /// Guarded on accumulation, not `unwrittenSeconds`: a written-through tracker
+  /// holds nothing unwritten and still owes its tail at quit.
+  @Test func aTrackerWrittenThroughAndThenIdleStillFlushes() {
+    let defaults = InMemoryDefaults()
+    let t = tracker(defaults)
+    // Past `debounceSeconds`, so `noteTick` itself wrote through.
+    t.noteTick(dimState: .active, effectiveLevel: 0.8, secondsSinceLastTick: 90)
+    defaults.removeObject(forKey: "oledWearSeconds.panel-a")
+    t.flush()
+    #expect(defaults.object(forKey: "oledWearSeconds.panel-a") != nil)
+    #expect(tracker(defaults).totalSeconds == 90)
+  }
+
+  /// A tracker alive past a reset must not re-create the keys the reset removed.
+  @Test func aFlushAfterAResetLeavesNoKeyBehind() {
+    let defaults = InMemoryDefaults()
+    let t = tracker(defaults)
+    t.noteTick(dimState: .active, effectiveLevel: 0.8, secondsSinceLastTick: 60)
+    t.flush()
+    t.reset()
+    t.flush()
+    #expect(defaults.object(forKey: "oledWearSeconds.panel-a") == nil)
+    #expect(defaults.object(forKey: "oledWearSchema.panel-a") == nil)
+  }
+
   @Test func displaysDoNotShareAHistogram() {
     let defaults = InMemoryDefaults()
     let a = tracker(defaults, "panel-a")

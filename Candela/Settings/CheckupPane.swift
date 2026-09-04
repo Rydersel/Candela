@@ -62,6 +62,10 @@ enum CheckupHistoryScope {
     if let newest = dated.max(by: { $0.date < $1.date }) { return newest.key }
     return (candidates.first { !$0.isBuiltIn } ?? candidates.first)?.key
   }
+
+  /// Only the default scope follows the newest run anywhere; a hand-picked scope
+  /// stays put, so reading every display's runs for it decodes them for nothing.
+  static func needsEveryDisplay(chosenByHand: Bool) -> Bool { !chosenByHand }
 }
 
 /// The Checkup pillar: the launcher, this display's past runs, and the
@@ -96,6 +100,9 @@ struct CheckupPane: View {
   }
 
   var body: some View {
+    // `DisplayPrefs` is not observable and the scope picker is named through it;
+    // without this a rename leaves the old name in the menu.
+    let _ = model.prefsRevision
     SettingsPageScaffold {
       SettingsPageHeader(title: CheckupPaneCopy.title, subtitle: CheckupPaneCopy.subtitle)
       runSection
@@ -113,7 +120,13 @@ struct CheckupPane: View {
     }
     .onChange(of: activeState) { _, state in
       guard state != .inactive else { return }
-      refresh()
+      // `refresh()` decodes every display's runs, and only the default scope
+      // needs that.
+      if CheckupHistoryScope.needsEveryDisplay(chosenByHand: chosenByHand) {
+        refresh()
+      } else {
+        reload()
+      }
     }
   }
 
@@ -123,8 +136,11 @@ struct CheckupPane: View {
     SettingsCardSection(title: CheckupPaneCopy.runTitle) {
       VStack(alignment: .leading, spacing: 10) {
         SettingsRowNote(verbatim: CheckupPaneCopy.runNote)
+        // SwiftUI does not publish a `Button` title to accessibility; without
+        // this it announces as "button".
         Button(CheckupPaneCopy.run) { actions.openCheckup() }
           .buttonStyle(SettingsPrimaryButtonStyle())
+          .accessibilityLabel(Text(verbatim: CheckupPaneCopy.run))
       }
       .padding(.vertical, 2)
     }
@@ -232,6 +248,7 @@ struct CheckupPane: View {
         SettingsRowNote(verbatim: CheckupPaneCopy.verifyNote)
         Button(CheckupPaneCopy.verify) { verify() }
           .buttonStyle(SettingsSecondaryButtonStyle())
+          .accessibilityLabel(Text(verbatim: CheckupPaneCopy.verify))
         if let verification {
           // The answer is about the file and never about the display: a report
           // that validates is one nobody edited, and nothing more.
@@ -245,6 +262,7 @@ struct CheckupPane: View {
         SettingsRowNote(verbatim: ProvenanceCopy.checkNote)
         Button(ProvenanceCopy.check) { checkProvenance() }
           .buttonStyle(SettingsSecondaryButtonStyle())
+          .accessibilityLabel(Text(verbatim: ProvenanceCopy.check))
         if let provenanceVerdict {
           // Styled like the verify answer above it: both are a sentence about a file.
           Text(verbatim: provenanceVerdict)
@@ -327,14 +345,19 @@ private struct CheckupHistoryRow: View {
         .fixedSize(horizontal: false, vertical: true)
 
       HStack(spacing: 8) {
+        // Same as the Run button above. The details label follows the visible
+        // title so the spoken one says which way the row goes.
         Button(CheckupPaneCopy.export) { export() }
           .buttonStyle(SettingsSecondaryButtonStyle())
+          .accessibilityLabel(Text(verbatim: CheckupPaneCopy.export))
         Button(CheckupPaneCopy.copySummary) { copySummary() }
           .buttonStyle(SettingsSecondaryButtonStyle())
-        Button(showingDetails ? CheckupPaneCopy.hideDetails : CheckupPaneCopy.showDetails) {
-          showingDetails.toggle()
-        }
-        .buttonStyle(SettingsSecondaryButtonStyle())
+          .accessibilityLabel(Text(verbatim: CheckupPaneCopy.copySummary))
+        let detailsTitle = showingDetails
+          ? CheckupPaneCopy.hideDetails : CheckupPaneCopy.showDetails
+        Button(detailsTitle) { showingDetails.toggle() }
+          .buttonStyle(SettingsSecondaryButtonStyle())
+          .accessibilityLabel(Text(verbatim: detailsTitle))
         if justCopied {
           Text(verbatim: CheckupPaneCopy.copied)
             .font(.caption)

@@ -16,12 +16,9 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
   private let model: AppModel
   private let actions: SettingsActions
   private let onCompletion: () -> Void
-  /// Fires after the window closes ONLY when the close came from the finish
-  /// page's "Start Using …" button. ⌘W, the red close button and Skip Setup
-  /// complete Setup but stay quiet: the user asked to dismiss a window,
-  /// not to be handed a menu.
-  var onFinishedByButton: (() -> Void)?
-  private var closedByFinishButton = false
+  /// Fires after a first-run Setup window closes by any route: each leaves a new
+  /// user with no window and no Dock icon. A re-run from Settings stays quiet.
+  var onFirstRunClosed: (() -> Void)?
   /// Constructed once and reused like the window, which is only safe because
   /// `isEnabled` is a LIVE read of `SMAppService.mainApp.status`. No copy
   /// of the registration state is held, so nothing here goes stale after a
@@ -119,17 +116,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     }
     flow.onKeepSize = { [weak applier] in applier?.keep() }
     flow.onRevertSize = { [weak applier] in applier?.revert() }
-    flow.onClose = { [weak self, weak flow] in
-      guard let self else { return }
-      // The flow's own close fires from the finish advance and from Skip
-      // Setup. On the finish page the skip link never renders, so a close
-      // arriving there IS the finish, and only that close earns the landing
-      // callout.
-      if flow?.currentPage == .finish {
-        self.closedByFinishButton = true
-      }
-      self.window?.performClose(nil)
-    }
+    flow.onClose = { [weak self] in self?.window?.performClose(nil) }
     self.flowModel = flow
     self.applier = applier
     window.contentView = NSHostingView(rootView: OnboardingFlowView(model: flow))
@@ -212,10 +199,12 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     // observation loop dies rather than staying armed behind a closed window. An
     // answer still waiting on its first preview observation survives this.
     applier?.cancel()
+    // Before `onCompletion`, which records the schema version that makes a later
+    // read say "not a first run".
+    let wasFirstRun = flowModel?.environment.isFirstRun ?? false
     onCompletion()
-    if closedByFinishButton {
-      closedByFinishButton = false
-      onFinishedByButton?()
+    if wasFirstRun {
+      onFirstRunClosed?()
     }
   }
 }

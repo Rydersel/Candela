@@ -81,6 +81,22 @@ struct CheckupCopyTests {
     #expect(!line.contains("field.black"))
   }
 
+  /// The window found no `NSScreen`, which mirroring is the usual but not the
+  /// only cause of. The line says what was observed and offers the cause.
+  @Test func theUnshownFieldStatesTheObservationRatherThanAssertingMirroring() {
+    #expect(CheckupCopy.fieldNotShown.contains(CheckupCopy.noScreenReason))
+    #expect(CheckupCopy.fieldNotShown.contains("usual cause"))
+    #expect(!CheckupCopy.noScreenReason.lowercased().contains("mirror"))
+  }
+
+  /// The mode legs blank the panel once per rate. Unwarned, that reads as the
+  /// app breaking the display.
+  @Test func thePlanSaysTheDisplayWillGoDarkDuringTheModeLegs() {
+    #expect(CheckupCopy.planModeSweep.contains("go dark"))
+    #expect(CheckupCopy.planModeSweep.contains("refresh rate"))
+    #expect(CheckupCopy.planModeSweep.contains("put back"))
+  }
+
   @Test func noCopyCarriesAnEmDashOrAVerdictOnTheDisplay() {
     for s in CheckupCopy.allStringsForTest {
       #expect(!s.contains("—"))

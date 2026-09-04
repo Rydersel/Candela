@@ -380,6 +380,42 @@ struct LockDimTests {
     #expect(OledCareCadence.fast == .milliseconds(100))
   }
 
+  /// A pending verification outranks the idle cadence: those entries outlive
+  /// the state that issued them.
+  @Test func nothingEnrolledIdlesTheLoopUnlessAVerificationIsPending() {
+    #expect(
+      OledCareCadence.interval(
+        anyOverlayUp: false, anyLockDimEngaged: false, verificationPending: false,
+        anythingEnrolled: false
+      ) == OledCareCadence.idle
+    )
+    #expect(
+      OledCareCadence.interval(
+        anyOverlayUp: false, anyLockDimEngaged: false, verificationPending: true,
+        anythingEnrolled: false
+      ) == OledCareCadence.fast
+    )
+    // An enrolled display keeps the slow cadence.
+    #expect(
+      OledCareCadence.interval(
+        anyOverlayUp: false, anyLockDimEngaged: false, verificationPending: false,
+        anythingEnrolled: true
+      ) == OledCareCadence.slow
+    )
+    #expect(OledCareCadence.idle == .seconds(30))
+  }
+
+  /// Both windows derive from the sampling interval; the stall warning's copy
+  /// says "over 10 minutes". The liveness window sits between captures: at
+  /// exactly two intervals one skipped capture put the dot out.
+  @Test func stalenessWindowsAreMultiplesOfTheSamplingInterval() {
+    #expect(OledCareCadence.sampling == .seconds(60))
+    #expect(OledCareCadence.samplingSeconds == 60)
+    #expect(OledCareCadence.livenessWindowSeconds == 150)
+    #expect(OledCareCadence.livenessWindowSeconds > 2 * OledCareCadence.samplingSeconds)
+    #expect(OledCareCadence.stallWarningSeconds == 600)
+  }
+
   /// The engine can no longer ask for a lock-dim OVERLAY at all. The delivery
   /// ruling is structural rather than a convention the coordinator honours.
   @Test func theOverlayLayerCannotProduceALockDim() {

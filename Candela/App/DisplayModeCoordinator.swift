@@ -1308,6 +1308,9 @@ final class DisplayModeCoordinator {
     }
     switch await session.begin(mode: mode, on: displayID) {
     case .success:
+      // Before the await: a tick from the previous driver landing during `adopt`
+      // knocks seconds off the fresh preview. Narrows the window, does not close it.
+      stopCountdown()
       await adopt(.clear)
       startCountdown()
     case let .failure(error):
@@ -1427,6 +1430,9 @@ final class DisplayModeCoordinator {
       size, onPhysical: displayID, identityKey: display.identity.key
     ) {
     case .success:
+      // Before the await: a tick from the previous driver landing during `adopt`
+      // knocks seconds off the fresh preview. Narrows the window, does not close it.
+      stopCountdown()
       await adopt(.clear, synthesis: .clear)
       // Guarded on a preview actually standing, which a successful engage does
       // not guarantee: the engage runs its own departure sweep when it lands, and

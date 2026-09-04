@@ -137,6 +137,7 @@ struct GeneralPane: View {
           set: { loginItem.setEnabled($0) } // the live-status rule: the readback happens inside
         ))
         .themedSwitch()
+        .accessibilityLabel("Open at Login")
         // The mirror hooks hang on the toggle, the row that causes the failure
         // and the one row always present: hooks on the failure row would exist
         // only while the failure does, so nothing would watch for it to arrive.
@@ -215,6 +216,7 @@ struct GeneralPane: View {
           }
         ))
         .themedSwitch()
+        .accessibilityLabel("Dim past the display's minimum")
         .prefIdentifier(.disableCombinedBrightness)
       }
 
@@ -254,6 +256,7 @@ struct GeneralPane: View {
           }
         ))
         .themedSwitch()
+        .accessibilityLabel("Match other displays to the built-in display")
         .prefIdentifier(.enableBrightnessSync)
       }
     }

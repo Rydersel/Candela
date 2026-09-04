@@ -35,8 +35,16 @@ public struct CheckupStore: Sendable {
     return f.string(from: date)
   }
 
+  /// For directory names nobody sees; flattens spaces too.
   static func safe(_ s: String) -> String {
     s.map { $0.isLetter || $0.isNumber || $0 == "-" ? String($0) : "_" }.joined()
+  }
+
+  /// For a save panel, where `safe` would offer "DELL_U2725QE". Only what a path
+  /// component cannot carry goes, plus a leading dot, which hides the file.
+  static func safeFileName(_ s: String) -> String {
+    let replaced = String(s.map { $0 == "/" || $0 == ":" ? "_" : $0 })
+    return replaced.hasPrefix(".") ? "_" + String(replaced.dropFirst()) : replaced
   }
 
   /// One encoder for stored and exported envelopes, so an export is
@@ -81,8 +89,10 @@ public struct CheckupStore: Sendable {
     }.sorted { $0.startedAt > $1.startedAt }
   }
 
+  /// The product name is whatever the EDID says, and a slash in it would reach
+  /// the save panel as a path.
   public static func exportFileName(for report: CheckupReport) -> String {
     let model = report.identity.productName.isEmpty ? "Display" : report.identity.productName
-    return "Candela Checkup \(model) \(day(report.startedAt)).candela-checkup.json"
+    return "Candela Checkup \(safeFileName(model)) \(day(report.startedAt)).candela-checkup.json"
   }
 }

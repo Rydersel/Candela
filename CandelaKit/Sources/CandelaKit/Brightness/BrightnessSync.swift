@@ -37,7 +37,9 @@ public enum BrightnessSync {
       // Same `path` category as the controller's own mode and settle lines, so
       // one predicate shows the source's adoption and every replication.
       // `delta=` is the released accumulation, not the source's own step.
-      pathLog.log(
+      // `.info`: this fires per target per adoption, and `.debug` is invisible
+      // to the `log show` the regression rig needs.
+      pathLog.info(
         "sync fan-out delta=\(step, format: .fixed(precision: 4)) from=\(source.displayID) to=\(target.displayID)"
       )
       target.setBrightness(target.brightness + step)
