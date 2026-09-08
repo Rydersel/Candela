@@ -601,10 +601,8 @@ public final class BrightnessController: PendingWireDraining {
     return value
   }
 
-  /// Quantization noise on a native read: Control Center's slider granularity plus
-  /// the float round-trip through DisplayServices. Same size and same reason as the
-  /// poller's echo tolerance; anything smaller is not a move somebody made.
-  private static let nativeReadNoise = 0.008
+  /// Shared with the poller's echo discard: both measure the same quantization noise.
+  private static let nativeReadNoise = BrightnessPoller.defaultTolerance
 
   /// Snaps published state onto the panel's live native value before a `step()`.
   /// The poller's idle cadence can leave that state tens of seconds stale, and a

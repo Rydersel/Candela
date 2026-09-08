@@ -91,13 +91,9 @@ final class AccessibilityPermission {
   /// The argument decides only the re-stamp below; the cadence re-reads the modes.
   func reevaluateBackstop(requiresAccessibility: Bool) {
     guard isMonitoring else { return }
-    // The needed-and-absent state BEGINS here when a mode write brings the tap
-    // back on a rig that had the poll stood down, so the hunt is re-stamped
-    // rather than read from a grant that went missing hours ago: the user is at
-    // System Settings making the grant right now, which is the one moment the
-    // fast cadence exists for. A nil `scheduledInterval` is that stood-down
-    // state, the only one the cadence answers with no timer at all.
-    if requiresAccessibility, !isGranted, scheduledInterval == nil {
+    // Re-stamp the hunt: someone turning a key family on with no grant is at
+    // System Settings about to make it, however long the grant has been missing.
+    if requiresAccessibility, !isGranted {
       missingSince = ProcessInfo.processInfo.systemUptime
     }
     scheduleBackstop()

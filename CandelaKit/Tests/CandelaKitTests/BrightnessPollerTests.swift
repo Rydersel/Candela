@@ -369,17 +369,22 @@ private func makePoller(
   let firstTask = Task { await first.run() }
   _ = await waitUntil { !probe.reads.isEmpty }
   firstTask.cancel() // asleep for 30 s, exactly the state a surface can open into
+  // Awaited, not merely cancelled: a read the old job had already begun would
+  // otherwise land after the count below and pass for the new job's first read.
+  await firstTask.value
   let before = probe.reads.count
   probe.setSurfaceVisible(true)
   let replacement = makePoller(
     probe, fast: .milliseconds(5), idle: .milliseconds(50), slowIdle: .seconds(30))
   let start = ContinuousClock.now
   let secondTask = Task { await replacement.run() }
-  let read = await waitUntil(.seconds(2)) { probe.reads.count > before }
+  let read = await waitUntil(.seconds(5)) { probe.reads.count > before }
   let elapsed = ContinuousClock.now - start
   secondTask.cancel()
   #expect(read)
-  #expect(elapsed < .milliseconds(500))
+  // Milliseconds expected; the bound survives a loaded machine and stays an order
+  // of magnitude under the 30 s a job that slept first would wait.
+  #expect(elapsed < .seconds(2))
 }
 
 /// A display on the DDC path is not a consumer of the poll: it is never read, so

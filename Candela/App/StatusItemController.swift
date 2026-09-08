@@ -118,6 +118,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// Sleep/wake observation tokens: block-based observers stay registered only
   /// while retained. Never removed, app-lifetime.
   private var sleepWakeObservers: [any NSObjectProtocol] = []
+  /// Belt on the panel-open flag: AppKit's end-of-tracking signal, held like the
+  /// tokens above.
+  private var menuTrackingObserver: (any NSObjectProtocol)?
   /// Startup/wake DDC restore choreography. `startupAction` is app-level
   /// but read through DisplayPrefs like every other engine pref, and under safe
   /// mode through a prefs object whose getter reports `.doNothing`, which
@@ -193,6 +196,16 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     statusItem = item
     updateStatusItemImage()
     trackKeepAwake()
+
+    // A panel-open flag left true is a poller that never slows down, so the end of
+    // tracking clears it as well as `menuDidClose`. AppKit posts this for every
+    // session end, including the `cancelTracking` routes below.
+    menuTrackingObserver = NotificationCenter.default.addObserver(
+      forName: NSMenu.didEndTrackingNotification, object: menu, queue: .main
+    ) { [weak self] _ in
+      // A hop is safe here: the tracking session has just ended.
+      Task { @MainActor in self?.model.surfaceVisibility.setPanelOpen(false) }
+    }
 
     // Panel controls that have to end this tracking session reach it through
     // here: the gear button (a window cannot take focus while it runs) and
@@ -1012,18 +1025,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     return false
   }
 
-  /// The panel is a consumer of every polled brightness value, so the poller has
-  /// to be told while it is on screen. Set synchronously, not through a task hop:
-  /// menu tracking starves main-actor work, so a hop would land only once the menu
-  /// had closed again.
-  ///
-  /// The restart is what makes the panel's first frame current: the flag alone
-  /// changes only the NEXT interval, and the idle one already in flight can be 10
-  /// seconds long. The built-in's row is the one that shows it, since Control
-  /// Center and ambient light move that value with nothing of ours involved.
+  /// The panel consumes every polled value. Set synchronously: menu tracking
+  /// starves main-actor work, so a hop would land after the menu closed. The flag
+  /// changes only the NEXT interval, so the first frame takes a direct read; a
+  /// rebuilt poll job would adopt after the panel closed, for the same reason.
   func menuWillOpen(_: NSMenu) {
     model.surfaceVisibility.setPanelOpen(true)
-    model.notePollConsumerAppeared()
+    model.refreshNativeBrightnessForSurface()
   }
 
   func menuDidClose(_: NSMenu) {
@@ -1429,6 +1437,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
 
   private func startMediaKeyTap() {
     guard let mediaKeyTap else { return }
+    // Every start route stops here rather than failing and logging again.
+    guard !model.isTapPermanentlyUnavailable else { return }
     // Computed once and recorded only on success: `lastArmedTapConfig` is what is
     // actually being watched, and a config that failed to arm is not that.
     let config = model.tapConfig
@@ -1451,12 +1461,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         fields the media-key decode reads; media keys are off until Candela is updated
         """
       )
-      // A failed start is not "watching nothing": the keys are dead and the
-      // diagnostics row must say so. It also stops the refresh path retrying a
-      // start that cannot succeed, on every menu close, forever.
-      model.noteTapDisarmed()
+      // No later edge may retry a start that cannot succeed.
+      model.noteTapPermanentlyUnavailable()
     } catch {
-      log.error("media-key tap failed to start: \(error); keys disabled until relaunch")
+      // Transient, usually a port refused while TCC was still settling: the next
+      // edge that wants keys tries again.
+      log.error("media-key tap failed to start: \(error); retried on the next edge")
       model.noteTapDisarmed()
     }
   }
@@ -1471,7 +1481,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     switch TapLifecyclePolicy.action(
       previous: model.lastArmedTapConfig?.watchedKeys,
       next: config.watchedKeys,
-      grantHeld: model.accessibility.isGranted
+      grantHeld: model.accessibility.isGranted,
+      permanentlyUnavailable: model.isTapPermanentlyUnavailable
     ) {
     case .start:
       startMediaKeyTap()
@@ -1484,9 +1495,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       mediaKeyTap.update(config: config)
       model.noteTapArmed(config)
     case .nothing:
-      // The stored config is left alone, so in the watching-nothing state the
-      // alternate-brightness-key flag inside it can go stale. Nothing reads that
-      // flag while no tap exists, and the next start recomputes the whole config.
+      // The stored config can carry a stale alternate-brightness flag while no tap
+      // exists; nothing reads it, and the next start recomputes the whole config.
       break
     }
   }

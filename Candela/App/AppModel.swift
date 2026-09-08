@@ -520,11 +520,20 @@ final class AppModel {
     lastArmedTapConfig = config
   }
 
-  /// No tap can run: the grant is gone, or the start failed. Diagnostics must
-  /// report "the media-key tap is not running", not the config of a tap that no
-  /// longer exists. A tap stopped because there is nothing to watch is NOT this;
-  /// that state records the empty config instead.
+  /// No tap can run: grant gone, or the start failed. Retryable: the next edge
+  /// that wants keys tries again. A tap stopped for lack of keys is not this; that
+  /// records the empty config.
   func noteTapDisarmed() {
+    lastArmedTapConfig = nil
+  }
+
+  /// The one failure a retry cannot clear: this macOS version does not answer the
+  /// CGEvent fields the decode reads. Without the latch every reconfigure and menu
+  /// close would retry and re-log the error. Never cleared.
+  private(set) var isTapPermanentlyUnavailable = false
+
+  func noteTapPermanentlyUnavailable() {
+    isTapPermanentlyUnavailable = true
     lastArmedTapConfig = nil
   }
 
@@ -1577,21 +1586,21 @@ final class AppModel {
     )
   }
 
-  /// A consumer appearing (a surface opening, brightness sync turned on) must not
-  /// wait out the idle interval already in flight, which is up to 10 seconds on
-  /// mains and 30 on battery.
-  ///
-  /// Rebuilding is the whole mechanism: the cancel drops the sleeping task and the
-  /// fresh `run()` ticks before it sleeps at all, so the value is current the moment
-  /// the surface draws. Waking the sleep instead would need a signal channel into
-  /// the actor, and slicing the sleep would put back the once-a-second timer this
-  /// work exists to remove.
-  ///
-  /// Cheap and main-actor-synchronous: it maps the live display list and starts a
-  /// task. Safe to call from inside a menu tracking session for that reason, which
-  /// is where the panel's open edge arrives.
+  /// A new consumer (a surface opening, sync turned on) must not wait out the idle
+  /// interval in flight, up to 30 s on battery. A fresh `run()` ticks before it
+  /// sleeps, so rebuilding is the wake-up. Not the panel's route: menu tracking
+  /// starves the main actor, so the rebuilt job would land after the panel closed.
   func notePollConsumerAppeared() {
     restartPoller()
+  }
+
+  /// Snaps every native display's published brightness onto its live value before
+  /// a surface draws. Synchronous: the panel's open edge runs inside menu tracking,
+  /// which starves anything that hops. No-op off the native path, so never DDC.
+  func refreshNativeBrightnessForSurface() {
+    for state in allControlledStates {
+      state.controller.syncFromNativeBeforeStep()
+    }
   }
 
   /// Rebuilds the native-brightness poll job for the current display set. Control
@@ -1658,12 +1667,8 @@ final class AppModel {
       isEpochCurrent: { [displayManager] in
         displayManager.isEpochCurrent(displayManager.currentEpoch())
       },
-      // Both read live on every tick rather than captured here, so a pref write or
-      // a surface opening changes the cadence without restarting the job. Restarting
-      // it is what would be dangerous: an external entering HDR reaches the native
-      // path through no call of ours, and only a RUNNING poller notices.
-      // The SAME predicate the fan-out is gated on below, reset latch included: a
-      // consumer that is refusing to consume is not a consumer.
+      // Read live every tick, never captured. Same predicate the fan-out is gated
+      // on, reset latch included: a consumer refusing to consume is not a consumer.
       isSyncEnabled: { [appPrefs, resettingOffMain] in
         appPrefs.enableBrightnessSync && !resettingOffMain.withLock { $0 }
       },

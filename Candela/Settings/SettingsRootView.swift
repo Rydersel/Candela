@@ -50,10 +50,10 @@ struct SettingsRootView: View {
 
   @Environment(AppModel.self) private var model
 
-  /// Whether this window is on screen, for the brightness poller's cadence. A
-  /// CLOSED settings window reports `.inactive` here, since the window object
-  /// outlives the close, and so does one sitting behind another app: the same
-  /// answer for the poller's purposes, because nobody is reading the sliders.
+  /// Whether this window is on screen, for the poller's cadence. A CLOSED window
+  /// reports `.inactive` (the object outlives the close), as does one behind
+  /// another app. Looser than the canvas's `.key` threshold on purpose: a window
+  /// behind another Candela window still shows its values.
   @Environment(\.controlActiveState) private var activeState
 
   private func noteSettingsVisible(_ visible: Bool) {

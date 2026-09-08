@@ -1,11 +1,13 @@
 import SwiftUI
 
 /// The drifting glow ground under every settings page, tinted per destination.
+/// The Heat Map window draws it too, as its own window's ground.
 ///
 /// The window keeps ONE canvas alive across every selection so the light moves
 /// rather than cutting to a new one. Reduce Motion holds it at its first frame.
-/// Anything short of a key window holds the frame it froze on instead, so the
-/// drift resumes where it stopped rather than jumping.
+/// A non-key window holds the frame it froze on, so the drift resumes where it
+/// stopped. Stricter than the poller's consumer threshold on purpose: only the
+/// focused window has to pay for 12 frames a second.
 struct SettingsCanvas: View {
   var accent: Color
   var secondary: Color

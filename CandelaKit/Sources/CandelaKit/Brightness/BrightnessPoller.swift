@@ -65,13 +65,14 @@ public actor BrightnessPoller {
   /// Last cadence reported to the log, so a steady state costs no lines.
   private var lastLoggedCadence: BrightnessPollCadence?
 
-  /// `tolerance` covers Control Center's slider quantization plus the float
-  /// round-trip through DisplayServices; larger swallows real external moves.
-  ///
-  /// The two consumer signals are read LIVE on every tick, like the per-target
-  /// native gate: a surface opening or a pref changing must not need the poll job
-  /// rebuilt, because rebuilding it is what would drop the HDR edges nothing else
-  /// reports.
+  /// Control Center's slider quantization plus the float round-trip through
+  /// DisplayServices; larger swallows real external moves. Public so the pre-step
+  /// freshness read shares it.
+  public static let defaultTolerance = 0.008
+
+  /// `tolerance` is per instance so a test can widen or narrow it. The consumer
+  /// signals are read LIVE on every tick, like the native gate, so a surface
+  /// opening or a pref write never needs the job rebuilt.
   public init(
     targets: [Target],
     read: @escaping @Sendable (CGDirectDisplayID) -> Double?,
@@ -83,7 +84,7 @@ public actor BrightnessPoller {
     idleInterval: Duration = .seconds(1),
     slowIdleInterval: Duration = .seconds(10),
     batteryIdleInterval: Duration = .seconds(30),
-    tolerance: Double = 0.008
+    tolerance: Double = BrightnessPoller.defaultTolerance
   ) {
     self.targets = targets
     self.read = read

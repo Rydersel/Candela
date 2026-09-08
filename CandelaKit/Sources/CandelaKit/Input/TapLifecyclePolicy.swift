@@ -14,23 +14,21 @@ public enum TapLifecycleAction: Sendable, Equatable {
 /// The edge is decided from the INTENDED sets, never the tap's `isRunning`: an
 /// emergency teardown leaves that flag true.
 public enum TapLifecyclePolicy {
-  /// `previous` is the last watched set the app committed to: nil when no tap
-  /// could be armed at all (no grant, or a start that failed), which is not the
-  /// same as an empty set. Empty means the app deliberately watches nothing and
-  /// can pick the tap back up the moment a key needs it; nil means something
-  /// outside this decision has to change first, so restarting from here would
-  /// retry a failed start on every reconfigure and every menu close.
-  ///
-  /// Two non-empty sets always reconfigure, equal or not: the config carries the
-  /// alternate-brightness-key flag as well, and that pref reaches the tap
-  /// through this same path.
+  /// `previous` nil: no tap could be armed (no grant, or a failed start). Not the
+  /// empty set, and retryable, since most start failures are transient.
+  /// `permanentlyUnavailable` is the one failure a retry cannot fix.
+  /// Equal non-empty sets still reconfigure: the config also carries the
+  /// alternate-brightness-key flag.
   public static func action(
     previous: Set<MediaKey>?,
     next: Set<MediaKey>,
-    grantHeld: Bool
+    grantHeld: Bool,
+    permanentlyUnavailable: Bool
   ) -> TapLifecycleAction {
     guard grantHeld else { return .nothing }
-    guard let previous else { return .nothing }
+    // Set only where no tap exists, so there is never one here to stop.
+    guard !permanentlyUnavailable else { return .nothing }
+    guard let previous else { return next.isEmpty ? .nothing : .start }
     if previous.isEmpty {
       return next.isEmpty ? .nothing : .start
     }
