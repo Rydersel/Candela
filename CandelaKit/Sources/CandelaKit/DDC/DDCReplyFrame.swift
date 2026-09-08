@@ -45,6 +45,27 @@ enum DDCReplyFrame {
     return nil
   }
 
+  /// Whether this frame is the display's OWN refusal of `command`: it parsed the
+  /// request and filled in a result code saying no.
+  ///
+  /// True only for a frame addressed to us, carrying a VCP reply op code, a
+  /// non-zero result code, and echoing the code that was asked about. Every
+  /// other rejection is malformed, stale or mis-addressed, says nothing about
+  /// the register, and is worth asking again; this one is an answer, so asking
+  /// again asks a question the panel has already answered.
+  ///
+  /// Byte 4 is part of the test on purpose. `rejection` reports the result code
+  /// before it looks at the echo, so a non-zero result on a frame naming ANOTHER
+  /// code would otherwise pass for an answer about this one. A stale reply is
+  /// the likelier reading, and retrying is the conservative direction.
+  ///
+  /// The checksum is deliberately NOT checked here: this answers what a frame
+  /// says, and whether its bytes can be believed is the caller's own question.
+  static func isRefusal(_ reply: [UInt8], of command: UInt8) -> Bool {
+    guard case .displayReportedError = rejection(for: reply, command: command) else { return false }
+    return reply[4] == command
+  }
+
   /// Big-endian 16-bit read.
   ///
   /// Spelled with the widening BEFORE the shift: `UInt16(high << 8)` shifts in

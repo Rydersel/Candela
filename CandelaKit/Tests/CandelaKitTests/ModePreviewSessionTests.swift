@@ -385,6 +385,62 @@ struct ModePreviewSessionTests {
     #expect(fake.applied.last == .init(modeID: 1, scope: .session))
   }
 
+  /// What the commit ACHIEVED travels out with the preview. Without it the
+  /// surfaces asking "keep this resolution?" can name only the resolution that
+  /// was asked for, on a screen showing something else, and the person
+  /// answering has no way to see the difference.
+  @Test func anUnhonouredCommitTravelsOutWithThePreview() async {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    fake.divergeNextApplyTo = mode(9)
+    let session = ModePreviewSession(configurator: fake)
+    _ = await session.begin(mode: mode(2), on: 7)
+
+    let previewed = await session.previewedMode
+    // The question is still the mode that was asked for: Keep re-applies it.
+    #expect(previewed?.mode == mode(2))
+    #expect(previewed?.unhonouredCommit?.requested == mode(2))
+    #expect(previewed?.unhonouredCommit?.achieved == mode(9))
+  }
+
+  /// The control: an honoured commit carries nothing, so no surface can draw
+  /// that caption over an ordinary preview.
+  @Test func anHonouredCommitCarriesNoAchievedGeometry() async {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake)
+    _ = await session.begin(mode: mode(2), on: 7)
+
+    #expect(await session.previewedMode?.unhonouredCommit == nil)
+  }
+
+  /// A second pick on the same display replaces it: the divergence belonged to
+  /// the apply that is now history, and a stale caption would name a resolution
+  /// nothing is showing.
+  @Test func aFreshPreviewDoesNotInheritTheLastOnesDivergence() async {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    fake.divergeNextApplyTo = mode(9)
+    let session = ModePreviewSession(configurator: fake)
+    _ = await session.begin(mode: mode(2), on: 7)
+    #expect(await session.previewedMode?.unhonouredCommit != nil)
+
+    _ = await session.begin(mode: mode(3), on: 7)
+    #expect(await session.previewedMode?.unhonouredCommit == nil)
+  }
+
+  /// An ANSWER is matched on the display and the mode alone, so a surface that
+  /// rendered the preview before the divergence was known still resolves it.
+  @Test func anAnswerCarryingNoAchievedGeometryStillResolvesThePreview() async {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    fake.divergeNextApplyTo = mode(9)
+    let session = ModePreviewSession(configurator: fake)
+    _ = await session.begin(mode: mode(2), on: 7)
+
+    #expect(await session.revert(answer(2)) == .reverted)
+  }
+
   /// Keep re-applies what the user ASKED for, so an unhonoured commit cannot
   /// become permanent by being kept: the session-scope apply verifies again.
   @Test func keepingAfterAnUnhonouredCommitCommitsTheRequestedMode() async {

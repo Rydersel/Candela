@@ -78,6 +78,87 @@ struct OnboardingFlowModelTests {
     #expect(model.committed.isEmpty)
   }
 
+  // MARK: - What the display is actually showing
+
+  /// The unhonoured commit reaches the page. Without it the setup window asks
+  /// "keep it?" over a glyph naming a size the display is not showing, and the
+  /// person answering has no way to see the difference.
+  @Test func anAchievedSizeReportedWithATickReachesThePage() {
+    let model = modelOnSizePage()
+    model.applySize(displayKey: "dell", choice: .recommended)
+    // The ordinary case reports nothing, so no caption is drawn.
+    #expect(model.pendingAchievedSize(forKey: "dell") == nil)
+
+    model.applyCountdownTicked(
+      secondsRemaining: 12, achieved: .size(width: 1920, height: 1080, refreshHz: 30))
+    #expect(model.applyState == .counting(secondsRemaining: 12))
+    #expect(model.pendingAchievedSize(forKey: "dell")
+      == .size(width: 1920, height: 1080, refreshHz: 30))
+    // The question is still about the size that was asked for: the glyph reads
+    // this, and Keep re-applies it.
+    #expect(model.pendingAppliedSize(forKey: "dell")?.width == 2560)
+    // One display's divergence never captions another display's page.
+    #expect(model.pendingAchievedSize(forKey: "mag") == nil)
+  }
+
+  /// A commit that went through and could not be read back is its own case: a
+  /// failed readback is not evidence the size arrived, so it must not report as
+  /// the ordinary nothing-to-say.
+  @Test func anUnreadableAchievedSizeIsCarriedRatherThanDropped() {
+    let model = modelOnSizePage()
+    model.applySize(displayKey: "dell", choice: .recommended)
+    model.applyCountdownTicked(secondsRemaining: 12, achieved: .unreadable)
+    #expect(model.pendingAchievedSize(forKey: "dell") == .unreadable)
+  }
+
+  /// Reported per tick, so a later tick with nothing to say retires the caption
+  /// rather than leaving a sentence about a resolution no longer on the glass.
+  @Test func aLaterTickWithNothingToSayRetiresTheAchievedSize() {
+    let model = modelOnSizePage()
+    model.applySize(displayKey: "dell", choice: .recommended)
+    model.applyCountdownTicked(
+      secondsRemaining: 12, achieved: .size(width: 1920, height: 1080, refreshHz: 30))
+    model.applyCountdownTicked(secondsRemaining: 11)
+    #expect(model.pendingAchievedSize(forKey: "dell") == nil)
+  }
+
+  /// Every way an apply ends drops it, so the next question starts clean.
+  @Test func endingAnApplyDropsTheAchievedSize() {
+    for end in ["keep", "revert", "fail", "pick again"] {
+      let model = modelOnSizePage()
+      model.applySize(displayKey: "dell", choice: .recommended)
+      model.applyCountdownTicked(
+        secondsRemaining: 12, achieved: .size(width: 1920, height: 1080, refreshHz: 30))
+      switch end {
+      // A keep advances, and the per-apply state resets on navigation.
+      case "keep": model.applyKept()
+      case "revert": model.applyReverted()
+      case "fail": model.applyFailed()
+      default: model.applySize(displayKey: "dell", choice: .recommended)
+      }
+      #expect(model.pendingAchievedSize(forKey: "dell") == nil, "ended by \(end)")
+    }
+  }
+
+  /// The page's own mapping, so the setup window cannot word this differently
+  /// from the settings banner, the floating card and the menu bar. In this
+  /// page's dialect: it writes every size with an x and calls it a size, and a
+  /// caption arriving in the app windows' spelling reads as a line from
+  /// somewhere else.
+  @Test func theSizePageSpeaksTheSharedAchievedSentenceInItsOwnDialect() {
+    let named = OnboardingSizePage.achievedCaption(
+      .size(width: 1920, height: 1080, refreshHz: 30))
+    #expect(named == DisplayModeCopy.achievedGeometry(
+      width: 1920, height: 1080, refreshHz: 30, dialect: .size))
+    #expect(named.contains("1920 x 1080"))
+    #expect(!named.contains("×"))
+
+    let unreadable = OnboardingSizePage.achievedCaption(.unreadable)
+    #expect(unreadable == DisplayModeCopy.unreadableAchievedGeometry(dialect: .size))
+    #expect(unreadable.contains("size"))
+    #expect(!unreadable.contains("resolution"))
+  }
+
   @Test func keepRecordsTheChoiceEmitsTheRecordAndAdvances() {
     let model = modelOnSizePage()
     let pageIndex = model.index

@@ -38,6 +38,20 @@ enum OnboardingApplyState: Equatable, Sendable {
   case failed
 }
 
+/// What the display is showing when the apply that opened the countdown
+/// COMMITTED without landing on the size that was asked for. Absent means the
+/// apply landed, which is the ordinary case.
+///
+/// Its own type rather than the engine's `UnhonouredCommit`, so this model stays
+/// free of engine types the way the rest of it is; the live applier maps one
+/// onto the other and the fixture applier can produce it without a display.
+enum OnboardingAchievedSize: Equatable, Sendable {
+  case size(width: Int, height: Int, refreshHz: Double)
+  /// The commit went through and the display would not say what it is running.
+  /// Not the same as landing: a readback that failed is evidence of nothing.
+  case unreadable
+}
+
 /// Drives the guided setup flow over an `OnboardingEnvironment`. Owns the
 /// derived page list, the in-flow choices and the commit seam. In fixture mode
 /// (the mock and tests) commits are recorded and the permission grant is
@@ -170,6 +184,9 @@ final class OnboardingFlowModel {
   /// The choice under countdown. Recorded into `sizeChoices` only when the
   /// countdown is answered; until then the decision does not exist yet.
   private var pendingApply: PendingApply?
+  /// Reported with each tick rather than once, so it follows the applier's own
+  /// reading of the preview and cannot outlive it.
+  private var pendingAchieved: OnboardingAchievedSize?
   private var applyTicker: Task<Void, Never>?
 
   static let applyCountdownSeconds = 15
@@ -352,6 +369,9 @@ final class OnboardingFlowModel {
     pendingApply = PendingApply(
       displayKey: displayKey, choice: choice,
       looksLikeWidth: size.width, looksLikeHeight: size.height)
+    // Nothing has been applied yet, so the previous apply's divergence must not
+    // caption this one's question.
+    pendingAchieved = nil
     applyState = .counting(secondsRemaining: applierCountdownSeconds)
     onApplySize(displayKey, size.width, size.height)
   }
@@ -380,9 +400,15 @@ final class OnboardingFlowModel {
 
   // MARK: - Size apply reports (called by the seam implementation)
 
-  func applyCountdownTicked(secondsRemaining: Int) {
+  /// `achieved` rides the tick because the applier reads it from the same
+  /// preview the seconds come from: one report, one reading, so the caption and
+  /// the countdown cannot describe different moments.
+  func applyCountdownTicked(
+    secondsRemaining: Int, achieved: OnboardingAchievedSize? = nil
+  ) {
     guard pendingApply != nil else { return }
     applyState = .counting(secondsRemaining: max(0, secondsRemaining))
+    pendingAchieved = achieved
   }
 
   /// A kept apply: the display is already showing the size, so record the
@@ -403,6 +429,7 @@ final class OnboardingFlowModel {
     applyTicker?.cancel()
     sizeChoices[pending.displayKey] = .keepCurrent
     pendingApply = nil
+    pendingAchieved = nil
     applyState = .reverted
   }
 
@@ -412,6 +439,7 @@ final class OnboardingFlowModel {
     guard pendingApply != nil else { return }
     applyTicker?.cancel()
     pendingApply = nil
+    pendingAchieved = nil
     applyState = .failed
   }
 
@@ -429,6 +457,14 @@ final class OnboardingFlowModel {
   func pendingAppliedSize(forKey key: String) -> (width: Int, height: Int)? {
     guard let pendingApply, pendingApply.displayKey == key else { return nil }
     return (pendingApply.looksLikeWidth, pendingApply.looksLikeHeight)
+  }
+
+  /// What this display is showing instead, when the apply committed onto
+  /// something else. Nil in the ordinary case, where the size above IS what is
+  /// on the glass and a caption would be noise.
+  func pendingAchievedSize(forKey key: String) -> OnboardingAchievedSize? {
+    guard let pendingApply, pendingApply.displayKey == key else { return nil }
+    return pendingAchieved
   }
 
   // MARK: - Fixture applier
@@ -468,6 +504,7 @@ final class OnboardingFlowModel {
   private func resetApplyState() {
     applyTicker?.cancel()
     pendingApply = nil
+    pendingAchieved = nil
     applyState = .idle
   }
 

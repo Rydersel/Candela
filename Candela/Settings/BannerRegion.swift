@@ -476,6 +476,12 @@ private struct AnswerableModeBanner: View {
         .font(.callout)
         .foregroundStyle(SettingsTheme.bodyColor)
 
+      // Beside the question, not instead of it: the size above is what Keep
+      // re-applies, and this is what the glass shows in the meantime.
+      if let commit = preview.unhonouredCommit {
+        SettingsCaption(verbatim: DisplayModeCopy.achievedGeometry(commit))
+      }
+
       if let failure = preview.failure {
         // Nothing auto-retries a failed resolution. Silence here would leave
         // the display on a mode the user never approved.

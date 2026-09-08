@@ -114,10 +114,11 @@ struct BrightnessReadEvidenceCallSiteTests {
   /// The other half, and the one a monotonic fold got wrong: a pass that does ask
   /// supersedes, or the app says "answers with zeros" about a panel that just answered.
   ///
-  /// What makes a pass ask has changed: a panel that answered nothing is asked
-  /// once per plug, so the wake here is not decoration, it is the thing that
-  /// earns the second question. `BrightnessReadSkipTests` pins the skip and
-  /// every route out of it.
+  /// Nothing has to earn the second question here: the skip latches on the
+  /// SECOND non-answer of a kind, so one zeros pass leaves the next one asking.
+  /// A wake was called here for a while, which read as the thing that unlocked
+  /// the re-ask and is not. `BrightnessReadSkipTests` pins the latch and every
+  /// route out of it, the wake included.
   @Test func apassThatAsksAgainSupersedesTheOldVerdict() async {
     let fake = FakeDDC(readResult: (current: 0, max: 0))
     let (controller, _) = Self.make(writer: fake)
@@ -125,7 +126,6 @@ struct BrightnessReadEvidenceCallSiteTests {
     #expect(controller.readEvidence == .allZeros)
 
     await fake.setReadResult((current: 40, max: 80))
-    controller.noteWake()
     await controller.refreshFromHardware()
     #expect(controller.readEvidence == .answered)
   }

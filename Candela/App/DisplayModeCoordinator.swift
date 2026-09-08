@@ -203,6 +203,11 @@ final class DisplayModeCoordinator {
     /// Reported by the session, not inferred: a failed expiry disarms the
     /// countdown while a failed commit deliberately leaves it armed.
     var isCountingDown: Bool
+    /// Set when the apply that began this preview committed onto something
+    /// other than `mode`. `mode` stays the question, since that is what Keep
+    /// re-applies; this is how a surface can also say what the glass shows,
+    /// which is the one thing a person answering cannot check for themselves.
+    var unhonouredCommit: DisplayConfigError.UnhonouredCommit?
     /// Non-nil when this preview is a SYNTHESIZED size: the engine has a
     /// virtual display up and the panel mirrored onto it, and the answer goes
     /// to `SynthesisPreviewSession` rather than `ModePreviewSession`.
@@ -1132,6 +1137,7 @@ final class DisplayModeCoordinator {
       secondsRemaining: 0,
       failure: nil,
       isCountingDown: false,
+      unhonouredCommit: outstanding.unhonouredCommit,
       synthesized: nil,
       synthesisFailure: nil
     )
@@ -1152,6 +1158,9 @@ final class DisplayModeCoordinator {
       secondsRemaining: 0,
       failure: nil,
       isCountingDown: false,
+      // The mode session is not the engine here, so there is no committed mode
+      // apply to have gone unhonoured.
+      unhonouredCommit: nil,
       synthesized: outstanding,
       synthesisFailure: nil
     )
@@ -1231,8 +1240,9 @@ final class DisplayModeCoordinator {
     // claim is then held continuously through the countdown's resolution.
     //
     // The refusal is REPORTED by the synthesis coordinator rather than as a
-    // `StartFailure`: that surface says "CoreGraphics error <n>", and what went
-    // wrong was a virtual display refusing to come down.
+    // `StartFailure`: that surface reports a display-configuration failure and
+    // its diagnostic prints a CoreGraphics code, and what went wrong here was a
+    // virtual display refusing to come down.
     guard await endOutstandingSynthesisPreview() else {
       log.error("Refused a mode change on display \(displayID): an outstanding synthesized size could not be disengaged")
       await adopt(.keep)
@@ -1492,8 +1502,9 @@ final class DisplayModeCoordinator {
   /// keeps this one in.
   ///
   /// An engine failure goes through the refusal the synthesis coordinator renders,
-  /// never a `StartFailure`: that surface says "CoreGraphics error <n>", and what
-  /// would have gone wrong is a virtual display.
+  /// never a `StartFailure`: that surface reports a display-configuration failure
+  /// and its diagnostic prints a CoreGraphics code, and what would have gone
+  /// wrong here is a virtual display.
   private func restoreStopAfterAFallenPick(on displayID: CGDirectDisplayID) async {
     guard let size = restoreStopIfPickFalls.removeValue(forKey: displayID) else { return }
     guard let synthesis,
@@ -1747,6 +1758,7 @@ final class DisplayModeCoordinator {
         secondsRemaining: await coordinator.session.secondsRemaining,
         failure: nil,
         isCountingDown: counting,
+        unhonouredCommit: nil,
         synthesized: outstanding,
         synthesisFailure: carried
       )
@@ -1782,6 +1794,10 @@ final class DisplayModeCoordinator {
       secondsRemaining: await session.secondsRemaining,
       failure: carried,
       isCountingDown: counting,
+      // Read from the session on every rebuild, not carried across like
+      // `failure`: the session holds it for as long as the preview stands, so a
+      // countdown tick cannot lose it and a fresh preview cannot inherit it.
+      unhonouredCommit: outstanding.unhonouredCommit,
       synthesized: nil,
       synthesisFailure: nil
     )

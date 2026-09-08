@@ -191,6 +191,23 @@ struct OnboardingSizePage: View {
     .padding(.horizontal, 60)
   }
 
+  /// One sentence for what the display is actually showing, from
+  /// `DisplayModeCopy` so this page cannot word it differently from the other
+  /// three surfaces that ask the same question.
+  ///
+  /// In THIS page's dialect: every size here is written "2560 x 1440" and the
+  /// noun is always "size", so the shared sentence arrives spelled the way the
+  /// glyph, the apply button and the alternatives grid above it already are.
+  static func achievedCaption(_ achieved: OnboardingAchievedSize) -> String {
+    switch achieved {
+    case let .size(width, height, refreshHz):
+      DisplayModeCopy.achievedGeometry(
+        width: width, height: height, refreshHz: refreshHz, dialect: .size)
+    case .unreadable:
+      DisplayModeCopy.unreadableAchievedGeometry(dialect: .size)
+    }
+  }
+
   /// The keep and revert bar, the safety shape the picker ships. The copy
   /// states the semantic: expiry reverts, so the size sticks only on Keep.
   private func countdownBar(seconds: Int) -> some View {
@@ -200,6 +217,17 @@ struct OnboardingSizePage: View {
         .foregroundStyle(OnboardingStyle.bodyColor)
         .monospacedDigit()
         .contentTransition(.numericText())
+      // Beside the question, in the words the settings banner and the
+      // confirmation card use. The GLYPH above keeps naming the REQUESTED size:
+      // Keep re-applies and re-verifies that size, so it is what the question is
+      // about, and this line is what the glass shows in the meantime.
+      if let achieved = model.pendingAchievedSize(forKey: displayKey) {
+        Text(verbatim: Self.achievedCaption(achieved))
+          .font(.callout)
+          .foregroundStyle(OnboardingStyle.faintColor)
+          .multilineTextAlignment(.center)
+          .fixedSize(horizontal: false, vertical: true)
+      }
       HStack(spacing: 14) {
         Button("Keep") { model.keepSize() }
           .buttonStyle(OnboardingPrimaryButtonStyle(accent: accent))

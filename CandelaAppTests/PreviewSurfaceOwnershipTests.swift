@@ -26,7 +26,8 @@ struct PreviewSurfaceOwnershipTests {
     DisplayModeCoordinator.Preview(
       displayID: displayID, mode: mode, surface: surface,
       secondsRemaining: isCountingDown ? 21 : 0, failure: nil,
-      isCountingDown: isCountingDown, synthesized: nil, synthesisFailure: nil
+      isCountingDown: isCountingDown, unhonouredCommit: nil,
+      synthesized: nil, synthesisFailure: nil
     )
   }
 

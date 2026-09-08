@@ -23,6 +23,13 @@ private func replyFrame(command: UInt8, current: UInt16, max: UInt16) -> [UInt8]
   ])
 }
 
+/// The same frame carrying a result code instead of a value: the display
+/// parsed the Get VCP and refused the code. `0x01` is the MCCS "unsupported VCP
+/// code", the one the Dell answers for a register it does not carry.
+private func refusalFrame(command: UInt8, code: UInt8 = 0x01) -> [UInt8] {
+  sealed([0x6E, 0x88, 0x02, code, command, 0x00, 0, 0, 0, 0, 0x00])
+}
+
 /// With a zero fill, a buffer nobody wrote to and a panel that answered zeros
 /// are the same bytes.
 @Test func theReplySentinelIsNotZero() {
@@ -204,6 +211,74 @@ private func runRead(
   ])
   var reply = [UInt8](repeating: 0, count: 11)
   #expect(runRead(panel, reply: &reply) == .ok)
+}
+
+// MARK: - A refusal is an answer, and it ends the ladder
+
+/// A refused register costs ONE transaction, as it did before the reply frame
+/// was validated at all. Retrying re-asks a question the panel answered, and the
+/// value controller spends this ladder `pollingTries` times per pass.
+@Test func aRefusedRegisterEndsTheLadderOnTheAttemptThatCarriedIt() {
+  let panel = ScriptedPanel([refusalFrame(command: 0x10)])
+  var reply = [UInt8](repeating: 0, count: 11)
+  #expect(runRead(panel, reply: &reply) == .silent)
+  #expect(panel.reads == 1)
+  #expect(panel.writes == 1)
+}
+
+/// The evidence is unchanged by the early exit: a refusal is not a readable
+/// register, so it reads as silence and the skip latch counts it as before.
+@Test func aRefusalStillReadsAsSilenceRatherThanAnAnswer() {
+  #expect(Arm64DDC.replyVerdict(refusalFrame(command: 0x10), command: 0x10) == .silent)
+  #expect(Arm64DDC.attemptVerdict(refusalFrame(command: 0x10), command: 0x10).isRefusal)
+}
+
+/// The ordering `isRefusal` rests on: `attemptVerdict` checks the checksum
+/// FIRST, so a result code carried in bytes that failed their own integrity
+/// check is not the panel answering. `isRefusal` deliberately does not check the
+/// checksum itself, so nothing but that ordering keeps a corrupted frame from
+/// ending the ladder.
+@Test func aRefusalWithABrokenChecksumIsNotAnAnswerAndKeepsRetrying() {
+  var corrupted = refusalFrame(command: 0x10)
+  corrupted[corrupted.count - 1] &+= 1
+  // The frame still SAYS refusal; only the checksum says not to believe it.
+  #expect(DDCReplyFrame.isRefusal(corrupted, of: 0x10))
+  #expect(!Arm64DDC.attemptVerdict(corrupted, command: 0x10).isRefusal)
+
+  let panel = ScriptedPanel([corrupted])
+  var reply = [UInt8](repeating: 0, count: 11)
+  #expect(runRead(panel, reply: &reply) == .silent)
+  #expect(panel.reads == 5)
+}
+
+/// The control for the early exit, and the rule it rests on: only a result-code
+/// refusal is an answer. A malformed, mis-addressed or stale frame proves
+/// nothing about the register and keeps every retry it had.
+@Test func onlyARefusalEndsTheLadderAndEveryOtherRejectionRetries() {
+  // Re-sealed after the edit: a broken checksum would end these transactions
+  // for a reason that has nothing to do with which rejection they carry.
+  var wrongSource = refusalFrame(command: 0x10)
+  wrongSource[0] = 0x6F
+  var notAReply = refusalFrame(command: 0x10)
+  notAReply[2] = 0xE3
+  for frame in [sealed(wrongSource), sealed(notAReply), refusalFrame(command: 0x12)] {
+    let panel = ScriptedPanel([frame])
+    var reply = [UInt8](repeating: 0, count: 11)
+    #expect(runRead(panel, reply: &reply) == .silent)
+    #expect(panel.reads == 5)
+  }
+}
+
+/// A refusal on attempt two does not erase what attempt one proved: zeros are
+/// the more specific finding and the fold keeps them.
+@Test func aRefusalDoesNotEraseEarlierZeros() {
+  let panel = ScriptedPanel([
+    [UInt8](repeating: 0, count: 11),
+    refusalFrame(command: 0x10),
+  ])
+  var reply = [UInt8](repeating: 0, count: 11)
+  #expect(runRead(panel, reply: &reply) == .answeredZeros)
+  #expect(panel.reads == 2)
 }
 
 /// The write path, which none of this changes: an acknowledged write with no

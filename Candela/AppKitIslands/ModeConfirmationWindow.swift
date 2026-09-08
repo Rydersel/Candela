@@ -90,6 +90,12 @@ struct ModeConfirmationView: View {
         ConfirmationTitle("Keep this resolution?")
         ConfirmationSubtitle(verbatim: subtitle(preview))
 
+        // The subtitle names what Keep re-applies; this names what the display
+        // is showing while the question sits on it.
+        if let commit = preview.unhonouredCommit {
+          ConfirmationCaption(Text(verbatim: DisplayModeCopy.achievedGeometry(commit)))
+        }
+
         if let failure = preview.failure {
           // Nothing auto-retries a failed resolution. Staying silent would
           // leave the display on a mode the user never approved, held only
@@ -137,8 +143,14 @@ struct ModeConfirmationView: View {
     if let failure = coordinator.startFailure {
       ConfirmationCard {
         ConfirmationTitle("Resolution not changed")
-        if !displayName.isEmpty {
-          ConfirmationSubtitle(verbatim: displayName)
+        // Names both displays where the caption below is about a second one, so
+        // the title, the subject and the sentence read as one story rather than
+        // as a card that contradicts itself.
+        let subject = DisplayModeCopy.startFailureSubject(
+          displayName: displayName, reason: failure.reason
+        )
+        if !subject.isEmpty {
+          ConfirmationSubtitle(verbatim: subject)
         }
         ConfirmationCaption(DisplayModeCopy.startFailure(failure.reason))
           .help(DisplayModeCopy.startFailureDiagnostic(failure.reason))

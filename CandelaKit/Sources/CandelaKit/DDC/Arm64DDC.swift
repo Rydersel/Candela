@@ -250,24 +250,47 @@ public class Arm64DDC: NSObject {
   /// line reads as, so a floating read counts as untouched.
   static let replySentinel: UInt8 = 0xFF
 
+  /// What one attempt proved, and whether the ladder may stop on it.
+  struct AttemptVerdict: Equatable {
+    let outcome: TransactionOutcome
+    /// The panel's own result code for the code asked about. NOT an outcome of
+    /// its own: a refused register is still not a readable one, so the evidence
+    /// stays `.silent` and the read-skip latch counts it exactly as before. What
+    /// it buys is the four remaining attempts, which on a polling pass are four
+    /// ladders of dead bus time spent re-asking a question already answered.
+    let isRefusal: Bool
+  }
+
   /// Verdict for a reply buffer whose read call reported success. Validated here,
   /// inside the ladder, so a frame answering a DIFFERENT code gets the same retry
   /// as any failed read.
-  static func replyVerdict(_ reply: [UInt8], command: UInt8? = nil) -> TransactionOutcome {
-    guard reply.count >= 2 else { return .silent }
+  static func attemptVerdict(_ reply: [UInt8], command: UInt8? = nil) -> AttemptVerdict {
+    guard reply.count >= 2 else { return AttemptVerdict(outcome: .silent, isRefusal: false) }
     var frame = reply
     guard self.checksum(chk: 0x50, data: &frame, start: 0, end: frame.count - 2) == frame[frame.count - 1] else {
-      return reply.allSatisfy { $0 == 0 } ? .answeredZeros : .silent
+      return AttemptVerdict(
+        outcome: reply.allSatisfy { $0 == 0 } ? .answeredZeros : .silent, isRefusal: false
+      )
     }
     // The checksum alone is a 1-in-256 guard. Without the op-code and
     // result-code check the Intel transport has always made, a display
     // answering with stale bytes, or answering a DIFFERENT VCP code than the
     // one asked for, produces a plausible `max` that silently compresses the
     // whole range.
+    //
+    // The refusal is read only from a frame that PASSED the checksum, so the
+    // result code is a byte the panel meant to send rather than one landing
+    // there by luck.
     if let command, DDCReplyFrame.rejection(for: reply, command: command) != nil {
-      return .silent
+      return AttemptVerdict(
+        outcome: .silent, isRefusal: DDCReplyFrame.isRefusal(reply, of: command)
+      )
     }
-    return .ok
+    return AttemptVerdict(outcome: .ok, isRefusal: false)
+  }
+
+  static func replyVerdict(_ reply: [UInt8], command: UInt8? = nil) -> TransactionOutcome {
+    self.attemptVerdict(reply, command: command).outcome
   }
 
   /// One attempt's verdict folded into the transaction's: `answeredZeros` outlives
@@ -347,9 +370,13 @@ public class Arm64DDC: NSObject {
         // Recorded whatever it returned: the bus was busy either way.
         pacer?.recordBusUse()
         if answered == 0 {
-          let verdict = Self.replyVerdict(reply, command: replyCommand)
-          if verdict == .ok { return .ok }
-          outcome = Self.fold(outcome, verdict)
+          let verdict = Self.attemptVerdict(reply, command: replyCommand)
+          if verdict.outcome == .ok { return .ok }
+          outcome = Self.fold(outcome, verdict.outcome)
+          // The panel answered, and the answer was no. Retrying a refused code
+          // cannot change it, and the caller polls this ladder several times a
+          // pass. Folded first, so an earlier attempt's zeros still outlive it.
+          if verdict.isRefusal { return outcome }
         }
       }
       transport.sleep(retrySleepTime ?? 20000)

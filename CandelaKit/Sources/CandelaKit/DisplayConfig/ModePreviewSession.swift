@@ -6,10 +6,25 @@ import Foundation
 public struct PreviewedMode: Sendable, Equatable {
   public let displayID: CGDirectDisplayID
   public let mode: DisplayMode
+  /// Set when the apply that began this preview COMMITTED without landing on
+  /// `mode`: the display is on a third mode nobody picked. The keep question
+  /// still names `mode`, because that is what Keep re-applies; this is what a
+  /// surface needs to say what the glass is showing while the question is read.
+  ///
+  /// Defaulted, so an ANSWER can be built from a display and a mode alone.
+  /// `matches` compares those two and never this, or a UI that rendered the
+  /// preview before the divergence was known would have its answer refused as
+  /// stale over a caption.
+  public let unhonouredCommit: DisplayConfigError.UnhonouredCommit?
 
-  public init(displayID: CGDirectDisplayID, mode: DisplayMode) {
+  public init(
+    displayID: CGDirectDisplayID,
+    mode: DisplayMode,
+    unhonouredCommit: DisplayConfigError.UnhonouredCommit? = nil
+  ) {
     self.displayID = displayID
     self.mode = mode
+    self.unhonouredCommit = unhonouredCommit
   }
 }
 
@@ -36,6 +51,11 @@ public actor ModePreviewSession {
     /// Captured before the preview was applied. Survives failed resolutions.
     let previousMode: DisplayMode
     let previewedMode: DisplayMode
+    /// What the apply achieved, when it committed and did not honour the
+    /// request. Held here rather than derived later: the display can be
+    /// reconfigured again before anyone reads it, and this is the state at the
+    /// moment the question was asked.
+    let unhonouredCommit: DisplayConfigError.UnhonouredCommit?
   }
 
   private let configurator: any DisplayConfiguring
@@ -60,7 +80,11 @@ public actor ModePreviewSession {
 
   /// What is applied and unresolved. A UI rebuilds its state from this.
   public var previewedMode: PreviewedMode? {
-    outstanding.map { PreviewedMode(displayID: $0.displayID, mode: $0.previewedMode) }
+    outstanding.map {
+      PreviewedMode(
+        displayID: $0.displayID, mode: $0.previewedMode, unhonouredCommit: $0.unhonouredCommit
+      )
+    }
   }
 
   /// Reported rather than inferred: a failed expiry disarms the countdown
@@ -115,6 +139,7 @@ public actor ModePreviewSession {
       previous = read
     }
 
+    var unhonoured: DisplayConfigError.UnhonouredCommit?
     do {
       try configurator.apply(mode, to: displayID, scope: .preview)
     } catch let error as DisplayConfigError {
@@ -122,14 +147,19 @@ public actor ModePreviewSession {
       // mode nobody picked, and failing here would leave it there with no
       // countdown. So it is captured like a success; the fallback read before the
       // apply is still the way back, and the countdown takes it.
-      guard error.didCommit else { return .failure(error) }
+      guard let commit = error.unhonouredCommit else { return .failure(error) }
+      // Carried out to the surfaces so the keep question can say what is on the
+      // glass. Silence here is what made the question unanswerable: the banner
+      // named a size the display was not showing and gave no way to tell.
+      unhonoured = commit
     } catch {
       return .failure(DisplayConfigError(cgErrorCode: -1))
     }
     // The mode ASKED for, not what the display landed on: keep re-applies and
     // re-verifies it, so an unhonoured commit cannot become permanent.
     outstanding = OutstandingPreview(
-      displayID: displayID, previousMode: previous, previewedMode: mode
+      displayID: displayID, previousMode: previous, previewedMode: mode,
+      unhonouredCommit: unhonoured
     )
     // Cleared here, not on entry: a begin() that fails establishes nothing, so
     // the last thing that really happened to the display stays the last outcome.
