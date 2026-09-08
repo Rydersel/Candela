@@ -163,7 +163,8 @@ struct BouncingSynthesisDriver: SynthesisDriving {
       // Session scope, matching the engine's own applies.
       try configurator.apply(target, to: displayID, scope: .session)
     } catch {
-      Self.log.info("synthesis.retime could not run for display \(displayID): \(String(describing: error), privacy: .public)")
+      // "Did not land": the apply also throws on a commit the display did not honour.
+      Self.log.info("synthesis.retime did not land on display \(displayID): \(String(describing: error), privacy: .public)")
       return false
     }
     // THE RETURN CODE IS NOT THE EVIDENCE. The apply cross-checks the RESOLVED

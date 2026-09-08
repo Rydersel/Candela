@@ -202,14 +202,17 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
         \(mode.ioModeID, privacy: .public), reports \(achieved ?? -1, privacy: .public)
         """
       )
-      // Deliberately not a platform error code: the platform did not report
-      // one, which is the entire point of this check.
-      throw DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
+      // This commit went through, so the same error as the published path:
+      // callers must revert, not report "nothing changed". The id compare is
+      // sound here because CoreGraphics and CGS share one mode-ID space.
+      throw DisplayConfigError(
+        unhonouredCommit: .init(requested: mode, achieved: achievedMode(displayID)))
     }
   }
 
   /// The public path: resolve the `CGDisplayMode`, cross-check the geometry it
-  /// actually denotes, then stage and commit.
+  /// actually denotes, stage, commit, then read back what the display is
+  /// actually running.
   private func applyPublishedMode(
     _ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope
   ) throws {
@@ -250,6 +253,62 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     guard result == .success else {
       throw DisplayConfigError(cgErrorCode: result.rawValue)
     }
+
+    // THE RETURN CODE IS NOT THE EVIDENCE, the achieved mode is. The cross-check
+    // above proves the id still denotes the geometry asked for; it proves
+    // nothing about what the commit then did with it.
+    //
+    // Bounded settle rather than one immediate read, the shape `applyRotation`
+    // uses: the window server lands a mode change asynchronously, so a single
+    // read can still describe the outgoing mode and report a false miss. Half a
+    // second, because a change that has not landed by then is not landing.
+    //
+    // The first read is taken BEFORE any sleep and an honoured commit returns on
+    // it, so a caller on the main actor pays this block only on the failure
+    // path. 50 ms between polls for the same reason: ten reads is ample
+    // resolution for a settle measured in tens of milliseconds, and a tighter
+    // loop only spends more of a blocked main thread on a case already lost.
+    let deadline = Date().addingTimeInterval(0.5)
+    var achieved = achievedMode(displayID)
+    while ModeApplyVerification.verdict(requested: mode, achieved: achieved) == .unhonoured,
+      Date() < deadline
+    {
+      Thread.sleep(forTimeInterval: 0.05)
+      achieved = achievedMode(displayID)
+    }
+    guard ModeApplyVerification.verdict(requested: mode, achieved: achieved) == .honoured else {
+      // Both geometries, here and in the error: a code alone says nothing about
+      // which mode is on the glass.
+      Logger(subsystem: "com.rydersel.Candela", category: "topology").error(
+        """
+        CoreGraphics returned success for a mode it did not apply: display \
+        \(displayID, privacy: .public) asked for \
+        \(Self.geometry(of: mode), privacy: .public), reports \
+        \(achieved.map(Self.geometry) ?? "nothing", privacy: .public)
+        """
+      )
+      // Its own error, not a platform code: THIS one committed, so a caller
+      // holding a fallback must use it.
+      throw DisplayConfigError(
+        unhonouredCommit: .init(requested: mode, achieved: achieved))
+    }
+  }
+
+  /// The live mode as CoreGraphics reports it, deliberately NOT through
+  /// Not `currentMode(for:)`: that resolves against the deduplicated list and
+  /// answers nil for anything missing from it, which the settle loop would read
+  /// as a mode that never landed. It also re-enumerates every CGS descriptor.
+  private func achievedMode(_ displayID: CGDirectDisplayID) -> DisplayMode? {
+    CGDisplayCopyDisplayMode(displayID).map {
+      Self.displayMode(ioModeID: $0.ioDisplayModeID, mode: $0)
+    }
+  }
+
+  private static func geometry(of mode: DisplayMode) -> String {
+    """
+    \(mode.logicalWidth)x\(mode.logicalHeight) \
+    px\(mode.pixelWidth)x\(mode.pixelHeight) @\(mode.refreshHz)Hz
+    """
   }
 
   /// The same transaction discipline as `apply`, with the mirror call

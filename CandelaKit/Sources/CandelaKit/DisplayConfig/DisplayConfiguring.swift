@@ -113,8 +113,41 @@ public struct ConfiguredDisplay: Sendable, Equatable, Identifiable {
 }
 
 public struct DisplayConfigError: Error, Sendable, Equatable {
+  /// What a COMMITTED transaction was asked for and what it left behind. Every
+  /// other `DisplayConfigError` means the display did not move; this one means it
+  /// did, so a caller holding a fallback must use it rather than report a refusal.
+  public struct UnhonouredCommit: Sendable, Equatable {
+    public let requested: DisplayMode
+    /// Nil when the display could not say what it is running, which is not
+    /// evidence the mode landed.
+    public let achieved: DisplayMode?
+
+    public init(requested: DisplayMode, achieved: DisplayMode?) {
+      self.requested = requested
+      self.achieved = achieved
+    }
+  }
+
+  /// Not a CoreGraphics code, and negative so it never reads as one. Not
+  /// `CGError.failure` either, which a transaction that never opened also throws.
+  public static let unhonouredCommitCode: Int32 = -1000
+
   public let cgErrorCode: Int32
-  public init(cgErrorCode: Int32) { self.cgErrorCode = cgErrorCode }
+  public let unhonouredCommit: UnhonouredCommit?
+
+  public init(cgErrorCode: Int32) {
+    self.cgErrorCode = cgErrorCode
+    unhonouredCommit = nil
+  }
+
+  public init(unhonouredCommit: UnhonouredCommit) {
+    cgErrorCode = Self.unhonouredCommitCode
+    self.unhonouredCommit = unhonouredCommit
+  }
+
+  /// Whether the display MOVED despite the throw. The one question that decides
+  /// whether a caller may say "nothing changed".
+  public var didCommit: Bool { unhonouredCommit != nil }
 }
 
 /// Opens a display-configuration transaction, or throws.
@@ -198,6 +231,13 @@ public protocol DisplayConfiguring: Sendable {
   /// The panel's own pixel count, from the mode flagged native. Needed to tell
   /// scaled modes from native ones.
   func nativePixels(for displayID: CGDirectDisplayID) -> (width: Int, height: Int)?
+  /// Stages one mode change, commits it, then reads back the mode the display
+  /// Stages one mode change, commits it, then reads back what the display runs.
+  ///
+  /// Throws `DisplayConfigError` if the mode cannot be resolved, staging or the
+  /// commit fails, or the readback disagrees (`ModeApplyVerification`). **That
+  /// last throw follows a committed transaction**: the display is wherever
+  /// CoreGraphics put it, and only the caller's revert puts it back.
   func apply(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope) throws
 
   /// Stages one `CGConfigureDisplayMirrorOfDisplay` per change in a SINGLE
@@ -212,8 +252,8 @@ public protocol DisplayConfiguring: Sendable {
   /// topology does not show what was asked for (`MirrorVerification`). An empty
   /// `changes` array does nothing and opens no transaction.
   ///
-  /// **That last throw is the ONE that can follow a committed change**, and the
-  /// only place in this protocol where a throw does not mean "nothing moved".
+  /// **That last throw follows a committed change**, as `apply`'s readback does,
+  /// so neither one means "nothing moved".
   /// CoreGraphics accepted the batch and did something else; the machine is in
   /// whatever topology it chose, and nothing here puts it back. Reporting the
   /// divergence still beats the alternative that shipped, where a caller recorded

@@ -781,6 +781,9 @@ final class DisplayModeCoordinator {
       // reconfiguration and the event it produces calls this again.
       arrivals.release(previewed)
     }
+    // Synchronous on the main actor, so an unhonoured commit blocks here for the
+    // configurator's whole settle window. An honoured one returns on the first
+    // read; the alternative is reporting a restore that did not happen.
     for display in displays where display.id != previewed {
       // Synthesis reapply runs AFTER the stored-mode decision for the same
       // display, never beside it: engaging makes the panel a mirror slave, and a
@@ -845,11 +848,10 @@ final class DisplayModeCoordinator {
         try configurator.apply(mode, to: display.id, scope: .session)
         log.log("reapplied stored mode on display \(display.id): \(mode.logicalWidth)x\(mode.logicalHeight) @\(mode.refreshHz)Hz")
       } catch {
-        // `apply` throws when staging or completion fails AND when the resolved
-        // `CGDisplayMode`'s descriptor does not match the one asked for, a
-        // reassigned `ioModeID` now denoting a different mode. On the unattended
-        // path that second case must not be swallowed: `try?` would leave the
-        // display on some third mode with the app reporting a successful restore.
+        // Not `try?`: that would report a successful restore over a refused
+        // transaction, a reassigned `ioModeID`, or a commit the display did not
+        // honour. Only the last one moved the display, so the notice claims
+        // nothing about where it was left.
         let configError = error as? DisplayConfigError
           ?? DisplayConfigError(cgErrorCode: -1)
         notice = .failed(configError)

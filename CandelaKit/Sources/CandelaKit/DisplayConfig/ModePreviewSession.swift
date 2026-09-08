@@ -24,10 +24,10 @@ public struct PreviewedMode: Sendable, Equatable {
 /// - No preview begins until the fallback mode has been read.
 /// - Confirm commits the mode that was previewed, not what the display reports
 ///   now; the two differ exactly when something went wrong.
-/// - A preview stays outstanding until a resolution succeeds. An apply that
-///   throws changed nothing, so the original fallback is still the one to keep,
-///   which is why every guard asks "is a preview applied?" and never "was an
-///   answer given?".
+/// - A preview stays outstanding until a resolution succeeds, which is why every
+///   guard asks "is a preview applied?" and never "was an answer given?". A
+///   throw never invalidates the fallback: a refusal left the display alone, and
+///   an unhonoured commit moved it without touching the pre-preview mode.
 public actor ModePreviewSession {
   /// One value so no path can pair one preview's display ID with another's
   /// fallback mode.
@@ -115,10 +115,16 @@ public actor ModePreviewSession {
     do {
       try configurator.apply(mode, to: displayID, scope: .preview)
     } catch let error as DisplayConfigError {
-      return .failure(error)
+      // A commit the display did not honour is not a refusal: the display is on a
+      // mode nobody picked, and failing here would leave it there with no
+      // countdown. So it is captured like a success; the fallback read before the
+      // apply is still the way back, and the countdown takes it.
+      guard error.didCommit else { return .failure(error) }
     } catch {
       return .failure(DisplayConfigError(cgErrorCode: -1))
     }
+    // The mode ASKED for, not what the display landed on: keep re-applies and
+    // re-verifies it, so an unhonoured commit cannot become permanent.
     outstanding = OutstandingPreview(
       displayID: displayID, previousMode: previous, previewedMode: mode
     )
@@ -177,9 +183,9 @@ public actor ModePreviewSession {
     answered.displayID == outstanding.displayID && answered.mode == outstanding.previewedMode
   }
 
-  /// Success is what clears the outstanding preview. A throw leaves session
-  /// state intact: the display did not move, so the record of how to move it
-  /// back is still true.
+  /// Only success clears the outstanding preview. A refusal moved nothing, and an
+  /// unhonoured commit moved the display to a third mode without touching the
+  /// record of the pre-preview mode, so session state is kept in both cases.
   ///
   /// A failed commit leaves the countdown armed on purpose, so a mode that
   /// could not be made permanent still falls back to one the user can see.

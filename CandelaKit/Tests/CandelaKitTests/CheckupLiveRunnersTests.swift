@@ -87,6 +87,9 @@ struct CheckupLiveRunnersTests {
     var modeList: [DisplayMode]
     var current: DisplayMode?
     var refuse: Set<Int32> = []
+    /// Mode id to the mode the display is left on: a commit that went through
+    /// and was not honoured, which is not the same event as a refusal.
+    var unhonour: [Int32: DisplayMode] = [:]
 
     func displays() -> [ConfiguredDisplay] { [] }
     func modes(for displayID: CGDirectDisplayID) -> [DisplayMode] { modeList }
@@ -95,6 +98,9 @@ struct CheckupLiveRunnersTests {
       modeList.first(where: \.isNative).map { ($0.pixelWidth, $0.pixelHeight) }
     }
     func apply(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope) throws {
+      if let landed = unhonour[mode.ioModeID] {
+        throw DisplayConfigError(unhonouredCommit: .init(requested: mode, achieved: landed))
+      }
       if refuse.contains(mode.ioModeID) {
         throw DisplayConfigError(cgErrorCode: CGError.invalidOperation.rawValue)
       }
@@ -123,6 +129,41 @@ struct CheckupLiveRunnersTests {
     let refusing = FakeConfigurator(modeList: [native], current: native, refuse: [1])
     let refused = await CheckupLiveModeRunner(configurator: refusing, displayID: 1).runNativeMode()
     #expect(refused.first?.verdict.kind == "refused")
+    #expect(refused.first?.verdict.text.contains("apply refused") == true)
+  }
+
+  /// An unhonoured commit is not a refusal (nothing said no), and the achieved
+  /// geometry is the finding, so no error code replaces it.
+  @Test func anUnhonouredCommitNamesWhatTheDisplayShowsRatherThanARefusal() async {
+    let native = mode(1, w: 3840, h: 2160, hz: 60, native: true)
+    let landed = mode(2, w: 1920, h: 1080, hz: 60)
+    let diverging = FakeConfigurator(
+      modeList: [native], current: landed, unhonour: [1: landed])
+    let claims = await CheckupLiveModeRunner(configurator: diverging, displayID: 1).runNativeMode()
+    // The KIND carries as much as the sentence: the report prints it as the
+    // row's label, so a refused kind reads "refused" whatever the text says.
+    #expect(claims.first?.verdict.kind == "notObserved")
+    let text = claims.first?.verdict.text ?? ""
+    #expect(!text.contains("refused"))
+    #expect(text.contains("applied 3840 by 2160 at 60 Hz"))
+    #expect(text.contains("macOS reports 1920 by 1080 at 60 Hz"))
+  }
+
+  /// The rate-only sweep is where an unhonoured commit is invisible on screen,
+  /// so its claim keeps the rate it asked for AND the one it got.
+  @Test func theRefreshSweepKeepsBothRatesWhenACommitIsNotHonoured() async {
+    let m60 = mode(1, w: 3840, h: 2160, hz: 60, native: true)
+    let m120 = mode(2, w: 3840, h: 2160, hz: 120)
+    let diverging = FakeConfigurator(
+      modeList: [m60, m120], current: m60, unhonour: [2: m60])
+    let claims = await CheckupLiveModeRunner(configurator: diverging, displayID: 1)
+      .runRefreshSweep()
+    let claim = claims.first { $0.verdict.text.hasPrefix("120 Hz") }
+    #expect(claim?.verdict.kind == "notObserved")
+    let text = claim?.verdict.text ?? ""
+    #expect(!text.contains("refused"))
+    #expect(text.contains("applied 3840 by 2160 at 120 Hz"))
+    #expect(text.contains("macOS reports 3840 by 2160 at 60 Hz"))
   }
 
   @Test func everyApplyIsPreviewScopedSoACrashDoesNotParkThePanel() async {

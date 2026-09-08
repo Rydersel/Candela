@@ -113,6 +113,18 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
     return String(describing: error)
   }
 
+  /// The verdict for an apply that threw. An unhonoured commit is not a refusal
+  /// (nothing said no), so it records as not observed with the achieved geometry.
+  static func applyFailure(_ error: any Error, prefix: String = "") -> CheckupVerdict {
+    guard let unhonoured = (error as? DisplayConfigError)?.unhonouredCommit else {
+      return .refused("\(prefix)apply refused: \(reason(error))")
+    }
+    return .notObserved("""
+      \(prefix)applied \(describe(unhonoured.requested)); macOS reports \
+      \(unhonoured.achieved.map(describe) ?? "no current mode")
+      """)
+  }
+
   /// Geometry and quantized rate, never `ioModeID`: that number is positional,
   /// and after a reconfiguration it can resolve to a different mode while the
   /// apply still reports success. The sweep reconfigures once per rate.
@@ -142,7 +154,7 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
       return [
         CheckupClaim(
           family: .nativeMode, id: CheckupCheckID.nativeMode,
-          verdict: .refused("apply refused: \(Self.reason(error))"))
+          verdict: Self.applyFailure(error))
       ]
     }
     guard let achieved = configurator.currentMode(for: displayID) else {
@@ -195,7 +207,7 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
         claims.append(
           CheckupClaim(
             family: .refresh, id: id,
-            verdict: .refused("\(Self.hz(rate)) Hz: apply refused: \(Self.reason(error))")))
+            verdict: Self.applyFailure(error, prefix: "\(Self.hz(rate)) Hz: ")))
         continue
       }
       guard let achieved = configurator.currentMode(for: displayID)?.refreshHz else {

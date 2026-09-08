@@ -86,13 +86,16 @@ enum DisplayModeCopy {
 
   /// A11y contract 8: posted when the answerable banner appears. The 10- and
   /// 3-second re-announcements reuse `countdown(_:)`.
+  ///
+  /// Names the resolution, never says the display changed to it: an unhonoured
+  /// commit leaves something else on the glass, and the listener cannot check.
   static func previewAnnouncement(mode: DisplayMode, seconds: Int) -> String {
     let spoken = ModeSpeech.spoken(
       logicalWidth: mode.logicalWidth,
       logicalHeight: mode.logicalHeight,
       refreshHz: mode.refreshHz
     )
-    return "Display changed to \(spoken). Keep this resolution? \(countdown(seconds))"
+    return "Keep \(spoken)? \(countdown(seconds))"
   }
 
   // The CoreGraphics code stays out of these sentences: it is diagnostic, and
@@ -101,9 +104,11 @@ enum DisplayModeCopy {
   // Computed, not stored: `LocalizedStringKey` is not `Sendable`, so a static
   // `let` of one is a concurrency error under complete checking.
 
-  /// A `begin()` that failed. Nothing was applied, so nothing needs answering.
+  /// A `begin()` that failed. No preview is armed, so there is nothing to
+  /// answer. No claim that nothing changed: the readback can fail on a commit
+  /// CoreGraphics already made.
   static var startFailure: LocalizedStringKey {
-    "\(AppInfo.productName) could not switch this display. Nothing changed."
+    "\(AppInfo.productName) could not switch this display to the resolution you picked. Check what it is showing before trying again."
   }
 
   /// One sentence for either reason a selection took no effect: a new reason
@@ -116,17 +121,26 @@ enum DisplayModeCopy {
   }
 
   /// The tooltip beside it: diagnostic, not part of the statement.
+  ///
+  /// Through `diagnostic(_:)`: ending a preview on ANOTHER display can commit
+  /// without taking, and that failure has no CoreGraphics code to print.
   static func startFailureDiagnostic(_ reason: DisplayModeCoordinator.StartFailure.Reason) -> String {
     switch reason {
-    case let .failed(error): "CoreGraphics error \(error.cgErrorCode)"
-    case let .blocked(claimant): "Held by \(claimant.rawValue)"
+    case let .failed(error):
+      if let unhonoured = error.unhonouredCommit {
+        let landed = unhonoured.achieved.map { "\(size($0)), \(refresh($0.refreshHz))" }
+        return "CoreGraphics reported success; display shows \(landed ?? "an unreadable resolution")"
+      }
+      return "CoreGraphics error \(error.cgErrorCode)"
+    case let .blocked(claimant): return "Held by \(claimant.rawValue)"
     }
   }
 
-  /// A `confirm()`/`revert()`/expiry that threw. The preview is still on the
-  /// display and nothing auto-retries, so this must invite another attempt.
+  /// A `confirm()`/`revert()`/expiry that threw. Nothing auto-retries, so this
+  /// must invite another attempt. It does not say which resolution is on the
+  /// glass: the readback can fail on a commit CoreGraphics already made.
   static var resolveFailure: LocalizedStringKey {
-    "\(AppInfo.productName) could not complete that change. The display is still showing the preview. Try again."
+    "\(AppInfo.productName) could not complete that change. Check this display, then try again."
   }
 
   /// Said only alongside `resolveFailure`: the countdown is spent, so the user
@@ -155,9 +169,11 @@ enum DisplayModeCopy {
   }
 
   /// The apply failed. Distinct from `reapplyUnavailable` because the mode
-  /// still exists, so trying again from the list is worth doing.
+  /// still exists, so trying again from the list is worth doing. No claim about
+  /// where the display was left: the readback can fail on a commit that went
+  /// through, unattended.
   static func reapplyFailed(requested: DisplayModeDescriptor) -> LocalizedStringKey {
-    "\(AppInfo.productName) could not restore the resolution saved for this display (\(size(requested)), \(refresh(requested.refreshHz))). Nothing was changed."
+    "\(AppInfo.productName) could not restore the resolution saved for this display (\(size(requested)), \(refresh(requested.refreshHz))). Pick it from the list of resolutions to try again."
   }
 
   /// One sentence for whichever happened, so both surfaces say the same thing.

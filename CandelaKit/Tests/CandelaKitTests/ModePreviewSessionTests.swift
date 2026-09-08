@@ -29,6 +29,7 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
   private var _current: DisplayMode?
   private var _failWith: DisplayConfigError?
   private var _failOnlyDisplay: CGDirectDisplayID?
+  private var _divergeNextApplyTo: DisplayMode?
   private var _available: [DisplayMode] = []
   private var _appliedMirroring: [AppliedMirroring] = []
   private var _configuredDisplays: [ConfiguredDisplay] = []
@@ -62,6 +63,15 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
   var failOnlyDisplay: CGDirectDisplayID? {
     get { lock.withLock { _failOnlyDisplay } }
     set { lock.withLock { _failOnlyDisplay = newValue } }
+  }
+
+  /// Accept the next apply, COMMIT it, and put the display on a different mode:
+  /// the measured `CGCompleteDisplayConfiguration` behaviour. One-shot, like
+  /// `divergeNextMirroringTo`, so the recovery can land. Distinct from
+  /// `failWith`, which refuses before anything moves.
+  var divergeNextApplyTo: DisplayMode? {
+    get { lock.withLock { _divergeNextApplyTo } }
+    set { lock.withLock { _divergeNextApplyTo = newValue } }
   }
 
   var available: [DisplayMode] {
@@ -116,6 +126,14 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
       }
       _applied.append(Applied(modeID: mode.ioModeID, scope: scope))
       _appliedDisplayIDs.append(displayID)
+      // Recorded and moved BEFORE the throw, the way production does it: this
+      // transaction committed, and only then did the readback disagree.
+      if let diverted = _divergeNextApplyTo {
+        _divergeNextApplyTo = nil
+        _current = diverted
+        throw DisplayConfigError(
+          unhonouredCommit: .init(requested: mode, achieved: diverted))
+      }
       _current = mode
     }
   }
@@ -347,6 +365,37 @@ struct ModePreviewSessionTests {
     let result = await session.begin(mode: mode(2), on: 7)
     #expect(result.failureError == DisplayConfigError(cgErrorCode: 1001))
     #expect(fake.applied.isEmpty)
+  }
+
+  /// The readback can fail on a commit that WENT THROUGH. Refusing the preview
+  /// there would leave a mode nobody picked on the glass with no countdown.
+  @Test func aCommittedButUnhonouredApplyArmsTheRevertRatherThanRefusing() async {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    fake.divergeNextApplyTo = mode(9)
+    let session = ModePreviewSession(configurator: fake, countdownSeconds: 1)
+
+    let result = await session.begin(mode: mode(2), on: 7)
+    #expect(result.failureError == nil)
+    #expect(await session.hasOutstandingPreview)
+    #expect(await session.isCountingDown)
+    // Back to the mode captured BEFORE the apply, never the one CoreGraphics
+    // substituted for it.
+    #expect(await session.tick() == .reverted)
+    #expect(fake.applied.last == .init(modeID: 1, scope: .session))
+  }
+
+  /// Keep re-applies what the user ASKED for, so an unhonoured commit cannot
+  /// become permanent by being kept: the session-scope apply verifies again.
+  @Test func keepingAfterAnUnhonouredCommitCommitsTheRequestedMode() async {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    fake.divergeNextApplyTo = mode(9)
+    let session = ModePreviewSession(configurator: fake)
+    _ = await session.begin(mode: mode(2), on: 7)
+
+    #expect(await session.confirm(answer(2)) == .committed)
+    #expect(fake.applied.last == .init(modeID: 2, scope: .session))
   }
 
   @Test func tickingAfterResolutionDoesNothing() async {

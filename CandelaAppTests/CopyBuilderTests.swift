@@ -397,7 +397,10 @@ struct CopyBuilderTests {
   @Test func displayModePreviewAnnouncementSpeaksTheModeAndTheDeadline() {
     let spoken = DisplayModeCopy.previewAnnouncement(mode: Self.mode, seconds: 15)
     #expect(spoken.contains("2,560 by 1,440 at 60 hertz"))
-    #expect(spoken.contains("Keep this resolution?"))
+    #expect(spoken.hasPrefix("Keep 2,560 by 1,440 at 60 hertz?"))
+    // Spoken to someone who cannot look: an unhonoured commit leaves something
+    // else on the glass.
+    #expect(!spoken.contains("Display changed to"))
     #expect(spoken.contains(DisplayModeCopy.countdown(15)))
     // No glyphs in a spoken string: the times sign is read inconsistently.
     #expect(!spoken.contains("×"))
@@ -423,6 +426,9 @@ struct CopyBuilderTests {
 
   @Test func displayModeStartFailureStatesEitherReason() {
     #expect(render(DisplayModeCopy.startFailure).contains("could not switch this display"))
+    // The readback can fail on a commit that went through, so no "nothing changed".
+    #expect(!render(DisplayModeCopy.startFailure).contains("Nothing changed"))
+    #expect(render(DisplayModeCopy.startFailure).contains("Check what it is showing"))
     #expect(
       render(DisplayModeCopy.startFailure(.failed(DisplayConfigError(cgErrorCode: 1001))))
         == render(DisplayModeCopy.startFailure))
@@ -435,11 +441,24 @@ struct CopyBuilderTests {
       DisplayModeCopy.startFailureDiagnostic(.failed(DisplayConfigError(cgErrorCode: 1001)))
         == "CoreGraphics error 1001")
     #expect(DisplayModeCopy.startFailureDiagnostic(.blocked(by: .rotation)) == "Held by rotation")
+
+    // A commit that went through unhonoured has no error code worth printing:
+    // CoreGraphics reported success, and the finding is which resolution the
+    // display was left on.
+    let unhonoured = DisplayModeCopy.startFailureDiagnostic(
+      .failed(
+        DisplayConfigError(
+          unhonouredCommit: .init(requested: Self.mode, achieved: Self.mode))))
+    #expect(!unhonoured.contains("CoreGraphics error"))
+    #expect(unhonoured.contains("reported success"))
+    #expect(unhonoured.contains(DisplayModeCopy.size(Self.mode)))
   }
 
   @Test func displayModeResolveFailuresInviteAnotherAttempt() {
-    #expect(render(DisplayModeCopy.resolveFailure).contains("still showing the preview"))
-    #expect(render(DisplayModeCopy.resolveFailure).contains("Try again"))
+    // The readback can fail on a commit that went through, so no claim about
+    // what is showing.
+    #expect(!render(DisplayModeCopy.resolveFailure).contains("still showing the preview"))
+    #expect(render(DisplayModeCopy.resolveFailure).contains("then try again"))
     #expect(render(DisplayModeCopy.expiryAlreadyRan).contains("already run"))
   }
 
@@ -463,7 +482,10 @@ struct CopyBuilderTests {
     #expect(unavailable.contains("left this display as it found it"))
 
     let failed = render(DisplayModeCopy.reapplyFailed(requested: Self.descriptor))
-    #expect(failed.contains("Nothing was changed"))
+    // Unattended, and the readback can fail after the commit: must not say the
+    // display did not move.
+    #expect(!failed.contains("Nothing was changed"))
+    #expect(failed.contains("Pick it from the list of resolutions"))
 
     // One sentence per notice, and each routes to its own builder.
     #expect(
