@@ -102,7 +102,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     let permission = model.accessibility
     flow.onCommit = { router.route($0) }
     flow.onRequestAccessibility = { permission.promptIfNeeded() }
-    flow.onOpenAccessibilitySettings = { AccessibilityPermission.openSystemSettings() }
+    flow.onOpenAccessibilitySettings = { permission.openSystemSettings() }
     // The request and nothing else. The return value means "already
     // granted", not "granted now" (it is false when the dialog was merely
     // shown), so nothing may gate on it; the telemetry pref itself is written

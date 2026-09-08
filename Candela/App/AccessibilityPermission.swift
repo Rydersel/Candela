@@ -50,10 +50,16 @@ final class AccessibilityPermission {
     guard !isGranted else { return }
     // Deliberately the unmanaged constant, not a string literal.
     let promptKey = kAXTrustedCheckOptionPrompt.takeRetainedValue() as String
+    let granted = AXIsProcessTrustedWithOptions([promptKey: true] as CFDictionary)
+    // Only where the prompt actually went up. A false answer IS the prompt being
+    // shown, and its button opens the Accessibility list; a true answer showed
+    // nothing and sent nobody anywhere, so the clock has no reason to move (and
+    // `applyGranted` clears it below in any case).
+    if !granted { reevaluateBackstop(after: .sentToSystemSettings) }
     // Through `applyGranted`, not a bare assignment: if this call observes the
     // grant already present, the transition still has to reach `onChange` or the
     // tap never starts and `recheck` sees no change to report.
-    applyGranted(AXIsProcessTrustedWithOptions([promptKey: true] as CFDictionary))
+    applyGranted(granted)
   }
 
   /// Calls `onChange` on every TRANSITION, grant and revocation both. Never fires
@@ -80,7 +86,11 @@ final class AccessibilityPermission {
     scheduleBackstop()
   }
 
-  static func openSystemSettings() {
+  /// Opens the Accessibility list, and reopens the hunt on the way: this is the
+  /// route to the grant, so the backstop has to be at the hunting cadence when the
+  /// user comes back rather than resting at thirty seconds.
+  func openSystemSettings() {
+    reevaluateBackstop(after: .sentToSystemSettings)
     NSWorkspace.shared.open(
       URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
     )

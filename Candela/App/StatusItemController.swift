@@ -1513,6 +1513,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     case .reconfigure:
       mediaKeyTap.update(config: config)
       model.noteTapArmed(config)
+    case .recordEmpty:
+      // Nothing to stop: no tap was ever armed. Recording the empty set is what
+      // separates keys released on purpose from a tap that could not run.
+      model.noteTapArmed(config)
     case .nothing:
       // The stored config can carry a stale alternate-brightness flag while no tap
       // exists; nothing reads it, and the next start recomputes the whole config.

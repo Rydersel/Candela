@@ -55,8 +55,20 @@ struct TapLifecyclePolicyTests {
   @Test func aTapThatFailedToArmIsRetriedOnTheNextEdge() {
     #expect(action(previous: nil, next: brightness) == .start)
     #expect(action(previous: nil, next: [.mute]) == .start)
-    // Still nothing to watch, so still nothing to build.
-    #expect(action(previous: nil, next: []) == .nothing)
+  }
+
+  /// Nothing to watch and no tap to watch with. Nothing is built, but the empty set
+  /// is still committed: left unrecorded it reads as a tap that could not run, and
+  /// diagnostics says "not running" for keys released on purpose.
+  @Test func wantingNothingWithNoTapRecordsTheEmptySet() {
+    #expect(action(previous: nil, next: []) == .recordEmpty)
+  }
+
+  /// The grant outranks it: with no grant no tap can run, which is what "not
+  /// running" means, so there is no empty set to commit.
+  @Test func nothingIsRecordedWithoutTheGrant() {
+    #expect(action(previous: nil, next: [], grantHeld: false) == .nothing)
+    #expect(action(previous: [], next: [], grantHeld: false) == .nothing)
   }
 
   /// The one failure a retry cannot fix; without the latch every reconfigure and

@@ -92,6 +92,29 @@ struct AccessibilityBackstopPolicyTests {
     ))
   }
 
+  /// The prompt and the two buttons that open the Accessibility list: the user is
+  /// at System Settings by construction, so the backstop polls fast for their
+  /// return however long the grant has been gone.
+  @Test func beingSentToSystemSettingsReopensTheHunt() {
+    #expect(cadenceAfterEdge(.sentToSystemSettings) == 2)
+    #expect(AccessibilityBackstopPolicy.reopensHunt(
+      edge: .sentToSystemSettings, granted: false, requiresAccessibility: true
+    ))
+  }
+
+  /// Same two halves as the key-mode write. The all-custom case is the live one:
+  /// the onboarding flow can offer the list before any key family wants the grant.
+  @Test func beingSentToSystemSettingsReopensNothingWithoutBothStateHalves() {
+    #expect(cadenceAfterEdge(.sentToSystemSettings, granted: true) == 10)
+    #expect(cadenceAfterEdge(.sentToSystemSettings, requires: false) == nil)
+    #expect(AccessibilityBackstopPolicy.reopensHunt(
+      edge: .sentToSystemSettings, granted: true, requiresAccessibility: true
+    ) == false)
+    #expect(AccessibilityBackstopPolicy.reopensHunt(
+      edge: .sentToSystemSettings, granted: false, requiresAccessibility: false
+    ) == false)
+  }
+
   /// The state halves, on the edge that can carry them: a held grant is not being
   /// hunted for, and an all-custom rig runs no timer for a re-stamp to move.
   @Test func aKeyModeWriteReopensNothingWithoutBothStateHalves() {

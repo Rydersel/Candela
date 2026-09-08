@@ -50,11 +50,27 @@ struct SettingsRootView: View {
 
   @Environment(AppModel.self) private var model
 
-  /// Whether this window is on screen, for the poller's cadence. A CLOSED window
-  /// reports `.inactive` (the object outlives the close), as does one behind
-  /// another app. Looser than the canvas's `.key` threshold on purpose: a window
-  /// behind another Candela window still shows its values.
+  /// The FALLBACK visibility signal, and only that. Every window of a
+  /// non-frontmost app reports `.inactive`, so on its own this reads a settings
+  /// page open beside another app as closed, and the poller then serves a hero
+  /// slider that is on screen at the idle interval.
   @Environment(\.controlActiveState) private var activeState
+
+  /// What the hosting window says about itself: on screen and not fully covered.
+  /// nil until a window has attached, which is the whole window in which the
+  /// activation fallback speaks.
+  @State private var windowVisibility: Bool?
+
+  /// The window's own answer wherever there is one.
+  static func isSettingsOnScreen(
+    windowVisibility: Bool?, activeState: ControlActiveState
+  ) -> Bool {
+    windowVisibility ?? (activeState != .inactive)
+  }
+
+  private var isOnScreen: Bool {
+    Self.isSettingsOnScreen(windowVisibility: windowVisibility, activeState: activeState)
+  }
 
   private func noteSettingsVisible(_ visible: Bool) {
     model.surfaceVisibility.setSettingsVisible(visible)
@@ -114,9 +130,9 @@ struct SettingsRootView: View {
     .preferredColorScheme(.dark)
     // The window is a poll consumer while up; becoming visible also restarts the
     // job so the first frame is not a slow interval stale.
-    .onAppear { noteSettingsVisible(activeState != .inactive) }
-    .onChange(of: activeState) { _, state in
-      noteSettingsVisible(state != .inactive)
+    .onAppear { noteSettingsVisible(isOnScreen) }
+    .onChange(of: isOnScreen) { _, visible in
+      noteSettingsVisible(visible)
     }
     // Belt on the flag: a consumer left true is a poller that never slows down.
     .onDisappear { model.surfaceVisibility.setSettingsVisible(false) }
@@ -166,7 +182,8 @@ struct SettingsRootView: View {
       SettingsWindowTitleHost(
         displayKey: presentation.displayKey,
         fallbackTitle: selectedPaneTitle,
-        navigationToken: currentPathDepth))
+        navigationToken: currentPathDepth,
+        onWindowVisibility: { windowVisibility = $0 }))
     .onAppear {
       if let pending = SettingsOpener.pendingSelection {
         SettingsOpener.pendingSelection = nil
@@ -761,11 +778,17 @@ private struct SettingsWindowTitleHost: View {
   /// Also covers the same-frame race where the key has left the connected states.
   let fallbackTitle: String
   let navigationToken: Int
+  /// Passed straight through: the configurator is where the hosting window is
+  /// already reached, so the visibility signal needs no second window route.
+  let onWindowVisibility: @MainActor (Bool) -> Void
 
   @Environment(AppModel.self) private var model
 
   var body: some View {
-    SettingsWindowConfigurator(title: title, navigationToken: navigationToken)
+    SettingsWindowConfigurator(
+      title: title,
+      navigationToken: navigationToken,
+      onWindowVisibility: onWindowVisibility)
   }
 
   private var title: String {
@@ -814,20 +837,25 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
   /// contract promptly. Measured: a push flips `titleVisibility` back to visible
   /// and draws the window title at the leading edge.
   let navigationToken: Int
+  /// Reports whether the window is on screen and not fully covered. Called only
+  /// on a change, and never from inside a SwiftUI update pass.
+  let onWindowVisibility: @MainActor (Bool) -> Void
 
   func makeNSView(context: Context) -> NSView {
     let coordinator = context.coordinator
+    coordinator.reportVisibility = onWindowVisibility
     coordinator.desiredTitle = title
     let view = WindowAttachedView()
     // The view has no window during `makeNSView`, and asking again after a
     // `DispatchQueue.main.async` hop answered nil whenever the hop lost the
     // race, with nothing to retry it.
-    view.onAttach = { [weak coordinator] window in coordinator?.apply(to: window) }
+    view.onAttach = { [weak coordinator] window in coordinator?.attach(to: window) }
     return view
   }
 
   func updateNSView(_ view: NSView, context: Context) {
     let coordinator = context.coordinator
+    coordinator.reportVisibility = onWindowVisibility
     coordinator.desiredTitle = title
     if let window = view.window { coordinator.apply(to: window) }
   }
@@ -860,13 +888,23 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
   /// only hides the disagreement, and the frame where AppKit wins the race
   /// still shows a window named for a pane that is not on screen.
   final class Coordinator {
-    // Nonisolated storage so `deinit` can remove the observer: a `@MainActor`
+    // Nonisolated storage so `deinit` can remove the observers: a `@MainActor`
     // property is unreachable from a nonisolated deinit under Swift 6.
-    // `removeObserver` is thread-safe, and both properties are only ever
-    // WRITTEN from `apply(to:)`, which is main-actor.
+    // `removeObserver` is thread-safe, and every property below is only ever
+    // WRITTEN from a main-actor method of this class.
     private var observer: NSObjectProtocol?
+    /// The occlusion and close observations, held apart from the update-pass one
+    /// so all three come down together with the window they watch.
+    private var visibilityObservers: [NSObjectProtocol] = []
     private weak var observedWindow: NSWindow?
     private var title = ""
+    /// Last value handed out, so the update-pass belt below can re-assert the
+    /// answer every pass without waking SwiftUI for a value it already has.
+    private var reportedVisibility: Bool?
+
+    /// Replaced on every update, so a report lands on the live view rather than
+    /// the one that was on screen when the window attached.
+    @MainActor var reportVisibility: @MainActor (Bool) -> Void = { _ in }
 
     /// Re-applied to the window the moment it changes, so a dropped write
     /// cannot outlive one update.
@@ -893,6 +931,32 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
     /// coordinator alive.
     private struct WeakCoordinatorBox: @unchecked Sendable {
       weak var coordinator: Coordinator?
+    }
+
+    /// The window has arrived: assert the contract at once, and report the
+    /// visibility on a hop. `viewDidMoveToWindow` runs inside the SwiftUI update
+    /// pass that attached the view, and a state write there is undefined; the
+    /// hop costs one run-loop turn, during which the activation fallback answers.
+    @MainActor func attach(to window: NSWindow) {
+      apply(to: window)
+      Task { @MainActor [weak self] in
+        guard let self, let window = self.observedWindow else { return }
+        self.report(self.isOnScreen(window))
+      }
+    }
+
+    /// Whether anyone can see this window: on screen, and not fully covered by
+    /// an opaque window in front of it. `isVisible` is the ordered-out half, and
+    /// it is not redundant: occlusion is tracked for windows on screen, so a
+    /// window that has gone away is not a state to read as visible.
+    @MainActor private func isOnScreen(_ window: NSWindow) -> Bool {
+      window.isVisible && window.occlusionState.contains(.visible)
+    }
+
+    @MainActor private func report(_ visible: Bool) {
+      guard reportedVisibility != visible else { return }
+      reportedVisibility = visible
+      reportVisibility(visible)
     }
 
     @MainActor func apply(to window: NSWindow) {
@@ -984,6 +1048,8 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
     @MainActor private func observe(_ window: NSWindow) {
       guard observedWindow !== window else { return }
       if let observer { NotificationCenter.default.removeObserver(observer) }
+      for observer in visibilityObservers { NotificationCenter.default.removeObserver(observer) }
+      visibilityObservers = []
       observedWindow = window
       let box = WeakWindowBox(window: window)
       let owner = WeakCoordinatorBox(coordinator: self)
@@ -996,12 +1062,36 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
           guard let coordinator = owner.coordinator, let window = box.window else { return }
           coordinator.apply(to: window)
           coordinator.restoreMinimumSize(on: window)
+          // The belt on the way back IN. A window ordered back on screen is
+          // updated, whatever the occlusion notification did or did not post,
+          // and a stale `false` here is a hero slider served at the idle
+          // interval. Deduplicated, so a per-pass call is not a per-pass write.
+          coordinator.report(coordinator.isOnScreen(window))
         }
       }
+      visibilityObservers.append(
+        NotificationCenter.default.addObserver(
+          forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main
+        ) { _ in
+          MainActor.assumeIsolated {
+            guard let coordinator = owner.coordinator, let window = box.window else { return }
+            coordinator.report(coordinator.isOnScreen(window))
+          }
+        })
+      // The belt on the way OUT: a closing window is not promised to post an
+      // occlusion change, and it stops being updated, so neither route above can
+      // be trusted to say it has gone. `willClose` always arrives.
+      visibilityObservers.append(
+        NotificationCenter.default.addObserver(
+          forName: NSWindow.willCloseNotification, object: window, queue: .main
+        ) { _ in
+          MainActor.assumeIsolated { owner.coordinator?.report(false) }
+        })
     }
 
     deinit {
       if let observer { NotificationCenter.default.removeObserver(observer) }
+      for observer in visibilityObservers { NotificationCenter.default.removeObserver(observer) }
     }
   }
 }

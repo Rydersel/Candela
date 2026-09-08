@@ -4,6 +4,10 @@ public enum TapLifecycleAction: Sendable, Equatable {
   case start
   case stop
   case reconfigure
+  /// Nothing is watched and no tap exists, so there is nothing to do to one. The
+  /// empty set is committed anyway: "watching nothing on purpose" and "no tap could
+  /// run" are different answers, and diagnostics reports them apart.
+  case recordEmpty
   case nothing
 }
 
@@ -28,7 +32,7 @@ public enum TapLifecyclePolicy {
     guard grantHeld else { return .nothing }
     // Set only where no tap exists, so there is never one here to stop.
     guard !permanentlyUnavailable else { return .nothing }
-    guard let previous else { return next.isEmpty ? .nothing : .start }
+    guard let previous else { return next.isEmpty ? .recordEmpty : .start }
     if previous.isEmpty {
       return next.isEmpty ? .nothing : .start
     }

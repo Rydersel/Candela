@@ -332,7 +332,7 @@ struct PanelView: View {
         // open behind the frontmost app. Queued: `endTracking` only asks the
         // session to end, and a synchronous open still runs inside it.
         PanelMenu.endTracking()
-        Task { @MainActor in AccessibilityPermission.openSystemSettings() }
+        Task { @MainActor in model.accessibility.openSystemSettings() }
       }
       .buttonStyle(.link)
       .font(.system(size: 12))
