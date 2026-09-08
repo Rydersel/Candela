@@ -14,6 +14,9 @@ public actor Arm64DDCService: DDCWriting {
   }
 
   private let box: ServiceBox
+  /// This display's bus floor, and only this display's: the pacer is per actor,
+  /// so a write to one panel never delays a write to another.
+  private let pacer = DDCBusPacer()
 
   private init(box: ServiceBox) {
     self.box = box
@@ -24,11 +27,12 @@ public actor Arm64DDCService: DDCWriting {
   }
 
   public func write(command: UInt8, value: UInt16) async -> Bool {
-    // start/end pair also exposes the per-transaction duration (~30 ms).
+    // start/end pair also exposes the per-transaction duration: ~14 ms, from
+    // the MAG's nine-write ramp measured at 0.129 s.
     // `.info`: the default level persists every one of these to disk at drag
     // rate, and `.debug` is invisible to the `log show` the regression rig parses.
     dragPerfLog.info("ddc.write.start value=\(value)")
-    let ok = Arm64DDC.write(service: box.service, command: command, value: value)
+    let ok = Arm64DDC.write(service: box.service, command: command, value: value, pacer: pacer)
     dragPerfLog.info("ddc.write.end value=\(value) ok=\(ok)")
     return ok
   }
@@ -38,7 +42,7 @@ public actor Arm64DDCService: DDCWriting {
   }
 
   public func readOutcome(command: UInt8) async -> DDCReadOutcome {
-    let outcome = Arm64DDC.readOutcome(service: box.service, command: command)
+    let outcome = Arm64DDC.readOutcome(service: box.service, command: command, pacer: pacer)
     // The rig's only instrument for which branch a silent panel takes. A read
     // costs a menu open or a wake, not a drag, so one line per read is cheap;
     // `.info` because `log show` does not persist `.debug`.
@@ -54,6 +58,9 @@ public actor Arm64DDCService: DDCWriting {
   }
 
   public func readCapabilityString() async -> String? {
+    // The fragment loop paces itself, but it leaves the bus busy: without this
+    // the next write would see an idle bus and skip the floor.
+    defer { pacer.recordBusUse() }
     var bytes: [UInt8] = []
     var offset: UInt16 = 0
     // Real strings run 200–800 bytes. The caps exist so a panel that never
