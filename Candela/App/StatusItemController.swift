@@ -303,9 +303,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // hotkeys and need no grant, so an all-custom rig must not be shown a TCC
       // prompt it can only refuse.
       let prefs = DisplayPrefs(persistenceKey: "app")
-      guard KeyModePolicy.requiresAccessibility(
+      let required = KeyModePolicy.requiresAccessibility(
         brightness: prefs.keyboardBrightness, volume: prefs.keyboardVolume
-      ) else { return }
+      )
+      // Ahead of the guard: the backstop must hear a key family going off as well
+      // as coming on, and nothing else reports either edge.
+      self?.model.accessibility.reevaluateBackstop(requiresAccessibility: required)
+      guard required else { return }
       self?.model.accessibility.promptIfNeeded()
     }
     settingsActions.updateStatusItem = { [weak self] in self?.updateStatusItemVisibility() }
