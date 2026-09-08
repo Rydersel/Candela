@@ -304,6 +304,47 @@ struct RefusedRegisterEvidenceTests {
     #expect(await writer.reads(of: VCP.audioSpeakerVolume) == 1)
   }
 
+  /// The other half of that exit: ending the pass must not ERASE what an earlier
+  /// try heard. Zeros outrank a refusal in the transport's fold and in the
+  /// evidence ordering above, being the more specific finding about the register:
+  /// a panel that put zeros on the bus said something about every code. Assigning
+  /// the refusal over them left this suite green and contradicted both.
+  @Test func arefusalDoesNotEraseAZerosAnswerFromEarlierInThePass() async {
+    let prefs = DisplayPrefs(defaults: InMemoryDefaults(), persistenceKey: "refused-after-zeros")
+    prefs.startupAction = .read
+    let writer = RefusingDDC([.allZeros, .refused])
+    let volume = DDCValueController(writer: writer, command: .volume, prefs: prefs)
+
+    await volume.refreshFromHardware()
+    #expect(volume.readEvidence == .allZeros)
+    #expect(await writer.reads(of: VCP.audioSpeakerVolume) == 2, "control: both tries ran")
+  }
+
+  /// The direction the pass fold runs. A refusal supersedes a silence heard
+  /// earlier in the same pass, which is the transport's own ordering: the panel
+  /// answering "not this register" is a more specific observation than a busy
+  /// wire. `DDCReadEvidence.worse` ranks it the other way, for the fold ACROSS
+  /// controllers, where a refused register must never speak for a display; using
+  /// that ordering inside the pass published `.noReply` off one contended try
+  /// and closed the latch on a finding the panel never gave.
+  @Test func arefusalSupersedesASilenceHeardEarlierInThePass() async {
+    let prefs = DisplayPrefs(defaults: InMemoryDefaults(), persistenceKey: "refused-after-silence")
+    prefs.startupAction = .read
+    let writer = RefusingDDC([.noReply, .refused])
+    let volume = DDCValueController(writer: writer, command: .volume, prefs: prefs)
+
+    await volume.refreshFromHardware()
+    #expect(volume.readEvidence == .refused, "it publishes on its first pass, as a refusal does")
+    await volume.refreshFromHardware()
+    #expect(volume.readEvidence == .refused)
+
+    // And the latch closed on the refusal, not on a silence run the contended
+    // try invented: two passes of the same finding stop the register being asked.
+    let afterTwoPasses = await writer.reads(of: VCP.audioSpeakerVolume)
+    await volume.refreshFromHardware()
+    #expect(await writer.reads(of: VCP.audioSpeakerVolume) == afterTwoPasses)
+  }
+
   /// And it latches on the same two-pass rule as the other findings, so the
   /// register is not re-asked for the life of the plug. Without this the Dell
   /// spends `pollingTries` transactions on VCP 0x62 on every pass, forever.

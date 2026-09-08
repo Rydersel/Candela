@@ -391,9 +391,12 @@ public final class DDCValueController: PendingWireDraining {
   /// `.read`: validated DDC readback. `max == 0` is a FAILED read, not a value
   /// of zero: the fork's unvalidated read clobbered saved values to 0.
   ///
-  /// Skipped after two silent passes (`DDCReadSkipLatch`). It matters more here
-  /// than for brightness: this loop spends `pollingTries` transactions per pass,
-  /// which is also why a refusal ends the loop on the try that carried it.
+  /// The value read is skipped after two silent passes (`DDCReadSkipLatch`). It
+  /// matters more here than for brightness: this loop spends `pollingTries`
+  /// transactions per pass, which is also why a refusal ends the loop on the try
+  /// that carried it. The skip covers that register alone; the VCP 0x8D mute
+  /// readback asks a different register, and a latched value register says
+  /// nothing about it.
   ///
   /// `settling` marks a pass a topology change triggered, where the wire is still
   /// renegotiating and a silence is evidence about the moment rather than the
@@ -403,83 +406,95 @@ public final class DDCValueController: PendingWireDraining {
     guard prefs.startupAction == .read, isAvailable else { return }
     let tries = prefs.pollingTries
     guard tries > 0 else { return }
-    guard !readSkip.skipsRead else { return }
-    let tuning = prefs.tuning(for: command)
-    // Fork parity: reads use only the FIRST remap code.
-    let readCode = tuning.remapCodes.first ?? command.code
-    // Staleness fence (the I9 doctrine): the read loop can
-    // span seconds on a wedged bus — a slider drag or key that lands
-    // mid-flight must win over the stale read, INCLUDING in the persisted
-    // store. Any submit bumps the generation, so a mismatch means user
-    // input superseded this read.
-    let issuedAtStart = issuedGeneration
-    // Captured HERE, not after the value loop: a toggleMute
-    // landing mid-value-loop bumps the mute generation, and a later capture
-    // would blind the 0x8D-readback guard to it — the readback could then
-    // setMuted(false)+persist over the user's fresh mute.
+    // Captured before the value loop below: a toggleMute landing mid-loop bumps
+    // the mute generation, and a later capture would blind the 0x8D-readback
+    // guard to it; the readback could then setMuted(false) and persist over the
+    // user's fresh mute.
     let muteIssuedAtStart = issuedMuteGeneration
-    // This pass's own evidence, folded from `.notAttempted` rather than from
-    // what the last pass concluded (see `readEvidence`). Only the FAILED
-    // attempts fold, worst-wins; a success supersedes them outright.
-    var passEvidence = DDCReadEvidence.notAttempted
-    // The latch counts passes, not attempts: the retries are the reliability
-    // mechanism.
-    var answered = false
-    for _ in 0 ..< tries {
-      // Silence and zeros are different facts; the transport tells them apart, and
-      // `outcome.evidence` is the one place `max == 0` folds into zeros.
-      let outcome = await writer.readOutcome(command: readCode)
-      // A refusal ends the pass the way it ends the transport's own ladder: the
-      // panel read the request and said this register is not one it carries, and
-      // no retry can change that. Assigned rather than folded, because
-      // worst-wins ranks a silence above it: with the fold, one contended try
-      // among four refusals branded the whole pass silent, and two such passes
-      // published "Not answering" about a display that had replied every time.
-      if outcome.evidence == .refused {
-        passEvidence = .refused
+    // The skip is the VALUE register's own. VCP 0x8D is a separate register with
+    // a separate answer, so a latched 0x62 must not stop the mute readback at
+    // the end of this pass.
+    if !readSkip.skipsRead {
+      let tuning = prefs.tuning(for: command)
+      // Fork parity: reads use only the FIRST remap code.
+      let readCode = tuning.remapCodes.first ?? command.code
+      // Staleness fence. A read that began before a newer write must not
+      // overwrite it: the loop can span seconds on a wedged bus, and a slider
+      // drag or key that lands mid-flight must win over the stale read,
+      // INCLUDING in the persisted store. Any submit bumps the generation, so a
+      // mismatch means user input superseded this read.
+      let issuedAtStart = issuedGeneration
+      // This pass's own evidence, folded from `.notAttempted` rather than from
+      // what the last pass concluded (see `readEvidence`). Only the FAILED
+      // attempts fold; a success supersedes them outright.
+      var passEvidence = DDCReadEvidence.notAttempted
+      // The latch counts passes, not attempts: the retries are the reliability
+      // mechanism.
+      var answered = false
+      for _ in 0 ..< tries {
+        // Silence and zeros are different facts; the transport tells them apart, and
+        // `outcome.evidence` is the one place `max == 0` folds into zeros.
+        let outcome = await writer.readOutcome(command: readCode)
+        // A refusal ends the pass the way it ends the transport's own ladder: the
+        // panel read the request and said this register is not one it carries,
+        // and no retry can change that.
+        //
+        // The ordering is the transport's, not `DDCReadEvidence.worse`: a
+        // refusal supersedes a silence and loses to zeros, because the more
+        // specific observation about the register wins and a panel that put
+        // zeros on the bus said something about every code. `worse` ranks a
+        // refusal below both silences, which is right for the fold ACROSS a
+        // display's controllers, where a refused register must never speak for
+        // the display. Inside the pass it is wrong twice over: one contended try
+        // ahead of the refusal would publish `.noReply` about a panel that
+        // replied every time, and the latch would then close on a finding the
+        // panel never gave.
+        if outcome.evidence == .refused {
+          passEvidence = passEvidence == .allZeros ? .allZeros : .refused
+          break
+        }
+        guard let result = outcome.value, result.max > 0 else {
+          // Held, not published: the latch below decides once the pass concludes.
+          passEvidence = DDCReadEvidence.worse(passEvidence, outcome.evidence)
+          continue
+        }
+        // Recorded BEFORE the staleness fence: the panel answered, and that is
+        // true whether or not user input superseded the value we were about to
+        // adopt. Returning here without recording would hide a good panel behind
+        // a race. The latch is recorded here for the same reason.
+        readSkip.record(.answered)
+        readEvidence = .answered
+        answered = true
+        // The max is real information on every validated read (the loop guard
+        // proved `max > 0`), and it is a fact about the panel rather than about
+        // anyone's intent, so it is learned before BOTH exits below: the staleness
+        // fence, which supersedes the value alone, and the artifact skip, which
+        // concerns `current` only. Either one taking the max with it leaves
+        // `readMax` nil and later writes scaled against the assumed 100.
+        readMax = Int(result.max)
+        guard issuedGeneration == issuedAtStart else { return }
+        // Muted default-strategy register 0 is the mute ARTIFACT, not
+        // information: adopting/persisting it would destroy the
+        // unmute restore target.
+        if command == .volume, isMuted, result.current == 0 { break }
+        let adopted = DimmingMath.ddcToValue(
+          result.current,
+          minDDC: Double(tuning.minDDCOverride),
+          maxDDC: Double(tuning.effectiveMaxDDC(readMax: Int(result.max))),
+          curve: tuning.curveMultiplier,
+          invert: tuning.invert
+        )
+        value = adopted
+        persist(adopted)
         break
       }
-      guard let result = outcome.value, result.max > 0 else {
-        // Held, not published: the latch below decides once the pass concludes.
-        passEvidence = DDCReadEvidence.worse(passEvidence, outcome.evidence)
-        continue
-      }
-      // Recorded BEFORE the staleness fence: the panel answered, and that is
-      // true whether or not user input superseded the value we were about to
-      // adopt. Returning here without recording would hide a good panel behind
-      // a race. The latch is recorded here for the same reason.
-      readSkip.record(.answered)
-      readEvidence = .answered
-      answered = true
-      // The max is real information on every validated read (the loop guard
-      // proved `max > 0`), and it is a fact about the panel rather than about
-      // anyone's intent, so it is learned before BOTH exits below: the staleness
-      // fence, which supersedes the value alone, and the artifact skip, which
-      // concerns `current` only. Either one taking the max with it leaves
-      // `readMax` nil and later writes scaled against the assumed 100.
-      readMax = Int(result.max)
-      guard issuedGeneration == issuedAtStart else { return }
-      // Muted default-strategy register 0 is the mute ARTIFACT, not
-      // information: adopting/persisting it would destroy the
-      // unmute restore target.
-      if command == .volume, isMuted, result.current == 0 { break }
-      let adopted = DimmingMath.ddcToValue(
-        result.current,
-        minDDC: Double(tuning.minDDCOverride),
-        maxDDC: Double(tuning.effectiveMaxDDC(readMax: Int(result.max))),
-        curve: tuning.curveMultiplier,
-        invert: tuning.invert
-      )
-      value = adopted
-      persist(adopted)
-      break
+      // No answer this pass. Zeros publish at once; a lone silence waits for a
+      // second. A settling pass that only ever heard silence is dropped instead:
+      // the latch never sees it, so it cannot pair with a contended pass to brand
+      // a panel that answers.
+      if !answered, !(settling && passEvidence == .noReply),
+         readSkip.record(passEvidence) { readEvidence = passEvidence }
     }
-    // No answer this pass. Zeros publish at once; a lone silence waits for a
-    // second. A settling pass that only ever heard silence is dropped instead:
-    // the latch never sees it, so it cannot pair with a contended pass to brand
-    // a panel that answers.
-    if !answered, !(settling && passEvidence == .noReply),
-       readSkip.record(passEvidence) { readEvidence = passEvidence }
     // The strategy in force, not the pref: 0x8D is where this display's mute
     // lives only if the display takes 0x8D. Asking a register the display
     // denies and adopting its answer would write a mute state nothing ever

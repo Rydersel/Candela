@@ -380,13 +380,18 @@ public class Arm64DDC: NSObject {
           if verdict == .refused { return outcome }
         } else {
           failedReadCalls += 1
-          // A read CALL that failed never reached a panel, so the four remaining
+          // A read CALL that failed never reached a panel, so the remaining
           // attempts re-ask a wire that is not carrying reads, at about 80 ms
-          // each, on every pass for the life of the install. One retry, because a
-          // single dropped call on a busy bus is real and the next one usually
-          // lands. A frame that arrives and fails VALIDATION keeps the full
-          // ladder: there the panel did answer, and a garbled answer is the case
-          // retries exist for.
+          // each, on every pass for the life of the install. Two, not one: the
+          // inherited ladder stopped after a single attempt only because a failed
+          // read call left the WRITE result standing as the transaction's
+          // verdict, so the caller parsed a buffer the read never touched.
+          // Counting that call as a read failure is the fix, and this cap is the
+          // one extra attempt it costs, spent because a single dropped call on a
+          // busy bus is real and the next one usually lands. A read call that
+          // SUCCEEDS and leaves the buffer untouched, or brings back a frame
+          // that fails VALIDATION, keeps the full ladder: the wire is carrying
+          // reads there, and a garbled answer is the case retries exist for.
           if failedReadCalls >= Self.maxFailedReadCalls { return outcome }
         }
       }
