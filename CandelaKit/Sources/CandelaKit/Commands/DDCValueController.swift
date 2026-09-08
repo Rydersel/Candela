@@ -393,7 +393,12 @@ public final class DDCValueController: PendingWireDraining {
   ///
   /// Skipped after two silent passes (`DDCReadSkipLatch`). It matters more here
   /// than for brightness: this loop spends `pollingTries` transactions per pass.
-  public func refreshFromHardware() async {
+  ///
+  /// `settling` marks a pass a topology change triggered, where the wire is still
+  /// renegotiating and a silence is evidence about the moment rather than the
+  /// panel. Such a pass is dropped whole: not counted, not published, the skip
+  /// untouched. Zeros and frames publish as they always did.
+  public func refreshFromHardware(settling: Bool = false) async {
     guard prefs.startupAction == .read, isAvailable else { return }
     let tries = prefs.pollingTries
     guard tries > 0 else { return }
@@ -456,8 +461,12 @@ public final class DDCValueController: PendingWireDraining {
       persist(adopted)
       break
     }
-    // No answer this pass. Zeros publish at once; a lone silence waits for a second.
-    if !answered, readSkip.record(passEvidence) { readEvidence = passEvidence }
+    // No answer this pass. Zeros publish at once; a lone silence waits for a
+    // second. A settling pass that only ever heard silence is dropped instead:
+    // the latch never sees it, so it cannot pair with a contended pass to brand
+    // a panel that answers.
+    if !answered, !(settling && passEvidence == .noReply),
+       readSkip.record(passEvidence) { readEvidence = passEvidence }
     // The strategy in force, not the pref: 0x8D is where this display's mute
     // lives only if the display takes 0x8D. Asking a register the display
     // denies and adopting its answer would write a mute state nothing ever

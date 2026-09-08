@@ -192,8 +192,13 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
       throw DisplayConfigError(cgErrorCode: result.rawValue)
     }
 
-    // THE RETURN CODE IS NOT THE EVIDENCE — the achieved mode is.
-    let achieved = CGDisplayCopyDisplayMode(displayID)?.ioDisplayModeID
+    // THE RETURN CODE IS NOT THE EVIDENCE: the achieved mode is. Same bounded
+    // settle as the published path, for the same reason: the window server lands
+    // a mode change asynchronously, so one immediate read can still describe the
+    // outgoing mode and would report an honoured apply as unhonoured.
+    let achieved = settledRevealedModeID(requested: mode) {
+      CGDisplayCopyDisplayMode(displayID)?.ioDisplayModeID
+    }
     guard achieved == mode.ioModeID else {
       Logger(subsystem: "com.rydersel.Candela", category: "topology").error(
         """
@@ -255,22 +260,9 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     }
 
     // THE RETURN CODE IS NOT THE EVIDENCE; the achieved mode is. Bounded settle
-    // rather than one read, as `applyRotation` does: the window server lands a
-    // mode change asynchronously, so a single read can still describe the
-    // outgoing mode. Half a second, because a change not landed by then is not
-    // landing. The first read is taken before any sleep, so an honoured commit
-    // pays nothing.
-    //
-    // Blocks the calling thread: the main actor for an interactive apply, a
-    // cooperative thread for the preview session and checkup runners. The
-    // alternative was reporting an unverified apply.
-    let deadline = Date().addingTimeInterval(0.5)
-    var achieved = achievedMode(displayID)
-    while ModeApplyVerification.verdict(requested: mode, achieved: achieved) == .unhonoured,
-      Date() < deadline
-    {
-      Thread.sleep(forTimeInterval: 0.05)
-      achieved = achievedMode(displayID)
+    // rather than one read, as `applyRotation` does.
+    let achieved = settled(read: { achievedMode(displayID) }) {
+      ModeApplyVerification.verdict(requested: mode, achieved: $0) == .honoured
     }
     guard ModeApplyVerification.verdict(requested: mode, achieved: achieved) == .honoured else {
       // Both geometries, here and in the error: a code alone says nothing about
@@ -288,6 +280,65 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
       throw DisplayConfigError(
         unhonouredCommit: .init(requested: mode, achieved: achieved))
     }
+  }
+
+  /// The window in which a committed mode change is still allowed to be landing.
+  /// Half a second, because a change not landed by then is not landing.
+  static let modeSettleWindow: TimeInterval = 0.5
+  static let modeSettlePoll: TimeInterval = 0.05
+
+  /// Re-reads the achieved state until it matches or the window closes, and
+  /// hands back the LAST reading either way, so the caller reports what the
+  /// display actually said rather than a stale first look.
+  ///
+  /// The window server lands a mode change asynchronously, so one immediate read
+  /// can still describe the outgoing mode. The read is taken before any sleep,
+  /// so an honoured apply pays nothing.
+  ///
+  /// Blocks the calling thread: the main actor for an interactive apply, a
+  /// cooperative thread for the preview session and checkup runners. The
+  /// alternative was reporting an unverified apply.
+  /// The revealed path's settle and its verdict together, split from the
+  /// CoreGraphics call so the pair tests without a display. The compare is
+  /// id-based and stays like with like across the loop: both sides are
+  /// `ioModeID`s in the one space CoreGraphics and CGS share, and the requested
+  /// id is fixed while only the read side moves. Geometry cannot stand in here,
+  /// because a revealed mode's CGS descriptor and the `CGDisplayMode` it lands as
+  /// do not have to spell the same size.
+  ///
+  /// Returns the LAST id read, so a caller that did not get what it asked for
+  /// can say what the display reports instead.
+  func settledRevealedModeID(
+    requested: DisplayMode,
+    window: TimeInterval = modeSettleWindow,
+    poll: TimeInterval = modeSettlePoll,
+    now: () -> Date = Date.init,
+    sleep: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) },
+    read: () -> Int32?
+  ) -> Int32? {
+    settled(window: window, poll: poll, now: now, sleep: sleep, read: read) {
+      $0 == requested.ioModeID
+    }
+  }
+
+  /// The clock and the sleep are injected so a test spends no real time here;
+  /// nothing in the app passes anything but the defaults. Real time and not an
+  /// iteration count, because the read itself costs some of the window.
+  func settled<Reading>(
+    window: TimeInterval = modeSettleWindow,
+    poll: TimeInterval = modeSettlePoll,
+    now: () -> Date = Date.init,
+    sleep: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) },
+    read: () -> Reading,
+    until landed: (Reading) -> Bool
+  ) -> Reading {
+    var observed = read()
+    let deadline = now().addingTimeInterval(window)
+    while !landed(observed), now() < deadline {
+      sleep(poll)
+      observed = read()
+    }
+    return observed
   }
 
   /// Not `currentMode(for:)`: that resolves against the deduplicated list and

@@ -494,7 +494,13 @@ public final class BrightnessController: PendingWireDraining {
   /// `brightness` or the store, so adopting the register back would fold it in
   /// permanently and `endTemporaryDim` would then "restore" to the corrupted number.
   /// Reached on every reconfiguration, which a lock dim can outlast.
-  public func refreshFromHardware() async {
+  ///
+  /// `settling` marks a pass a topology change triggered, where the wire is still
+  /// busy renegotiating: the Dell answers silence on every such pass and a frame
+  /// on the next quiet one [MEASURED]. A silence there is evidence about the
+  /// moment, not the panel, so it is dropped whole rather than counted. A frame
+  /// or zeros still publish: those the wire did carry.
+  public func refreshFromHardware(settling: Bool = false) async {
     guard temporaryDimFactor == nil else { return }
     if role == .builtIn {
       // The built-in panel has no DDC wire, so the native read is the only truth
@@ -527,7 +533,16 @@ public final class BrightnessController: PendingWireDraining {
     // the panel WAS asked and this pass's answer is the current fact about it.
     // Folding across passes published "does not reply" about panels that had since
     // replied (see `readEvidence`); a lone silence holds the previous verdict.
+    //
+    // Staleness fence, the same one `DDCValueController.refreshFromHardware`
+    // takes: a read on a wedged bus spans hundreds of milliseconds, and a write
+    // submitted meanwhile (a key press, the panel's surface fan-out) is newer
+    // than anything this read can be carrying. Any submit bumps the generation.
+    let issuedAtStart = issuedGeneration
     let outcome = await writer.readOutcome(command: tuning.remapCodes.first ?? VCP.brightness)
+    // Dropped before the latch sees it, so a settling pass leaves the count, the
+    // verdict and the skip exactly as it found them.
+    if settling, outcome.evidence == .noReply { return }
     // One read per pass, so this attempt's verdict is the pass's. The latch says
     // whether it publishes.
     let publishes = readSkip.record(outcome.evidence)
@@ -537,10 +552,16 @@ public final class BrightnessController: PendingWireDraining {
       if publishes { readEvidence = outcome.evidence }
       return
     }
+    // Recorded ahead of the fence, for the reason the latch above is: the panel
+    // answered, and that stays true whether or not a write superseded the value.
     readEvidence = .answered
+    // Everything below ADOPTS: the panel's max, the published brightness and the
+    // store. A write issued since the read began is the newer intent, so the read
+    // is dropped and the next pass re-reads.
+    guard issuedGeneration == issuedAtStart else { return }
     maxDDCValue = result.max
     // From here on `maxDDCValue` is the panel's own answer, not the 100
-    // default. Set only on the answered arm — every other exit leaves the
+    // default. Set only on the answered arm: every other exit leaves the
     // assumption standing, and says so.
     didReadMaxDDC = true
     // Read mirrors write (fork convDDCToValue): un-apply curve and invert through

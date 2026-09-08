@@ -154,13 +154,40 @@ private func runRead(
 }
 
 /// The write lands, the reply read fails, and the transaction used to return on
-/// attempt one carrying the write's success.
-@Test func aFailedReplyReadSpendsTheWholeLadder() {
+/// attempt one carrying the write's success. It is still a failed read, and it
+/// still retries: once, not four times. A read CALL that failed never reached a
+/// panel, so the remaining attempts re-ask a wire that is not carrying reads, at
+/// about 80 ms each, on every pass, for the life of the install.
+@Test func aFailedReplyReadIsRetriedOnceAndNoMore() {
   let panel = ScriptedPanel([nil])
   var reply = [UInt8](repeating: 0, count: 11)
   #expect(runRead(panel, reply: &reply) == .silent)
-  #expect(panel.writes == 5)
-  #expect(panel.reads == 5)
+  #expect(panel.writes == 2)
+  #expect(panel.reads == 2)
+}
+
+/// The other half of that rule: the retry is real, so a call that fails once and
+/// then lands still answers.
+@Test func aFailedReplyReadStillGetsItsOneRetry() {
+  let asked = replyFrame(command: 0x10, current: 40, max: 80)
+  let panel = ScriptedPanel([nil, asked])
+  var reply = [UInt8](repeating: 0, count: 11)
+  #expect(runRead(panel, reply: &reply) == .ok)
+  #expect(reply == asked)
+  #expect(panel.reads == 2)
+}
+
+/// The cap counts failed read CALLS, not attempts. A frame that arrives and
+/// fails validation keeps the full ladder (the panel did answer, and a garbled
+/// answer is what retries exist for), so a ladder that mixes the two spends its
+/// two failed calls wherever they fall.
+@Test func aFailedCallAmongBadFramesStillLeavesOneMoreCall() {
+  let lying = replyFrame(command: 0x12, current: 99, max: 99)
+  let panel = ScriptedPanel([lying, nil, lying, nil, lying])
+  var reply = [UInt8](repeating: 0, count: 11)
+  #expect(runRead(panel, reply: &reply) == .silent)
+  // Attempts 1 to 4: bad frame, failed call, bad frame, failed call and stop.
+  #expect(panel.reads == 4)
 }
 
 /// A read call that succeeds and writes nothing must not read as a panel

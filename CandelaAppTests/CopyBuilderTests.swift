@@ -415,6 +415,41 @@ struct CopyBuilderTests {
     #expect(!spoken.contains("×"))
   }
 
+  /// The caption beside the keep question is silent to a listener, so an
+  /// unhonoured commit's achieved geometry rides the announcement too. Otherwise
+  /// the one person who cannot check the screen approves a size the display is
+  /// not showing.
+  @Test func displayModePreviewAnnouncementSpeaksTheAchievedGeometryToo() {
+    let spoken = DisplayModeCopy.previewAnnouncement(
+      mode: Self.mode, seconds: 15,
+      unhonouredCommit: .init(requested: Self.mode, achieved: Self.landedMode))
+    // The question and its deadline still lead.
+    #expect(spoken.hasPrefix("Keep 2,560 by 1,440 at 60 hertz?"))
+    #expect(spoken.contains(DisplayModeCopy.countdown(15)))
+    // The same statement the caption makes, in the spoken spelling: grouped
+    // digits, words for the rate, and no times sign.
+    #expect(spoken.hasSuffix("The display is showing 1,920 by 1,080 at 30 hertz."))
+    #expect(!spoken.contains("×"))
+    #expect(!spoken.contains("Hz"))
+    // The size that was ASKED for still leads; the achieved one never replaces it.
+    #expect(spoken.contains("2,560 by 1,440"))
+
+    // A display that cannot say what it is showing gets the other sentence,
+    // never silence.
+    let unreadable = DisplayModeCopy.previewAnnouncement(
+      mode: Self.mode, seconds: 15,
+      unhonouredCommit: .init(requested: Self.mode, achieved: nil))
+    #expect(unreadable.hasSuffix(DisplayModeCopy.unreadableAchievedGeometry()))
+  }
+
+  /// The control: an honoured apply says nothing extra, so the announcement does
+  /// not imply a divergence on every preview.
+  @Test func displayModePreviewAnnouncementStaysBareWhenTheCommitWasHonoured() {
+    #expect(
+      DisplayModeCopy.previewAnnouncement(mode: Self.mode, seconds: 15, unhonouredCommit: nil)
+        == DisplayModeCopy.previewAnnouncement(mode: Self.mode, seconds: 15))
+  }
+
   @Test func displayModeMarksMakeNoQualityClaim() {
     #expect(DisplayModeCopy.addedByApp == "Added by \(AppInfo.productName)")
     #expect(DisplayModeCopy.recommended == "Recommended")
@@ -1037,6 +1072,16 @@ struct CopyBuilderTests {
       add(
         "DisplayModeCopy.previewAnnouncement(\(seconds))",
         DisplayModeCopy.previewAnnouncement(mode: Self.mode, seconds: seconds))
+      add(
+        "DisplayModeCopy.previewAnnouncement(\(seconds), unhonoured)",
+        DisplayModeCopy.previewAnnouncement(
+          mode: Self.mode, seconds: seconds,
+          unhonouredCommit: .init(requested: Self.mode, achieved: Self.landedMode)))
+      add(
+        "DisplayModeCopy.previewAnnouncement(\(seconds), unreadable)",
+        DisplayModeCopy.previewAnnouncement(
+          mode: Self.mode, seconds: seconds,
+          unhonouredCommit: .init(requested: Self.mode, achieved: nil)))
     }
     add("DisplayModeCopy.startFailure", DisplayModeCopy.startFailure)
     add("DisplayModeCopy.startFailureAfterACommit", DisplayModeCopy.startFailureAfterACommit)

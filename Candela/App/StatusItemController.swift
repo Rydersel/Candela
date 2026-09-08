@@ -458,7 +458,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         self.model.mirroring.refreshTopology()
         // Return value ignored: this loop often JOINS a pass a menu close started,
         // and a joiner gets an empty list. Cleanup rides `onDisplaysDeparted`.
-        await self.model.refresh()
+        //
+        // The ONE settling caller: this is the app's reconfiguration intake, so
+        // the DDC reads inside the pass run over a wire still renegotiating. A
+        // silence there is discarded rather than counted. Launch and menu close
+        // keep counting, and they are what earns a panel its read verdict.
+        await self.model.refresh(settling: true)
         self.refreshTapConfig()
         self.updateStatusItemVisibility()
         // OLED care: display IDs can be REASSIGNED with every display still

@@ -528,7 +528,12 @@ private struct AnswerableModeBanner: View {
     .onAppear {
       keepFocused = true
       AccessibilityNotification.Announcement(
-        DisplayModeCopy.previewAnnouncement(mode: preview.mode, seconds: preview.secondsRemaining)
+        DisplayModeCopy.previewAnnouncement(
+          mode: preview.mode, seconds: preview.secondsRemaining,
+          // The caption above says this to a reader; the announcement is the
+          // only route a listener has to it.
+          unhonouredCommit: preview.unhonouredCommit
+        )
       ).post()
     }
     // Driven by the tick this view already re-renders on, never a timer of its own.

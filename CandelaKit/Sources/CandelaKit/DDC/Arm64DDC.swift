@@ -250,6 +250,12 @@ public class Arm64DDC: NSObject {
   /// line reads as, so a floating read counts as untouched.
   static let replySentinel: UInt8 = 0xFF
 
+  /// How many failed reply-read CALLS one transaction pays for before it stops.
+  /// Counted across the whole ladder rather than consecutively: a transaction
+  /// that has seen two calls fail has learned what the wire is doing however the
+  /// other attempts went.
+  static let maxFailedReadCalls = 2
+
   /// What one attempt proved, and whether the ladder may stop on it.
   struct AttemptVerdict: Equatable {
     let outcome: TransactionOutcome
@@ -343,6 +349,7 @@ public class Arm64DDC: NSObject {
     // retry keeps the full sleep it always had. With no pacer the floor is paid
     // in full.
     var firstPacket = true
+    var failedReadCalls = 0
     for _ in 1 ... (numOfRetryAttemps ?? 4) + 1 {
       // ONE packet per logical write. The inherited default of 2 put two
       // identical packets on the bus for every write and cost 20 ms of sleep
@@ -377,6 +384,16 @@ public class Arm64DDC: NSObject {
           // cannot change it, and the caller polls this ladder several times a
           // pass. Folded first, so an earlier attempt's zeros still outlive it.
           if verdict.isRefusal { return outcome }
+        } else {
+          failedReadCalls += 1
+          // A read CALL that failed never reached a panel, so the four remaining
+          // attempts re-ask a wire that is not carrying reads, at about 80 ms
+          // each, on every pass for the life of the install. One retry, because a
+          // single dropped call on a busy bus is real and the next one usually
+          // lands. A frame that arrives and fails VALIDATION keeps the full
+          // ladder: there the panel did answer, and a garbled answer is the case
+          // retries exist for.
+          if failedReadCalls >= Self.maxFailedReadCalls { return outcome }
         }
       }
       transport.sleep(retrySleepTime ?? 20000)

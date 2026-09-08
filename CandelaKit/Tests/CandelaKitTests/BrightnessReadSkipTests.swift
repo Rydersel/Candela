@@ -501,3 +501,133 @@ private func makeValueController(
   await brightness.handleReconfigure()
   #expect(volume.readEvidence == .answered)
 }
+
+// MARK: - The settling pass
+
+/// A read pass a topology change triggered runs over a wire still renegotiating.
+/// The Dell is measured silent on every such pass and answers a frame on the next
+/// quiet one, so a silence there is evidence about the moment, not the panel.
+
+@MainActor
+@Test func aSettlingSilenceIsDiscardedWholeAndNeverLatches() async {
+  let fake = FakeDDC(readResult: nil)
+  let controller = makeLegacyPathController(writer: fake)
+  for _ in 0 ..< 4 { await controller.refreshFromHardware(settling: true) }
+  // Not published, and not counted either: the panel is still asked, which is
+  // what makes the discard a discard and not a second skip.
+  #expect(controller.readEvidence == .notAttempted)
+  #expect(await fake.recordedReadCount() == 4)
+}
+
+/// The invariant a reconfiguration used to defeat: one busy-bus miss never brands
+/// a panel. A contended menu-close pass followed by the measured-silent settling
+/// pass published "Not answering" on a panel that answers.
+@MainActor
+@Test func aContendedPassAndASettlingPassAreNotAPair() async {
+  let fake = FakeDDC(readResult: nil)
+  let controller = makeLegacyPathController(writer: fake)
+  await controller.refreshFromHardware()
+  await controller.refreshFromHardware(settling: true)
+  #expect(controller.readEvidence == .notAttempted)
+
+  await fake.setReadResult((current: 50, max: 100))
+  await controller.refreshFromHardware()
+  #expect(controller.readEvidence == .answered)
+}
+
+/// The discriminator for the test above: two COUNTING silences still publish, so
+/// the discard narrows what latches rather than disabling the latch.
+@MainActor
+@Test func twoCountingSilencesStillPublishAcrossASettlingOne() async {
+  let fake = FakeDDC(readResult: nil)
+  let controller = makeLegacyPathController(writer: fake)
+  await controller.refreshFromHardware()
+  await controller.refreshFromHardware(settling: true)
+  await controller.refreshFromHardware()
+  #expect(controller.readEvidence == .noReply)
+}
+
+/// Zeros are the panel's own word about itself and the wire carried them, so a
+/// settling pass publishes them exactly as any other pass does.
+@MainActor
+@Test func aSettlingPassStillPublishesZeros() async {
+  let fake = FakeDDC(readResult: (current: 0, max: 0))
+  let controller = makeLegacyPathController(writer: fake)
+  await controller.refreshFromHardware(settling: true)
+  #expect(controller.readEvidence == .allZeros)
+}
+
+@MainActor
+@Test func aSettlingPassStillAdoptsAFrame() async {
+  let fake = FakeDDC(readResult: (current: 50, max: 100))
+  let controller = makeLegacyPathController(writer: fake)
+  await controller.refreshFromHardware(settling: true)
+  #expect(controller.readEvidence == .answered)
+}
+
+/// The same rule at the value registers, where a pass costs `pollingTries`
+/// ladders rather than one.
+@MainActor
+@Test func aSettlingSilenceAtTheValueRegisterIsDiscardedToo() async {
+  let fake = FakeDDC(readResult: nil)
+  let controller = makeValueController(writer: fake)
+  await controller.refreshFromHardware()
+  await controller.refreshFromHardware(settling: true)
+  #expect(controller.readEvidence == .notAttempted)
+  await controller.refreshFromHardware()
+  #expect(controller.readEvidence == .noReply)
+}
+
+// MARK: - The read's staleness fence
+
+/// A writer that runs the test's own code WHILE a read is in flight. Landing a
+/// write between a read being issued and its continuation is the whole scenario,
+/// and nothing else can reach that instant.
+///
+/// `@unchecked Sendable`: the counter and the hook are touched only from calls
+/// the controller makes one at a time, and the test reads them after the await.
+private final class InterleavingDDC: DDCWriting, @unchecked Sendable {
+  private let result: (current: UInt16, max: UInt16)?
+  var duringFirstRead: (@MainActor () -> Void)?
+  private(set) var reads = 0
+
+  init(result: (current: UInt16, max: UInt16)?) { self.result = result }
+
+  func write(command _: UInt8, value _: UInt16) async -> Bool { true }
+
+  func read(command _: UInt8) async -> (current: UInt16, max: UInt16)? {
+    reads += 1
+    if let hook = duringFirstRead {
+      duringFirstRead = nil
+      await MainActor.run { hook() }
+    }
+    return result
+  }
+}
+
+/// The panel's surface fan-out and a key press both submit while a read is on a
+/// wedged bus. The read is then describing the register BEFORE that write, so
+/// adopting it would undo the user's input, in the published value and in the
+/// store.
+@MainActor
+@Test func aWriteIssuedDuringAReadDropsTheRead() async {
+  let fake = InterleavingDDC(result: (current: 20, max: 100))
+  let controller = makeLegacyPathController(writer: fake)
+  controller.setBrightness(0.8)
+  fake.duringFirstRead = { controller.setBrightness(0.6) }
+  await controller.refreshFromHardware()
+  // 0.2 is what the read carried. The write that landed mid-read is newer.
+  #expect(controller.brightness == 0.6)
+  // The panel still answered, and that is a fact about the wire either way.
+  #expect(controller.readEvidence == .answered)
+}
+
+/// The control: with nothing landing mid-read, the same read is adopted.
+@MainActor
+@Test func aReadWithNoWriteBehindItIsAdopted() async {
+  let fake = InterleavingDDC(result: (current: 20, max: 100))
+  let controller = makeLegacyPathController(writer: fake)
+  controller.setBrightness(0.8)
+  await controller.refreshFromHardware()
+  #expect(controller.brightness == 0.2)
+}

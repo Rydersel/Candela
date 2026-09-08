@@ -92,3 +92,150 @@ struct ModeApplyVerificationTests {
     #expect(!DisplayConfigError(cgErrorCode: -1).didCommit)
   }
 }
+
+/// The bounded settle both apply paths verify through. The window server lands a
+/// mode change asynchronously, so one immediate read can describe the OUTGOING
+/// mode and report an honoured apply as unhonoured.
+@Suite("Mode apply settle")
+struct ModeApplySettleTests {
+  private let configurator = CoreGraphicsDisplayConfigurator()
+
+  /// Time the test moves by hand, so the settle spends none.
+  private final class FakeClock {
+    private var seconds: TimeInterval = 0
+    func now() -> Date { Date(timeIntervalSinceReferenceDate: seconds) }
+    func advance(_ interval: TimeInterval) { seconds += interval }
+  }
+
+  /// An honoured apply pays nothing: the read is taken before any sleep.
+  @Test func aReadingThatAlreadyMatchesCostsOneRead() {
+    let clock = FakeClock()
+    var reads = 0
+    var sleeps = 0
+    let observed = configurator.settled(
+      now: clock.now, sleep: { sleeps += 1; clock.advance($0) },
+      read: {
+        reads += 1
+        return 7
+      }, until: { $0 == 7 })
+    #expect(observed == 7)
+    #expect(reads == 1)
+    #expect(sleeps == 0)
+  }
+
+  /// The whole point: a mode still landing on the first look is re-read rather
+  /// than reported as a divergence.
+  @Test func aLateArrivalIsSeenOnALaterRead() {
+    let clock = FakeClock()
+    var reads = 0
+    let observed = configurator.settled(
+      now: clock.now, sleep: { clock.advance($0) },
+      read: {
+        reads += 1
+        return reads < 3 ? 1 : 7
+      }, until: { $0 == 7 })
+    #expect(observed == 7)
+    #expect(reads == 3)
+  }
+
+  /// A change that never lands returns the LAST reading, not the first: the
+  /// caller reports what the display says now, and the error it throws carries
+  /// that geometry. Bounded, so a wedged display cannot hold the thread.
+  @Test func aChangeThatNeverLandsIsBoundedAndReturnsTheLastReading() {
+    let clock = FakeClock()
+    var reads = 0
+    var slept: TimeInterval = 0
+    let observed = configurator.settled(
+      now: clock.now,
+      sleep: {
+        slept += $0
+        clock.advance($0)
+      },
+      read: {
+        reads += 1
+        return reads
+      }, until: { _ in false })
+    #expect(observed == reads)
+    #expect(reads > 1)
+    // The bound, with one poll interval of overshoot allowed: the deadline is
+    // checked before each sleep rather than after it.
+    #expect(slept <= CoreGraphicsDisplayConfigurator.modeSettleWindow
+      + CoreGraphicsDisplayConfigurator.modeSettlePoll)
+  }
+
+  private func revealed(id: Int32) -> DisplayMode {
+    DisplayMode(
+      ioModeID: id, logicalWidth: 3440, logicalHeight: 1440,
+      pixelWidth: 6880, pixelHeight: 2880, refreshHz: 120, isNative: false)
+  }
+
+  /// Through the revealed path's OWN settle-and-verdict, not a predicate the test
+  /// wrote: the requested id is the one the loop keeps comparing against, so a
+  /// mode still landing on the first look is waited for rather than reported as a
+  /// divergence.
+  @Test func theRevealedSettleWaitsForTheRequestedId() {
+    let clock = FakeClock()
+    let mode = revealed(id: 291)
+    var reads = 0
+    let observed = configurator.settledRevealedModeID(
+      requested: mode, now: clock.now, sleep: { clock.advance($0) },
+      read: {
+        reads += 1
+        return reads < 3 ? 7 : mode.ioModeID
+      })
+    #expect(observed == mode.ioModeID)
+    #expect(reads == 3)
+  }
+
+  /// The requested side is FIXED across the loop, which is what "like with like"
+  /// means here: a read side that keeps changing to other ids never satisfies it,
+  /// and the loop ends on the bound with the last id read, which is what the
+  /// caller reports.
+  @Test func theRevealedSettleNeverAcceptsAnotherId() {
+    let clock = FakeClock()
+    let mode = revealed(id: 291)
+    var reads = 0
+    let observed = configurator.settledRevealedModeID(
+      requested: mode, now: clock.now, sleep: { clock.advance($0) },
+      read: {
+        reads += 1
+        return Int32(reads)
+      })
+    #expect(observed != mode.ioModeID)
+    #expect(observed == Int32(reads))
+    #expect(reads > 1)
+  }
+
+  /// A display that reports no mode at all is not one the mode landed on, and it
+  /// does not end the settle early either.
+  @Test func theRevealedSettleTreatsAnUnreadableModeAsNotLanded() {
+    let clock = FakeClock()
+    let mode = revealed(id: 291)
+    var reads = 0
+    let observed = configurator.settledRevealedModeID(
+      requested: mode, now: clock.now, sleep: { clock.advance($0) },
+      read: {
+        reads += 1
+        return reads < 2 ? nil : mode.ioModeID
+      })
+    #expect(observed == mode.ioModeID)
+    #expect(reads == 2)
+  }
+
+  /// An honoured revealed apply pays nothing: one read, no sleep.
+  @Test func theRevealedSettleCostsNothingOnAnHonouredApply() {
+    let clock = FakeClock()
+    let mode = revealed(id: 291)
+    var reads = 0
+    var sleeps = 0
+    let observed = configurator.settledRevealedModeID(
+      requested: mode, now: clock.now, sleep: { _ in sleeps += 1 },
+      read: {
+        reads += 1
+        return mode.ioModeID
+      })
+    #expect(observed == mode.ioModeID)
+    #expect(reads == 1)
+    #expect(sleeps == 0)
+  }
+}

@@ -114,13 +114,37 @@ enum DisplayModeCopy {
   ///
   /// Names the resolution, never says the display changed to it: an unhonoured
   /// commit leaves something else on the glass, and the listener cannot check.
-  static func previewAnnouncement(mode: DisplayMode, seconds: Int) -> String {
+  ///
+  /// When the apply DID commit onto something else, the achieved geometry is
+  /// spoken after the countdown. A sighted person reads that off the caption
+  /// beside the question; someone listening has no caption, and the question
+  /// alone would have them approve a size the display is not showing. Last, so
+  /// the question and its deadline still lead.
+  static func previewAnnouncement(
+    mode: DisplayMode, seconds: Int,
+    unhonouredCommit: DisplayConfigError.UnhonouredCommit? = nil
+  ) -> String {
     let spoken = ModeSpeech.spoken(
       logicalWidth: mode.logicalWidth,
       logicalHeight: mode.logicalHeight,
       refreshHz: mode.refreshHz
     )
-    return "Keep \(spoken)? \(countdown(seconds))"
+    let question = "Keep \(spoken)? \(countdown(seconds))"
+    guard let unhonouredCommit else { return question }
+    return "\(question) \(spokenAchievedGeometry(unhonouredCommit))"
+  }
+
+  /// The achieved-geometry sentence in spoken form. Not `achievedGeometry`: that
+  /// is display text down to the times sign and the "Hz" abbreviation, and both
+  /// are read inconsistently. Same statement, said out loud.
+  static func spokenAchievedGeometry(_ commit: DisplayConfigError.UnhonouredCommit) -> String {
+    guard let achieved = commit.achieved else { return unreadableAchievedGeometry() }
+    let spoken = ModeSpeech.spoken(
+      logicalWidth: achieved.logicalWidth,
+      logicalHeight: achieved.logicalHeight,
+      refreshHz: achieved.refreshHz
+    )
+    return "The display is showing \(spoken)."
   }
 
   /// Beside the keep question, when the apply that started the preview
