@@ -456,15 +456,23 @@ final class AppModel {
   /// refuse the second click.
   private(set) var isResetting = false
 
+  /// `isResetting` for the poll job's cadence closure, which runs off the main
+  /// actor. Written wherever the observable is, and nowhere else.
+  @ObservationIgnored private let resettingOffMain = OSAllocatedUnfairLock(initialState: false)
+
   /// Claims the latch. False means a reset is already running and this one must
   /// not start.
   func beginReset() -> Bool {
     guard !isResetting else { return false }
     isResetting = true
+    resettingOffMain.withLock { $0 = true }
     return true
   }
 
-  func endReset() { isResetting = false }
+  func endReset() {
+    isResetting = false
+    resettingOffMain.withLock { $0 = false }
+  }
 
   /// Per-display VCP 0x62 verdict from the capabilities string. Observable,
   /// so the panel's volume slider enables live the moment a probe lands. An ABSENT
@@ -838,9 +846,12 @@ final class AppModel {
     }
   }
 
+  // All three key paths read native first: published state can be an idle poll
+  // interval stale, and a step from it jumps a Control Center move back.
   func stepBrightnessAllExternal(isUp: Bool, isFine: Bool) -> [(id: CGDirectDisplayID, name: String, newValue: Double)] {
     keyEnabledStates(displays).map { state in
-      (state.id, state.display.name, state.controller.step(isUp: isUp, isFine: isFine))
+      state.controller.syncFromNativeBeforeStep()
+      return (state.id, state.display.name, state.controller.step(isUp: isUp, isFine: isFine))
     }
   }
 
@@ -857,6 +868,7 @@ final class AppModel {
       // `isDisabled` filters the loop body: a resolved-but-disabled display
       // steps nothing and shows no HUD.
       guard let slot, !keyEnabledStates([slot]).isEmpty else { return nil }
+      slot.controller.syncFromNativeBeforeStep()
       return (slot.id, slot.display.name,
               slot.controller.step(isUp: isUp, isFine: isFine))
     }
@@ -867,6 +879,7 @@ final class AppModel {
   /// online.
   func stepBrightnessBuiltIn(isUp: Bool, isFine: Bool) -> (id: CGDirectDisplayID, name: String, newValue: Double)? {
     guard let builtIn, !keyEnabledStates([builtIn]).isEmpty else { return nil }
+    builtIn.controller.syncFromNativeBeforeStep()
     return (builtIn.id, builtIn.display.name,
             builtIn.controller.step(isUp: isUp, isFine: isFine))
   }
@@ -1222,6 +1235,10 @@ final class AppModel {
   /// must never outlive the pass that dropped it.
   @ObservationIgnored private var pollerTask: Task<Void, Never>?
 
+  /// Whether a surface showing a brightness value is on screen; one of the
+  /// poller's cadence signals.
+  let surfaceVisibility = SurfaceVisibility()
+
   deinit {
     pollerTask?.cancel()
   }
@@ -1560,6 +1577,23 @@ final class AppModel {
     )
   }
 
+  /// A consumer appearing (a surface opening, brightness sync turned on) must not
+  /// wait out the idle interval already in flight, which is up to 10 seconds on
+  /// mains and 30 on battery.
+  ///
+  /// Rebuilding is the whole mechanism: the cancel drops the sleeping task and the
+  /// fresh `run()` ticks before it sleeps at all, so the value is current the moment
+  /// the surface draws. Waking the sleep instead would need a signal channel into
+  /// the actor, and slicing the sleep would put back the once-a-second timer this
+  /// work exists to remove.
+  ///
+  /// Cheap and main-actor-synchronous: it maps the live display list and starts a
+  /// task. Safe to call from inside a menu tracking session for that reason, which
+  /// is where the panel's open edge arrives.
+  func notePollConsumerAppeared() {
+    restartPoller()
+  }
+
   /// Rebuilds the native-brightness poll job for the current display set. Control
   /// Center and ambient changes bypass us entirely, so looking is the only way to
   /// stay in sync on the native path.
@@ -1570,6 +1604,8 @@ final class AppModel {
       return
     }
     let states = allControlledStates
+    // The built-in must not vote on the cadence; see `Target.isExternal`.
+    let externalIDs = Set(displays.map(\.id))
     let targets = states.map { state -> BrightnessPoller.Target in
       let controller = state.controller
       return BrightnessPoller.Target(
@@ -1610,7 +1646,8 @@ final class AppModel {
             )
           }
         },
-        isConverging: { controller.isConvergingFromExternal() }
+        isConverging: { controller.isConvergingFromExternal() },
+        isExternal: externalIDs.contains(state.id)
       )
     }
     let poller = BrightnessPoller(
@@ -1620,8 +1657,38 @@ final class AppModel {
       // suspended (mid-reconfigure burst or asleep): the poller's skip rule.
       isEpochCurrent: { [displayManager] in
         displayManager.isEpochCurrent(displayManager.currentEpoch())
-      }
+      },
+      // Both read live on every tick rather than captured here, so a pref write or
+      // a surface opening changes the cadence without restarting the job. Restarting
+      // it is what would be dangerous: an external entering HDR reaches the native
+      // path through no call of ours, and only a RUNNING poller notices.
+      // The SAME predicate the fan-out is gated on below, reset latch included: a
+      // consumer that is refusing to consume is not a consumer.
+      isSyncEnabled: { [appPrefs, resettingOffMain] in
+        appPrefs.enableBrightnessSync && !resettingOffMain.withLock { $0 }
+      },
+      isSurfaceVisible: { [surfaceVisibility] in surfaceVisibility.isVisible }
     )
     pollerTask = Task { await poller.run() }
   }
+}
+
+/// Whether a Candela surface showing a brightness value is on screen.
+///
+/// Lock-backed, not main-actor: the poller reads it off the main actor, and the
+/// panel writes it from inside a menu tracking session, where a hop would land
+/// after the menu closed.
+final class SurfaceVisibility: Sendable {
+  private struct State {
+    var isPanelOpen = false
+    var isSettingsVisible = false
+  }
+
+  private let state = OSAllocatedUnfairLock(initialState: State())
+
+  var isVisible: Bool { state.withLock { $0.isPanelOpen || $0.isSettingsVisible } }
+
+  func setPanelOpen(_ open: Bool) { state.withLock { $0.isPanelOpen = open } }
+
+  func setSettingsVisible(_ visible: Bool) { state.withLock { $0.isSettingsVisible = visible } }
 }

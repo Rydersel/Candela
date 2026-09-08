@@ -1,14 +1,21 @@
 import CoreGraphics
 import Foundation
+import os
+
+let pollLog = Logger(subsystem: "com.rydersel.Candela", category: "poll")
 
 /// Polls native brightness for displays whose controller is HDR-native,
 /// discards echoes of our own writes, and reports real external deltas to the
 /// controller. Ported from the MonitorControl fork's `refreshBrightness` poll
-/// job, the behavior oracle for both the cadence and the echo discard.
+/// job, the behavior oracle for the echo discard and for the moving/idle pair at
+/// the top of the cadence.
 ///
 /// It never smooths, never writes hardware and never decides staleness:
 /// `BrightnessController.adoptExternal` owns the easing and the generation
 /// discard.
+///
+/// Unlike the fork, the idle cadence is not one interval: `BrightnessPollCadence`
+/// lengthens it when nothing consumes the value. The task itself never stops.
 public actor BrightnessPoller {
   public struct Target: Sendable {
     public let displayID: CGDirectDisplayID
@@ -24,44 +31,70 @@ public actor BrightnessPoller {
     /// True while an earlier adoption is still easing toward its target: the
     /// echo discard must be bypassed or the chase never terminates.
     public let isConverging: @Sendable () -> Bool
+    /// Only externals vote on the cadence; see `BrightnessPollCadence.choose`.
+    public let isExternal: Bool
 
     public init(
       displayID: CGDirectDisplayID,
       expected: @escaping @Sendable () -> (value: Double?, generation: UInt64),
       isNativeActive: @escaping @Sendable () -> Bool,
       adopt: @escaping @Sendable (Double, UInt64) -> Void,
-      isConverging: @escaping @Sendable () -> Bool
+      isConverging: @escaping @Sendable () -> Bool,
+      isExternal: Bool
     ) {
       self.displayID = displayID
       self.expected = expected
       self.isNativeActive = isNativeActive
       self.adopt = adopt
       self.isConverging = isConverging
+      self.isExternal = isExternal
     }
   }
 
   private let targets: [Target]
   private let read: @Sendable (CGDirectDisplayID) -> Double?
   private let isEpochCurrent: @Sendable () -> Bool
+  private let isSyncEnabled: @Sendable () -> Bool
+  private let isSurfaceVisible: @Sendable () -> Bool
+  private let isOnBattery: @Sendable () -> Bool
   private let fastInterval: Duration
   private let idleInterval: Duration
+  private let slowIdleInterval: Duration
+  private let batteryIdleInterval: Duration
   private let tolerance: Double
+  /// Last cadence reported to the log, so a steady state costs no lines.
+  private var lastLoggedCadence: BrightnessPollCadence?
 
   /// `tolerance` covers Control Center's slider quantization plus the float
   /// round-trip through DisplayServices; larger swallows real external moves.
+  ///
+  /// The two consumer signals are read LIVE on every tick, like the per-target
+  /// native gate: a surface opening or a pref changing must not need the poll job
+  /// rebuilt, because rebuilding it is what would drop the HDR edges nothing else
+  /// reports.
   public init(
     targets: [Target],
     read: @escaping @Sendable (CGDirectDisplayID) -> Double?,
     isEpochCurrent: @escaping @Sendable () -> Bool,
+    isSyncEnabled: @escaping @Sendable () -> Bool,
+    isSurfaceVisible: @escaping @Sendable () -> Bool,
+    isOnBattery: @escaping @Sendable () -> Bool = { PowerSource.isOnBattery() },
     fastInterval: Duration = .milliseconds(100),
     idleInterval: Duration = .seconds(1),
+    slowIdleInterval: Duration = .seconds(10),
+    batteryIdleInterval: Duration = .seconds(30),
     tolerance: Double = 0.008
   ) {
     self.targets = targets
     self.read = read
     self.isEpochCurrent = isEpochCurrent
+    self.isSyncEnabled = isSyncEnabled
+    self.isSurfaceVisible = isSurfaceVisible
+    self.isOnBattery = isOnBattery
     self.fastInterval = fastInterval
     self.idleInterval = idleInterval
+    self.slowIdleInterval = slowIdleInterval
+    self.batteryIdleInterval = batteryIdleInterval
     self.tolerance = tolerance
   }
 
@@ -69,11 +102,47 @@ public actor BrightnessPoller {
   public func run() async {
     while !Task.isCancelled {
       let moving = tick()
+      let cadence = BrightnessPollCadence.choose(
+        isMoving: moving,
+        isSyncEnabled: isSyncEnabled(),
+        isSurfaceVisible: isSurfaceVisible(),
+        // Outside `tick`, which returns early mid-reconfigure: a burst must not
+        // decide the cadence after it.
+        isExternalNativeActive: externalNativeActive(),
+        isOnBattery: isOnBattery()
+      )
+      let sleep = interval(for: cadence)
+      log(cadence, sleeping: sleep)
       do {
-        try await Task.sleep(for: moving ? fastInterval : idleInterval)
+        try await Task.sleep(for: sleep)
       } catch {
         return
       }
+    }
+  }
+
+  /// The idle intervals are otherwise unobservable from outside the process.
+  /// `.fast` is not logged: it flips on every adopted value during a drag.
+  private func log(_ cadence: BrightnessPollCadence, sleeping: Duration) {
+    guard cadence != .fast, cadence != lastLoggedCadence else { return }
+    lastLoggedCadence = cadence
+    let ms = sleeping.components.seconds * 1000
+      + sleeping.components.attoseconds / 1_000_000_000_000_000
+    pollLog.info(
+      "native poll cadence \(cadence.name, privacy: .public) interval=\(ms, privacy: .public)ms"
+    )
+  }
+
+  private func externalNativeActive() -> Bool {
+    targets.contains { $0.isExternal && $0.isNativeActive() }
+  }
+
+  private func interval(for cadence: BrightnessPollCadence) -> Duration {
+    switch cadence {
+    case .fast: fastInterval
+    case .idle: idleInterval
+    case .slowIdle: slowIdleInterval
+    case .batterySlowIdle: batteryIdleInterval
     }
   }
 

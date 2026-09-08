@@ -107,6 +107,9 @@ public enum PrefEffect: Sendable, Hashable {
   /// virtual displays to the slot prefs. Carried by
   /// `virtualSlotConfigured` alone.
   case syncVirtualDisplays
+  /// `AppModel.notePollConsumerAppeared()`: rebuild the poll job so the first
+  /// fan-out does not wait out the idle interval in flight.
+  case restartBrightnessPoll
 }
 
 public enum PrefPropagation {
@@ -123,9 +126,14 @@ public enum PrefPropagation {
       // `hasVisibleSlider` derives from these two hide prefs.
       [.rebuildPanel, .updateStatusItem]
 
+    case .enableBrightnessSync:
+      // Sync is a poll consumer, so the job is rebuilt rather than left asleep on
+      // a long interval.
+      [.rebuildPanel, .restartBrightnessPoll]
+
     case .showContrast, .enableSliderSnap, .enableSliderPercent,
          .hideVolumeSlider, .friendlyName, .isDisabled, .hideOsd,
-         .enableBrightnessSync, .hideKeepAwake, .hideCombinedBrightness:
+         .hideKeepAwake, .hideCombinedBrightness:
       // `hideKeepAwake` is presentation alone: hiding the row while keep awake is ON
       // leaves the display awake, which the Menu Bar pane's caption says out loud.
       // `isDisabled` carries no `.rearmTap` deliberately: a display whose keyboard

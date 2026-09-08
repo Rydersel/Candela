@@ -1012,7 +1012,22 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     return false
   }
 
+  /// The panel is a consumer of every polled brightness value, so the poller has
+  /// to be told while it is on screen. Set synchronously, not through a task hop:
+  /// menu tracking starves main-actor work, so a hop would land only once the menu
+  /// had closed again.
+  ///
+  /// The restart is what makes the panel's first frame current: the flag alone
+  /// changes only the NEXT interval, and the idle one already in flight can be 10
+  /// seconds long. The built-in's row is the one that shows it, since Control
+  /// Center and ambient light move that value with nothing of ours involved.
+  func menuWillOpen(_: NSMenu) {
+    model.surfaceVisibility.setPanelOpen(true)
+    model.notePollConsumerAppeared()
+  }
+
   func menuDidClose(_: NSMenu) {
+    model.surfaceVisibility.setPanelOpen(false)
     // Re-discover displays and re-read hardware once tracking has ended and
     // the run loop is back in default mode, so the next open starts fresh.
     Task {

@@ -601,6 +601,31 @@ public final class BrightnessController: PendingWireDraining {
     return value
   }
 
+  /// Quantization noise on a native read: Control Center's slider granularity plus
+  /// the float round-trip through DisplayServices. Same size and same reason as the
+  /// poller's echo tolerance; anything smaller is not a move somebody made.
+  private static let nativeReadNoise = 0.008
+
+  /// Snaps published state onto the panel's live native value before a `step()`.
+  /// The poller's idle cadence can leave that state tens of seconds stale, and a
+  /// step from it jumps a Control Center move back. Native path only, so never the
+  /// DDC wire. No persist: the `step()` that follows writes the final value.
+  public func syncFromNativeBeforeStep() {
+    // Under a temporary dim the read is our own write; folding it in corrupts what
+    // `endTemporaryDim` restores.
+    guard isNativeActive(), temporaryDimFactor == nil else { return }
+    guard let read = backends.readNative?(displayID) else { return }
+    let clamped = min(max(Double(read), 0), 1)
+    guard abs(clamped - brightness) > Self.nativeReadNoise else { return }
+    brightness = clamped
+    // Retire any adoption queued from an earlier poll tick; it describes an older read.
+    echo.withLock { state in
+      state.value = clamped
+      state.generation &+= 1
+      state.converging = false
+    }
+  }
+
   // MARK: - Path selection
 
   /// The four-way fork contract, decided synchronously from cached state:

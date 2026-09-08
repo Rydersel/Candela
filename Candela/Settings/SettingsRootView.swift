@@ -50,6 +50,17 @@ struct SettingsRootView: View {
 
   @Environment(AppModel.self) private var model
 
+  /// Whether this window is on screen, for the brightness poller's cadence. A
+  /// CLOSED settings window reports `.inactive` here, since the window object
+  /// outlives the close, and so does one sitting behind another app: the same
+  /// answer for the poller's purposes, because nobody is reading the sliders.
+  @Environment(\.controlActiveState) private var activeState
+
+  private func noteSettingsVisible(_ visible: Bool) {
+    model.surfaceVisibility.setSettingsVisible(visible)
+    if visible { model.notePollConsumerAppeared() }
+  }
+
   var body: some View {
     ZStack {
       // One canvas for the life of the window, so a selection change moves the
@@ -101,6 +112,14 @@ struct SettingsRootView: View {
     // Dark-only: every colour comes from the theme layer and none of
     // them has a light-appearance answer.
     .preferredColorScheme(.dark)
+    // The window is a poll consumer while up; becoming visible also restarts the
+    // job so the first frame is not a slow interval stale.
+    .onAppear { noteSettingsVisible(activeState != .inactive) }
+    .onChange(of: activeState) { _, state in
+      noteSettingsVisible(state != .inactive)
+    }
+    // Belt on the flag: a consumer left true is a poller that never slows down.
+    .onDisappear { model.surfaceVisibility.setSettingsVisible(false) }
     // The cross-link navigation seam, wired here because this view
     // owns the selection and re-wired per appearance so a reopened window binds
     // to the live view identity.
