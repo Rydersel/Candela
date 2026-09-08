@@ -73,10 +73,7 @@ private func replyFrame(command: UInt8, current: UInt16, max: UInt16) -> [UInt8]
 
 // MARK: - The retry ladder, driven by a scripted panel
 
-/// One scripted reply per read call: `nil` is a read call that fails, `[]` is a
-/// read call that reports success and writes nothing, bytes are what the panel
-/// puts in the buffer. The last entry keeps answering once the script runs out,
-/// so a test says what it is about and no more.
+/// One scripted reply per read call: `nil` fails, `[]` reports success and
 /// writes nothing, bytes are what the panel puts in the buffer. The last entry
 /// repeats once the script runs out.
 ///
@@ -87,9 +84,7 @@ private final class ScriptedPanel: @unchecked Sendable {
   private var writeResults: [Int32]
   private(set) var writes = 0
   private(set) var reads = 0
-  /// Packets and sleeps in the order the transaction spent them, as `write`,
-  /// `read` and `sleep:<microseconds>`. The pacing tests below are about that
-  /// order and nothing else, so the sleeps have to be visible.
+  /// Packets and sleeps in the order spent, as `write`, `read` and
   /// `sleep:<microseconds>`; the pacing tests are about that order.
   private(set) var trace: [String] = []
 
@@ -128,8 +123,6 @@ private final class ScriptedPanel: @unchecked Sendable {
   }
 }
 
-/// Time the tests move by hand, so the three gap cases are pinned without
-/// spending any. Starts away from zero so that rewinding it stays in range.
 /// Time the tests move by hand. Starts away from zero so rewinding stays in range.
 ///
 /// `@unchecked Sendable`: every mutation happens on the test's own thread, from

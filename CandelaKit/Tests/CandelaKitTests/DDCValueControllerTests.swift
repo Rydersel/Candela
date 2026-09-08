@@ -874,9 +874,14 @@ struct DDCValueControllerTests {
     #expect(harness.controller.readMax == nil) // nothing was learned; 100 is assumed
   }
 
-  @Test func asilentBusPublishesNoReply() async {
+  /// Two passes, unlike the zeros answer above: the Dell has answered silence on
+  /// a plug-in pass and a clean frame on the next. `BrightnessReadSkipTests` pins
+  /// the rule.
+  @Test func asilentBusPublishesNoReplyOnTheSecondPass() async {
     let harness = Harness(command: .contrast, savedValue: 0.6) { $0.startupAction = .read }
     await harness.controller.refreshFromHardware() // FakeDDC(readResult: nil) by default
+    #expect(harness.controller.readEvidence == .notAttempted)
+    await harness.controller.refreshFromHardware()
     #expect(harness.controller.readEvidence == .noReply)
   }
 
@@ -957,6 +962,10 @@ struct DDCValueControllerTests {
   /// this suite green: the case that separates them is a zeros answer followed by
   /// a pass that hears nothing, where the carried seed republishes `.allZeros`.
   /// Within a pass attempts still fold worst-wins; only the seed is per-pass.
+  ///
+  /// Zeros and silence are different findings, so the zeros pass does not count
+  /// towards the silence after it: taking them as a pair flipped this panel to
+  /// "Not answering" on one bad pass. The zeros verdict stands until the second.
   @Test func apassThatHearsOnlySilenceReportsSilenceNotTheOldZeros() async {
     let harness = Harness(command: .contrast, savedValue: 0.6) { $0.startupAction = .read }
     await harness.fake.setReadResult((current: 0, max: 0))
@@ -964,6 +973,9 @@ struct DDCValueControllerTests {
     #expect(harness.controller.readEvidence == .allZeros)
 
     await harness.fake.setReadResult(nil) // the bus goes quiet: every try returns nil
+    await harness.controller.refreshFromHardware()
+    #expect(harness.controller.readEvidence == .allZeros)
+
     await harness.controller.refreshFromHardware()
     #expect(harness.controller.readEvidence == .noReply)
   }

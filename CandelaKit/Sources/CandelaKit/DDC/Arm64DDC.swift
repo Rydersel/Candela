@@ -8,14 +8,11 @@ import CandelaPrivateAPIs
 let ARM64_DDC_7BIT_ADDRESS: UInt8 = 0x37 // This works with DisplayPort devices
 let ARM64_DDC_DATA_ADDRESS: UInt8 = 0x51
 
-/// The floor between two packets on ONE display's I2C bus, measured from when
-/// the last call on that bus returned rather than paid before every packet.
+/// The floor between two packets on one display's I2C bus, measured from the
+/// last call's return rather than paid before every packet. Paying it up front
+/// cost every command 10 ms of dead time on a transaction measured at about
+/// 14 ms, even on a bus idle for minutes; measuring keeps every gap that exists.
 ///
-/// Paying it up front cost every command 10 ms of dead time even when the bus
-/// had been idle for minutes, which on a transaction measured at about 14 ms is
-/// most of it. Measuring it instead keeps every gap that exists today (a burst
-/// of writes, a read followed at once by a write) and drops only the wait
-/// nothing was waiting for.
 /// One per display for the life of the process (`DDCBusPacerRegistry`), so two
 /// panels never pace each other and two services for one panel never race.
 ///
@@ -56,7 +53,8 @@ final class DDCBusPacer: @unchecked Sendable {
   }
 }
 
-/// One pacer per display, held for the life of the process.
+/// One pacer per display, held for the life of the process. Services are rebuilt
+/// on every refresh while the retired one can still drain a queued write
 /// (`DDCCommandApplier` holds its writer as a `let`), so a per-service pacer let
 /// two pacers each believe one bus was quiet.
 ///
@@ -246,15 +244,9 @@ public class Arm64DDC: NSObject {
     case silent
   }
 
-  /// The non-zero fill the reply buffer carries into every read call.
-  ///
-  /// `IOAVServiceReadI2C` can return success without writing the buffer, so with
-  /// the zero-filled buffer this used to hand it, "the panel answered with
-  /// eleven zeros" and "nothing was written here at all" were the same bytes and
-  /// the write-only verdict was a claim the instrument could not support. Only a
-  /// buffer that CHANGED to zeros is evidence about the panel. 0xFF is also what
-  /// an idle I2C line reads as, so a floating read lands in the same bucket as an
-  /// untouched buffer, which is where it belongs.
+  /// The reply buffer's fill before every read call. `IOAVServiceReadI2C` can
+  /// return success without writing the buffer, so a zero fill made "answered
+  /// zeros" and "wrote nothing" the same bytes. 0xFF is also what an idle I2C
   /// line reads as, so a floating read counts as untouched.
   static let replySentinel: UInt8 = 0xFF
 

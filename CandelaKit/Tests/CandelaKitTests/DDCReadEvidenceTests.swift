@@ -82,8 +82,12 @@ struct BrightnessReadEvidenceCallSiteTests {
     #expect(controller.readEvidence == .allZeros)
   }
 
-  @Test func asilentBusIsPublishedAsNoReply() async {
+  /// Two passes, unlike the zeros answer above: silence publishes only once it
+  /// has happened twice running. `BrightnessReadSkipTests` pins the rule.
+  @Test func asilentBusIsPublishedAsNoReplyOnTheSecondPass() async {
     let (controller, _) = Self.make(writer: FakeDDC(readResult: nil))
+    await controller.refreshFromHardware()
+    #expect(controller.readEvidence == .notAttempted)
     await controller.refreshFromHardware()
     #expect(controller.readEvidence == .noReply)
   }

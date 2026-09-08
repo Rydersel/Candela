@@ -254,9 +254,10 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
       throw DisplayConfigError(cgErrorCode: result.rawValue)
     }
 
-    // THE RETURN CODE IS NOT THE EVIDENCE, the achieved mode is. The cross-check
-    // above proves the id still denotes the geometry asked for; it proves
-    // nothing about what the commit then did with it.
+    // THE RETURN CODE IS NOT THE EVIDENCE; the achieved mode is. Bounded settle
+    // rather than one read, as `applyRotation` does: the window server lands a
+    // mode change asynchronously, so a single read can still describe the
+    // outgoing mode. Half a second, because a change not landed by then is not
     // landing. The first read is taken before any sleep, so an honoured commit
     // pays nothing.
     //
@@ -289,7 +290,6 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     }
   }
 
-  /// The live mode as CoreGraphics reports it, deliberately NOT through
   /// Not `currentMode(for:)`: that resolves against the deduplicated list and
   /// answers nil for anything missing from it, which the settle loop would read
   /// as a mode that never landed. It also re-enumerates every CGS descriptor.

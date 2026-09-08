@@ -85,16 +85,19 @@ public final class DDCValueController: PendingWireDraining {
   /// them: the display-level verdict is `DDCReadEvidence.worst` of the three,
   /// folded at whatever reads them.
   ///
-  /// Scope: the most recent pass that actually asked the panel something,
-  /// folded worst-wins over the FAILED attempts within that pass, so a late
-  /// `continue` cannot erase an earlier zeros observation and a pass that
-  /// returns early leaves the previous verdict standing.
+  /// Scope: the most recent pass that actually asked the panel something AND
+  /// concluded with an answer, folded worst-wins over the FAILED attempts within
+  /// that pass, so a late `continue` cannot erase an earlier zeros observation
+  /// and a pass that returns early leaves the previous verdict standing.
   ///
   /// Deliberately NOT a fold across passes and retries. DDC reads are flaky, so
   /// the common healthy case is attempt 1 returning nil and attempt 2
   /// answering; folding those publishes "this display does not reply" about a
   /// panel that just replied. A successful attempt supersedes the failures
   /// before it in its pass.
+  ///
+  /// A pass that ends in silence does not supersede this either: `DDCReadSkipLatch`
+  /// decides, on two consecutive silent passes. Clears reach only the skip.
   public private(set) var readEvidence: DDCReadEvidence = .notAttempted
 
   /// Whether this register is still worth asking about. Its own, never the
@@ -385,9 +388,6 @@ public final class DDCValueController: PendingWireDraining {
     return true
   }
 
-  /// `.read`: validated DDC readback. `(0, 0)` and `max == 0` are FAILED reads,
-  /// not a value of zero: a write-only panel produces nothing usable from any
-  /// read, and the fork's unvalidated read clobbers saved values to 0.
   /// `.read`: validated DDC readback. `max == 0` is a FAILED read, not a value
   /// of zero: the fork's unvalidated read clobbered saved values to 0.
   ///
@@ -416,30 +416,24 @@ public final class DDCValueController: PendingWireDraining {
     // what the last pass concluded (see `readEvidence`). Only the FAILED
     // attempts fold, worst-wins; a success supersedes them outright.
     var passEvidence = DDCReadEvidence.notAttempted
-    // One pass, one hearing: the retries inside it are the reliability
-    // mechanism, so the latch counts what the pass concluded and not what each
-    // attempt did.
+    // The latch counts passes, not attempts: the retries are the reliability
+    // mechanism.
     var answered = false
     for _ in 0 ..< tries {
-      // A silent bus and a panel that answers zeros are different facts, and the
-      // transport is where they are now told apart: it carries a non-zero
-      // sentinel into the reply buffer, so zeros are the panel's word and not a
-      // buffer the read call never wrote to. A frame whose `max` is 0 is the
-      // same admission, and `outcome.evidence` is the one place that mapping
-      // lives, shared with the brightness read site.
+      // Silence and zeros are different facts; the transport tells them apart, and
+      // `outcome.evidence` is the one place `max == 0` folds into zeros.
       let outcome = await writer.readOutcome(command: readCode)
       guard let result = outcome.value, result.max > 0 else {
+        // Held, not published: the latch below decides once the pass concludes.
         passEvidence = DDCReadEvidence.worse(passEvidence, outcome.evidence)
-        readEvidence = passEvidence
         continue
       }
       // Recorded BEFORE the staleness fence: the panel answered, and that is
       // true whether or not user input superseded the value we were about to
       // adopt. Returning here without recording would hide a good panel behind
-      // a race. The latch is cleared at the same point and for the same reason:
-      // the pass below can still `return` before its own recording runs.
-      readEvidence = .answered
+      // a race. The latch is recorded here for the same reason.
       readSkip.record(.answered)
+      readEvidence = .answered
       answered = true
       guard issuedGeneration == issuedAtStart else { return }
       // The max is real information on every validated read (the loop guard
@@ -462,7 +456,8 @@ public final class DDCValueController: PendingWireDraining {
       persist(adopted)
       break
     }
-    if !answered { readSkip.record(passEvidence) }
+    // No answer this pass. Zeros publish at once; a lone silence waits for a second.
+    if !answered, readSkip.record(passEvidence) { readEvidence = passEvidence }
     // The strategy in force, not the pref: 0x8D is where this display's mute
     // lives only if the display takes 0x8D. Asking a register the display
     // denies and adopting its answer would write a mute state nothing ever
@@ -618,15 +613,10 @@ public final class DDCValueController: PendingWireDraining {
     muteCoalescer.resetDuplicateState()
   }
 
-  /// Wake, reconfiguration and the HDR-off edge, all of which reach this
-  /// controller through the display's brightness controller: its three
-  /// controllers share one wire, and this one has no observers of its own.
-  ///
-  /// The verdict goes with the latch. Keeping it while the skip is cleared would
-  /// leave the diagnostics report asserting a write-only panel over a register
-  /// nothing has asked since.
-  public func noteReadEvidenceStale() {
-    readEvidence = .notAttempted
+  /// Reached through the display's brightness controller, which owns the wire's
+  /// observers. The skip only: the read pass runs before the reconfiguration fans
+  /// out, so dropping the verdict here wiped what it had just earned [MEASURED].
+  public func noteReadWorthRetrying() {
     readSkip.clear()
   }
 

@@ -318,8 +318,11 @@ struct CopyBuilderTests {
     let notSet = render(DiagnosticsPageCopy.notAttempted(isSafeMode: false, readsBackAtStartup: false))
     #expect(notSet.contains("is not set to read values back from displays at startup"))
 
+    // One silent pass is held, not published, so the display may have been read;
+    // "nothing has been read" would be false there.
     let nothingYet = render(DiagnosticsPageCopy.notAttempted(isSafeMode: false, readsBackAtStartup: true))
-    #expect(nothingYet.contains("Nothing has been read from this display yet"))
+    #expect(nothingYet.contains("No answer has been recorded from this display yet"))
+    #expect(!nothingYet.contains("Nothing has been read"))
   }
 
   @Test func diagnosticsWriteGateLabelNamesNoWireTheBuiltInLacks() {

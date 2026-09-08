@@ -231,7 +231,6 @@ public protocol DisplayConfiguring: Sendable {
   /// The panel's own pixel count, from the mode flagged native. Needed to tell
   /// scaled modes from native ones.
   func nativePixels(for displayID: CGDirectDisplayID) -> (width: Int, height: Int)?
-  /// Stages one mode change, commits it, then reads back the mode the display
   /// Stages one mode change, commits it, then reads back what the display runs.
   ///
   /// Throws `DisplayConfigError` if the mode cannot be resolved, staging or the

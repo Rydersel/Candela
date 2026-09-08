@@ -110,17 +110,18 @@ public final class BrightnessController: PendingWireDraining {
   ///   silent verdict (below), so the assignments sit AFTER every such return.
   ///   Otherwise a display that answered zeros once looks pristine again because the
   ///   next pass never reached the wire.
-  /// - A pass that does ask supersedes the previous pass's verdict. A worst-wins fold
-  ///   across passes reads "this display does not reply" about a panel that just
-  ///   replied. `worse` is still exactly right WITHIN a pass and across this display's
+  /// - A pass that does ask, and gets an answer, supersedes the previous pass's
+  ///   verdict. A worst-wins fold across passes reads "this display does not reply"
+  ///   about a panel that just replied. `worse` is still exactly right WITHIN a pass and across this display's
   ///   sibling controllers (`DDCReadEvidence.worst`); the scope of the fold was wrong,
   ///   never the ordering.
-  /// - It does NOT gate the asking. `DDCReadSkipLatch` does, on two consecutive
-  ///   silent passes rather than on this value, so one bad pass still publishes the
-  ///   verdict diagnostics needs while the panel keeps its next hearing. Once the
-  ///   latch is set the panel is asked once per plug rather than on every menu
-  ///   close, and it gets another hearing only from wake, a reconfiguration, a
-  ///   rebind onto a different panel, or an HDR window closing.
+  /// - It does not gate the asking; `DDCReadSkipLatch` does, on two consecutive
+  ///   silent passes.
+  /// - A single silent pass does not supersede it: silence publishes only on the
+  ///   pass that trips the latch. Wake, reconfiguration and HDR-off clear the skip
+  ///   and leave this standing, because the read pass runs BEFORE the
+  ///   reconfiguration clear and a clear there wiped its verdict [MEASURED]. Only
+  ///   `rebind` onto a different panel resets it.
   ///
   /// This controller reads one code, at most once, per pass, so the within-pass fold
   /// here is trivial and the assignments are plain. `DDCValueController`, which
@@ -525,16 +526,15 @@ public final class BrightnessController: PendingWireDraining {
     // has already returned for the passes that ask nothing, so reaching here means
     // the panel WAS asked and this pass's answer is the current fact about it.
     // Folding across passes published "does not reply" about panels that had since
-    // replied (see `readEvidence`).
+    // replied (see `readEvidence`); a lone silence holds the previous verdict.
     let outcome = await writer.readOutcome(command: tuning.remapCodes.first ?? VCP.brightness)
-    // One read per pass here, so the pass's verdict IS this attempt's.
-    readSkip.record(outcome.evidence)
+    // One read per pass, so this attempt's verdict is the pass's. The latch says
+    // whether it publishes.
+    let publishes = readSkip.record(outcome.evidence)
     // A `max` of 0 is a FAILED read, not a brightness of zero: the fork's
-    // unvalidated read clobbers saved values to 0. Recorded rather than merely
-    // rejected, and it publishes `allZeros` like a buffer of zeros does, because
-    // it is the same admission.
+    // unvalidated read clobbered saved values to 0. Publishes as `allZeros`.
     guard let result = outcome.value, result.max > 0 else {
-      readEvidence = outcome.evidence
+      if publishes { readEvidence = outcome.evidence }
       return
     }
     readEvidence = .answered
@@ -835,36 +835,27 @@ public final class BrightnessController: PendingWireDraining {
   /// told us nothing yet.
   public func noteWake() {
     resetWireHealth()
-    // The read verdict deserves the same fresh hearing the wire health gets: a
-    // link rebuilt while the Mac slept has told us nothing yet, and without this
-    // two silent passes before a sleep would mean the panel is never asked again
-    // for the life of the plug.
+    // Same fresh hearing as the wire health: without it, two silent passes before
+    // sleep would mean the panel is never asked again this plug.
     giveTheReadAnotherHearing()
   }
 
-  /// Drops what this display's reads have proved, across its whole wire, but
-  /// only where a read can follow.
+  /// Clears the read skip on this display's whole wire and leaves `readEvidence`
+  /// alone: the read pass runs BEFORE `handleReconfigure`, so clearing the verdict
+  /// here wiped what that pass had just earned [MEASURED].
   ///
-  /// Under the native path (an HDR window, or a panel driven by
-  /// DisplayServices) `refreshFromHardware` returns before reaching the wire, so
-  /// clearing here would replace a real write-only verdict with "nothing
-  /// attempted" in the diagnostics report and no pass would put it back for as
-  /// long as the window lasts. The HDR-off edge is that panel's next hearing,
-  /// and it clears unconditionally.
-  ///
-  /// The siblings clear on this display's condition rather than each on their
-  /// own: HDR locks the register for every command on the wire, and the sibling
-  /// controllers cannot see it.
+  /// Guarded on the native path because no read reaches the wire there; the
+  /// HDR-off edge clears unconditionally. Siblings clear on this display's
+  /// condition because they cannot see the HDR window that locked the register.
   private func giveTheReadAnotherHearing() {
     guard !usesNative else { return }
-    readEvidence = .notAttempted
     readSkip.clear()
-    for sibling in wireSiblings { sibling.noteReadEvidenceStale() }
+    for sibling in wireSiblings { sibling.noteReadWorthRetrying() }
   }
 
   /// The sibling route into the same clear: a display's three controllers share
   /// one wire, so a wake or a reconfiguration is an event about all of them.
-  public func noteReadEvidenceStale() {
+  public func noteReadWorthRetrying() {
     giveTheReadAnotherHearing()
   }
 
@@ -1691,18 +1682,13 @@ public final class BrightnessController: PendingWireDraining {
         "HDR window closed on display=\(self.displayID): dropping the wire's duplicate memos"
       )
       invalidateWireMemos()
-      // A silent verdict earned while HDR held the register is a fact about the
-      // window, not about the panel: DDC was dead, so the panel was never really
-      // asked, and the read skip would otherwise carry that answer for the rest
-      // of the plug. Same carve-out the capabilities probe makes for the same
-      // reason (`CapabilityProbePolicy`).
-      //
-      // Unconditional, unlike the wake and reconfiguration clears: this IS the
-      // edge that makes reads reachable again, and `usesNative` still describes
-      // the window that just closed until `updateNativeActive()` below runs.
-      readEvidence = .notAttempted
+      // A skip earned while HDR held the register is a fact about the window, not
+      // the panel (same carve-out as `CapabilityProbePolicy`). Written out rather
+      // than routed through the `usesNative` guard, so this edge stays correct on
+      // its own and not through `cachedHDRActive` having just been reassigned.
+      // The skip only: the verdict stands until the first pass after the window.
       readSkip.clear()
-      for sibling in wireSiblings { sibling.noteReadEvidenceStale() }
+      for sibling in wireSiblings { sibling.noteReadWorthRetrying() }
     }
     updateNativeActive()
   }
@@ -1835,6 +1821,8 @@ public final class BrightnessController: PendingWireDraining {
   /// - `readEvidence` back to `.notAttempted`, the floor: we have asked THIS
   ///   panel nothing. Not a weakening of worst-wins, which folds within a pass and
   ///   across sibling controllers, neither of which survives a swapped monitor.
+  ///   The only route that resets the verdict; every other clear reaches the
+  ///   skip alone.
   /// - `maxDDCValue` back to `assumedMaxDDC`. Resetting the provenance flag and
   ///   leaving the number keeps the motivating scenario alive on the write path
   ///   itself: a previous panel that reported 80 leaves the NEW panel's writes scaled
@@ -1858,10 +1846,9 @@ public final class BrightnessController: PendingWireDraining {
   /// limitation is inherited: identical twins can share an EDID UUID and are not told
   /// apart here, though they already share a saved value and a prefs domain. The cost
   /// of the narrower trigger is that the SAME panel rebound through a DDC-hostile new
-  /// route keeps its old verdict, and a silent one now GATES the next read, so no
-  /// later refresh would supersede it either. `handleReconfigure` is what covers that
-  /// case: a new cable or a new port arrives as a reconfiguration whether or not the
-  /// panel identity moved, and the verdict is cleared there.
+  /// route keeps its old verdict, and a silent one gates the next read. A new cable
+  /// or port arrives as a reconfiguration either way, and `handleReconfigure` clears
+  /// the skip there.
   public func rebind(writer: any DDCWriting, panelIdentity: String?) {
     self.writer = writer
     if panelIdentity != boundPanelIdentity {

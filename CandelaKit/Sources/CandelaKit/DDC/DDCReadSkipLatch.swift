@@ -1,47 +1,60 @@
 /// When a display's DDC reads stop being worth attempting.
 ///
-/// A read pass on a silent panel walks the whole retry ladder with the wire
-/// held, which is the menu-close stall a person feels, so a panel that says
-/// nothing is asked once per plug rather than on every pass. What decides that
-/// is TWO consecutive silent passes, not one: bus contention, the probe holding
-/// the wire, another panel entering HDR and a wedged transaction all produce one
-/// bad pass on a display that answers perfectly on the next, and latching on the
-/// first would publish "does not answer reads" about the Dell for the rest of
-/// the plug. The cost of the second pass is one more futile read pass per plug
-/// on a genuinely write-only panel.
+/// A read pass on a panel that gives nothing back holds the wire for the whole
+/// retry ladder, which is the menu-close stall a person feels, so such a panel
+/// is asked once per plug. Two consecutive passes of the SAME nothing, not one:
+/// bus contention, the probe holding the wire and another panel entering HDR
+/// all produce one bad pass on a display that answers on the next, and the
+/// Dell has answered silence on a plug-in pass and right after a mode change.
+/// Zeros and silence are different findings, so one of each is contention, not
+/// a run: taking them as a pair flipped the MAG from "Write-only" to "Not
+/// answering" on a single bad pass.
 ///
-/// Counts PASSES, never attempts: a pass that retries internally is one
-/// hearing, and the retries are the reliability mechanism rather than evidence
-/// of their own.
-///
-/// Separate from `DDCReadEvidence`, which is what diagnostics reports. The
-/// verdict is published from the first silent pass; only the asking waits for
-/// the second.
+/// Counts passes, never attempts. Also decides when silence becomes a VERDICT:
+/// a frame or zeros publish at once, silence only on the pass that trips the latch.
 struct DDCReadSkipLatch: Sendable, Equatable {
   static let latchAfter = 2
 
-  private(set) var consecutiveSilentPasses = 0
+  /// Which nothing the current run is made of, so a run is only ever the same
+  /// finding repeating. nil once a pass has answered.
+  private var runningNonAnswer: DDCReadEvidence?
+  private(set) var consecutiveNonAnswers = 0
 
   /// Whether the next pass should skip the wire entirely.
-  var skipsRead: Bool { consecutiveSilentPasses >= Self.latchAfter }
+  var skipsRead: Bool { consecutiveNonAnswers >= Self.latchAfter }
 
-  /// One pass's verdict. `notAttempted` is not a pass and leaves the count
-  /// alone: a controller that returned before reaching the wire has learned
-  /// nothing about the panel either way.
-  mutating func record(_ evidence: DDCReadEvidence) {
+  /// Records one pass and answers whether the caller should PUBLISH it, in one
+  /// call so no site can ask before recording. `notAttempted` is not a pass and
+  /// changes nothing. A frame or zeros supersede at once; silence only once it
+  /// has happened twice running, and a zeros pass in between breaks the run.
+  @discardableResult
+  mutating func record(_ evidence: DDCReadEvidence) -> Bool {
     switch evidence {
     case .noReply, .allZeros:
-      // Capped so a long-lived silent panel cannot count past the latch and
-      // make the value itself unstable.
-      consecutiveSilentPasses = min(consecutiveSilentPasses + 1, Self.latchAfter)
+      if runningNonAnswer == evidence {
+        // Capped so a long-silent panel cannot count past the latch.
+        consecutiveNonAnswers = min(consecutiveNonAnswers + 1, Self.latchAfter)
+      } else {
+        // A different nothing starts its own run; one of each is contention.
+        runningNonAnswer = evidence
+        consecutiveNonAnswers = 1
+      }
+      return evidence == .allZeros || skipsRead
     case .answered:
-      consecutiveSilentPasses = 0
+      runningNonAnswer = nil
+      consecutiveNonAnswers = 0
+      return true
     case .notAttempted:
-      break
+      return false
     }
   }
 
-  /// Anything that may have changed the panel's mind: a wake, a
-  /// reconfiguration, a rebind onto another panel, an HDR window closing.
-  mutating func clear() { consecutiveSilentPasses = 0 }
+  /// Anything that may have changed the panel's mind: wake, reconfiguration,
+  /// rebind, an HDR window closing. Clears the skip only: the read pass runs
+  /// before the reconfiguration clear, and wiping the verdict here left the hub
+  /// reading "Not asked yet" on both panels after every reconfiguration [MEASURED].
+  mutating func clear() {
+    runningNonAnswer = nil
+    consecutiveNonAnswers = 0
+  }
 }

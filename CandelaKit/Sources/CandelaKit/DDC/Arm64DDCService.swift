@@ -15,9 +15,6 @@ public actor Arm64DDCService: DDCWriting {
   }
 
   private let box: ServiceBox
-  /// This display's bus floor, and only this display's, shared with every other
-  /// service ever built for it: a write to one panel never delays a write to
-  /// another, and a service retired mid-drain cannot spend the new one's floor.
   /// This display's bus floor, shared with every service ever built for it: a
   /// service retired mid-drain cannot spend the new one's floor.
   private let pacer: DDCBusPacer
