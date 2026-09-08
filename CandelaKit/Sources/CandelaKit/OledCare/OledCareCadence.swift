@@ -9,6 +9,9 @@ import Foundation
 public enum OledCareCadence {
   /// Restore-latency gate: any perceptible lag makes this unusable.
   public static let fast: Duration = .milliseconds(100)
+  /// The nomination geometry refresh rides this loop on a one second throttle:
+  /// slower stretches a moved window's shed, faster is dropped by the throttle.
+  public static let windowFollow: Duration = .seconds(1)
   /// The thresholds are minutes, so nothing needs a fast tick to reach them.
   public static let slow: Duration = .seconds(2)
   /// Nothing enrolled: the loop has no work, and `reconcileEnrollment` restarts
@@ -31,20 +34,36 @@ public enum OledCareCadence {
   /// it waits until skipped captures cannot explain the silence.
   public static let stallWarningSeconds: Double = 10 * OledCareCadence.samplingSeconds
 
-  /// Fast whenever a dim is UP BY ANY DELIVERY, or an achieved-state
-  /// verification is pending.
+  /// Fast whenever a dim INPUT SHOULD LIFT is up by any delivery, or an
+  /// achieved-state verification is pending.
   ///
   /// `anyOverlayUp` is the WANT, not the verified presence, on purpose: input
   /// lifts a dim the engine believes is up, and that belief needs fast ticks to
-  /// be corrected.
+  /// be corrected. Only dims `liftsOnInput` covers: detection dimming's mask is
+  /// `nominationDisplayed`, which buys the window-follow second, not 10 Hz.
   ///
   /// `anythingEnrolled` defaults to true so a caller that forgets it cannot idle
-  /// the loop by accident.
+  /// the loop by accident. A displayed nomination outranks it: a mask on screen
+  /// is work in flight whatever the caller says about enrollment.
   public static func interval(
     anyOverlayUp: Bool, anyLockDimEngaged: Bool, verificationPending: Bool,
-    anythingEnrolled: Bool = true
+    nominationDisplayed: Bool = false, anythingEnrolled: Bool = true
   ) -> Duration {
     if anyOverlayUp || anyLockDimEngaged || verificationPending { return fast }
+    if nominationDisplayed { return windowFollow }
     return anythingEnrolled ? slow : idle
+  }
+}
+
+extension OledDimState {
+  /// Whether the user's next input should end this dim. The cadence's fast term
+  /// and the driver's input monitor both key on it, so they cannot disagree.
+  /// `.active` is excluded though it can carry an overlay: detection dimming's
+  /// mask follows window geometry, not input, and counting it held the loop at 10 Hz.
+  public var liftsOnInput: Bool {
+    switch self {
+    case .idleDim, .blackout, .lockDim, .unfocusedDim: true
+    case .active, .suspended: false
+    }
   }
 }

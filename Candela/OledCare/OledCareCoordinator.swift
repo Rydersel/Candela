@@ -114,9 +114,9 @@ final class OledCareCoordinator: CheckupCareHolding {
     /// `.active` is exactly when detection dimming runs.
     var assertionHeld = false
     /// The current nomination in PANEL space. The LUMINANCE half changes only
-    /// when a new sample lands; the WINDOW half is re-read on the fast loop
-    /// while a nomination is displayed (`refreshNominationGeometry`), so a moved
-    /// window sheds its dim in about a second. Nil means "nothing qualifies",
+    /// when a new sample lands; the WINDOW half is re-read once a second while a
+    /// nomination is displayed (`refreshNominationGeometry`), so a moved window
+    /// sheds its dim in about a second. Nil means "nothing qualifies",
     /// deliberately distinguishable from an all-zero mask: the render then keeps
     /// the cheaper scalar path.
     var nominatedMask: OverlayMask?
@@ -164,10 +164,10 @@ final class OledCareCoordinator: CheckupCareHolding {
     var lockDimRamp: Task<Void, Never>?
   }
 
-  /// Poll cadence: slow while every enrolled display is `.active`/`.suspended`;
-  /// fast while any dim is up by any delivery (the restore latency gate is
-  /// 100 ms) or a verification is pending. The predicate and both
-  /// durations live in `OledCareCadence`, under test.
+  /// Poll cadence: fast while a dim input should lift is up by any delivery or a
+  /// verification is pending; the window-follow second while a nomination mask is
+  /// on screen with no such dim; slow otherwise. `OledCareCadence` owns the
+  /// predicates and durations, under test.
   /// After this much CONTINUOUS settling the signal is ignored: the entry gate
   /// exists for a transition window measured in seconds, not for a latch that
   /// never cleared.
@@ -1035,10 +1035,11 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// entries outlive the state that issued them.
   private func cadence() -> Duration {
     OledCareCadence.interval(
-      anyOverlayUp: states.values.contains { $0.lastAppliedAlpha != nil },
+      anyOverlayUp: anyOverlayDimUp(),
       anyLockDimEngaged: states.values.contains(where: \.lockDimEngaged),
       verificationPending: states.values.contains(where: \.needsVerify)
         || !pendingRemovalVerifications.isEmpty,
+      nominationDisplayed: anyNominationDisplayed(),
       anythingEnrolled: !states.isEmpty
     )
   }
@@ -1046,7 +1047,26 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// Dims that input can lift. A pending verification also runs the fast
   /// cadence but gives an input event nothing to do.
   private func anyDimUp() -> Bool {
-    states.values.contains { $0.lastAppliedAlpha != nil || $0.lockDimEngaged }
+    anyOverlayDimUp() || states.values.contains(where: \.lockDimEngaged)
+  }
+
+  /// An overlay that is up BECAUSE the display is dimmed, as opposed to detection
+  /// dimming's mask on an `.active` display, which no input clears. `tick()`
+  /// assigns `dimStates` before the driver asks, so this is this tick's verdict.
+  /// A display that departed mid-debounce reads as no dim; its teardown
+  /// verification rides the pending-removal list, which runs fast on its own.
+  private func anyOverlayDimUp() -> Bool {
+    states.contains { key, state in
+      state.lastAppliedAlpha != nil && dimStates[key]?.liftsOnInput == true
+    }
+  }
+
+  /// A nomination actually reaching the panel: a mask kept current under a
+  /// mirror-set suspension renders nothing. Over-reports a dimmed display whose
+  /// nomination is not composed (blackout, display sleep under a uniform dim),
+  /// harmlessly, since every one of those states takes the fast term first.
+  private func anyNominationDisplayed() -> Bool {
+    states.values.contains { $0.nominatedMask != nil && $0.lastAppliedAlpha != nil }
   }
 
   // MARK: - Event-driven restore
