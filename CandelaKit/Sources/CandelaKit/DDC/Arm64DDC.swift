@@ -146,7 +146,8 @@ public class Arm64DDC: NSObject {
 
   /// `read`, keeping what the wire proved. `command` goes into the ladder so every
   /// ATTEMPT is validated against it; a frame answering another code retries like
-  /// a failed read and ends as `noReply` rather than a fourth case.
+  /// a failed read and ends as `noReply`, while the panel's own result code for
+  /// the code asked about ends as `refused`.
   public static func readOutcome(service: IOAVService?, command: UInt8, writeSleepTime: UInt32? = nil, numOfWriteCycles: UInt8? = nil, readSleepTime: UInt32? = nil, numOfRetryAttemps: UInt8? = nil, retrySleepTime: UInt32? = nil) -> DDCReadOutcome {
     self.readOutcome(service: service, command: command, pacer: nil, writeSleepTime: writeSleepTime, numOfWriteCycles: numOfWriteCycles, readSleepTime: readSleepTime, numOfRetryAttemps: numOfRetryAttemps, retrySleepTime: retrySleepTime)
   }
@@ -166,6 +167,8 @@ public class Arm64DDC: NSObject {
       return .allZeros
     case .silent:
       return .noReply
+    case .refused:
+      return .refused
     }
   }
 
@@ -239,9 +242,14 @@ public class Arm64DDC: NSObject {
     /// The panel wrote zeros over the sentinel: it is on the bus and saying
     /// nothing. The write-only signature.
     case answeredZeros
-    /// Nothing usable: a refused write, a failed read call, a buffer the read
+    /// Nothing usable: a NAKed write, a failed read call, a buffer the read
     /// left untouched, or a frame that failed its checksum.
     case silent
+    /// The panel's own result code for the code asked about: it parsed the
+    /// request and answered that the register is not one it carries. Its own
+    /// outcome rather than a shade of `silent`, because it is a reply, and a
+    /// display that replies must not be reported as one that went quiet.
+    case refused
   }
 
   /// The reply buffer's fill before every read call. `IOAVServiceReadI2C` can
@@ -256,27 +264,14 @@ public class Arm64DDC: NSObject {
   /// other attempts went.
   static let maxFailedReadCalls = 2
 
-  /// What one attempt proved, and whether the ladder may stop on it.
-  struct AttemptVerdict: Equatable {
-    let outcome: TransactionOutcome
-    /// The panel's own result code for the code asked about. NOT an outcome of
-    /// its own: a refused register is still not a readable one, so the evidence
-    /// stays `.silent` and the read-skip latch counts it exactly as before. What
-    /// it buys is the four remaining attempts, which on a polling pass are four
-    /// ladders of dead bus time spent re-asking a question already answered.
-    let isRefusal: Bool
-  }
-
   /// Verdict for a reply buffer whose read call reported success. Validated here,
   /// inside the ladder, so a frame answering a DIFFERENT code gets the same retry
   /// as any failed read.
-  static func attemptVerdict(_ reply: [UInt8], command: UInt8? = nil) -> AttemptVerdict {
-    guard reply.count >= 2 else { return AttemptVerdict(outcome: .silent, isRefusal: false) }
+  static func replyVerdict(_ reply: [UInt8], command: UInt8? = nil) -> TransactionOutcome {
+    guard reply.count >= 2 else { return .silent }
     var frame = reply
     guard self.checksum(chk: 0x50, data: &frame, start: 0, end: frame.count - 2) == frame[frame.count - 1] else {
-      return AttemptVerdict(
-        outcome: reply.allSatisfy { $0 == 0 } ? .answeredZeros : .silent, isRefusal: false
-      )
+      return reply.allSatisfy { $0 == 0 } ? .answeredZeros : .silent
     }
     // The checksum alone is a 1-in-256 guard. Without the op-code and
     // result-code check the Intel transport has always made, a display
@@ -284,28 +279,27 @@ public class Arm64DDC: NSObject {
     // one asked for, produces a plausible `max` that silently compresses the
     // whole range.
     //
-    // The refusal is read only from a frame that PASSED the checksum, so the
+    // A refusal is read only from a frame that PASSED the checksum, so the
     // result code is a byte the panel meant to send rather than one landing
     // there by luck.
     if let command, DDCReplyFrame.rejection(for: reply, command: command) != nil {
-      return AttemptVerdict(
-        outcome: .silent, isRefusal: DDCReplyFrame.isRefusal(reply, of: command)
-      )
+      return DDCReplyFrame.isRefusal(reply, of: command) ? .refused : .silent
     }
-    return AttemptVerdict(outcome: .ok, isRefusal: false)
-  }
-
-  static func replyVerdict(_ reply: [UInt8], command: UInt8? = nil) -> TransactionOutcome {
-    self.attemptVerdict(reply, command: command).outcome
+    return .ok
   }
 
   /// One attempt's verdict folded into the transaction's: `answeredZeros` outlives
   /// a later silence, the ordering `DDCReadEvidence.worse` uses. The ladder returns
   /// on `.ok` rather than folding it; the `.ok` arms only keep this total.
+  ///
+  /// A refusal outlives a silence and loses to zeros, for the same reason zeros
+  /// beat silence: the more specific observation about the register wins, and a
+  /// panel that put zeros on the bus said something about every code.
   static func fold(_ transaction: TransactionOutcome, _ attempt: TransactionOutcome) -> TransactionOutcome {
     switch (transaction, attempt) {
     case (.ok, _), (_, .ok): .ok
     case (.answeredZeros, _), (_, .answeredZeros): .answeredZeros
+    case (.refused, _), (_, .refused): .refused
     default: .silent
     }
   }
@@ -377,13 +371,13 @@ public class Arm64DDC: NSObject {
         // Recorded whatever it returned: the bus was busy either way.
         pacer?.recordBusUse()
         if answered == 0 {
-          let verdict = Self.attemptVerdict(reply, command: replyCommand)
-          if verdict.outcome == .ok { return .ok }
-          outcome = Self.fold(outcome, verdict.outcome)
+          let verdict = Self.replyVerdict(reply, command: replyCommand)
+          if verdict == .ok { return .ok }
+          outcome = Self.fold(outcome, verdict)
           // The panel answered, and the answer was no. Retrying a refused code
           // cannot change it, and the caller polls this ladder several times a
           // pass. Folded first, so an earlier attempt's zeros still outlive it.
-          if verdict.isRefusal { return outcome }
+          if verdict == .refused { return outcome }
         } else {
           failedReadCalls += 1
           // A read CALL that failed never reached a panel, so the four remaining

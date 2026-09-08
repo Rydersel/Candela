@@ -129,7 +129,10 @@ enum DiagnosticsPageCopy {
       notAttempted(isSafeMode: isSafeMode, readsBackAtStartup: readsBackAtStartup)
     case .answered:
       "The values shown elsewhere in this window come from the display itself."
-    case .allZeros, .noReply:
+    // A refusal joins them because this caption is about where the numbers on
+    // screen came from, and a register the display will not report is one more
+    // number it did not supply.
+    case .allZeros, .noReply, .refused:
       "The values shown elsewhere in this window are what \(AppInfo.productName) last wrote, not what the display reports."
     }
   }

@@ -555,15 +555,18 @@ public final class BrightnessController: PendingWireDraining {
     // Recorded ahead of the fence, for the reason the latch above is: the panel
     // answered, and that stays true whether or not a write superseded the value.
     readEvidence = .answered
-    // Everything below ADOPTS: the panel's max, the published brightness and the
-    // store. A write issued since the read began is the newer intent, so the read
-    // is dropped and the next pass re-reads.
-    guard issuedGeneration == issuedAtStart else { return }
     maxDDCValue = result.max
-    // From here on `maxDDCValue` is the panel's own answer, not the 100
-    // default. Set only on the answered arm: every other exit leaves the
-    // assumption standing, and says so.
+    // Ahead of the fence too. The scale is a fact about the panel rather than
+    // about anyone's intent, so a key press landing mid-read supersedes the
+    // VALUE and not this; dropping it left the next writes scaled against the
+    // assumed 100. From here on `maxDDCValue` is the panel's own answer: set
+    // only on the answered arm, so every other exit leaves the assumption
+    // standing and says so.
     didReadMaxDDC = true
+    // Everything below ADOPTS: the published brightness and the store. A write
+    // issued since the read began is the newer intent, so the read is dropped and
+    // the next pass re-reads.
+    guard issuedGeneration == issuedAtStart else { return }
     // Read mirrors write (fork convDDCToValue): un-apply curve and invert through
     // the same tuning, or a tuned readable panel adopts a corrupted brightness at
     // every launch.

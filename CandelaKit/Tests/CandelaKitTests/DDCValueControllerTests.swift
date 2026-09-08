@@ -692,6 +692,22 @@ struct DDCValueControllerTests {
     #expect(harness.prefs.muted)
   }
 
+  /// The same rule for this controller's `readMax`: the staleness fence drops
+  /// the VALUE a user write superseded, never the panel's reported scale, which
+  /// is not about intent at all. Dropped, later writes scale against the assumed
+  /// 100 until some other pass happens to answer.
+  @Test func aValueWriteDuringTheReadStillKeepsThePanelsScale() async {
+    let scripted = ScriptedDDC(reads: [(current: 30, max: 80)], hookAfterRead: 1)
+    let harness = Harness(command: .contrast, savedValue: 0.6, writer: scripted) { prefs in
+      prefs.startupAction = .read
+    }
+    let controller = harness.controller
+    await scripted.setHook { await MainActor.run { controller.setValue(0.9) } }
+    await harness.controller.refreshFromHardware()
+    #expect(harness.controller.value == 0.9, "the write is the newer intent")
+    #expect(harness.controller.readMax == 80)
+  }
+
   @Test func minimalPollingReadsExactlyOnce() async {
     // A bug that reads once regardless of tries — or five times under
     // .minimal — fails one of this pair.

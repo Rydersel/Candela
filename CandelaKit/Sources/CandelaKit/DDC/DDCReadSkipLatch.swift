@@ -11,7 +11,8 @@
 /// answering" on a single bad pass.
 ///
 /// Counts passes, never attempts. Also decides when silence becomes a VERDICT:
-/// a frame or zeros publish at once, silence only on the pass that trips the latch.
+/// a frame, zeros or a refusal publish at once, silence only on the pass that
+/// trips the latch.
 struct DDCReadSkipLatch: Sendable, Equatable {
   static let latchAfter = 2
 
@@ -25,21 +26,27 @@ struct DDCReadSkipLatch: Sendable, Equatable {
 
   /// Records one pass and answers whether the caller should PUBLISH it, in one
   /// call so no site can ask before recording. `notAttempted` is not a pass and
-  /// changes nothing. A frame or zeros supersede at once; silence only once it
-  /// has happened twice running, and a zeros pass in between breaks the run.
+  /// changes nothing. A frame, zeros or a refusal supersede at once; silence only
+  /// once it has happened twice running, and a different pass in between breaks
+  /// the run.
+  ///
+  /// A refusal counts toward the skip even though it is an answer: it is the
+  /// panel's settled word about that register, so re-asking spends the wire on a
+  /// question already answered. It publishes on its first pass for the same
+  /// reason zeros do, being the panel's own word rather than a busy bus.
   @discardableResult
   mutating func record(_ evidence: DDCReadEvidence) -> Bool {
     switch evidence {
-    case .noReply, .allZeros:
+    case .noReply, .allZeros, .refused:
       if runningNonAnswer == evidence {
         // Capped so a long-silent panel cannot count past the latch.
         consecutiveNonAnswers = min(consecutiveNonAnswers + 1, Self.latchAfter)
       } else {
-        // A different nothing starts its own run; one of each is contention.
+        // A different finding starts its own run; one of each is contention.
         runningNonAnswer = evidence
         consecutiveNonAnswers = 1
       }
-      return evidence == .allZeros || skipsRead
+      return evidence != .noReply || skipsRead
     case .answered:
       runningNonAnswer = nil
       consecutiveNonAnswers = 0

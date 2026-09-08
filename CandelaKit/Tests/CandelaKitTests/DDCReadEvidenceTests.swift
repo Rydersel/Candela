@@ -31,10 +31,36 @@ struct DDCReadEvidenceTests {
     #expect(DDCReadEvidence.worst([.allZeros, .notAttempted, .notAttempted]) == .allZeros)
   }
 
-  /// "No reply" and "answered with zeros" are different facts about a panel, and only
-  /// the second is the write-only signature.
-  @Test func noReplyAndAllZerosAreNotTheSameFact() {
-    #expect(DDCReadEvidence.noReply != DDCReadEvidence.allZeros)
+  /// The Dell: brightness and contrast answer, and the volume register is refused
+  /// because the panel carries no VCP 0x62. The display answers reads and the fold
+  /// has to say so; ranking a refusal as a non-answer published "Not answering"
+  /// about a panel that had just answered twice.
+  @Test func arefusedRegisterLeavesAnAnsweringDisplayAnswering() {
+    #expect(DDCReadEvidence.worst([.refused, .answered, .answered]) == .answered)
+    #expect(DDCReadEvidence.worse(.refused, .answered) == .answered)
+    #expect(DDCReadEvidence.worse(.answered, .refused) == .answered)
+  }
+
+  /// It is still a finding, though: above the floor, so a display that refused
+  /// something does not read as one nothing has been asked of, and below both
+  /// silences, which is what keeps it out of the "not answering" verdict.
+  @Test func arefusalOutranksTheFloorAndNeitherSilence() {
+    #expect(DDCReadEvidence.worse(.refused, .notAttempted) == .refused)
+    #expect(DDCReadEvidence.worse(.notAttempted, .refused) == .refused)
+    #expect(DDCReadEvidence.worse(.refused, .noReply) == .noReply)
+    #expect(DDCReadEvidence.worse(.refused, .allZeros) == .allZeros)
+  }
+
+  /// "No reply", "answered with zeros" and "refused the code" are three different
+  /// facts about a panel: only the second is the write-only signature, and only
+  /// the third is the panel replying. Asserted through the copy, because three
+  /// enum cases in a `Set` are distinct whatever the code does, and a check that
+  /// cannot fail is not a check. Collapse an arm of `readEvidence` and this goes
+  /// red.
+  @Test func theThreeValuelessFindingsAreNotTheSameFact() {
+    let sentences = [DDCReadEvidence.noReply, .allZeros, .refused]
+      .map { DiagnosticsCopy.readEvidence($0, app: "Candela") }
+    #expect(Set(sentences).count == 3)
   }
 }
 
@@ -212,5 +238,124 @@ struct MaxDDCProvenanceTests {
     await controller.refreshFromHardware()
     #expect(controller.didReadMaxDDC == true)
     #expect(controller.maxDDCValue == 80)
+  }
+}
+
+/// A panel that answers the read with its own result code: the Dell does this
+/// for VCP 0x62, which it does not carry. Counted per command, because the pin
+/// is that the refused register stops being asked while its siblings do not.
+///
+/// `outcomes` scripts the tries within one pass, the last entry repeating, so a
+/// refusal can be followed by the contended silence the pass fold used to lose
+/// it to. Default: every try refuses.
+///
+/// `@unchecked Sendable` is not needed: an actor confines the state, and the
+/// controller awaits every call.
+private actor RefusingDDC: DDCWriting {
+  private var readsByCommand: [UInt8: Int] = [:]
+  private var outcomes: [DDCReadOutcome]
+
+  init(_ outcomes: [DDCReadOutcome] = [.refused]) { self.outcomes = outcomes }
+
+  func write(command _: UInt8, value _: UInt16) async -> Bool { true }
+
+  func read(command: UInt8) async -> (current: UInt16, max: UInt16)? {
+    await readOutcome(command: command).value
+  }
+
+  func readOutcome(command: UInt8) async -> DDCReadOutcome {
+    readsByCommand[command, default: 0] += 1
+    return outcomes.count > 1 ? outcomes.removeFirst() : (outcomes.first ?? .refused)
+  }
+
+  func reads(of command: UInt8) -> Int { readsByCommand[command, default: 0] }
+}
+
+/// The configuration the round this fix came from is about: the Dell under "Ask
+/// the display", whose volume register answers a refusal on every try.
+@Suite("Read evidence for a refused register")
+@MainActor
+struct RefusedRegisterEvidenceTests {
+  /// It publishes on the FIRST pass, unlike a silence: the panel's own result
+  /// code is not a busy wire, so nothing is gained by waiting for a second.
+  @Test func arefusedVolumeRegisterPublishesOnItsFirstPass() async {
+    let prefs = DisplayPrefs(defaults: InMemoryDefaults(), persistenceKey: "refused-volume")
+    prefs.startupAction = .read
+    let volume = DDCValueController(writer: RefusingDDC(), command: .volume, prefs: prefs)
+
+    await volume.refreshFromHardware()
+    #expect(volume.readEvidence == .refused)
+  }
+
+  /// A refusal ends the pass on the try that carried it, so one contended try
+  /// behind it cannot speak for the pass. Worst-wins ranks a silence above a
+  /// refusal, so without the early exit this pass folded to `.noReply` and two of
+  /// them published "Not answering" about a display that replied every time. The
+  /// exit is also what stops a refused register costing `pollingTries`
+  /// transactions a pass.
+  @Test func arefusalEndsThePassOnTheTryThatCarriedIt() async {
+    let prefs = DisplayPrefs(defaults: InMemoryDefaults(), persistenceKey: "refused-pass")
+    prefs.startupAction = .read
+    let writer = RefusingDDC([.refused, .noReply])
+    let volume = DDCValueController(writer: writer, command: .volume, prefs: prefs)
+
+    await volume.refreshFromHardware()
+    #expect(volume.readEvidence == .refused)
+    #expect(await writer.reads(of: VCP.audioSpeakerVolume) == 1)
+  }
+
+  /// And it latches on the same two-pass rule as the other findings, so the
+  /// register is not re-asked for the life of the plug. Without this the Dell
+  /// spends `pollingTries` transactions on VCP 0x62 on every pass, forever.
+  @Test func arefusedVolumeRegisterStopsBeingAskedAfterTwoPasses() async {
+    let prefs = DisplayPrefs(defaults: InMemoryDefaults(), persistenceKey: "refused-latch")
+    prefs.startupAction = .read
+    let writer = RefusingDDC()
+    let volume = DDCValueController(writer: writer, command: .volume, prefs: prefs)
+
+    await volume.refreshFromHardware()
+    await volume.refreshFromHardware()
+    let afterLatching = await writer.reads(of: VCP.audioSpeakerVolume)
+    #expect(afterLatching > 0, "control: the register was asked at all")
+
+    await volume.refreshFromHardware()
+    #expect(await writer.reads(of: VCP.audioSpeakerVolume) == afterLatching)
+    #expect(volume.readEvidence == .refused)
+  }
+
+  /// The brightness controller publishes the same verdict off its one read per
+  /// pass, so the two call sites cannot drift.
+  @Test func abrightnessRefusalPublishesTheSameVerdict() async {
+    let controller = makeLegacyPathController(writer: RefusingDDC())
+
+    await controller.refreshFromHardware()
+    #expect(controller.readEvidence == .refused)
+    // A refusal carries no maximum, so the scale stays assumed and says so.
+    #expect(controller.didReadMaxDDC == false)
+    #expect(controller.maxDDCValue == 100)
+  }
+
+  /// The headline, at the surface the round-4 finding is about: the Dell answers
+  /// brightness and contrast and refuses volume, and the display-level fold the
+  /// hub, the Diagnostics row and the report all read has to call that display
+  /// answering.
+  @Test func adisplayThatRefusesOneRegisterStillReadsAsAnswering() async {
+    let prefs = DisplayPrefs(defaults: InMemoryDefaults(), persistenceKey: "refused-fold")
+    prefs.startupAction = .read
+    let volume = DDCValueController(writer: RefusingDDC(), command: .volume, prefs: prefs)
+    let contrast = DDCValueController(
+      writer: FakeDDC(readResult: (current: 50, max: 100)), command: .contrast, prefs: prefs
+    )
+    let brightness = makeLegacyPathController(writer: FakeDDC(readResult: (current: 30, max: 100)))
+
+    await volume.refreshFromHardware()
+    await contrast.refreshFromHardware()
+    await brightness.refreshFromHardware()
+
+    let folded = DDCReadEvidence.worst([
+      brightness.readEvidence, volume.readEvidence, contrast.readEvidence,
+    ])
+    #expect(folded == .answered)
+    #expect(DiagnosticsCopy.readbackVerdict(folded) == "Answers reads")
   }
 }

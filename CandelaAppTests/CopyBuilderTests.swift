@@ -1326,7 +1326,8 @@ struct CopyBuilderTests {
     }
   }
 
-  private static let allReadEvidence: [DDCReadEvidence] = [.notAttempted, .answered, .allZeros, .noReply]
+  private static let allReadEvidence: [DDCReadEvidence] =
+    [.notAttempted, .answered, .allZeros, .noReply, .refused]
 
   private static func guardReadEvidence(_ evidence: DDCReadEvidence) -> Int {
     switch evidence {
@@ -1334,6 +1335,7 @@ struct CopyBuilderTests {
     case .answered: 1
     case .allZeros: 2
     case .noReply: 3
+    case .refused: 4
     }
   }
 
@@ -1493,7 +1495,7 @@ struct CopyBuilderTests {
     #expect(Set(Self.allApplyNotices.map(Self.guardApplyNotice)).count == 2)
     #expect(Set(Self.allProblemShapes.flatMap { $0 }.map(Self.guardProblem)).count == 2)
     #expect(Set(Self.allBrightnessPaths.map(Self.guardBrightnessPath)).count == 8)
-    #expect(Set(Self.allReadEvidence.map(Self.guardReadEvidence)).count == 4)
+    #expect(Set(Self.allReadEvidence.map(Self.guardReadEvidence)).count == 5)
     #expect(Set(Self.allMirrorRefusals.map(Self.guardMirrorRefusal)).count == 8)
     #expect(Set(Self.allRotationRefusals.map(Self.guardRotationRefusal)).count == 6)
     #expect(Set(Self.allModeReapplyNotices.map(Self.guardModeReapplyNotice)).count == 3)

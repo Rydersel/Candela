@@ -392,7 +392,8 @@ public final class DDCValueController: PendingWireDraining {
   /// of zero: the fork's unvalidated read clobbered saved values to 0.
   ///
   /// Skipped after two silent passes (`DDCReadSkipLatch`). It matters more here
-  /// than for brightness: this loop spends `pollingTries` transactions per pass.
+  /// than for brightness: this loop spends `pollingTries` transactions per pass,
+  /// which is also why a refusal ends the loop on the try that carried it.
   ///
   /// `settling` marks a pass a topology change triggered, where the wire is still
   /// renegotiating and a silence is evidence about the moment rather than the
@@ -428,6 +429,16 @@ public final class DDCValueController: PendingWireDraining {
       // Silence and zeros are different facts; the transport tells them apart, and
       // `outcome.evidence` is the one place `max == 0` folds into zeros.
       let outcome = await writer.readOutcome(command: readCode)
+      // A refusal ends the pass the way it ends the transport's own ladder: the
+      // panel read the request and said this register is not one it carries, and
+      // no retry can change that. Assigned rather than folded, because
+      // worst-wins ranks a silence above it: with the fold, one contended try
+      // among four refusals branded the whole pass silent, and two such passes
+      // published "Not answering" about a display that had replied every time.
+      if outcome.evidence == .refused {
+        passEvidence = .refused
+        break
+      }
       guard let result = outcome.value, result.max > 0 else {
         // Held, not published: the latch below decides once the pass concludes.
         passEvidence = DDCReadEvidence.worse(passEvidence, outcome.evidence)
@@ -440,12 +451,14 @@ public final class DDCValueController: PendingWireDraining {
       readSkip.record(.answered)
       readEvidence = .answered
       answered = true
-      guard issuedGeneration == issuedAtStart else { return }
       // The max is real information on every validated read (the loop guard
-      // proved `max > 0`); learn it BEFORE the artifact skip below, which
-      // concerns `current` only — otherwise the skip path leaves `readMax`
-      // nil and later writes scale against the assumed 100.
+      // proved `max > 0`), and it is a fact about the panel rather than about
+      // anyone's intent, so it is learned before BOTH exits below: the staleness
+      // fence, which supersedes the value alone, and the artifact skip, which
+      // concerns `current` only. Either one taking the max with it leaves
+      // `readMax` nil and later writes scaled against the assumed 100.
       readMax = Int(result.max)
+      guard issuedGeneration == issuedAtStart else { return }
       // Muted default-strategy register 0 is the mute ARTIFACT, not
       // information: adopting/persisting it would destroy the
       // unmute restore target.

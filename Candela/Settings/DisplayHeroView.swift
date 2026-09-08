@@ -410,10 +410,10 @@ struct DisplayHeroView: View {
     // The brightness controller's OWN evidence, not the folded worst-of-three
     // the diagnostics page states: this sentence is about the number on the
     // brightness slider, and a volume read that answered must not speak for it.
-    // Both silent verdicts group together: either way the value shown is what
-    // we last wrote.
+    // The two silent verdicts and a refusal group together: this caption is
+    // about where the number came from, and none of the three supplied one.
     switch state.controller.readEvidence {
-    case .allZeros, .noReply:
+    case .allZeros, .noReply, .refused:
       return .valueNotReadBack
     case .answered, .notAttempted:
       return nil

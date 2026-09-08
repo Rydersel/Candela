@@ -118,12 +118,13 @@ func ddcGet(code: UInt8, label: String) async {
   for entry in found {
     // A read failure is normal on a write-only panel, and WHICH failure is the
     // verdict: zeros over the sentinel is a panel answering nothing, silence is
-    // no answer at all.
+    // no answer at all, and a refusal is the panel naming a code it does not carry.
     let reading: String
     switch await entry.writer.readOutcome(command: code) {
     case let .frame(current, max): reading = "\(current)/\(max)"
     case .allZeros: reading = "read answered with zeros (write-only panel)"
     case .noReply: reading = "read got no reply (silent panel, or DDC is locked by HDR)"
+    case .refused: reading = "the display refused this code (it does not carry this register)"
     }
     print("\(entry.display.name): \(label) \(reading)")
   }

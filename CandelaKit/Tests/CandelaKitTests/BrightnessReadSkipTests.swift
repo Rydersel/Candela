@@ -77,12 +77,35 @@ private func makeHDRController(writer: any DDCWriting, hdr: FakeHDR) -> Brightne
 }
 
 /// A zeros reply is the panel's own word about itself, so it never waits for a
-/// second pass the way a silence does, and neither does a frame.
+/// second pass the way a silence does, and neither does a frame or a refusal.
 @Test func anAnswerPublishesOnItsFirstPass() {
   var zeros = DDCReadSkipLatch()
   #expect(zeros.record(.allZeros) == true)
   var frames = DDCReadSkipLatch()
   #expect(frames.record(.answered) == true)
+  var refusals = DDCReadSkipLatch()
+  #expect(refusals.record(.refused) == true)
+}
+
+/// A refused register is the panel's settled word, so re-asking it every pass
+/// spends the wire on a question already answered: it counts toward the skip on
+/// the same two-pass rule as the other findings. The Dell's VCP 0x62 is this
+/// case, and the value controller pays `pollingTries` transactions per pass for it.
+@Test func twoRefusedPassesLatchTheSkip() {
+  var latch = DDCReadSkipLatch()
+  latch.record(.refused)
+  #expect(!latch.skipsRead)
+  latch.record(.refused)
+  #expect(latch.skipsRead)
+}
+
+/// And a refusal is its own run, like zeros: one refusal beside one silence is a
+/// contended wire rather than a settled verdict.
+@Test func aRefusedPassAndASilentPassAreNotAPair() {
+  var latch = DDCReadSkipLatch()
+  latch.record(.refused)
+  #expect(latch.record(.noReply) == false)
+  #expect(!latch.skipsRead)
 }
 
 /// A pass that never reached the wire proved nothing, so it publishes nothing.
@@ -630,4 +653,20 @@ private final class InterleavingDDC: DDCWriting, @unchecked Sendable {
   controller.setBrightness(0.8)
   await controller.refreshFromHardware()
   #expect(controller.brightness == 0.2)
+}
+
+/// What the fence drops is the VALUE. The panel's own maximum is a fact about
+/// the hardware rather than about anyone's intent, so a key press landing
+/// mid-read must not take it down with the reading: dropped, every later write
+/// scales against the assumed 100 until some other pass happens to answer, and
+/// the provenance flag says "assumed" about a number the panel reported.
+@MainActor
+@Test func aWriteIssuedDuringAReadStillKeepsThePanelsScale() async {
+  let fake = InterleavingDDC(result: (current: 60, max: 120))
+  let controller = makeLegacyPathController(writer: fake)
+  fake.duringFirstRead = { controller.setBrightness(0.6) }
+  await controller.refreshFromHardware()
+  #expect(controller.brightness == 0.6, "the write is the newer intent")
+  #expect(controller.maxDDCValue == 120)
+  #expect(controller.didReadMaxDDC)
 }

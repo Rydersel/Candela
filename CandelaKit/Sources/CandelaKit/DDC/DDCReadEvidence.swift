@@ -30,16 +30,29 @@ public enum DDCReadEvidence: Sendable, Equatable {
   /// Nothing usable came back: a silent bus, a read call that left the reply
   /// buffer untouched, or a frame that failed its checksum, op code or offset.
   case noReply
+  /// The panel answered with a result code: it parsed the request and said this
+  /// register is not one it carries. The Dell answers VCP 0x62 that way.
+  ///
+  /// An ANSWER, not a fault. The value is unreadable, but the wire carried a
+  /// reply, so a display whose volume register is refused is not a display that
+  /// stopped answering, and the two must not read the same.
+  case refused
 
   /// Worst-wins ordering. `allZeros` outranks `noReply` because it is the more
   /// SPECIFIC finding — the panel is on the bus and talking, it just never
   /// says anything true — and that is the sentence the user needs.
+  ///
+  /// `refused` sits between the floor and `answered`: it is a real finding, so it
+  /// supersedes "nothing asked yet", and it is the panel replying, so a sibling
+  /// that returned a value speaks for the display instead. Below both silences on
+  /// purpose, which is what keeps a refused register out of "not answering".
   private var severity: Int {
     switch self {
     case .notAttempted: 0
-    case .answered: 1
-    case .noReply: 2
-    case .allZeros: 3
+    case .refused: 1
+    case .answered: 2
+    case .noReply: 3
+    case .allZeros: 4
     }
   }
 

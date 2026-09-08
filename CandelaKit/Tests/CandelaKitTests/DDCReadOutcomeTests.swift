@@ -59,15 +59,14 @@ private func refusalFrame(command: UInt8, code: UInt8 = 0x01) -> [UInt8] {
   #expect(Arm64DDC.replyVerdict(garbled) == .silent)
 }
 
-/// The control for the four cases above: the verdict function distinguishes at
-/// all, rather than answering `.silent` to everything.
+/// The control for the cases above: the verdict function distinguishes at all,
+/// rather than answering `.silent` to everything.
 @Test func theVerdictsAreDistinct() {
   let untouched = Arm64DDC.replyVerdict([UInt8](repeating: Arm64DDC.replySentinel, count: 11))
   let zeros = Arm64DDC.replyVerdict([UInt8](repeating: 0, count: 11))
   let frame = Arm64DDC.replyVerdict(replyFrame(command: 0x10, current: 1, max: 2))
-  #expect(untouched != zeros)
-  #expect(zeros != frame)
-  #expect(frame != untouched)
+  let refusal = Arm64DDC.replyVerdict(refusalFrame(command: 0x10), command: 0x10)
+  #expect(Set([untouched, zeros, frame, refusal]).count == 4)
 }
 
 /// A frame that answers a DIFFERENT code than the one asked is not an answer,
@@ -248,29 +247,31 @@ private func runRead(
 @Test func aRefusedRegisterEndsTheLadderOnTheAttemptThatCarriedIt() {
   let panel = ScriptedPanel([refusalFrame(command: 0x10)])
   var reply = [UInt8](repeating: 0, count: 11)
-  #expect(runRead(panel, reply: &reply) == .silent)
+  #expect(runRead(panel, reply: &reply) == .refused)
   #expect(panel.reads == 1)
   #expect(panel.writes == 1)
 }
 
-/// The evidence is unchanged by the early exit: a refusal is not a readable
-/// register, so it reads as silence and the skip latch counts it as before.
-@Test func aRefusalStillReadsAsSilenceRatherThanAnAnswer() {
-  #expect(Arm64DDC.replyVerdict(refusalFrame(command: 0x10), command: 0x10) == .silent)
-  #expect(Arm64DDC.attemptVerdict(refusalFrame(command: 0x10), command: 0x10).isRefusal)
+/// And it is its OWN outcome, not a shade of silence: the panel replied, so a
+/// display whose volume register is refused must not be reported as one that
+/// stopped answering.
+@Test func aRefusalIsItsOwnOutcomeRatherThanSilence() {
+  #expect(Arm64DDC.replyVerdict(refusalFrame(command: 0x10), command: 0x10) == .refused)
+  #expect(DDCReadOutcome.refused.evidence == .refused)
+  #expect(DDCReadOutcome.refused.value == nil)
 }
 
-/// The ordering `isRefusal` rests on: `attemptVerdict` checks the checksum
+/// The ordering the refusal verdict rests on: `replyVerdict` checks the checksum
 /// FIRST, so a result code carried in bytes that failed their own integrity
-/// check is not the panel answering. `isRefusal` deliberately does not check the
-/// checksum itself, so nothing but that ordering keeps a corrupted frame from
-/// ending the ladder.
+/// check is not the panel answering. `DDCReplyFrame.isRefusal` deliberately does
+/// not check the checksum itself, so nothing but that ordering keeps a corrupted
+/// frame from ending the ladder.
 @Test func aRefusalWithABrokenChecksumIsNotAnAnswerAndKeepsRetrying() {
   var corrupted = refusalFrame(command: 0x10)
   corrupted[corrupted.count - 1] &+= 1
   // The frame still SAYS refusal; only the checksum says not to believe it.
   #expect(DDCReplyFrame.isRefusal(corrupted, of: 0x10))
-  #expect(!Arm64DDC.attemptVerdict(corrupted, command: 0x10).isRefusal)
+  #expect(Arm64DDC.replyVerdict(corrupted, command: 0x10) == .silent)
 
   let panel = ScriptedPanel([corrupted])
   var reply = [UInt8](repeating: 0, count: 11)
@@ -305,6 +306,16 @@ private func runRead(
   ])
   var reply = [UInt8](repeating: 0, count: 11)
   #expect(runRead(panel, reply: &reply) == .answeredZeros)
+  #expect(panel.reads == 2)
+}
+
+/// The other direction: a refusal behind a dropped read call is the transaction's
+/// answer, because the panel did eventually speak and a lost call proves nothing
+/// about the register.
+@Test func aRefusalOutlivesAnEarlierFailedCall() {
+  let panel = ScriptedPanel([nil, refusalFrame(command: 0x10)])
+  var reply = [UInt8](repeating: 0, count: 11)
+  #expect(runRead(panel, reply: &reply) == .refused)
   #expect(panel.reads == 2)
 }
 
@@ -504,6 +515,12 @@ private func pacerOnAQuietBus(_ clock: FakeClock) -> DDCBusPacer {
   #expect(Arm64DDC.fold(.silent, .answeredZeros) == .answeredZeros)
   #expect(Arm64DDC.fold(.silent, .silent) == .silent)
   #expect(Arm64DDC.fold(.answeredZeros, .ok) == .ok)
+  // A refusal beats a silence and loses to zeros, in both argument orders.
+  #expect(Arm64DDC.fold(.silent, .refused) == .refused)
+  #expect(Arm64DDC.fold(.refused, .silent) == .refused)
+  #expect(Arm64DDC.fold(.answeredZeros, .refused) == .answeredZeros)
+  #expect(Arm64DDC.fold(.refused, .answeredZeros) == .answeredZeros)
+  #expect(Arm64DDC.fold(.refused, .ok) == .ok)
 }
 
 // MARK: - What a read outcome publishes
@@ -521,11 +538,14 @@ private func pacerOnAQuietBus(_ clock: FakeClock) -> DDCBusPacer {
   #expect(DDCReadOutcome.frame(current: 0, max: 0).evidence == .allZeros)
 }
 
-@Test func zerosOnTheBusAndSilenceStaySeparate() {
+@Test func zerosOnTheBusAndSilenceAndARefusalStaySeparate() {
   #expect(DDCReadOutcome.allZeros.evidence == .allZeros)
   #expect(DDCReadOutcome.allZeros.value == nil)
   #expect(DDCReadOutcome.noReply.evidence == .noReply)
   #expect(DDCReadOutcome.noReply.value == nil)
+  #expect(DDCReadOutcome.refused.evidence == .refused)
+  #expect(DDCReadOutcome.refused.value == nil)
+  #expect(Set([DDCReadOutcome.allZeros.evidence, .noReply, .refused]).count == 3)
 }
 
 // MARK: - The default a writer with no transport of its own inherits

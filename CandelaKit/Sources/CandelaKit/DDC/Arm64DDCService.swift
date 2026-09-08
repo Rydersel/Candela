@@ -57,7 +57,7 @@ public actor Arm64DDCService: DDCWriting {
 
   public func readOutcome(command: UInt8) async -> DDCReadOutcome {
     let outcome = Arm64DDC.readOutcome(service: box.service, command: command, pacer: pacer)
-    // The only instrument for which silent branch a panel takes. Reads happen on
+    // The only instrument for which branch a panel takes. Reads happen on
     // menu open or wake, not at drag rate, so one line each is cheap; `.info`
     // because `log show` does not persist `.debug`.
     switch outcome {
@@ -67,6 +67,8 @@ public actor Arm64DDCService: DDCWriting {
       ddcReadLog.info("ddc.read display=\(self.logTag, privacy: .public) command=0x\(UInt(command), format: .hex) outcome=zeros")
     case .noReply:
       ddcReadLog.info("ddc.read display=\(self.logTag, privacy: .public) command=0x\(UInt(command), format: .hex) outcome=silent")
+    case .refused:
+      ddcReadLog.info("ddc.read display=\(self.logTag, privacy: .public) command=0x\(UInt(command), format: .hex) outcome=refused")
     }
     return outcome
   }
