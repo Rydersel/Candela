@@ -186,7 +186,10 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// content for a whole sampling slot reads as burn-in, the symptom the feature
   /// exists to prevent. The poll under it is a measured 0.46 ms, and it only
   /// runs while a mask is on screen.
-  private static let nominationGeometryInterval: Duration = .seconds(1)
+  ///
+  /// Derived, never a second literal: the driver ticks at `windowFollow` while a
+  /// mask is up, and a throttle above that tick silently halves the follow rate.
+  private static let nominationGeometryInterval: Duration = OledCareCadence.windowFollow
   /// "At most every few minutes, plus at termination" (spec §4). A defaults
   /// write per sample would put one on a permanent 60 s timer per panel for a
   /// value that is only ever read by a settings view.
