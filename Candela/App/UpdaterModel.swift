@@ -14,6 +14,8 @@ import Sparkle
 @MainActor @Observable
 final class UpdaterModel {
   @ObservationIgnored private let controller: SPUStandardUpdaterController
+  // Sparkle holds its delegate weakly, so the model owns it.
+  @ObservationIgnored private let relaunchDelegate = UpdateRelaunchDelegate()
 
   /// False while a check or install is in flight; drives the button's
   /// disabled state. Mirrored from Sparkle's KVO-compliant property.
@@ -31,7 +33,7 @@ final class UpdaterModel {
     // checks are enabled. The `--vd-engage` helper never reaches here: it exits
     // inside CandelaMain before any app machinery is built.
     controller = SPUStandardUpdaterController(
-      startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil
+      startingUpdater: true, updaterDelegate: relaunchDelegate, userDriverDelegate: nil
     )
     automaticallyChecksForUpdates = controller.updater.automaticallyChecksForUpdates
     lastUpdateCheckDate = controller.updater.lastUpdateCheckDate

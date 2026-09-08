@@ -641,6 +641,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       if isFirstRun {
         presentOnboarding()
       }
+      // Here rather than at the top of launch for the same reason as the setup
+      // flow: the window's display rows derive over the discovered list.
+      if UpdateRelaunch.consume() {
+        SettingsOpener.open(at: .pane(.about))
+      }
       // Virtual display launch prelude: normalize the slot prefs, log
       // any orphan from a previous instance, and recreate the recreate-at-launch
       // slots (skipped in Safe Mode). Non-blocking; creation runs on the model's
