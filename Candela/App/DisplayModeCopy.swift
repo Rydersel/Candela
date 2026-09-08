@@ -126,14 +126,20 @@ enum DisplayModeCopy {
   /// without taking, and that failure has no CoreGraphics code to print.
   static func startFailureDiagnostic(_ reason: DisplayModeCoordinator.StartFailure.Reason) -> String {
     switch reason {
-    case let .failed(error):
-      if let unhonoured = error.unhonouredCommit {
-        let landed = unhonoured.achieved.map { "\(size($0)), \(refresh($0.refreshHz))" }
-        return "CoreGraphics reported success; display shows \(landed ?? "an unreadable resolution")"
-      }
-      return "CoreGraphics error \(error.cgErrorCode)"
-    case let .blocked(claimant): return "Held by \(claimant.rawValue)"
+    case let .failed(error): diagnostic(error)
+    case let .blocked(claimant): "Held by \(claimant.rawValue)"
     }
+  }
+
+  /// The tooltip for any `DisplayConfigError`; no surface reads `cgErrorCode`
+  /// itself. An unhonoured commit's code is a sentinel, not a CoreGraphics
+  /// error, and the finding there is which resolution the display was left on.
+  static func diagnostic(_ error: DisplayConfigError) -> String {
+    guard let unhonoured = error.unhonouredCommit else {
+      return "CoreGraphics error \(error.cgErrorCode)"
+    }
+    let landed = unhonoured.achieved.map { "\(size($0)), \(refresh($0.refreshHz))" }
+    return "CoreGraphics reported success; display shows \(landed ?? "an unreadable resolution")"
   }
 
   /// A `confirm()`/`revert()`/expiry that threw. Nothing auto-retries, so this

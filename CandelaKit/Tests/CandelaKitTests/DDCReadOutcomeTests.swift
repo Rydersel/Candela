@@ -130,6 +130,10 @@ private final class ScriptedPanel: @unchecked Sendable {
 
 /// Time the tests move by hand, so the three gap cases are pinned without
 /// spending any. Starts away from zero so that rewinding it stays in range.
+/// Time the tests move by hand. Starts away from zero so rewinding stays in range.
+///
+/// `@unchecked Sendable`: every mutation happens on the test's own thread, from
+/// closures `runTransaction` calls synchronously.
 private final class FakeClock: @unchecked Sendable {
   private var nanos: UInt64 = 1_000_000_000
 
@@ -368,6 +372,38 @@ private func pacerOnAQuietBus(_ clock: FakeClock) -> DDCBusPacer {
   #expect(pacer.deficit(floor: 10000) == 10000)
 }
 
+/// The pacer outlives the service: `DisplayDiscovery.discover()` rebuilds it on
+/// every refresh while the retired one can still drain a queued write.
+@Test func twoServicesForOneDisplayShareTheFloor() {
+  let clock = FakeClock()
+  let first = DDCBusPacerRegistry.shared.pacer(for: 0xFACE_0001, now: clock.reader)
+  clock.advance(microseconds: 60000)
+  #expect(first.deficit(floor: 10000) == 0)
+  first.recordBusUse()
+
+  // The rebuild. The clock argument is ignored for a key already registered,
+  // which is the point: a new service does not get to restart the floor.
+  let second = DDCBusPacerRegistry.shared.pacer(for: 0xFACE_0001, now: clock.reader)
+  #expect(second === first)
+  #expect(second.deficit(floor: 10000) == 10000)
+}
+
+/// And the other direction, which is what a per-display key is for: a write to
+/// one panel never delays a write to another.
+@Test func twoDisplaysDoNotPaceEachOther() {
+  let clock = FakeClock()
+  let one = DDCBusPacerRegistry.shared.pacer(for: 0xFACE_0002, now: clock.reader)
+  let other = DDCBusPacerRegistry.shared.pacer(for: 0xFACE_0003, now: clock.reader)
+  #expect(one !== other)
+  clock.advance(microseconds: 60000)
+  one.recordBusUse()
+  #expect(one.deficit(floor: 10000) == 10000)
+  #expect(other.deficit(floor: 10000) == 0)
+}
+
+/// The fold's own contract. The ladder returns on a valid frame rather than
+/// folding it, so the `.ok` arms exist to keep the function total, not for a path
+/// anything takes today.
 @Test func theFoldKeepsTheMoreSpecificFinding() {
   #expect(Arm64DDC.fold(.answeredZeros, .silent) == .answeredZeros)
   #expect(Arm64DDC.fold(.silent, .answeredZeros) == .answeredZeros)

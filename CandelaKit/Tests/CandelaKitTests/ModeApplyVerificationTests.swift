@@ -53,6 +53,17 @@ struct ModeApplyVerificationTests {
         == .honoured)
   }
 
+  /// The edges of the half-hertz tolerance: an NTSC rate and its integer twin
+  /// collapse into one match, a real neighbouring rate does not.
+  @Test func theRefreshToleranceCollapsesNTSCAndKeepsRealRatesApart() {
+    #expect(
+      ModeApplyVerification.verdict(requested: mode(hz: 60), achieved: mode(hz: 59.94))
+        == .honoured)
+    #expect(
+      ModeApplyVerification.verdict(requested: mode(hz: 60), achieved: mode(hz: 61))
+        == .unhonoured)
+  }
+
   /// No readable mode is not evidence the mode landed, so it takes the same
   /// answer as a miss.
   @Test func anUnreadableModeIsUnhonoured() {

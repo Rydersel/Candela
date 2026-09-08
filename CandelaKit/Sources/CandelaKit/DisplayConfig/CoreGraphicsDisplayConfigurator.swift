@@ -257,17 +257,12 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     // THE RETURN CODE IS NOT THE EVIDENCE, the achieved mode is. The cross-check
     // above proves the id still denotes the geometry asked for; it proves
     // nothing about what the commit then did with it.
+    // landing. The first read is taken before any sleep, so an honoured commit
+    // pays nothing.
     //
-    // Bounded settle rather than one immediate read, the shape `applyRotation`
-    // uses: the window server lands a mode change asynchronously, so a single
-    // read can still describe the outgoing mode and report a false miss. Half a
-    // second, because a change that has not landed by then is not landing.
-    //
-    // The first read is taken BEFORE any sleep and an honoured commit returns on
-    // it, so a caller on the main actor pays this block only on the failure
-    // path. 50 ms between polls for the same reason: ten reads is ample
-    // resolution for a settle measured in tens of milliseconds, and a tighter
-    // loop only spends more of a blocked main thread on a case already lost.
+    // Blocks the calling thread: the main actor for an interactive apply, a
+    // cooperative thread for the preview session and checkup runners. The
+    // alternative was reporting an unverified apply.
     let deadline = Date().addingTimeInterval(0.5)
     var achieved = achievedMode(displayID)
     while ModeApplyVerification.verdict(requested: mode, achieved: achieved) == .unhonoured,

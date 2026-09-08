@@ -97,6 +97,10 @@ public final class DDCValueController: PendingWireDraining {
   /// before it in its pass.
   public private(set) var readEvidence: DDCReadEvidence = .notAttempted
 
+  /// Whether this register is still worth asking about. Its own, never the
+  /// display's fold: volume can be silent on a panel whose brightness answers.
+  @ObservationIgnored private var readSkip = DDCReadSkipLatch()
+
   public init(
     writer: any DDCWriting,
     command: DDCCommand,
@@ -384,14 +388,16 @@ public final class DDCValueController: PendingWireDraining {
   /// `.read`: validated DDC readback. `(0, 0)` and `max == 0` are FAILED reads,
   /// not a value of zero: a write-only panel produces nothing usable from any
   /// read, and the fork's unvalidated read clobbers saved values to 0.
+  /// `.read`: validated DDC readback. `max == 0` is a FAILED read, not a value
+  /// of zero: the fork's unvalidated read clobbered saved values to 0.
   ///
-  /// Unlike the brightness controller, this one has no once-per-plug skip. It is
-  /// gated on `startupAction == .read`, which is not the default, so a silent
-  /// panel here costs `pollingTries` full transactions per pass.
+  /// Skipped after two silent passes (`DDCReadSkipLatch`). It matters more here
+  /// than for brightness: this loop spends `pollingTries` transactions per pass.
   public func refreshFromHardware() async {
     guard prefs.startupAction == .read, isAvailable else { return }
     let tries = prefs.pollingTries
     guard tries > 0 else { return }
+    guard !readSkip.skipsRead else { return }
     let tuning = prefs.tuning(for: command)
     // Fork parity: reads use only the FIRST remap code.
     let readCode = tuning.remapCodes.first ?? command.code
@@ -410,6 +416,10 @@ public final class DDCValueController: PendingWireDraining {
     // what the last pass concluded (see `readEvidence`). Only the FAILED
     // attempts fold, worst-wins; a success supersedes them outright.
     var passEvidence = DDCReadEvidence.notAttempted
+    // One pass, one hearing: the retries inside it are the reliability
+    // mechanism, so the latch counts what the pass concluded and not what each
+    // attempt did.
+    var answered = false
     for _ in 0 ..< tries {
       // A silent bus and a panel that answers zeros are different facts, and the
       // transport is where they are now told apart: it carries a non-zero
@@ -426,8 +436,11 @@ public final class DDCValueController: PendingWireDraining {
       // Recorded BEFORE the staleness fence: the panel answered, and that is
       // true whether or not user input superseded the value we were about to
       // adopt. Returning here without recording would hide a good panel behind
-      // a race.
+      // a race. The latch is cleared at the same point and for the same reason:
+      // the pass below can still `return` before its own recording runs.
       readEvidence = .answered
+      readSkip.record(.answered)
+      answered = true
       guard issuedGeneration == issuedAtStart else { return }
       // The max is real information on every validated read (the loop guard
       // proved `max > 0`); learn it BEFORE the artifact skip below, which
@@ -449,6 +462,7 @@ public final class DDCValueController: PendingWireDraining {
       persist(adopted)
       break
     }
+    if !answered { readSkip.record(passEvidence) }
     // The strategy in force, not the pref: 0x8D is where this display's mute
     // lives only if the display takes 0x8D. Asking a register the display
     // denies and adopting its answer would write a mute state nothing ever
@@ -580,6 +594,7 @@ public final class DDCValueController: PendingWireDraining {
       boundPanelIdentity = panelIdentity
       readMax = nil
       readEvidence = .notAttempted
+      readSkip.clear()
     }
     coalescer.resetDuplicateState()
     muteCoalescer.resetDuplicateState()
@@ -601,6 +616,18 @@ public final class DDCValueController: PendingWireDraining {
   public func resetWriteMemo() {
     coalescer.resetDuplicateState()
     muteCoalescer.resetDuplicateState()
+  }
+
+  /// Wake, reconfiguration and the HDR-off edge, all of which reach this
+  /// controller through the display's brightness controller: its three
+  /// controllers share one wire, and this one has no observers of its own.
+  ///
+  /// The verdict goes with the latch. Keeping it while the skip is cleared would
+  /// leave the diagnostics report asserting a write-only panel over a register
+  /// nothing has asked since.
+  public func noteReadEvidenceStale() {
+    readEvidence = .notAttempted
+    readSkip.clear()
   }
 
   /// Whether the wire is open right now: the same gate the coalescer consults

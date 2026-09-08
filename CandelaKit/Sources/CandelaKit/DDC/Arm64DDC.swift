@@ -16,28 +16,21 @@ let ARM64_DDC_DATA_ADDRESS: UInt8 = 0x51
 /// most of it. Measuring it instead keeps every gap that exists today (a burst
 /// of writes, a read followed at once by a write) and drops only the wait
 /// nothing was waiting for.
+/// One per display for the life of the process (`DDCBusPacerRegistry`), so two
+/// panels never pace each other and two services for one panel never race.
 ///
-/// One per display: `Arm64DDCService` is the per-display actor and owns one of
-/// these, so two panels never pace each other.
-///
-/// `@unchecked Sendable`: the two fields are confined by `lock`, and the clock
-/// is a `@Sendable` closure. The actor serializes its own display's calls, but
-/// the entry points below are static and reachable from anywhere.
+/// `@unchecked Sendable`: both fields are confined by `lock` and the clock is a
+/// `@Sendable` closure; the static entry points and the registry share it
+/// across actors.
 final class DDCBusPacer: @unchecked Sendable {
   private let now: @Sendable () -> UInt64
   private let lock = NSLock()
   private var lastCallEnd: UInt64
 
-  /// The clock is injected so a test can pin all three gap cases without
-  /// spending real time.
-  ///
-  /// The bus starts SEEN, not quiet. A pacer's lifetime is its service object's,
-  /// and `DisplayDiscovery.discover()` builds a fresh `Arm64DDCService` on every
-  /// refresh (wake, reconfiguration, a menu open), so an empty pacer would let
-  /// the first packet after a refresh follow the retired service's traffic by
-  /// microseconds. That is the one direction this change must never go, and on
-  /// the write-only MAG it would be silent. The cost is one floor's wait per
-  /// fresh service; every quiet-bus win survives it.
+  /// Injected clock so tests spend no real time. The bus starts SEEN, not quiet:
+  /// another writer may have used it microseconds ago, and on a write-only panel
+  /// a packet inside the floor fails silently. Costs one floor's wait per display
+  /// per process.
   init(now: @escaping @Sendable () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }) {
     self.now = now
     self.lastCallEnd = now()
@@ -60,6 +53,34 @@ final class DDCBusPacer: @unchecked Sendable {
     self.lock.lock()
     self.lastCallEnd = self.now()
     self.lock.unlock()
+  }
+}
+
+/// One pacer per display, held for the life of the process.
+/// (`DDCCommandApplier` holds its writer as a `let`), so a per-service pacer let
+/// two pacers each believe one bus was quiet.
+///
+/// Keyed on display ID, which a replug can reassign; that costs at most one
+/// misattributed floor across an interval measured in seconds.
+/// `@unchecked Sendable`: the table is confined by `lock`.
+final class DDCBusPacerRegistry: @unchecked Sendable {
+  static let shared = DDCBusPacerRegistry()
+
+  private let lock = NSLock()
+  private var pacers: [CGDirectDisplayID: DDCBusPacer] = [:]
+
+  /// `now` seeds a pacer on first sight only: a rebuilt service does not restart
+  /// the clock.
+  func pacer(
+    for displayID: CGDirectDisplayID,
+    now: @escaping @Sendable () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }
+  ) -> DDCBusPacer {
+    self.lock.lock()
+    defer { self.lock.unlock() }
+    if let existing = self.pacers[displayID] { return existing }
+    let fresh = DDCBusPacer(now: now)
+    self.pacers[displayID] = fresh
+    return fresh
   }
 }
 
@@ -257,12 +278,9 @@ public class Arm64DDC: NSObject {
     return .ok
   }
 
-  /// One attempt's verdict folded into the transaction's.
-  ///
-  /// `answeredZeros` is the more specific finding and outlives a later attempt
-  /// that got nothing at all, the ordering `DDCReadEvidence.worse` uses for the
-  /// same reason. Only a valid frame supersedes it, and the ladder returns on
-  /// that outright rather than folding it.
+  /// One attempt's verdict folded into the transaction's: `answeredZeros` outlives
+  /// a later silence, the ordering `DDCReadEvidence.worse` uses. The ladder returns
+  /// on `.ok` rather than folding it; the `.ok` arms only keep this total.
   static func fold(_ transaction: TransactionOutcome, _ attempt: TransactionOutcome) -> TransactionOutcome {
     switch (transaction, attempt) {
     case (.ok, _), (_, .ok): .ok

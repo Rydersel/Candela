@@ -96,6 +96,9 @@ public actor ModePreviewSession {
         // End a live preview on another display first, or its fallback gets
         // retargeted here and that display is left in preview with no
         // countdown. Refuse if the revert fails rather than strand it.
+        //
+        // That error describes the OTHER display; `DisplayConfigError` carries no
+        // display ID, and widening it would touch every caller.
         if case let .failed(error) = revertOutstanding() { return .failure(error) }
         guard let read = configurator.currentMode(for: displayID) else {
           return .failure(DisplayConfigError(cgErrorCode: CGError.failure.rawValue))

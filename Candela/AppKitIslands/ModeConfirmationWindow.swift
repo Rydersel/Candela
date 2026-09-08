@@ -95,7 +95,9 @@ struct ModeConfirmationView: View {
           // leave the display on a mode the user never approved, held only
           // until the app exits.
           ConfirmationCaption(DisplayModeCopy.resolveFailure)
-            .help("CoreGraphics error \(failure.cgErrorCode)")
+            // Not the bare code: an unhonoured commit's code is a sentinel, not a
+            // CoreGraphics error.
+            .help(DisplayModeCopy.diagnostic(failure))
         }
         if preview.isCountingDown {
           ConfirmationCountdown(DisplayModeCopy.countdown(preview.secondsRemaining))

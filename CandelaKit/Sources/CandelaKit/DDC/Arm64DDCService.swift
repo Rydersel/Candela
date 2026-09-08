@@ -1,4 +1,5 @@
 import CandelaPrivateAPIs
+import CoreGraphics
 import os
 
 /// One line per DDC read. Nothing else reports which of the two silent verdicts
@@ -14,16 +15,32 @@ public actor Arm64DDCService: DDCWriting {
   }
 
   private let box: ServiceBox
-  /// This display's bus floor, and only this display's: the pacer is per actor,
-  /// so a write to one panel never delays a write to another.
-  private let pacer = DDCBusPacer()
+  /// This display's bus floor, and only this display's, shared with every other
+  /// service ever built for it: a write to one panel never delays a write to
+  /// another, and a service retired mid-drain cannot spend the new one's floor.
+  /// This display's bus floor, shared with every service ever built for it: a
+  /// service retired mid-drain cannot spend the new one's floor.
+  private let pacer: DDCBusPacer
+  /// Hashed: a raw persistence key can embed the panel's serial number and
+  /// these log lines are `.public`.
+  private let logTag: String
 
-  private init(box: ServiceBox) {
+  private init(box: ServiceBox, pacer: DDCBusPacer, logTag: String) {
     self.box = box
+    self.pacer = pacer
+    self.logTag = logTag
   }
 
-  nonisolated static func create(service: IOAVService?) -> Arm64DDCService {
-    Arm64DDCService(box: ServiceBox(service: service))
+  /// `displayID` keys the shared pacer; `logTag` is `DisplayLogging.tag(for:)` of
+  /// the persistence key, so a read verdict is attributable with two panels.
+  nonisolated static func create(
+    service: IOAVService?, displayID: CGDirectDisplayID, logTag: String
+  ) -> Arm64DDCService {
+    Arm64DDCService(
+      box: ServiceBox(service: service),
+      pacer: DDCBusPacerRegistry.shared.pacer(for: displayID),
+      logTag: logTag
+    )
   }
 
   public func write(command: UInt8, value: UInt16) async -> Bool {
@@ -43,16 +60,16 @@ public actor Arm64DDCService: DDCWriting {
 
   public func readOutcome(command: UInt8) async -> DDCReadOutcome {
     let outcome = Arm64DDC.readOutcome(service: box.service, command: command, pacer: pacer)
-    // The rig's only instrument for which branch a silent panel takes. A read
-    // costs a menu open or a wake, not a drag, so one line per read is cheap;
-    // `.info` because `log show` does not persist `.debug`.
+    // The only instrument for which silent branch a panel takes. Reads happen on
+    // menu open or wake, not at drag rate, so one line each is cheap; `.info`
+    // because `log show` does not persist `.debug`.
     switch outcome {
     case let .frame(current, max):
-      ddcReadLog.info("ddc.read command=0x\(UInt(command), format: .hex) outcome=frame current=\(current) max=\(max)")
+      ddcReadLog.info("ddc.read display=\(self.logTag, privacy: .public) command=0x\(UInt(command), format: .hex) outcome=frame current=\(current) max=\(max)")
     case .allZeros:
-      ddcReadLog.info("ddc.read command=0x\(UInt(command), format: .hex) outcome=zeros")
+      ddcReadLog.info("ddc.read display=\(self.logTag, privacy: .public) command=0x\(UInt(command), format: .hex) outcome=zeros")
     case .noReply:
-      ddcReadLog.info("ddc.read command=0x\(UInt(command), format: .hex) outcome=silent")
+      ddcReadLog.info("ddc.read display=\(self.logTag, privacy: .public) command=0x\(UInt(command), format: .hex) outcome=silent")
     }
     return outcome
   }

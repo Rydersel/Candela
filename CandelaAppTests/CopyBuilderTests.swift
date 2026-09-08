@@ -442,16 +442,41 @@ struct CopyBuilderTests {
         == "CoreGraphics error 1001")
     #expect(DisplayModeCopy.startFailureDiagnostic(.blocked(by: .rotation)) == "Held by rotation")
 
-    // A commit that went through unhonoured has no error code worth printing:
-    // CoreGraphics reported success, and the finding is which resolution the
-    // display was left on.
+    // No code to print for an unhonoured commit. Achieved differs from requested
+    // so the assertions can tell which one the sentence names.
+    let landed = DisplayMode(
+      ioModeID: 9, logicalWidth: 1920, logicalHeight: 1080,
+      pixelWidth: 1920, pixelHeight: 1080, refreshHz: 30, isNative: false)
     let unhonoured = DisplayModeCopy.startFailureDiagnostic(
       .failed(
         DisplayConfigError(
-          unhonouredCommit: .init(requested: Self.mode, achieved: Self.mode))))
+          unhonouredCommit: .init(requested: Self.mode, achieved: landed))))
     #expect(!unhonoured.contains("CoreGraphics error"))
     #expect(unhonoured.contains("reported success"))
-    #expect(unhonoured.contains(DisplayModeCopy.size(Self.mode)))
+    #expect(unhonoured.contains(DisplayModeCopy.size(landed)))
+    #expect(unhonoured.contains(DisplayModeCopy.refresh(landed.refreshHz)))
+    #expect(!unhonoured.contains(DisplayModeCopy.size(Self.mode)))
+  }
+
+  /// Every tooltip that renders a `DisplayConfigError` calls this, so the
+  /// unhonoured arm is pinned once.
+  @Test func displayModeDiagnosticRendersBothArms() {
+    #expect(DisplayModeCopy.diagnostic(DisplayConfigError(cgErrorCode: 1001)) == "CoreGraphics error 1001")
+
+    let landed = DisplayMode(
+      ioModeID: 9, logicalWidth: 1920, logicalHeight: 1080,
+      pixelWidth: 1920, pixelHeight: 1080, refreshHz: 30, isNative: false)
+    let committed = DisplayModeCopy.diagnostic(
+      DisplayConfigError(unhonouredCommit: .init(requested: Self.mode, achieved: landed)))
+    #expect(committed.contains(DisplayModeCopy.size(landed)))
+    // The sentinel is not a CoreGraphics code and must never be printed as one.
+    #expect(!committed.contains("\(DisplayConfigError.unhonouredCommitCode)"))
+
+    // An unreadable achieved mode is still an unhonoured commit, not the code arm.
+    let unreadable = DisplayModeCopy.diagnostic(
+      DisplayConfigError(unhonouredCommit: .init(requested: Self.mode, achieved: nil)))
+    #expect(unreadable.contains("unreadable resolution"))
+    #expect(!unreadable.contains("CoreGraphics error"))
   }
 
   @Test func displayModeResolveFailuresInviteAnotherAttempt() {

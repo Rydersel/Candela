@@ -11,14 +11,12 @@ enum ModeApplyVerification {
     case unhonoured
   }
 
-  /// Geometry through `matchesGeometry`, never `ioModeID`. The id is positional,
-  /// and a display can be running a duplicate the enumeration collapsed (42 such
-  /// buckets on the Dell), so equal geometry under two different ids is the same
-  /// achieved state and an id compare would report a false miss.
-  ///
-  /// A nil `achieved` is unhonoured rather than a separate answer: a mode that
-  /// cannot be read is not a mode that landed, and every caller does the same
-  /// thing with either.
+  /// Geometry via `matchesGeometry`, never `ioModeID`: the id is positional and
+  /// the enumeration collapses duplicates (42 buckets on the Dell), so equal
+  /// geometry under two ids is the same achieved state. A nil `achieved` is
+  /// unhonoured: a mode that cannot be read is not one that landed. The
+  /// half-hertz tolerance absorbs CoreGraphics' float noise (59.997 for 60) and
+  /// so also calls NTSC 59.94 a 60; stored-mode matching makes the same trade.
   static func verdict(requested: DisplayMode, achieved: DisplayMode?) -> Verdict {
     guard let achieved, achieved.matchesGeometry(of: requested) else { return .unhonoured }
     return .honoured

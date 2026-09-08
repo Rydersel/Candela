@@ -480,7 +480,9 @@ private struct AnswerableModeBanner: View {
         // Nothing auto-retries a failed resolution. Silence here would leave
         // the display on a mode the user never approved.
         SettingsCaption(DisplayModeCopy.resolveFailure)
-          .help("CoreGraphics error \(failure.cgErrorCode)")
+          // Not the bare code: an unhonoured commit's code is a sentinel, not a
+          // CoreGraphics error.
+          .help(DisplayModeCopy.diagnostic(failure))
           .transition(.opacity)
       }
       if preview.isCountingDown {

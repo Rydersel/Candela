@@ -239,8 +239,9 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     do {
       try configurator.apply(ownMode, to: displayID, scope: .session)
     } catch {
+      // "Did not put back": the apply also throws on a commit the display did not honour.
       Self.log.error("""
-      synthesis.restore could not put display \(displayID, privacy: .public) back on \
+      synthesis.restore did not put display \(displayID, privacy: .public) back on \
       \(ownMode.logicalWidth, privacy: .public)x\(ownMode.logicalHeight, privacy: .public): \
       \(String(describing: error), privacy: .public)
       """)

@@ -50,6 +50,15 @@ public protocol PendingWireDraining {
   /// HDR window certifies values that never landed. Anything that knows the
   /// panel may have moved out from under the memo has to say so here.
   func resetWriteMemo()
+  /// Forgets what this controller's own DDC READS have proved, so a panel that
+  /// went quiet is asked again.
+  ///
+  /// Same events as `resetWriteMemo`, for the mirrored reason: a wake, a
+  /// reconfiguration or an HDR window closing can all change the answer, and a
+  /// skip that outlives its cause leaves a panel unread for the rest of the
+  /// plug. Defaulted to nothing for conformers with no read of their own to
+  /// forget.
+  func noteReadEvidenceStale()
   /// Waits the queue out and reports whether everything submitted has reached
   /// hardware. A target the queue completed WITHOUT applying is submitted again
   /// with a fresh epoch stamp, so one closed reconfiguration window is recovered
@@ -58,6 +67,10 @@ public protocol PendingWireDraining {
   /// "Reached hardware" is bounded by the panel: the applier ran and reported
   /// success. On a write-only display that is the end of the evidence.
   func drainPendingWrites() async -> Bool
+}
+
+public extension PendingWireDraining {
+  func noteReadEvidenceStale() {}
 }
 
 /// Drives a set of write queues to a state where nothing is owed to the panel.
