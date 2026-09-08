@@ -18,6 +18,31 @@ public enum AccessibilityBackstopPolicy {
   /// lose the settle race, so the hunt resumes for this long after one.
   public static let notificationWindow: TimeInterval = 30
 
+  /// What asked for the backstop to be re-evaluated. Both cases carry the same state
+  /// and differ only in what they say about the person at the keyboard.
+  public enum Edge: Sendable, Equatable {
+    /// A key mode was written: someone chose whether a key family goes through us.
+    case keyModesWritten
+    /// The tap was re-armed by something else: a settings reset, or a pref that
+    /// carries the re-arm without being about keys at all.
+    case tapRearmed
+  }
+
+  /// Whether this edge reopens the hunt window, putting its clock back to zero.
+  ///
+  /// Only a key-mode write does: a person turning a key family on with no grant is at
+  /// System Settings about to make it, however long the grant has been missing. The
+  /// tap's other re-arm routes re-derive the cadence from the live modes and leave the
+  /// clock where it is; reopening there would put an ungranted rig back on the
+  /// two-second interval for two minutes after a write that has nothing to do with
+  /// keys (a DDC availability switch, an audio-routing override).
+  public static func reopensHunt(
+    edge: Edge, granted: Bool, requiresAccessibility: Bool
+  ) -> Bool {
+    guard edge == .keyModesWritten else { return false }
+    return !granted && requiresAccessibility
+  }
+
   /// `secondsSinceNotification` is nil when no notification has arrived this
   /// launch. A nil result means run no timer at all.
   public static func interval(

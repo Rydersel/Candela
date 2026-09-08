@@ -86,14 +86,31 @@ final class AccessibilityPermission {
     )
   }
 
-  /// Key modes changed. Called in both directions: nothing else stands the timer
+  /// The tap was re-armed. Every pref carrying the re-arm reaches here, most of them
+  /// nothing to do with keys (a DDC availability switch, an audio-routing override),
+  /// and so does the settings reset, which is the route that leaves an all-custom rig
+  /// wanting the tap with no timer running.
+  func noteTapRearmed() {
+    reevaluateBackstop(after: .tapRearmed)
+  }
+
+  /// A key mode was written. Called in both directions: nothing else stands the timer
   /// down when the last key family goes off, or re-arms it when one comes back.
-  /// The argument decides only the re-stamp below; the cadence re-reads the modes.
-  func reevaluateBackstop(requiresAccessibility: Bool) {
+  func noteKeyModesChanged() {
+    reevaluateBackstop(after: .keyModesWritten)
+  }
+
+  /// Both doors take this path with the same state; the EDGE is the whole difference,
+  /// and the policy is what turns it into "reopen the hunt clock" or "leave it".
+  private func reevaluateBackstop(after edge: AccessibilityBackstopPolicy.Edge) {
     guard isMonitoring else { return }
-    // Re-stamp the hunt: someone turning a key family on with no grant is at
-    // System Settings about to make it, however long the grant has been missing.
-    if requiresAccessibility, !isGranted {
+    if AccessibilityBackstopPolicy.reopensHunt(
+      edge: edge,
+      granted: isGranted,
+      // Read live, like the cadence below: the settings reset restores key-mode
+      // defaults without coming back through a caller that could report them.
+      requiresAccessibility: Self.storedModesRequireGrant()
+    ) {
       missingSince = ProcessInfo.processInfo.systemUptime
     }
     scheduleBackstop()

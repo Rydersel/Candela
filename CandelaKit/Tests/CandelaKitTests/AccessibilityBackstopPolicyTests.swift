@@ -57,4 +57,51 @@ struct AccessibilityBackstopPolicyTests {
     #expect(interval(requires: false, missingFor: 3600) == nil)
     #expect(interval(requires: false, sinceNotification: 0) == nil)
   }
+
+  /// The cadence an hour into a missing grant that the tap wants, for each edge.
+  ///
+  /// The edge goes THROUGH the policy, exactly as `AccessibilityPermission`'s two
+  /// doors do: nothing here decides for it, so hard-coding the predicate either way
+  /// moves one of the two answers below. What is modelled is only what the permission
+  /// object does with the verdict, which is to put the hunt clock back to zero.
+  private func cadenceAfterEdge(
+    _ edge: AccessibilityBackstopPolicy.Edge,
+    granted: Bool = false,
+    requires: Bool = true
+  ) -> TimeInterval? {
+    let reopens = AccessibilityBackstopPolicy.reopensHunt(
+      edge: edge, granted: granted, requiresAccessibility: requires
+    )
+    return interval(granted: granted, requires: requires, missingFor: reopens ? 0 : 3600)
+  }
+
+  /// A pref that re-arms the tap says nothing about whether anyone is at System
+  /// Settings, and most of them are not about keys at all, so the clock stays put.
+  @Test func anUnrelatedTapRearmLeavesTheRestingCadence() {
+    #expect(cadenceAfterEdge(.tapRearmed) == 30)
+    #expect(AccessibilityBackstopPolicy.reopensHunt(
+      edge: .tapRearmed, granted: false, requiresAccessibility: true
+    ) == false)
+  }
+
+  /// The one edge that does mean someone may be about to grant it.
+  @Test func aKeyModeWriteReopensTheHunt() {
+    #expect(cadenceAfterEdge(.keyModesWritten) == 2)
+    #expect(AccessibilityBackstopPolicy.reopensHunt(
+      edge: .keyModesWritten, granted: false, requiresAccessibility: true
+    ))
+  }
+
+  /// The state halves, on the edge that can carry them: a held grant is not being
+  /// hunted for, and an all-custom rig runs no timer for a re-stamp to move.
+  @Test func aKeyModeWriteReopensNothingWithoutBothStateHalves() {
+    #expect(cadenceAfterEdge(.keyModesWritten, granted: true) == 10)
+    #expect(cadenceAfterEdge(.keyModesWritten, requires: false) == nil)
+    #expect(AccessibilityBackstopPolicy.reopensHunt(
+      edge: .keyModesWritten, granted: true, requiresAccessibility: true
+    ) == false)
+    #expect(AccessibilityBackstopPolicy.reopensHunt(
+      edge: .keyModesWritten, granted: false, requiresAccessibility: false
+    ) == false)
+  }
 }

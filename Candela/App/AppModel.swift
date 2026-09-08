@@ -1594,12 +1594,26 @@ final class AppModel {
     restartPoller()
   }
 
-  /// Snaps every native display's published brightness onto its live value before
-  /// a surface draws. Synchronous: the panel's open edge runs inside menu tracking,
-  /// which starves anything that hops. No-op off the native path, so never DDC.
+  /// Adopts every native display's live brightness before a surface draws, through
+  /// the same route the poller takes: published, persisted, and fanned out to the
+  /// other displays when sync is on. Synchronous: the panel's open edge runs inside
+  /// menu tracking, which starves anything that hops. No-op off the native path, so
+  /// never DDC.
   func refreshNativeBrightnessForSurface() {
-    for state in allControlledStates {
-      state.controller.syncFromNativeBeforeStep()
+    let controllers = allControlledStates.map(\.controller)
+    // Every display is read before anything is written, so a fan-out cannot land on
+    // a display this pass has not looked at yet and be read back as a move of its own.
+    let adopted = controllers.compactMap { controller -> (BrightnessController, Double)? in
+      let delta = controller.adoptNativeForSurface()
+      return delta == 0 ? nil : (controller, delta)
+    }
+    for (source, delta) in adopted {
+      // The poller's own gate, reset latch included: a fan-out during a reset keeps
+      // that display's queue busy and the reset then gives up on restoring its HDR.
+      BrightnessSync.fanOut(
+        delta: delta, from: source, to: controllers,
+        isEnabled: appPrefs.enableBrightnessSync && !isResetting
+      )
     }
   }
 

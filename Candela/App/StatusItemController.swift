@@ -203,8 +203,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     menuTrackingObserver = NotificationCenter.default.addObserver(
       forName: NSMenu.didEndTrackingNotification, object: menu, queue: .main
     ) { [weak self] _ in
-      // A hop is safe here: the tracking session has just ended.
-      Task { @MainActor in self?.model.surfaceVisibility.setPanelOpen(false) }
+      // Delivered on the main queue, so the flag is cleared in this turn rather
+      // than in a task the next open could outrun: menu tracking starves
+      // main-actor task execution, and a reopen inside that window would have its
+      // fresh `menuWillOpen` flag cleared by the previous session's late hop.
+      MainActor.assumeIsolated { self?.model.surfaceVisibility.setPanelOpen(false) }
     }
 
     // Panel controls that have to end this tracking session reach it through
@@ -308,6 +311,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // every mode write through the seam. Static because the manager instance is
       // private here and the KeyboardShortcuts registry is global.
       ShortcutManager.syncRegistration()
+      // Here as well as in `recheckPermissions`, which the settings reset does not
+      // call: a reset from an all-custom ungranted rig restores the media-key
+      // defaults, so the tap becomes wanted with no timer left to notice the grant
+      // arriving. The door WITHOUT the hunt re-stamp, because most prefs that re-arm
+      // the tap say nothing about whether anyone is at System Settings; the key-mode
+      // write below is the one that does.
+      self?.model.accessibility.noteTapRearmed()
     }
     settingsActions.recheckPermissions = { [weak self] in
       // The fork computes this and never calls it, so changing a
@@ -315,14 +325,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // change actually made the CGEvent tap wanted. Custom shortcuts are Carbon
       // hotkeys and need no grant, so an all-custom rig must not be shown a TCC
       // prompt it can only refuse.
-      let prefs = DisplayPrefs(persistenceKey: "app")
-      let required = KeyModePolicy.requiresAccessibility(
-        brightness: prefs.keyboardBrightness, volume: prefs.keyboardVolume
-      )
-      // Ahead of the guard: the backstop must hear a key family going off as well
-      // as coming on, and nothing else reports either edge.
-      self?.model.accessibility.reevaluateBackstop(requiresAccessibility: required)
-      guard required else { return }
+      // Ahead of the guard: the backstop must hear a key family going off as well as
+      // coming on. This is the edge that reopens the hunt, and the only one.
+      self?.model.accessibility.noteKeyModesChanged()
+      guard AccessibilityPermission.storedModesRequireGrant() else { return }
       self?.model.accessibility.promptIfNeeded()
     }
     settingsActions.updateStatusItem = { [weak self] in self?.updateStatusItemVisibility() }
@@ -1447,6 +1453,19 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     guard !config.watchedKeys.isEmpty else {
       mediaKeyTap.stop()
       model.noteTapArmed(config)
+      return
+    }
+    // The tracked grant is refreshed by a poll, so a revocation made in System
+    // Settings and followed by a plug-in inside that window would run `tapCreate`
+    // while TCC is still committing the delete, which is the wedge the emergency
+    // teardown's settle closure waits out. One live read costs nothing here (no
+    // options, so it can never prompt) and it is only taken on a start edge.
+    // Not the policy input: the tracked flag stays what decides the lifecycle.
+    guard AXIsProcessTrustedWithOptions(nil) else {
+      // `.info` rather than `.error`: an expected decline, and the only observable
+      // that separates it from a start nobody attempted. The next edge retries.
+      log.info("media-key tap not started: the Accessibility grant reads false right now")
+      model.noteTapDisarmed()
       return
     }
     do {

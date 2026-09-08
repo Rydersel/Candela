@@ -604,17 +604,32 @@ public final class BrightnessController: PendingWireDraining {
   /// Shared with the poller's echo discard: both measure the same quantization noise.
   private static let nativeReadNoise = BrightnessPoller.defaultTolerance
 
+  /// The guarded native read both freshness routes take. Nil means there is nothing
+  /// to publish: no read is trustworthy right now, or published state already agrees
+  /// with the glass.
+  private func freshNativeRead() -> Double? {
+    // Under a temporary dim the read is our own write; folding it in corrupts what
+    // `endTemporaryDim` restores.
+    guard isNativeActive(), temporaryDimFactor == nil else { return nil }
+    // Mid-reconfigure and asleep, display state is being rebuilt and every read is
+    // suspect. The poller skips its whole tick on this same gate.
+    guard isWireOpen else { return nil }
+    // A key repeat can outrun the drain: with our own write still queued the panel
+    // has not moved yet, so reading here would snap published state back to the
+    // value the previous press just left and the repeat would re-step from it.
+    guard issuedGeneration <= coalescer.completedThrough() else { return nil }
+    guard let read = backends.readNative?(displayID) else { return nil }
+    let clamped = min(max(Double(read), 0), 1)
+    guard abs(clamped - brightness) > Self.nativeReadNoise else { return nil }
+    return clamped
+  }
+
   /// Snaps published state onto the panel's live native value before a `step()`.
   /// The poller's idle cadence can leave that state tens of seconds stale, and a
   /// step from it jumps a Control Center move back. Native path only, so never the
   /// DDC wire. No persist: the `step()` that follows writes the final value.
   public func syncFromNativeBeforeStep() {
-    // Under a temporary dim the read is our own write; folding it in corrupts what
-    // `endTemporaryDim` restores.
-    guard isNativeActive(), temporaryDimFactor == nil else { return }
-    guard let read = backends.readNative?(displayID) else { return }
-    let clamped = min(max(Double(read), 0), 1)
-    guard abs(clamped - brightness) > Self.nativeReadNoise else { return }
+    guard let clamped = freshNativeRead() else { return }
     brightness = clamped
     // Retire any adoption queued from an earlier poll tick; it describes an older read.
     echo.withLock { state in
@@ -622,6 +637,39 @@ public final class BrightnessController: PendingWireDraining {
       state.generation &+= 1
       state.converging = false
     }
+  }
+
+  /// The same read for a SURFACE about to draw (the menu-bar panel opening), which
+  /// has no `step()` behind it to write the value down.
+  ///
+  /// Takes the poller's adoption route rather than a bare snap: publish, persist,
+  /// and return the delta so the caller can fan it out to the other displays when
+  /// brightness sync is on. A bare snap published a value the store never saw and
+  /// stamped the echo slot with it, so the poller then discarded the panel's real
+  /// value as an echo of ours and the store kept a stale number for the launch
+  /// restore to write back to the glass.
+  ///
+  /// It snaps where `adoptExternal` eases: the easing exists so a continuous
+  /// Control Center drag does not step the other displays in jumps, and a surface
+  /// opening is one discrete event whose first frame has to be right.
+  ///
+  /// Returns 0 when nothing was adopted, the panel opening being the common case.
+  @discardableResult
+  public func adoptNativeForSurface() -> Double {
+    // A convergence in flight belongs to the poller, which lands it within a few
+    // ticks; ending it here would stop it fanning the rest of the move out.
+    guard !isConvergingFromExternal() else { return 0 }
+    guard let clamped = freshNativeRead() else { return 0 }
+    let previous = brightness
+    brightness = clamped
+    persist(clamped)
+    // Retire any adoption queued from an earlier poll tick; it describes an older read.
+    echo.withLock { state in
+      state.value = clamped
+      state.generation &+= 1
+      state.converging = false
+    }
+    return clamped - previous
   }
 
   // MARK: - Path selection
@@ -2352,6 +2400,15 @@ actor BrightnessWriteCoalescer {
     )
 
   private var completedGeneration: UInt64 = 0
+  /// Lock-backed mirror of `completedGeneration`, for readers that cannot suspend:
+  /// the freshness read runs on the key path, where an executor hop into this actor
+  /// would land after the key repeat it exists to protect.
+  ///
+  /// It mirrors the COMPLETED counter and not `appliedGeneration` because a failed
+  /// or epoch-skipped write never advances the applied one, so a reader gating on
+  /// that would stay gated for the rest of the session on a display whose wire went
+  /// quiet.
+  private nonisolated let completedMirror = OSAllocatedUnfairLock<UInt64>(initialState: 0)
   /// The highest generation that actually reached hardware, was skipped because
   /// its exact target was already there, or was superseded by a newer write
   /// that did one of those. Compare it against the submitter's own counter to
@@ -2458,6 +2515,11 @@ actor BrightnessWriteCoalescer {
   /// See `appliedGeneration`. Read AFTER a `waitUntilCompleted` for the
   /// generation in question, or it answers about a queue still in flight.
   func appliedThrough() -> UInt64 { appliedGeneration }
+
+  /// The highest generation the queue has finished with, applied or skipped, read
+  /// without an executor hop. `submissionMark`-style comparison against the
+  /// submitter's own counter answers "is a write of ours still in the queue".
+  nonisolated func completedThrough() -> UInt64 { completedMirror.withLock { $0 } }
 
   func waitUntilCompleted(through generation: UInt64) async {
     guard generation > completedGeneration else { return }
@@ -2572,6 +2634,8 @@ actor BrightnessWriteCoalescer {
 
   private func complete(_ generation: UInt64) {
     completedGeneration = max(completedGeneration, generation)
+    let completed = completedGeneration
+    completedMirror.withLock { $0 = completed }
     resumeSatisfiedWaiters()
   }
 
