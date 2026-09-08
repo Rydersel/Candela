@@ -500,19 +500,22 @@ final class AppModel {
   /// rather than reporting them unenumerated.
   private(set) var hardwareFacts: [String: DisplayHardwareFacts] = [:]
 
-  /// The `WatchConfig` most recently ARMED, not the one most recently computed.
-  /// Those differ exactly when a rearm failed, which is the case the row exists
-  /// for. Recorded at the arm site in `StatusItemController`, never at the compute
-  /// site here.
+  /// The `WatchConfig` most recently COMMITTED to, not the one most recently
+  /// computed; they differ exactly when a rearm failed. Recorded in
+  /// `StatusItemController`, never here.
+  ///
+  /// Empty is not nil. Empty: the app watches nothing on purpose, so no tap exists.
+  /// nil: no tap could be built, the one state diagnostics calls "not running".
   private(set) var lastArmedTapConfig: MediaKeyEventTap.WatchConfig?
 
   func noteTapArmed(_ config: MediaKeyEventTap.WatchConfig) {
     lastArmedTapConfig = config
   }
 
-  /// The tap was torn down (a revoked grant). Diagnostics must report "the
-  /// media-key tap is not running", not the config of a tap that no longer
-  /// exists.
+  /// No tap can run: the grant is gone, or the start failed. Diagnostics must
+  /// report "the media-key tap is not running", not the config of a tap that no
+  /// longer exists. A tap stopped because there is nothing to watch is NOT this;
+  /// that state records the empty config instead.
   func noteTapDisarmed() {
     lastArmedTapConfig = nil
   }

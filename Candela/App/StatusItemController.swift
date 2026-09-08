@@ -1413,6 +1413,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // Computed once and recorded only on success: `lastArmedTapConfig` is what is
     // actually being watched, and a config that failed to arm is not that.
     let config = model.tapConfig
+    // An empty tap still costs three threads for nothing. The empty config, not a
+    // disarm, keeps diagnostics on "watching nothing" and the restart edge visible.
+    guard !config.watchedKeys.isEmpty else {
+      mediaKeyTap.stop()
+      model.noteTapArmed(config)
+      return
+    }
     do {
       try mediaKeyTap.start(config: config)
       model.noteTapArmed(config)
@@ -1425,18 +1432,44 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         fields the media-key decode reads; media keys are off until Candela is updated
         """
       )
+      // A failed start is not "watching nothing": the keys are dead and the
+      // diagnostics row must say so. It also stops the refresh path retrying a
+      // start that cannot succeed, on every menu close, forever.
+      model.noteTapDisarmed()
     } catch {
       log.error("media-key tap failed to start: \(error); keys disabled until relaunch")
+      model.noteTapDisarmed()
     }
   }
 
-  /// Re-arms or disarms brightness keys after display topology changes (the
-  /// fork's `updateMediaKeyTap`). No-op unless the tap is running.
+  /// Re-arms, re-configures or tears down the tap after the watched-key set can
+  /// have changed (the fork's `updateMediaKeyTap`). The edge comes from the last
+  /// committed set, never `mediaKeyTap.isRunning`: an emergency teardown leaves
+  /// that flag true.
   private func refreshTapConfig() {
-    guard let mediaKeyTap, mediaKeyTap.isRunning else { return }
+    guard let mediaKeyTap else { return }
     let config = model.tapConfig
-    mediaKeyTap.update(config: config)
-    model.noteTapArmed(config)
+    switch TapLifecyclePolicy.action(
+      previous: model.lastArmedTapConfig?.watchedKeys,
+      next: config.watchedKeys,
+      grantHeld: model.accessibility.isGranted
+    ) {
+    case .start:
+      startMediaKeyTap()
+    case .stop:
+      // Not `noteTapDisarmed`: the keys are released on purpose, which is a
+      // different answer from a tap that cannot run.
+      mediaKeyTap.stop()
+      model.noteTapArmed(config)
+    case .reconfigure:
+      mediaKeyTap.update(config: config)
+      model.noteTapArmed(config)
+    case .nothing:
+      // The stored config is left alone, so in the watching-nothing state the
+      // alternate-brightness-key flag inside it can go stale. Nothing reads that
+      // flag while no tap exists, and the next start recomputes the whole config.
+      break
+    }
   }
 
   /// Filled while a keep-awake assertion is held: it suppresses every OLED care
