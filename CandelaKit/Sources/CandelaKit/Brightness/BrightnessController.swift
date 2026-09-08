@@ -106,19 +106,25 @@ public final class BrightnessController: PendingWireDraining {
   /// not the worst thing ever observed on this display:
   ///
   /// - A pass that attempts nothing must not touch it. `refreshFromHardware` returns
-  ///   early under the native path, `unavailableDDC` and role `.builtIn`, so the
-  ///   assignments below sit AFTER every such return. Otherwise a display that
-  ///   answered zeros once looks pristine again because the next pass never reached
-  ///   the wire.
+  ///   early under the native path, `unavailableDDC`, role `.builtIn` and a standing
+  ///   silent verdict (below), so the assignments sit AFTER every such return.
+  ///   Otherwise a display that answered zeros once looks pristine again because the
+  ///   next pass never reached the wire.
   /// - A pass that does ask supersedes the previous pass's verdict. A worst-wins fold
   ///   across passes reads "this display does not reply" about a panel that just
   ///   replied. `worse` is still exactly right WITHIN a pass and across this display's
   ///   sibling controllers (`DDCReadEvidence.worst`); the scope of the fold was wrong,
   ///   never the ordering.
+  /// - It GATES the asking as well as recording it, so the clears carry as much
+  ///   weight as the assignments. `noReply` and `allZeros` stop `refreshFromHardware`
+  ///   at the top: a panel that said nothing is asked once per plug rather than on
+  ///   every menu close, and it gets another hearing only from wake, a
+  ///   reconfiguration, a rebind onto a different panel, or an HDR window closing.
+  ///   Nothing else in a session asks it again.
   ///
-  /// This controller reads one code, once, per pass, so the within-pass fold here is
-  /// trivial and the assignments are plain. `DDCValueController`, which retries, has
-  /// to spell the fold out.
+  /// This controller reads one code, at most once, per pass, so the within-pass fold
+  /// here is trivial and the assignments are plain. `DDCValueController`, which
+  /// retries, has to spell the fold out.
   public private(set) var readEvidence: DDCReadEvidence = .notAttempted
 
   /// Whether this display's DDC wire has stopped carrying writes
@@ -499,27 +505,37 @@ public final class BrightnessController: PendingWireDraining {
     guard !usesNative else { return }
     let tuning = prefs.tuning(for: .brightness)
     guard !tuning.unavailableDDC else { return }
+    // Asked once per plug, the same rule the capabilities probe follows and for
+    // the same reason: a panel that said nothing does not start answering between
+    // two menu closes, and every futile pass now walks the full retry ladder with
+    // the wire held, which is the menu-close stall a person feels. THIS
+    // controller's own verdict, never the folded worst across its display's
+    // siblings: volume and contrast can be silent on a panel whose brightness
+    // register answers. Cleared wherever the panel may have changed its mind, so
+    // the skip cannot outlive its cause.
+    switch readEvidence {
+    case .noReply, .allZeros: return
+    case .notAttempted, .answered: break
+    }
     // Fork parity: reads use only the FIRST remap code.
     //
     // Three named outcomes, so "the panel never replied" and "the panel replied
     // with zeros" do not collapse into the same silence. Only the second is the
-    // MAG 341C's write-only signature, and the diagnostics pane has to say which
-    // happened.
+    // write-only signature, and the diagnostics pane has to say which happened.
+    // The transport's reply sentinel is what tells them apart.
     //
     // Assignment, not a fold against the previous value: everything above this line
     // has already returned for the passes that ask nothing, so reaching here means
     // the panel WAS asked and this pass's answer is the current fact about it.
     // Folding across passes published "does not reply" about panels that had since
     // replied (see `readEvidence`).
-    guard let result = await writer.read(command: tuning.remapCodes.first ?? VCP.brightness) else {
-      readEvidence = .noReply
-      return
-    }
-    // `(0, 0)` and `max == 0` are FAILED reads, not a brightness of zero: the
-    // MAG341C answers every read this way, and the fork's unvalidated read clobbers
-    // saved values to 0. Recorded rather than merely rejected.
-    guard result.max > 0 else {
-      readEvidence = .allZeros
+    let outcome = await writer.readOutcome(command: tuning.remapCodes.first ?? VCP.brightness)
+    // A `max` of 0 is a FAILED read, not a brightness of zero: the fork's
+    // unvalidated read clobbers saved values to 0. Recorded rather than merely
+    // rejected, and it publishes `allZeros` like a buffer of zeros does, because
+    // it is the same admission.
+    guard let result = outcome.value, result.max > 0 else {
+      readEvidence = outcome.evidence
       return
     }
     readEvidence = .answered
@@ -820,6 +836,11 @@ public final class BrightnessController: PendingWireDraining {
   /// told us nothing yet.
   public func noteWake() {
     resetWireHealth()
+    // The read verdict deserves the same fresh hearing the wire health gets: a
+    // link rebuilt while the Mac slept has told us nothing yet, and without this
+    // one silent pass before a sleep would mean the panel is never asked again
+    // for the life of the plug.
+    readEvidence = .notAttempted
   }
 
   /// Where this display's pixels actually are: itself, or its mirror master. Read
@@ -1550,6 +1571,12 @@ public final class BrightnessController: PendingWireDraining {
     // moment a wire that stopped answering deserves to be asked again.
     let wasUnresponsive = isWireUnresponsive
     resetWireHealth()
+    // Same event, same reason, for the read verdict, and this is the only route
+    // that covers a REPLUG of the same monitor: `rebind` clears the verdict when
+    // the panel identity changes, and a new cable or a new port on the panel that
+    // was already here changes nothing it compares. Placed above the early
+    // returns below, which are about the dimming legs.
+    readEvidence = .notAttempted
     if wasUnresponsive, !usesNative {
       // The transition already ran the full reapply-after-pref-change re-evaluation,
       // which covers the
@@ -1641,6 +1668,12 @@ public final class BrightnessController: PendingWireDraining {
         "HDR window closed on display=\(self.displayID): dropping the wire's duplicate memos"
       )
       invalidateWireMemos()
+      // A silent verdict earned while HDR held the register is a fact about the
+      // window, not about the panel: DDC was dead, so the panel was never really
+      // asked, and the read skip would otherwise carry that answer for the rest
+      // of the plug. Same carve-out the capabilities probe makes for the same
+      // reason (`CapabilityProbePolicy`).
+      readEvidence = .notAttempted
     }
     updateNativeActive()
   }
@@ -1796,8 +1829,10 @@ public final class BrightnessController: PendingWireDraining {
   /// limitation is inherited: identical twins can share an EDID UUID and are not told
   /// apart here, though they already share a saved value and a prefs domain. The cost
   /// of the narrower trigger is that the SAME panel rebound through a DDC-hostile new
-  /// route keeps its old verdict until the next read pass supersedes it, which here is
-  /// the very next refresh.
+  /// route keeps its old verdict, and a silent one now GATES the next read, so no
+  /// later refresh would supersede it either. `handleReconfigure` is what covers that
+  /// case: a new cable or a new port arrives as a reconfiguration whether or not the
+  /// panel identity moved, and the verdict is cleared there.
   public func rebind(writer: any DDCWriting, panelIdentity: String?) {
     self.writer = writer
     if panelIdentity != boundPanelIdentity {

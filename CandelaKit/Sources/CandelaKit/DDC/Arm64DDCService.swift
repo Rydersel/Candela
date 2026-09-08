@@ -1,6 +1,10 @@
 import CandelaPrivateAPIs
 import os
 
+/// One line per DDC read. Nothing else reports which of the two silent verdicts
+/// a panel earned, and that is the whole of a write-only panel's signature.
+let ddcReadLog = Logger(subsystem: "com.rydersel.Candela", category: "ddcread")
+
 /// Serializes DDC I/O for one display's IOAVService (spec §5: serial per-display actor).
 public actor Arm64DDCService: DDCWriting {
   /// Wraps CFTypeRef to satisfy strict concurrency: the actor serializes all access,
@@ -30,7 +34,23 @@ public actor Arm64DDCService: DDCWriting {
   }
 
   public func read(command: UInt8) async -> (current: UInt16, max: UInt16)? {
-    Arm64DDC.read(service: box.service, command: command)
+    await readOutcome(command: command).value
+  }
+
+  public func readOutcome(command: UInt8) async -> DDCReadOutcome {
+    let outcome = Arm64DDC.readOutcome(service: box.service, command: command)
+    // The rig's only instrument for which branch a silent panel takes. A read
+    // costs a menu open or a wake, not a drag, so one line per read is cheap;
+    // `.info` because `log show` does not persist `.debug`.
+    switch outcome {
+    case let .frame(current, max):
+      ddcReadLog.info("ddc.read command=0x\(UInt(command), format: .hex) outcome=frame current=\(current) max=\(max)")
+    case .allZeros:
+      ddcReadLog.info("ddc.read command=0x\(UInt(command), format: .hex) outcome=zeros")
+    case .noReply:
+      ddcReadLog.info("ddc.read command=0x\(UInt(command), format: .hex) outcome=silent")
+    }
+    return outcome
   }
 
   public func readCapabilityString() async -> String? {

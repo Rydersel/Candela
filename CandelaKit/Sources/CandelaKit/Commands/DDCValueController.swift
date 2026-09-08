@@ -381,9 +381,13 @@ public final class DDCValueController: PendingWireDraining {
     return true
   }
 
-  /// `.read`: validated DDC readback. `(0, 0)` and `max == 0` are FAILED
-  /// reads — the MAG341C answers every read with zeros, and the fork's
-  /// unvalidated read clobbers saved values to 0.
+  /// `.read`: validated DDC readback. `(0, 0)` and `max == 0` are FAILED reads,
+  /// not a value of zero: a write-only panel produces nothing usable from any
+  /// read, and the fork's unvalidated read clobbers saved values to 0.
+  ///
+  /// Unlike the brightness controller, this one has no once-per-plug skip. It is
+  /// gated on `startupAction == .read`, which is not the default, so a silent
+  /// panel here costs `pollingTries` full transactions per pass.
   public func refreshFromHardware() async {
     guard prefs.startupAction == .read, isAvailable else { return }
     let tries = prefs.pollingTries
@@ -407,16 +411,15 @@ public final class DDCValueController: PendingWireDraining {
     // attempts fold, worst-wins; a success supersedes them outright.
     var passEvidence = DDCReadEvidence.notAttempted
     for _ in 0 ..< tries {
-      // Two guards, not one: a silent bus and a panel that answers zeros
-      // are different facts. Only the second is the write-only signature, and
-      // it is the one the MAG 341C produces on every one of `tries` attempts.
-      guard let result = await writer.read(command: readCode) else {
-        passEvidence = DDCReadEvidence.worse(passEvidence, .noReply)
-        readEvidence = passEvidence
-        continue
-      }
-      guard result.max > 0 else {
-        passEvidence = DDCReadEvidence.worse(passEvidence, .allZeros)
+      // A silent bus and a panel that answers zeros are different facts, and the
+      // transport is where they are now told apart: it carries a non-zero
+      // sentinel into the reply buffer, so zeros are the panel's word and not a
+      // buffer the read call never wrote to. A frame whose `max` is 0 is the
+      // same admission, and `outcome.evidence` is the one place that mapping
+      // lives, shared with the brightness read site.
+      let outcome = await writer.readOutcome(command: readCode)
+      guard let result = outcome.value, result.max > 0 else {
+        passEvidence = DDCReadEvidence.worse(passEvidence, outcome.evidence)
         readEvidence = passEvidence
         continue
       }

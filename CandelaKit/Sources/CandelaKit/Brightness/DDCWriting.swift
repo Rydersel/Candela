@@ -2,6 +2,9 @@
 public protocol DDCWriting: Sendable {
   func write(command: UInt8, value: UInt16) async -> Bool
   func read(command: UInt8) async -> (current: UInt16, max: UInt16)?
+  /// `read` plus what the transport saw. Every site that publishes
+  /// `DDCReadEvidence` uses this one.
+  func readOutcome(command: UInt8) async -> DDCReadOutcome
   /// The display's MCCS capability string (VCP 0xF3), reassembled from its
   /// fragments. `nil` means the TRANSACTION failed — never read that as "this
   /// display has no capabilities" (unknown resolves to enabled).
@@ -9,6 +12,13 @@ public protocol DDCWriting: Sendable {
 }
 
 public extension DDCWriting {
+  /// Writers with no transport of their own cannot tell silence from zeros, so
+  /// nil keeps its old meaning: nothing came back.
+  func readOutcome(command: UInt8) async -> DDCReadOutcome {
+    guard let value = await read(command: command) else { return .noReply }
+    return .frame(current: value.current, max: value.max)
+  }
+
   /// Writers with no capabilities path — the built-in's `NoopDDCWriter`, test
   /// fakes — inherit the honest answer: we do not know.
   func readCapabilityString() async -> String? { nil }

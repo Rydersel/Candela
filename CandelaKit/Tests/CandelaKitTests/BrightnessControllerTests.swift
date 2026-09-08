@@ -68,8 +68,15 @@ actor FakeDDC: DDCWriting {
   nonisolated func landedWriteCount() -> Int { landed.withLock { $0 } }
 
   func read(command: UInt8) async -> (current: UInt16, max: UInt16)? {
-    readResult
+    reads += 1
+    return readResult
   }
+
+  /// Counts the reads that reached the wire, which is the only way to tell a
+  /// controller that asked and got nothing from one that never asked.
+  private(set) var reads = 0
+
+  func recordedReadCount() -> Int { reads }
 
   func recordedWrites() async -> [(command: UInt8, value: UInt16)] { writes }
 

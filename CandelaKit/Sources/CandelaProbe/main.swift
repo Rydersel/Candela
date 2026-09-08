@@ -112,10 +112,16 @@ func parseHexByte(_ text: String) -> UInt8? {
 func ddcGet(code: UInt8, label: String) async {
   requireDDCDisplays()
   for entry in found {
-    let result = await entry.writer.read(command: code)
-    // A read failure is normal on write-only panels (the MAG 341C ACKs every
-    // write and returns all-zeros for every read), not a tool fault.
-    print("\(entry.display.name): \(label) \(result.map { "\($0.current)/\($0.max)" } ?? "read failed (panel may be write-only, or DDC is locked by HDR)")")
+    // A read failure is normal on a write-only panel, and WHICH failure is the
+    // verdict: zeros over the sentinel is a panel answering nothing, silence is
+    // no answer at all.
+    let reading: String
+    switch await entry.writer.readOutcome(command: code) {
+    case let .frame(current, max): reading = "\(current)/\(max)"
+    case .allZeros: reading = "read answered with zeros (write-only panel)"
+    case .noReply: reading = "read got no reply (silent panel, or DDC is locked by HDR)"
+    }
+    print("\(entry.display.name): \(label) \(reading)")
   }
 }
 

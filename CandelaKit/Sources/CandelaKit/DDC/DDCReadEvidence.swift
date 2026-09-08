@@ -8,9 +8,11 @@
 /// answered with nothing. Wiring it up needs a decision about what a truncated
 /// string proves.
 ///
-/// [MEASURED] The MAG 341C answers every DDC read with zeros — verified across
-/// 13 timing/buffer combinations and 5 VCP codes. Silence about this is what
-/// let the fork's unvalidated reads clobber saved values to 0.
+/// [MEASURED] No DDC read of the MAG 341C returns anything usable: verified
+/// across 13 timing/buffer combinations and 5 VCP codes, into a zero-filled
+/// buffer that could not tell "answered zeros" from "wrote nothing". Which of the
+/// two verdicts below it earns is the transport's call, not assumed here.
+/// Silence about the failure is what let the fork clobber saved values to 0.
 ///
 /// Deliberately a pure value, not state on a controller-owner:
 /// `AppModel.DisplayState` holds `controller`, `volume` and `contrast` as
@@ -22,9 +24,11 @@ public enum DDCReadEvidence: Sendable, Equatable {
   case notAttempted
   /// At least one read came back with `max > 0`. This panel answers.
   case answered
-  /// Reads returned `(0, 0)` / `max == 0` — the write-only signature.
+  /// The panel wrote nothing but zeros over the transport's sentinel, or
+  /// answered a frame whose `max` is 0. The write-only signature either way.
   case allZeros
-  /// Reads returned nil: no reply, bad checksum, wrong opcode or wrong offset.
+  /// Nothing usable came back: a silent bus, a read call that left the reply
+  /// buffer untouched, or a frame that failed its checksum, op code or offset.
   case noReply
 
   /// Worst-wins ordering. `allZeros` outranks `noReply` because it is the more
