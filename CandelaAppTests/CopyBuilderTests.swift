@@ -352,7 +352,7 @@ struct CopyBuilderTests {
     #expect(render(DiagnosticsPageCopy.hdrTurnedOnOutside).contains("HDR was turned on outside"))
     #expect(render(DiagnosticsPageCopy.watchedKeys).contains("go straight to macOS"))
     #expect(render(DiagnosticsPageCopy.accessibilityMissing).contains("does not have Accessibility permission"))
-    #expect(render(DiagnosticsPageCopy.reportScope).contains("doesn't include serial numbers"))
+    #expect(render(DiagnosticsPageCopy.reportScope).contains("Identifying fields are redacted"))
     #expect(DiagnosticsPageCopy.controlMethodTitle == "Hardware control not responding?")
     #expect(DiagnosticsPageCopy.controlMethodValue == "Control Method")
     #expect(render(DiagnosticsPageCopy.copyReport).contains("Copy Report"))

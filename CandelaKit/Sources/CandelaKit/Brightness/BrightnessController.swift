@@ -380,6 +380,10 @@ public final class BrightnessController: PendingWireDraining {
   /// HDR settle window: the display blanks and re-modes for ~2 s after an HDR
   /// toggle. Internal so tests can shrink it.
   @ObservationIgnored var settleDelay: Duration = .seconds(2)
+  /// Lets overlap tests hold the exit between its two supersession fences.
+  @ObservationIgnored var waitForHDRExitSettle: @Sendable (Duration) async -> Void = {
+    try? await Task.sleep(for: $0)
+  }
   /// Pause between the wire-settling rounds a restore runs before it re-engages
   /// HDR. Sized in `WireQuiescence` to outlast a reconfiguration's write gate;
   /// internal so tests can shrink it.
@@ -1345,7 +1349,7 @@ public final class BrightnessController: PendingWireDraining {
       cachedHDRActive = true // assume locked: see the rule above
       return false
     }
-    try? await Task.sleep(for: settleDelay)
+    await waitForHDRExitSettle(settleDelay)
     guard hdrTransitionGeneration == generation else {
       cachedHDRActive = true // assume locked: see the rule above
       return false // post-settle

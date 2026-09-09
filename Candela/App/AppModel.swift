@@ -582,6 +582,16 @@ final class AppModel {
     if recentDisplayEvents.count > 20 {
       recentDisplayEvents.removeLast(recentDisplayEvents.count - 20)
     }
+    redactRecentDisplayEvents()
+  }
+
+  /// Permanently scrub while facts are still available, so disconnecting a
+  /// display cannot restore its identifiers in a later report's event history.
+  private func redactRecentDisplayEvents() {
+    let identifiers = diagnosticsPrivateIdentifiers
+    recentDisplayEvents = recentDisplayEvents.map {
+      DiagnosticsCapabilityText.redactingIdentifiers(in: $0, identifiers: identifiers)
+    }
   }
 
   @ObservationIgnored private var capabilityProbesInFlight: Set<String> = []
@@ -746,7 +756,10 @@ final class AppModel {
       accessibilityGranted: accessibility.isGranted,
       launchAtLogin: launchAtLoginText,
       displays: allControlledStates.map { diagnosticsEntry($0, audioOutput: audioOutput) },
-      recentEvents: recentDisplayEvents
+      recentEvents: recentDisplayEvents.map {
+        DiagnosticsCapabilityText.redactingIdentifiers(in: $0, identifiers: diagnosticsPrivateIdentifiers)
+      },
+      sections: diagnosticsSystemSections(audioOutput: audioOutput, capturedAt: Date())
     )
   }
 
@@ -784,16 +797,34 @@ final class AppModel {
     let prefs = DisplayPrefs(persistenceKey: persistenceKey)
     let facts = hardwareFacts[persistenceKey]
     let isBuiltIn = builtIn?.id == state.id
+    let identifiers = diagnosticsPrivateIdentifiers
+    func scrub(_ text: String) -> String {
+      DiagnosticsCapabilityText.redactingIdentifiers(in: text, identifiers: identifiers)
+    }
+    let capabilityRequest: String
+    if isBuiltIn {
+      capabilityRequest = "not applicable (built-in display)"
+    } else if capabilityString[persistenceKey] != nil {
+      capabilityRequest = "answered"
+    } else if capabilityProbesInFlight.contains(persistenceKey) {
+      capabilityRequest = "in progress"
+    } else if volumeSupport[persistenceKey] != nil {
+      capabilityRequest = "no readable reply"
+    } else if state.controller.isHDREngaged {
+      capabilityRequest = "not asked while HDR is active"
+    } else {
+      capabilityRequest = "not asked yet"
+    }
     return DiagnosticsReportSnapshot.DisplayEntry(
-      name: DisplayOrdering.title(
+      name: scrub(DisplayOrdering.title(
         friendlyName: prefs.friendlyName, hardwareName: state.display.name
-      ),
-      hardwareName: state.display.name,
+      )),
+      hardwareName: scrub(state.display.name),
       // The built-in never passes through `DisplayDiscovery`, so its facts are
       // permanently absent and "not reported" would read as a failed lookup
       // rather than as a panel with no cable.
       connection: isBuiltIn ? "None: built-in display" : DiagnosticsCopy.transport(facts),
-      manufacturer: isBuiltIn ? nil : facts?.manufacturerID,
+      manufacturer: isBuiltIn ? nil : facts?.manufacturerID.map(scrub),
       hasSerial: facts?.numericSerialNumber != nil || facts?.alphanumericSerialNumber != nil,
       // Never `catalogs[...]?.current` directly: the catalog exists only for
       // displays something has already shown, so the built-in's entry would depend
@@ -820,9 +851,10 @@ final class AppModel {
       hdrEngaged: state.controller.isHDREngaged,
       nonDefaultPrefs: DiagnosticsPrefSummary.nonDefaultPrefs(
         prefs, remembersMode: displayModes.isRemembering(state.id)
-      ),
+      ).map(scrub),
       volumeAvailability: diagnosticsVolumeAvailability(state),
-      soundOutput: diagnosticsSoundOutput(state, device: audioOutput)
+      soundOutput: scrub(diagnosticsSoundOutput(state, device: audioOutput)),
+      sections: diagnosticsDisplaySections(state, capabilityRequest: capabilityRequest)
     )
   }
 
@@ -1390,6 +1422,7 @@ final class AppModel {
   /// before the drain task exits, so no explicit `waitForPendingWrites()` is
   /// needed.
   private func performRefresh(settling: Bool = false) async -> [CGDirectDisplayID] {
+    redactRecentDisplayEvents()
     // The display set is about to be re-derived, so a memoized "discovery does
     // not know this id" is no longer evidence about anything.
     discoveredPersistenceKeys.clear()
