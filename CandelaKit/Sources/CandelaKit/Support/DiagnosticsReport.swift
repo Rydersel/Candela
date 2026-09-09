@@ -15,6 +15,8 @@ public struct DiagnosticsReportSnapshot: Sendable {
     public let controlMethod: String
     public let readbackVerdict: String
     public let hdrEngaged: Bool
+    public let volumeAvailability: String
+    public let soundOutput: String
     /// Rendered verbatim; the caller scrubs these, not the renderer. Bare pref
     /// name and value only (`forceSw = true`), never a full storage key: a
     /// persistence key carries the display's serial.
@@ -23,7 +25,7 @@ public struct DiagnosticsReportSnapshot: Sendable {
     public init(name: String, hardwareName: String, connection: String?,
                 manufacturer: String?, hasSerial: Bool, currentMode: String?,
                 controlMethod: String, readbackVerdict: String, hdrEngaged: Bool,
-                nonDefaultPrefs: [String]) {
+                nonDefaultPrefs: [String], volumeAvailability: String, soundOutput: String) {
       self.name = name
       self.hardwareName = hardwareName
       self.connection = connection
@@ -34,6 +36,8 @@ public struct DiagnosticsReportSnapshot: Sendable {
       self.readbackVerdict = readbackVerdict
       self.hdrEngaged = hdrEngaged
       self.nonDefaultPrefs = nonDefaultPrefs
+      self.volumeAvailability = volumeAvailability
+      self.soundOutput = soundOutput
     }
   }
 
@@ -87,6 +91,8 @@ public enum DiagnosticsReport {
           "  control method: \(display.controlMethod)",
           "  readback: \(display.readbackVerdict)",
           "  hdr: \(display.hdrEngaged ? "engaged" : "off")",
+          "  volume: \(display.volumeAvailability)",
+          "  sound output: \(display.soundOutput)",
         ]
         if display.nonDefaultPrefs.isEmpty {
           lines.append("  non-default settings: none")
