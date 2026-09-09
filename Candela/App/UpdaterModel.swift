@@ -13,6 +13,7 @@ import Sparkle
 /// over foreign storage.
 @MainActor @Observable
 final class UpdaterModel {
+  let completion = UpdateCompletionState()
   @ObservationIgnored private let controller: SPUStandardUpdaterController
   // Sparkle holds its delegate weakly, so the model owns it.
   @ObservationIgnored private let relaunchDelegate = UpdateRelaunchDelegate()

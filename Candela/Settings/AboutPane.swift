@@ -96,6 +96,7 @@ struct AboutPane: View {
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.top, 4)
     }
+    .modifier(UpdateCompletionOverlay(state: updater.completion))
   }
 
   // MARK: - Hero

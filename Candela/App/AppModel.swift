@@ -44,6 +44,24 @@ final class AppModel {
   /// test target can fake it; production uses CoreAudio.
   let audioDevices: any AudioDeviceProviding
 
+  /// UI state published by the audio listener. Key routing still reads the
+  /// provider at execution time, before a queued UI update may have arrived.
+  private(set) var defaultAudioOutput: AudioOutputDevice?
+
+  /// Installs the app's single audio callback and delivers routing changes on main.
+  func startObservingAudioOutput(onChange: @escaping @MainActor () -> Void) {
+    audioDevices.setOnDefaultOutputChange { [weak self] in
+      Task { @MainActor in
+        guard let self else { return }
+        let output = self.audioDevices.defaultOutputDevice()
+        if self.defaultAudioOutput != output {
+          self.defaultAudioOutput = output
+        }
+        onChange()
+      }
+    }
+  }
+
   /// ONE gate for every display-reconfiguring feature: display modes,
   /// mirroring, rotation and arrangement. Declared before all four because each
   /// takes it as a required init parameter; a defaulted gate would give each

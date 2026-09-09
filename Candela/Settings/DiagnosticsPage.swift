@@ -651,7 +651,7 @@ struct DiagnosticsPage: View {
   }
 
   private var audioMatchText: String {
-    model.diagnosticsSoundOutput(state, device: model.audioDevices.defaultOutputDevice())
+    model.diagnosticsSoundOutput(state, device: model.defaultAudioOutput)
   }
 
   // MARK: - Actions

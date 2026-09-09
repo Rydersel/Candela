@@ -51,6 +51,9 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, Sendable {
       guard let self else { return }
       let fresh = self.readDefaultOutputDevice()
       self.snapshot.withLock { $0 = .some(fresh) }
+      // Publish the initial result through the same path as route changes,
+      // including nil, after the cache is ready for main-actor consumers.
+      self.handlerLock.withLock { $0 }?()
       let names = self.readOutputDeviceNames()
       self.outputNames.withLock { $0 = names }
     }

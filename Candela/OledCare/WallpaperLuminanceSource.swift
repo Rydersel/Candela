@@ -116,8 +116,23 @@ final class WallpaperLuminanceSource {
   }
 
   /// One entry per display, so a scheduled-rotation wallpaper cannot grow the
-  /// cache without bound over a multi-week soak.
-  private var cache: [CGDirectDisplayID: (key: CacheKey, cells: [Double])] = [:]
+  /// cache without bound over a multi-week soak. A nil grid remembers an
+  /// unreadable file until its identity changes or the cache is invalidated.
+  private var cache: [CGDirectDisplayID: (key: CacheKey, cells: [Double]?)] = [:]
+
+  private let wallpaperURL: (CGDirectDisplayID) -> URL?
+
+  init(wallpaperURL: @escaping (CGDirectDisplayID) -> URL? = { displayID in
+    guard let screen = WallpaperLuminanceSource.screen(for: displayID) else { return nil }
+    return NSWorkspace.shared.desktopImageURL(for: screen)
+  }) {
+    self.wallpaperURL = wallpaperURL
+  }
+
+  /// Drop sampled and unreadable entries after display reconfiguration.
+  func invalidate() {
+    cache.removeAll()
+  }
 
   /// Panel-physical wallpaper luminance for `displayID`, or nil when the
   /// display has no resolvable screen or the wallpaper cannot be read. Nil is
@@ -127,9 +142,7 @@ final class WallpaperLuminanceSource {
     for displayID: CGDirectDisplayID, appearanceIsDark: Bool,
     through transform: PanelSpaceTransform
   ) -> [Double]? {
-    guard let screen = Self.screen(for: displayID),
-      let url = NSWorkspace.shared.desktopImageURL(for: screen)
-    else {
+    guard let url = wallpaperURL(displayID) else {
       Self.reportRecompute(displayID: displayID, readable: false, appearanceIsDark: appearanceIsDark)
       cache.removeValue(forKey: displayID)
       return nil
@@ -143,11 +156,7 @@ final class WallpaperLuminanceSource {
     let cells = Self.computeGrid(url: url, through: transform)
     Self.reportRecompute(
       displayID: displayID, readable: cells != nil, appearanceIsDark: appearanceIsDark)
-    if let cells {
-      cache[displayID] = (key, cells)
-    } else {
-      cache.removeValue(forKey: displayID)
-    }
+    cache[displayID] = (key, cells)
     return cells
   }
 

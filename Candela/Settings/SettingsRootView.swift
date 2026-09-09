@@ -1,5 +1,6 @@
 import AppKit
 import CandelaKit
+import Observation
 import SwiftUI
 
 /// Sidebar navigation over a pane registry.
@@ -184,7 +185,7 @@ struct SettingsRootView: View {
         fallbackTitle: selectedPaneTitle,
         navigationToken: currentPathDepth,
         onWindowVisibility: { windowVisibility = $0 }))
-    .onAppear {
+    .onChange(of: SettingsOpener.requestID, initial: true) { _, _ in
       if let pending = SettingsOpener.pendingSelection {
         SettingsOpener.pendingSelection = nil
         selection = pending
@@ -1118,9 +1119,24 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
 /// and puts the window back behind the frontmost app (measured).
 @MainActor
 enum SettingsOpener {
-  /// Set before `open()`: the window comes up inside that call and its
-  /// `onAppear` reads this once, so a later assignment misses it.
-  static var pendingSelection: SettingsDestination?
+  @MainActor @Observable fileprivate final class NavigationRequest {
+    var destination: SettingsDestination?
+    var id = UUID()
+  }
+
+  private static let request = NavigationRequest()
+
+  /// Observed by the root for both initial and already-mounted delivery.
+  static var requestID: UUID { request.id }
+
+  static var pendingSelection: SettingsDestination? {
+    get { request.destination }
+    set {
+      request.destination = newValue
+      // Repeated destinations are new requests, even within one view update.
+      if newValue != nil { request.id = UUID() }
+    }
+  }
 
   static func open(at destination: SettingsDestination) {
     pendingSelection = destination

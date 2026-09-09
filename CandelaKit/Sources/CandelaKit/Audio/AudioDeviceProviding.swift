@@ -24,6 +24,7 @@ public protocol AudioDeviceProviding: Sendable {
   /// `defaultOutputDevice()`. No production callers: volume-slider gating reads the
   /// DDC capabilities string instead.
   func outputDeviceNames() -> [String]
-  /// Fires on default-output-device change (any thread). Pass nil to clear.
+  /// Fires when the initial default-output snapshot is ready and on subsequent
+  /// default-output-device changes (any thread). Pass nil to clear.
   func setOnDefaultOutputChange(_ handler: (@Sendable () -> Void)?)
 }
