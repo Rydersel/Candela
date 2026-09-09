@@ -457,7 +457,7 @@ struct DiagnosticsPage: View {
   /// display reports no HDR modes" about a panel whose HDR macOS drives fine.
   @ViewBuilder private var availabilityRows: some View {
     LabeledContent("Brightness") {
-      valueText(DiagnosticsCopy.brightnessAvailability(brightnessPath))
+      valueText(model.diagnosticsAvailability(state).brightness)
     }
 
     if !isBuiltIn {
@@ -469,30 +469,19 @@ struct DiagnosticsPage: View {
 
       SettingsCardDivider()
       LabeledContent("Contrast") {
-        valueText(DiagnosticsCopy.contrastAvailability(
-          isAvailable: state.contrast.isAvailable, forceSoftware: prefs.forceSoftware))
+        valueText(model.diagnosticsAvailability(state).contrast)
       }
       .help(DiagnosticsPageCopy.contrastHelp)
 
       SettingsCardDivider()
       LabeledContent("Mute") {
-        valueText(DiagnosticsCopy.muteAvailability(
-          muteEnabled: prefs.enableMuteUnmute,
-          volumeAvailable: state.volume.isAvailable,
-          forceSoftware: prefs.forceSoftware,
-          override: prefs.audioSinkOverride,
-          muteSupport: model.muteSupport[persistenceKey] ?? .unknown
-        ))
+        valueText(model.diagnosticsAvailability(state).mute)
       }
       .help(DiagnosticsPageCopy.muteHelp)
 
       SettingsCardDivider()
       LabeledContent("HDR") {
-        valueText(DiagnosticsCopy.hdrAvailability(
-          displayServicesAvailable: DisplayServices.isAvailable,
-          supportsHDR: state.controller.supportsHDR,
-          app: AppInfo.productName
-        ))
+        valueText(model.diagnosticsAvailability(state).hdr)
       }
     }
   }
@@ -623,8 +612,7 @@ struct DiagnosticsPage: View {
   /// Reads the LAST ARMED config, not a freshly computed one: the two differ
   /// exactly when a rearm failed, which is the case this row is for.
   private var watchedKeysText: String {
-    DiagnosticsCopy.watchedKeys(
-      families: watchedKeyFamilies, tapRunning: model.lastArmedTapConfig != nil)
+    model.diagnosticsWatchedKeys
   }
 
   /// Whether the tap is watching everything it ever watches. False while any
@@ -633,21 +621,6 @@ struct DiagnosticsPage: View {
     guard let config = model.lastArmedTapConfig else { return false }
     return config.watchedKeys.isSuperset(
       of: [.brightnessUp, .brightnessDown, .volumeUp, .volumeDown, .mute])
-  }
-
-  /// Split out so the row can tell "watching nothing" from "not running" and
-  /// caption the first without recomputing the words.
-  private var watchedKeyFamilies: [String] {
-    guard let config = model.lastArmedTapConfig else { return [] }
-    return DiagnosticsCopy.watchedKeyFamilies(
-      brightness: config.watchedKeys.contains(.brightnessUp)
-        || config.watchedKeys.contains(.brightnessDown),
-      // Reported apart because they are ARMED apart: the two write different
-      // registers, and a display can list one and deny the other.
-      volume: config.watchedKeys.contains(.volumeUp)
-        || config.watchedKeys.contains(.volumeDown),
-      mute: config.watchedKeys.contains(.mute)
-    )
   }
 
   private var audioMatchText: String {

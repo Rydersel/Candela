@@ -50,16 +50,39 @@ clipboard and **Save Report...** writes it to a file you choose. Either one
 covers every connected display, not only the one you are looking at, which is
 what makes it useful on an issue where two displays interact.
 
-The report contains the app version, the macOS version, whether Safe Mode is
-on, whether Accessibility is granted, the launch-at-login state, and for each
-display its names, connection, manufacturer, current mode, control method,
-readback verdict and HDR state, followed by any settings you have changed from
-their defaults and a short list of recent events.
+For a support request, reproduce the issue and then save or copy the report.
+There is no need to copy the raw capability description separately. Both
+buttons use the same report format and take a new snapshot when used.
 
-Two things are deliberately not in it. **Serial numbers never appear**: the
-report is written to be pasted into a public issue, and presence or absence of
-a serial is all that display-identity diagnosis needs. And changed settings are
-listed as a bare name and value, never as a full storage key, because a storage
-key carries the display's serial.
+The report includes:
+
+- **System:** capture time, report format version, app and macOS versions, Mac
+  model, Safe Mode, Accessibility and Screen Recording grants, launch-at-login
+  state, the media keys Candela is watching, and the selected sound output and
+  whether macOS can control its volume.
+- **Display setup:** the controlled displays, their names, connections,
+  manufacturers and modes, plus any other displays in the cached topology.
+  That sample can lag a connection change. If discovery did not record why a
+  display was excluded, the report says so rather than guessing.
+- **Reported capabilities:** the request state, parser result, MCCS version,
+  advertised command codes and capability description for each external
+  display. Not asked, still checking, no readable reply and a description that
+  could not be parsed are distinct states.
+- **Controls:** availability and reasons for brightness, volume, contrast, mute
+  and HDR; recorded read evidence and reported maxima for individual controls;
+  current app values and mute state; and the last brightness command result.
+- **Context:** OLED care enrollment, mirroring, recorded resolution problems,
+  cached resolution counts, non-default settings and recent display events.
+
+Export does not send test commands or change display settings. A reported app
+value or an accepted command is not confirmation that the physical brightness
+or audible volume changed. The report also cannot tell where an analog speaker
+cable is connected or whether sound is audible.
+
+Identifying fields are redacted for sharing: serial fields, known serials and
+storage keys in text, and unrecognized capability payloads. Capability text
+over 16,384 bytes is withheld. Redactions are marked; the parser result always
+describes the original response. Review custom display and audio-device names
+before sharing, since those may contain information you entered yourself.
 
 Nothing is uploaded. The report exists only where you put it.
