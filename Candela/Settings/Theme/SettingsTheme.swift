@@ -24,6 +24,8 @@ enum SettingsTheme {
   static let faintColor = OnboardingStyle.faintColor
   static let cardFill = OnboardingStyle.cardFill
   static let cardStroke = OnboardingStyle.cardStroke
+  /// Opaque so a transient notice stays legible above page content and when inactive.
+  static let noticeFill = Color(red: 0.10, green: 0.11, blue: 0.15)
 
   /// Destructive actions never borrow the destination accent, which everywhere
   /// else in this window means "this is on".

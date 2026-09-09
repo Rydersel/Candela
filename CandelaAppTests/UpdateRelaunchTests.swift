@@ -14,5 +14,6 @@ struct UpdateRelaunchTests {
     #expect(UpdateRelaunch.consume(in: defaults) == true)
     #expect(UpdateRelaunch.consume(in: defaults) == false)
     #expect(defaults.object(forKey: UpdateRelaunch.defaultsKey) == nil)
+    #expect(defaults.object(forKey: UpdateRelaunch.previousVersionKey) == nil)
   }
 }

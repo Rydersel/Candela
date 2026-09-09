@@ -671,7 +671,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       }
       // Here rather than at the top of launch for the same reason as the setup
       // flow: the window's display rows derive over the discovered list.
-      if UpdateRelaunch.consume() {
+      if updaterModel.completion.consumeRelaunch() {
         SettingsOpener.open(at: .pane(.about))
       }
       // Virtual display launch prelude: normalize the slot prefs, log
