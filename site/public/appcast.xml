@@ -19,7 +19,7 @@
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
       <description sparkle:format="markdown"><![CDATA[
 ## New
-- Updates: updates from 1.0.3 onward show a brief, dismissible version confirmation.
+- Updates: updates from 1.0.3 onward show a brief, dismissible version confirmation after being installed.
 
 ## Changed
 - Controls: background polling is optimized to reduce CPU usage while idle.
