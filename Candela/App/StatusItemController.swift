@@ -284,8 +284,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
 
     // Re-arm volume keys when the default output device changes. The
     // handler fires on the CoreAudio listener queue; hop to main for the tap.
-    model.audioDevices.setOnDefaultOutputChange { [weak self] in
-      Task { @MainActor in self?.refreshTapConfig() }
+    model.startObservingAudioOutput { [weak self] in
+      self?.refreshTapConfig()
     }
 
     // Re-arm when a capabilities probe lands. The watched set is gated on

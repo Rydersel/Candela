@@ -658,7 +658,7 @@ struct DiagnosticsPage: View {
   }
 
   private var audioMatchText: String {
-    guard let device = model.audioDevices.defaultOutputDevice() else {
+    guard let device = model.defaultAudioOutput else {
       return DiagnosticsCopy.noDefaultOutputDevice
     }
     return DiagnosticsCopy.audioMatch(
