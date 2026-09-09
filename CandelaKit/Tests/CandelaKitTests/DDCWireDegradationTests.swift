@@ -185,11 +185,20 @@ struct DDCWireDegradationTests {
     await harness.ddc.setWritesSucceed(false)
     await failWrites(harness, count: 2)
 
-    await harness.controller.setHDRMode(.alwaysOn)
-    await harness.controller.setHDRMode(.off)
+    // Observe an external HDR window so no exit re-apply races the failure
+    // count. Candela's own HDR door is covered by the adjacent round-trip test.
+    await harness.hdr?.stubEnabled(true)
+    _ = await harness.hdr?.measuredHDREnabled(displayID: Harness.displayID)
+    await harness.controller.noteHDRStateMayHaveChanged()
+    await harness.hdr?.stubEnabled(false)
+    _ = await harness.hdr?.measuredHDREnabled(displayID: Harness.displayID)
+    await harness.controller.noteHDRStateMayHaveChanged()
 
     await failWrites(harness, count: 2, from: 0.75)
     #expect(!harness.controller.isWireUnresponsive)
+    // The counter must still work after the reset: one more failed write trips it.
+    await failWrites(harness, count: 1, from: 0.6)
+    #expect(harness.controller.isWireUnresponsive)
   }
 
   /// The built-in routes native, so nothing it does is evidence about a cable it
