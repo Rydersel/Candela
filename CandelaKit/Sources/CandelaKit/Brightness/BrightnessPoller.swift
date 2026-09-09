@@ -102,24 +102,29 @@ public actor BrightnessPoller {
   /// Returns on cancellation.
   public func run() async {
     while !Task.isCancelled {
-      let moving = tick()
-      let cadence = BrightnessPollCadence.choose(
-        isMoving: moving,
-        isSyncEnabled: isSyncEnabled(),
-        isSurfaceVisible: isSurfaceVisible(),
-        // Outside `tick`, which returns early mid-reconfigure: a burst must not
-        // decide the cadence after it.
-        isExternalNativeActive: externalNativeActive(),
-        isOnBattery: isOnBattery()
-      )
-      let sleep = interval(for: cadence)
-      log(cadence, sleeping: sleep)
+      let delay = pollOnce()
       do {
-        try await Task.sleep(for: sleep)
+        try await Task.sleep(for: delay)
       } catch {
         return
       }
     }
+  }
+
+  /// Performs one poll and returns the delay before the next one.
+  func pollOnce() -> Duration {
+    let moving = tick()
+    let cadence = BrightnessPollCadence.choose(
+      isMoving: moving,
+      isSyncEnabled: isSyncEnabled(),
+      isSurfaceVisible: isSurfaceVisible(),
+      // A reconfiguration can skip the read without removing its consumers.
+      isExternalNativeActive: externalNativeActive(),
+      isOnBattery: isOnBattery()
+    )
+    let delay = interval(for: cadence)
+    log(cadence, sleeping: delay)
+    return delay
   }
 
   /// The idle intervals are otherwise unobservable from outside the process.

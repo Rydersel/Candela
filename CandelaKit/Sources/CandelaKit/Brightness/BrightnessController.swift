@@ -621,6 +621,9 @@ public final class BrightnessController: PendingWireDraining {
     guard let read = backends.readNative?(displayID) else { return nil }
     let clamped = min(max(Double(read), 0), 1)
     guard abs(clamped - brightness) > Self.nativeReadNoise else { return nil }
+    // The display moved outside our write path. A step back to the last successful
+    // target must reach hardware, even if a surface adopts this read before the key.
+    coalescer.resetDuplicateState()
     return clamped
   }
 

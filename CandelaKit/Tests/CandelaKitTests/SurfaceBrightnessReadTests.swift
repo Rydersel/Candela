@@ -9,6 +9,36 @@ import Testing
 @MainActor
 @Suite("Surface brightness read")
 struct SurfaceBrightnessReadTests {
+  @Test(arguments: [false, true])
+  func aKeyAfterSurfaceAdoptionReachesTheDisplay(isUp: Bool) async {
+    let panel = NativeFreshnessPanel(at: 0.75)
+    panel.controller.setBrightness(0.5)
+    await panel.controller.waitForPendingWrites()
+    #expect(panel.hardware.withLock { $0.value } == 0.5)
+    panel.hardware.withLock { $0.value = isUp ? 0.46 : 0.54 }
+
+    #expect(panel.controller.adoptNativeForSurface() != 0)
+    panel.controller.syncFromNativeBeforeStep()
+    #expect(panel.controller.step(isUp: isUp, isFine: false) == 0.5)
+    await panel.controller.waitForPendingWrites()
+
+    #expect(panel.hardware.withLock { $0.value } == 0.5)
+  }
+
+  @Test(arguments: [Float(0.5), Float(0.505)])
+  func unchangedSurfaceReadsDoNotCauseRedundantWrites(read: Float) async {
+    let panel = NativeFreshnessPanel(at: 0.75)
+    panel.controller.setBrightness(0.5)
+    await panel.controller.waitForPendingWrites()
+    panel.hardware.withLock { $0.value = read }
+
+    #expect(panel.controller.adoptNativeForSurface() == 0)
+    panel.controller.setBrightness(0.5)
+    await panel.controller.waitForPendingWrites()
+
+    #expect(panel.hardware.withLock { $0.writes } == [0.5])
+  }
+
   /// An external on the native path (HDR live), with a panel something else can
   /// move between calls and a store seeded with the value published at launch.
   private func nativeExternal(
