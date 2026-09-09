@@ -290,7 +290,17 @@ final class DisplayModeCoordinator {
   /// that window queues behind it and would commit the NEW mode while the banner
   /// still named the old one: correct ordering, wrong intent. Set synchronously so
   /// the disable lands in the same body evaluation as the click.
-  private(set) var isApplying = false
+  var isApplying: Bool { !pendingSelections.isEmpty }
+
+  struct ApplyingSelection {
+    let mode: DisplayMode
+    let displayID: CGDirectDisplayID
+  }
+
+  /// The first queued selection owns the current change, even when another
+  /// caller has already queued a different size or display behind it.
+  var applyingSelection: ApplyingSelection? { pendingSelections.first }
+  private var pendingSelections: [ApplyingSelection] = []
   /// Displays whose user has applied a size in THIS session: a person who
   /// just chose a size has answered the recommendation for now, and the durable
   /// opt-out is the dismissal pref.
@@ -375,7 +385,6 @@ final class DisplayModeCoordinator {
   @ObservationIgnored private var surfaces: [CGDirectDisplayID: PreviewSurface] = [:]
   @ObservationIgnored private let countdown = PreviewCountdownDriver()
   @ObservationIgnored private let queue = PreviewQueue()
-  @ObservationIgnored private var inFlightSelects = 0
   /// Displays anything has asked about. `handleDisplaysChanged` re-enumerates
   /// these rather than only the cached ones, so a display that departs and returns
   /// under the same ID gets its catalog back: a nil catalog renders as nothing at
@@ -1033,10 +1042,9 @@ final class DisplayModeCoordinator {
   ) {
     // Raised HERE, synchronously, not inside the queued operation: the banner's
     // buttons have to be disabled by the time the reconfiguration starts, so
-    // nobody can confirm a mode they are not reading. Counted rather than boolean,
-    // so two queued selects do not have the first completion clear the flag.
-    inFlightSelects += 1
-    isApplying = true
+    // nobody can confirm a mode they are not reading. Retain each request so
+    // busy feedback names the active operation across the entire queue.
+    pendingSelections.append(ApplyingSelection(mode: mode, displayID: displayID))
     queue.enqueue {
       // Routed on PROVENANCE: a synthesized row's sentinel mode ID denotes
       // nothing in either mode-ID space, so no configuration transaction could
@@ -1047,8 +1055,7 @@ final class DisplayModeCoordinator {
       } else {
         await self.performSelect(mode, on: displayID, from: origin, surface: surface)
       }
-      self.inFlightSelects -= 1
-      if self.inFlightSelects == 0 { self.isApplying = false }
+      self.pendingSelections.removeFirst()
     }
   }
 
@@ -1065,7 +1072,8 @@ final class DisplayModeCoordinator {
     _ mode: DisplayMode, on displayID: CGDirectDisplayID,
     from origin: PreviewOrigin, surface: PreviewSurface, currentModeID: Int32?
   ) {
-    guard mode.ioModeID != currentModeID else { return }
+    // The view may not have redrawn its disabled state before a repeat click.
+    guard !isApplying, mode.ioModeID != currentModeID else { return }
     select(mode, on: displayID, from: origin, surface: surface)
   }
 

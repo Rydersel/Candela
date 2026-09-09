@@ -71,6 +71,10 @@ struct AllModesPage: View {
   /// list at all.
   private var listMode: ListMode { chosenListMode ?? .recommended }
 
+  private var feedback: ModeChangeFeedback {
+    ModeChangeFeedback(coordinator: coordinator, displayID: displayID)
+  }
+
   var body: some View {
     // The scaffold's reading variant: it owns the scroller, and the two hooks
     // that land the page on the mode in use need that scroller's proxy.
@@ -90,6 +94,9 @@ struct AllModesPage: View {
       // RESOLVED mode, so a catalog arriving and flipping the default scrolls.
       .onChange(of: listMode) { _, _ in scrollToCurrent(proxy) }
 
+      if let caption = feedback.caption {
+        SettingsRowNote(verbatim: caption)
+      }
       // A nil catalog is "not enumerated yet", NOT "no modes". It renders as
       // nothing, so no empty state flashes on every push.
       if let catalog {
@@ -521,6 +528,7 @@ struct AllModesPage: View {
         }
       }
     }
+    .disabled(feedback.controlsDisabled)
     .id(row.id)
     .focused($focusedRow, equals: row.id)
   }
@@ -921,12 +929,13 @@ private struct ModeChoiceButtonStyle: ButtonStyle {
   let isHovering: Bool
   let isCurrent: Bool
   let accent: Color
+  @Environment(\.isEnabled) private var isEnabled
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
       .background(shape.fill(fill(pressed: configuration.isPressed)))
       .overlay(ring)
-      .opacity(configuration.isPressed ? 0.85 : 1)
+      .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : SettingsTheme.disabledOpacity)
   }
 
   private var shape: RoundedRectangle {
