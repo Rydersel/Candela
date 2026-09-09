@@ -74,8 +74,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   }
 
   /// The mode list one enumeration answers with. One expression for every
-  /// reader, `modeSnapshot` included: a hand-copied twin could diverge with
-  /// nothing to catch it, since no hardware-free test reaches this configurator.
+  /// reader, `modeSnapshot` included, so merge and collapse cannot diverge.
   ///
   /// Collapse AFTER the merge, not inside `copyModes`. Revelation dedupes
   /// against the published IDs, so a twin removed before it ran would free its
@@ -147,20 +146,23 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// `kCGDisplayShowDuplicateLowResolutionModes`, measured on hardware at
   /// 132/132, 332/332 and 120/120 across three panels.
   public func currentMode(for displayID: CGDirectDisplayID) -> DisplayMode? {
-    Self.resolveCurrent(displayID, in: modes(for: displayID))
+    Self.resolveCurrent(read: { achievedMode(displayID) }, in: modes(for: displayID))
   }
 
   /// Resolved rather than looked up: the display can be running a duplicate the
   /// enumeration collapsed, and `CGDisplayCopyDisplayMode` answers with the live
   /// id either way. See `DisplayModeList.resolve`.
   ///
-  /// The list is the caller's: the snapshot has already paid for one.
-  private static func resolveCurrent(
-    _ displayID: CGDirectDisplayID, in modes: [DisplayMode]
+  /// Delay the caller's list until the live read succeeds. An unreadable current
+  /// mode must not trigger enumeration, and resolution must use that captured
+  /// reading even if the display changes during enumeration. The snapshot hands
+  /// back its existing list, so it still pays for only one enumeration.
+  /// The read is injected at the hardware boundary for tests without displays.
+  static func resolveCurrent(
+    read: () -> DisplayMode?, in modes: @autoclosure () -> [DisplayMode]
   ) -> DisplayMode? {
-    guard let mode = CGDisplayCopyDisplayMode(displayID) else { return nil }
-    return DisplayModeList.resolve(
-      Self.displayMode(ioModeID: mode.ioDisplayModeID, mode: mode), in: modes)
+    guard let mode = read() else { return nil }
+    return DisplayModeList.resolve(mode, in: modes())
   }
 
   public func nativePixels(for displayID: CGDirectDisplayID) -> (width: Int, height: Int)? {
@@ -178,7 +180,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     let modes = Self.merged(pass)
     return DisplayModeSnapshot(
       modes: modes,
-      current: Self.resolveCurrent(displayID, in: modes),
+      current: Self.resolveCurrent(read: { achievedMode(displayID) }, in: modes),
       nativePixels: DisplayModeSnapshot.nativePixels(in: modes),
       withheldByWireTimingGuard: Self.withheld(pass)
     )

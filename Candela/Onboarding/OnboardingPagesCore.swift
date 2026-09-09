@@ -187,7 +187,6 @@ struct OnboardingFinishPage: View {
       VStack(spacing: 14) {
         AnimatedCheckmark(accent: accent)
           .frame(width: 68, height: 68)
-          .onboardingFloat(active: true)
         OnboardingHeading(title: "You're all set")
       }
       Spacer(minLength: 18)

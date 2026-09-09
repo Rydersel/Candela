@@ -93,9 +93,8 @@ struct OledCareTickCostTests {
     #expect(captures.isEmpty)
   }
 
-  /// Pinned exactly, not as a floor: the slow tick carries the sampling
-  /// throttle, which books a fixed 60 s however late the slot ran, so slack
-  /// there under-books exposure. 10% of cadence keeps that under 0.35%.
+  /// The fast input-response gate receives no added slack; the slower cadences
+  /// explicitly allow coalescing. These values do not bound sampling drift.
   @Test("Tolerance is zero on the fast cadence and a tenth of the slower ones")
   func toleranceFollowsTheCadence() {
     #expect(OledCareCoordinator.sleepTolerance(for: OledCareCadence.fast) == .zero)
@@ -105,6 +104,38 @@ struct OledCareTickCostTests {
     #expect(
       OledCareCoordinator.sleepTolerance(for: OledCareCadence.slow) == .milliseconds(200))
     #expect(OledCareCoordinator.sleepTolerance(for: OledCareCadence.idle) == .seconds(3))
+  }
+
+  @Test("Repeated slow-tick deferrals are accumulated before the sampling slot")
+  func repeatedDeferralsDoNotPretendToBeOneSixtySecondDeadline() {
+    let counter = ReadCount()
+    let coordinator = OledCareCoordinator(windowList: { _ in [] }, lowBattery: {
+      counter.reads += 1
+      return false
+    })
+    let target = OledTelemetryTarget(panel: Self.absentDisplay, topology: MirrorTopology([]))
+    let start = SuspendingClock.now
+    var now = start
+    var state = enrolled()
+    state.lastSampleAt = start
+    var captures: [OledCareCoordinator.CaptureRequest] = []
+    let deferredInterval = OledCareCadence.slow
+      + OledCareCoordinator.sleepTolerance(for: OledCareCadence.slow)
+
+    // Drive the real throttle with an allowed sequence of fully deferred ticks.
+    // No wall-clock wait or assumption about what the kernel normally chooses.
+    for _ in 0..<27 {
+      now += deferredInterval
+      coordinator.updateTelemetry(for: "panel", state: &state, dimState: .active,
+        on: target, panelIsAwake: true, at: now, into: &captures)
+    }
+    #expect(counter.reads == 0)
+    #expect(state.lastSampleAt == start)
+    now += deferredInterval
+    coordinator.updateTelemetry(for: "panel", state: &state, dimState: .active,
+      on: target, panelIsAwake: true, at: now, into: &captures)
+    #expect(counter.reads == 1)
+    #expect(state.lastSampleAt == start + .milliseconds(61_600))
   }
 
   /// A cadence the enum does not name is a cadence nobody has reasoned about,

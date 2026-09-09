@@ -5,6 +5,7 @@ import SwiftUI
 /// `DisplayGlyph`; no assets. Reduce Motion shows it complete.
 struct AnimatedCheckmark: View {
   var accent: Color
+  var floatActive = true
 
   @State private var ring: CGFloat = 0
   @State private var check: CGFloat = 0
@@ -30,6 +31,9 @@ struct AnimatedCheckmark: View {
         )
     }
     .shadow(color: accent.opacity(0.45), radius: 12)
+    // The float replaces its content when motion stops. Keep that branch
+    // below this view's drawing state and its once-per-appearance draw-in.
+    .onboardingFloat(active: floatActive)
     .onAppear {
       guard !reduceMotion else {
         ring = 1

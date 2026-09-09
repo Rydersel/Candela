@@ -48,6 +48,25 @@ final class LuminanceSampler {
     let rows: Int
   }
 
+  /// A prepared content snapshot. Starting a capture is synchronous; its
+  /// screenshot and reduction complete asynchronously on the returned task.
+  struct Wave {
+    let start: @MainActor (CGDirectDisplayID) -> Task<Sample?, Never>
+  }
+
+  /// One content enumeration shared by independently completing captures.
+  /// The non-Sendable snapshot never leaves MainActor, including the tasks
+  /// that read it. Only the immutable image reduction runs on a worker.
+  static func prepareWave() async -> Wave? {
+    guard let content = await shareableContent() else { return nil }
+    let sampler = LuminanceSampler()
+    return Wave { displayID in
+      Task { @MainActor in
+        await sampler.sample(displayID: displayID, content: content)
+      }
+    }
+  }
+
   private static let log = Logger(subsystem: "com.rydersel.Candela", category: "oledcare")
 
   /// Whether Screen Recording is already granted. Preflight only: this type
