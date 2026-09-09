@@ -29,6 +29,8 @@ export const hero: {
   foss: "Free and open source, forever.",
 }
 
+export const githubStarLabel = "Star on GitHub"
+
 // The hero's click-to-copy Homebrew pill. The tap repo does not exist yet:
 // creating Rydersel/homebrew-tap with the candela cask is a recorded deploy
 // gate, because the command must work on the day the site does.
