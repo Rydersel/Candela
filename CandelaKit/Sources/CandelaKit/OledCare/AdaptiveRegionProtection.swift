@@ -12,17 +12,17 @@ public struct AdaptiveRegionProtection: Sendable {
     /// Nil means focus could not be resolved, so regional dimming is withheld.
     public let isFocusedDisplay: Bool?
     public let frontmostPID: Int32?
-    /// The pointer's panel-native cell while there has been recent input.
-    public let pointerCell: Int?
+    /// Pointer in display-local, top-left coordinates, including beyond its bounds.
+    public let pointerPosition: CGPoint?
 
-    public init(isFocusedDisplay: Bool?, frontmostPID: Int32?, pointerCell: Int?,
+    public init(isFocusedDisplay: Bool?, frontmostPID: Int32?, pointerPosition: CGPoint?,
                 captureExcludedPID: Int32? = nil) {
       // The capture omits this app, so observed ownership describes what is
       // behind its windows. Withhold masks rather than dim through its UI.
       self.isFocusedDisplay = captureExcludedPID != nil && frontmostPID == captureExcludedPID
         ? nil : isFocusedDisplay
       self.frontmostPID = frontmostPID
-      self.pointerCell = pointerCell
+      self.pointerPosition = pointerPosition
     }
   }
 
@@ -41,6 +41,12 @@ public struct AdaptiveRegionProtection: Sendable {
   private var lastSample: Date?
   private var geometry: PanelSpaceTransform?
   private var captureSize: (cols: Int, rows: Int)?
+
+  private var windowRestoration = AdaptiveWindowRestoration()
+  /// Keep the driver fast only while a recently hovered window is returning.
+  public var isRestoringWindows: Bool { windowRestoration.isReturning }
+  /// A fully restored window still needs pointer-exit events to start its grace.
+  public var needsInputTracking: Bool { windowRestoration.needsInputTracking }
 
   public init() {}
 
@@ -78,14 +84,20 @@ public struct AdaptiveRegionProtection: Sendable {
     captureSize = (cols, rows)
   }
 
-  public func nominate(observation: WindowObservation, exposure: ExposureMap,
-                       activity: Activity, at now: Date) -> OverlayMask? {
+  public mutating func nominate(observation: WindowObservation, exposure: ExposureMap,
+                       activity: Activity, windows: [WindowSnapshot], at now: Date) -> OverlayMask? {
     guard Self.valid(observation), observation.fullScreenOwner == nil,
       evidence.count == PanelGrid.cellCount, brightness.count == PanelGrid.cellCount,
       let lastSample, now.timeIntervalSinceReferenceDate.isFinite,
       now >= lastSample, now.timeIntervalSince(lastSample) <= Self.maximumGap,
       activity.isFocusedDisplay != nil, let frontmostPID = activity.frontmostPID
-    else { return nil }
+    else {
+      windowRestoration = AdaptiveWindowRestoration()
+      return nil
+    }
+
+    let windowScales = windowRestoration.update(
+      pointer: activity.pointerPosition, windows: windows, at: now)
 
     // History only adjusts depth after a region qualifies on present evidence.
     // An immature or malformed record earns no extra dimming.
@@ -104,13 +116,13 @@ public struct AdaptiveRegionProtection: Sendable {
         held.windowID == window, held.ownerPID == owner,
         (observation.stationarySecondsByWindowID[window] ?? 0)
           >= WindowObserver.stationaryThresholdSeconds,
-        owner != frontmostPID,
-        !Self.isNearPointer(cell, pointer: activity.pointerCell)
+        owner != frontmostPID
       else { continue }
       // 15% normally, rising to 25% at twice the panel's average exposure.
       // These are conservative policy limits, not calibrated wear estimates.
       let extra = useHistory ? min(1, max(0, exposure.cells[cell] / mean - 1)) * 0.10 : 0
       cells[cell] = min(0.25, StaticRegionDetector.Thresholds.defaultDepth + extra)
+        * (windowScales[window] ?? 1)
     }
     let mask = OverlayMask(cells: cells)
     return mask.peak > 0 ? mask : nil
@@ -120,12 +132,6 @@ public struct AdaptiveRegionProtection: Sendable {
     observation.windowIDByCell.count == PanelGrid.cellCount
       && observation.ownerPIDByCell.count == PanelGrid.cellCount
       && observation.stationaryByCell.count == PanelGrid.cellCount
-  }
-
-  private static func isNearPointer(_ cell: Int, pointer: Int?) -> Bool {
-    guard let pointer, (0..<PanelGrid.cellCount).contains(pointer) else { return false }
-    return abs(cell % PanelGrid.cols - pointer % PanelGrid.cols) <= 1
-      && abs(cell / PanelGrid.cols - pointer / PanelGrid.cols) <= 1
   }
 
   /// Hash the spatial detail before reducing to a mean. Two moving patterns

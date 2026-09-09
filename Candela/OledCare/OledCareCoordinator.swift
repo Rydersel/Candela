@@ -120,7 +120,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     /// the cheaper scalar path.
     var nominatedMask: OverlayMask?
     var adaptiveActivity = AdaptiveRegionProtection.Activity(
-      isFocusedDisplay: nil, frontmostPID: nil, pointerCell: nil)
+      isFocusedDisplay: nil, frontmostPID: nil, pointerPosition: nil)
     /// Throttle for `refreshNominationGeometry`; nil until evidence first arrives.
     var lastNominationRefreshAt: SuspendingClock.Instant?
     /// Verification marker: the last render mutated window-server state; verify it on a
@@ -417,7 +417,7 @@ final class OledCareCoordinator: CheckupCareHolding {
           guard let self else { return }
           self.tick()
           interval = self.cadence()
-          if self.anyDimUp() {
+          if self.anyDimUp() || self.needsAdaptiveInput() {
             self.armInputMonitor()
           } else {
             self.disarmInputMonitor()
@@ -881,7 +881,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     let focusedDisplay = needsFocus ? focus.focusedDisplayID() : nil
     let currentFocus = needsFocus ? focus.currentResolvedDisplayID : nil
     let frontmostPID = anyAdaptiveEnabled ? NSWorkspace.shared.frontmostApplication?.processIdentifier : nil
-    let pointer = anyAdaptiveEnabled && idleSeconds < 30 ? CGEvent(source: nil)?.location : nil
+    let pointer = anyAdaptiveEnabled ? CGEvent(source: nil)?.location : nil
     // ID to key resolved fresh every tick; IDs reassign and are never cached as
     // identity. Uniquing defensively: two identical panels can collide on
     // persistenceKey, and a crash would be worse than one of them winning.
@@ -1021,14 +1021,15 @@ final class OledCareCoordinator: CheckupCareHolding {
       // resolves and the `isSynthesis` verdict above describe one instant.
       let target = OledTelemetryTarget(panel: id, topology: topology)
       if state.detectionDimmingEnabled {
-        let pointerCell = pointer.flatMap { point in
-          Self.transform(target)?.cell(forDisplayPoint: CGPoint(
-            x: point.x - CGDisplayBounds(target.surface).minX,
-            y: point.y - CGDisplayBounds(target.surface).minY))
+        let surfaceBounds = CGDisplayBounds(target.surface)
+        let pointerPosition = pointer.map { point in
+          // Keep off-display coordinates: a window spanning displays restores
+          // on both when hovered on either half. The window list does the same.
+          CGPoint(x: point.x - surfaceBounds.minX, y: point.y - surfaceBounds.minY)
         }
         let activity = AdaptiveRegionProtection.Activity(
           isFocusedDisplay: currentFocus.map { $0 == target.surface },
-          frontmostPID: frontmostPID, pointerCell: pointerCell,
+          frontmostPID: frontmostPID, pointerPosition: pointerPosition,
           captureExcludedPID: ProcessInfo.processInfo.processIdentifier)
         if activity != state.adaptiveActivity {
           // A newly raised foreground window must not inherit the cached
@@ -1100,6 +1101,7 @@ final class OledCareCoordinator: CheckupCareHolding {
       anyLockDimEngaged: states.values.contains(where: \.lockDimEngaged),
       verificationPending: states.values.contains(where: \.needsVerify)
         || !pendingRemovalVerifications.isEmpty,
+      windowRestorationPending: adaptiveProtection.values.contains(where: \.isRestoringWindows),
       nominationDisplayed: anyNominationDisplayed(),
       anythingEnrolled: !states.isEmpty
     )
@@ -1129,6 +1131,12 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// harmlessly, since every one of those states takes the fast term first.
   private func anyNominationDisplayed() -> Bool {
     states.values.contains { $0.nominatedMask != nil && $0.lastAppliedAlpha != nil }
+  }
+
+  /// Hovering may remove the last visible mask. Keep listening so leaving it
+  /// starts the grace promptly, without forcing fast polling while parked.
+  private func needsAdaptiveInput() -> Bool {
+    anyNominationDisplayed() || adaptiveProtection.values.contains(where: \.needsInputTracking)
   }
 
   // MARK: - Event-driven restore
@@ -1167,7 +1175,7 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// the monitor stays armed: a mouse move followed by an app switch belongs
   /// in one bounded batch, not two events separated by the slow driver tick.
   private func inputArrived() {
-    if anyNominationDisplayed(), !anyOverlayDimUp(),
+    if needsAdaptiveInput(), !anyOverlayDimUp(),
       !states.values.contains(where: \.lockDimEngaged) {
       adaptiveInputRestore.request()
     } else {
@@ -1403,10 +1411,10 @@ final class OledCareCoordinator: CheckupCareHolding {
     var protection = adaptiveProtection[key] ?? AdaptiveRegionProtection()
     protection.record(displayGrid: grid, cols: cols, rows: rows, through: transform,
                       observation: observation, at: now)
-    adaptiveProtection[key] = protection
     states[key]?.nominatedMask = protection.nominate(
       observation: observation, exposure: accumulators[key]?.map ?? .empty,
-      activity: state.adaptiveActivity, at: now)
+      activity: state.adaptiveActivity, windows: latestWindows[key] ?? [], at: now)
+    adaptiveProtection[key] = protection
   }
 
   private enum VerifyOutcome {
@@ -1539,7 +1547,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     at now: SuspendingClock.Instant
   ) {
     guard state.detectionDimmingEnabled, state.telemetryEnabled,
-      state.windowObservationEnabled, let protection = adaptiveProtection[key]
+      state.windowObservationEnabled, var protection = adaptiveProtection[key]
     else {
       state.nominatedMask = nil
       return
@@ -1565,7 +1573,8 @@ final class OledCareCoordinator: CheckupCareHolding {
     }
     state.nominatedMask = protection.nominate(
       observation: observation, exposure: accumulators[key]?.map ?? .empty,
-      activity: state.adaptiveActivity, at: Date())
+      activity: state.adaptiveActivity, windows: latestWindows[key] ?? [], at: Date())
+    adaptiveProtection[key] = protection
   }
 
   /// The panel-to-surface resolution against the topology AS IT STANDS NOW.

@@ -42,14 +42,20 @@ public enum OledCareCadence {
   /// be corrected. Only dims `liftsOnInput` covers: detection dimming's mask is
   /// `nominationDisplayed`, which buys the window-follow second, not 10 Hz.
   ///
+  /// A hover restoration temporarily keeps the fast cadence for its grace and
+  /// fade, including when the hovered window was the last visible nomination.
+  ///
   /// `anythingEnrolled` defaults to true so a caller that forgets it cannot idle
   /// the loop by accident. A displayed nomination outranks it: a mask on screen
   /// is work in flight whatever the caller says about enrollment.
   public static func interval(
     anyOverlayUp: Bool, anyLockDimEngaged: Bool, verificationPending: Bool,
+    windowRestorationPending: Bool = false,
     nominationDisplayed: Bool = false, anythingEnrolled: Bool = true
   ) -> Duration {
-    if anyOverlayUp || anyLockDimEngaged || verificationPending { return fast }
+    if anyOverlayUp || anyLockDimEngaged || verificationPending || windowRestorationPending {
+      return fast
+    }
     if nominationDisplayed { return windowFollow }
     return anythingEnrolled ? slow : idle
   }

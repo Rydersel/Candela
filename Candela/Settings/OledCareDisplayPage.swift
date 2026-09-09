@@ -536,9 +536,9 @@ struct OledCareDisplayPage: View {
   /// says when it is the live reason.
   ///
   /// Regional protection uses sampled persistence and window ownership. Focus
-  /// and recent pointer activity are exclusions, not an estimate of gaze.
+  /// and the hovered window are exclusions, not an estimate of gaze.
   private var detectionControls: some View {
-    SettingRow("Bright regions that stay unchanged across several samples can dim, with extra protection for areas with higher recorded exposure. Your foreground app and the area around recent pointer activity stay undimmed. Full-screen content and anything holding the screen awake pause this protection. This needs both measurement settings on the Health pane. Sampling can miss motion; turn this off when judging colors or brightness.") {
+    SettingRow("Bright regions that stay unchanged across several samples can dim, with extra protection for areas with higher recorded exposure. Your foreground app and the window under your pointer stay undimmed. After the pointer leaves, regional dimming returns gradually after a short pause. Full-screen content and anything holding the screen awake pause this protection. This needs both measurement settings on the Health pane. Sampling can miss motion; turn this off when judging colors or brightness.") {
       VStack(alignment: .leading, spacing: 6) {
         Toggle("Automatic static-region dimming", isOn: Binding(
           get: { prefs.oledDetectionDimming },

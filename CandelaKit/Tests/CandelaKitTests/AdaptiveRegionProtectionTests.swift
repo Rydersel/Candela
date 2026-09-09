@@ -10,7 +10,7 @@ struct AdaptiveRegionProtectionTests {
   private let transform = PanelSpaceTransform(
     displaySize: CGSize(width: 2400, height: 1000), rotation: .standard)
   private let activity = AdaptiveRegionProtection.Activity(
-    isFocusedDisplay: false, frontmostPID: 99, pointerCell: nil)
+    isFocusedDisplay: false, frontmostPID: 99, pointerPosition: nil)
 
   private func observation(window: UInt32 = 1, owner: Int32 = 7,
                            fullScreen: String? = nil) -> WindowObservation {
@@ -23,11 +23,11 @@ struct AdaptiveRegionProtectionTests {
       ownerPIDByCell: Array(repeating: owner, count: 240))
   }
 
-  private func warmed() -> AdaptiveRegionProtection {
+  private func warmed(observation: WindowObservation? = nil) -> AdaptiveRegionProtection {
     var protection = AdaptiveRegionProtection()
     for second in stride(from: 0, through: 300, by: 60) {
       protection.record(displayGrid: Array(repeating: 0.8, count: 960), cols: 48, rows: 20,
-                        through: transform, observation: observation(),
+                        through: transform, observation: observation ?? self.observation(),
                         at: start.addingTimeInterval(Double(second)))
     }
     return protection
@@ -37,8 +37,12 @@ struct AdaptiveRegionProtectionTests {
                     observation: WindowObservation? = nil,
                     exposure: ExposureMap = .empty,
                     activity: AdaptiveRegionProtection.Activity? = nil) -> OverlayMask? {
-    protection.nominate(observation: observation ?? self.observation(), exposure: exposure,
-                        activity: activity ?? self.activity, at: start.addingTimeInterval(second))
+    var protection = protection
+    return protection.nominate(observation: observation ?? self.observation(), exposure: exposure,
+                        activity: activity ?? self.activity, windows: [
+                          WindowSnapshot(windowID: 1, ownerPID: 7, ownerName: "Editor",
+                            bounds: CGRect(x: 0, y: 0, width: 2400, height: 1000), layer: 0)
+                        ], at: start.addingTimeInterval(second))
   }
 
   @Test func oneBrightSampleIsNotEvidenceOfPersistentContent() {
@@ -76,34 +80,115 @@ struct AdaptiveRegionProtectionTests {
     #expect((result?.cells[239] ?? 0) > 0)
   }
 
-  @Test func focusedAppAndRecentPointerAreaAreProtected() {
+  @Test func focusedAppAndEntireHoveredWindowAreProtected() {
     let protection = warmed()
     #expect(mask(protection, activity: .init(
-      isFocusedDisplay: true, frontmostPID: 7, pointerCell: nil)) == nil)
+      isFocusedDisplay: true, frontmostPID: 7, pointerPosition: nil)) == nil)
     let otherApp = mask(protection, activity: .init(
-      isFocusedDisplay: true, frontmostPID: 99, pointerCell: 25))
-    #expect(otherApp?.cells[25] == 0)
-    #expect(otherApp?.cells[0] == 0) // adjacent cell
-    #expect((otherApp?.cells[239] ?? 0) > 0)
+      isFocusedDisplay: true, frontmostPID: 99, pointerPosition: CGPoint(x: 150, y: 150)))
+    #expect(otherApp == nil) // Hover restores even the far end of the same window.
     #expect(mask(protection, activity: .init(
-      isFocusedDisplay: nil, frontmostPID: 7, pointerCell: nil)) == nil)
+      isFocusedDisplay: nil, frontmostPID: 7, pointerPosition: nil)) == nil)
     #expect(mask(protection, activity: .init(
-      isFocusedDisplay: true, frontmostPID: nil, pointerCell: nil)) == nil)
+      isFocusedDisplay: true, frontmostPID: nil, pointerPosition: nil)) == nil)
+  }
+
+
+  @Test func hoveringOneWindowLeavesAnotherWindowOfTheSameAppProtected() {
+    let windows = [
+      WindowSnapshot(windowID: 1, ownerPID: 7, ownerName: "Editor",
+        bounds: CGRect(x: 0, y: 0, width: 1200, height: 1000), layer: 0),
+      WindowSnapshot(windowID: 2, ownerPID: 7, ownerName: "Editor",
+        bounds: CGRect(x: 1200, y: 0, width: 1200, height: 1000), layer: 0),
+    ]
+    var observer = WindowObserver()
+    _ = observer.observe(windows, through: transform, at: start)
+    let observed = observer.observe(windows, through: transform, at: start.addingTimeInterval(300))
+    var protection = warmed(observation: observed)
+    func nominate(_ point: CGPoint?, _ second: Double) -> OverlayMask? {
+      protection.nominate(observation: observed, exposure: .empty,
+        activity: .init(isFocusedDisplay: false, frontmostPID: 99, pointerPosition: point),
+        windows: windows, at: start.addingTimeInterval(second))
+    }
+    let hovered = nominate(CGPoint(x: 1, y: 1), 300)
+    #expect(protection.needsInputTracking)
+    #expect(hovered?.cells[216] == 0) // Far corner of the hovered window.
+    #expect((hovered?.cells[239] ?? 0) > 0) // Same app, different window.
+    #expect(nominate(nil, 301)?.cells[216] == 0)
+    #expect(nominate(nil, 303)?.cells[216] == 0) // Grace has just ended.
+    let fading = nominate(nil, 303.5)
+    #expect((fading?.cells[216] ?? 0) > 0)
+    #expect((fading?.cells[216] ?? 1) < (fading?.cells[239] ?? 0))
+    #expect(nominate(nil, 304)?.cells[216] == hovered?.cells[239])
+    #expect(!protection.needsInputTracking)
+  }
+
+  @Test func clearingTheLastMaskKeepsExitTrackingThroughTheReturn() {
+    let windows = [WindowSnapshot(windowID: 1, ownerPID: 7, ownerName: "Editor",
+      bounds: CGRect(x: 0, y: 0, width: 2400, height: 1000), layer: 0)]
+    var protection = warmed()
+    #expect(protection.nominate(observation: observation(), exposure: .empty,
+      activity: .init(isFocusedDisplay: false, frontmostPID: 99,
+                      pointerPosition: CGPoint(x: 50, y: 50)),
+      windows: windows, at: start.addingTimeInterval(300)) == nil)
+    #expect(protection.needsInputTracking)
+    #expect(!protection.isRestoringWindows) // Listen for exit without fast polling.
+    #expect(protection.nominate(observation: observation(), exposure: .empty,
+      activity: activity, windows: windows, at: start.addingTimeInterval(301)) == nil)
+    #expect(protection.needsInputTracking && protection.isRestoringWindows)
+    #expect(protection.nominate(observation: observation(), exposure: .empty,
+      activity: activity, windows: windows, at: start.addingTimeInterval(304)) != nil)
+    #expect(!protection.needsInputTracking && !protection.isRestoringWindows)
+  }
+
+  @Test func staleEvidenceEndsTheReturnCadenceAndWithholdsTheMask() {
+    let windows = [WindowSnapshot(windowID: 1, ownerPID: 7, ownerName: "Editor",
+      bounds: CGRect(x: 0, y: 0, width: 2400, height: 1000), layer: 0)]
+    var protection = warmed()
+    _ = protection.nominate(observation: observation(), exposure: .empty,
+      activity: .init(isFocusedDisplay: false, frontmostPID: 99,
+                      pointerPosition: CGPoint(x: 50, y: 50)),
+      windows: windows, at: start.addingTimeInterval(389))
+    _ = protection.nominate(observation: observation(), exposure: .empty,
+      activity: activity, windows: windows, at: start.addingTimeInterval(390))
+    #expect(protection.isRestoringWindows)
+    #expect(protection.nominate(observation: observation(), exposure: .empty,
+      activity: activity, windows: windows, at: start.addingTimeInterval(391)) == nil)
+    #expect(!protection.isRestoringWindows)
+    #expect(!protection.needsInputTracking)
+  }
+
+  @Test func rotatedDisplayAndPointerBeyondItsBoundsRestoreTheSpanningWindow() {
+    let rotated = PanelSpaceTransform(
+      displaySize: CGSize(width: 1000, height: 2400), rotation: .ninety)
+    let windows = [WindowSnapshot(windowID: 1, ownerPID: 7, ownerName: "Editor",
+      bounds: CGRect(x: -100, y: 0, width: 1100, height: 2400), layer: 0)]
+    var protection = AdaptiveRegionProtection()
+    for second in stride(from: 0, through: 300, by: 60) {
+      protection.record(displayGrid: Array(repeating: 0.8, count: 960), cols: 20, rows: 48,
+        through: rotated, observation: observation(), at: start.addingTimeInterval(Double(second)))
+    }
+    #expect(protection.nominate(observation: observation(), exposure: .empty,
+      activity: activity, windows: windows, at: start.addingTimeInterval(300)) != nil)
+    #expect(protection.nominate(observation: observation(), exposure: .empty,
+      activity: .init(isFocusedDisplay: false, frontmostPID: 99,
+                      pointerPosition: CGPoint(x: -50, y: 50)),
+      windows: windows, at: start.addingTimeInterval(300)) == nil)
   }
 
   @Test func anExcludedForegroundAppCannotBeDimmedThroughItsBackgroundWindows() {
     let protection = warmed()
     #expect(mask(protection, activity: .init(
-      isFocusedDisplay: true, frontmostPID: 42, pointerCell: nil,
+      isFocusedDisplay: true, frontmostPID: 42, pointerPosition: nil,
       captureExcludedPID: 42)) == nil)
     #expect(mask(protection, activity: .init(
-      isFocusedDisplay: true, frontmostPID: 42, pointerCell: nil,
+      isFocusedDisplay: true, frontmostPID: 42, pointerPosition: nil,
       captureExcludedPID: 99)) != nil)
   }
 
   @Test func aForegroundAppSpanningDisplaysIsProtectedOnBoth() {
     #expect(mask(warmed(), activity: .init(
-      isFocusedDisplay: false, frontmostPID: 7, pointerCell: nil)) == nil)
+      isFocusedDisplay: false, frontmostPID: 7, pointerPosition: nil)) == nil)
   }
 
   @Test func historyStrengthensEligibleHotRegionsButCannotNominateDarkContent() {

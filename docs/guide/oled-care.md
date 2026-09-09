@@ -40,9 +40,11 @@ immediately.
   working on. Only clicking into it brings it back, not typing elsewhere.
 - **Automatic static-region dimming.** Bright, stable regions in background
   windows can dim a little while you work. Your foreground app stays undimmed across
-  displays, as does the area around the pointer for 30 seconds
-  after input. Full-screen content and anything holding the display awake
-  suspend this protection. Regional dimming is also withheld while Candela
+  displays, as does the entire window under your pointer. After the pointer
+  leaves a window, it stays clear for two seconds, then eligible regions fade
+  back to their dimmed level over one second. Other background windows remain
+  protected, including other windows belonging to the same app. Full-screen
+  content and anything holding the display awake suspend this protection. Regional dimming is also withheld while Candela
   itself is foreground, because its windows are excluded from capture. This
   setting is **off by default** and needs both
   measurement settings on the Health pane.
