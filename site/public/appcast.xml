@@ -12,6 +12,39 @@
     <description>Update feed for Candela.</description>
     <language>en</language>
     <item>
+      <title>Version 1.0.3</title>
+      <pubDate>Wed, 09 Sep 2026 04:04:38 +0000</pubDate>
+      <sparkle:version>1.0.3</sparkle:version>
+      <sparkle:shortVersionString>1.0.3</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description sparkle:format="markdown"><![CDATA[
+## New
+- Updates: updates from 1.0.3 onward show a brief, dismissible version confirmation.
+
+## Changed
+- Controls: background polling is optimized to reduce CPU usage while idle.
+- Settings: animated backgrounds stop when the Settings window closes.
+- Settings: copied and saved diagnostic reports include each display's volume availability and sound output, including whether the output matches that display.
+
+## Fixed
+- Controls: brightness stays responsive when you open controls or press a key after changing it outside Candela.
+- Controls: DDC read failures and refusals are reported accurately, and displays that never answer are not repeatedly polled until a connection or configuration change makes a retry useful.
+- Controls: correcting a display's read-register override retries the new register and discards stale results from the previous one.
+- Controls: isolated DDC writes no longer wait unnecessarily before reaching the display.
+- Sizes: a resolution that differs from your choice offers Revert without letting you save the wrong size.
+- Sizes: Settings shows when a change is running and prevents repeated selections, with a longer-running notice for rendered sizes.
+- Health: unreadable wallpapers are cached until the wallpaper changes, and unused wallpaper sampling is skipped.
+- Settings: the Sound card and Diagnostics follow changes to the system audio output without needing another interaction.
+- Settings: the Advanced subtitle aligns with its label, and Use Current stays on one line.
+- Updates: future updates open About after Install and Relaunch.
+]]></description>
+      <sparkle:fullReleaseNotesLink>https://github.com/Rydersel/Candela/releases</sparkle:fullReleaseNotesLink>
+      <enclosure
+        url="https://github.com/Rydersel/Candela/releases/download/v1.0.3/Candela-1.0.3.zip"
+        sparkle:edSignature="XQSmq1/5g2cQbgzbX9s1/2s6+TBb6ll2avZihDwd8RE2tnKcsppaTFU4IGId0YVq8Qj71V0bh8GVto48aKpMCQ==" length="5319371"
+        type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Version 1.0.2</title>
       <pubDate>Fri, 04 Sep 2026 21:00:36 +0000</pubDate>
       <sparkle:version>1.0.2</sparkle:version>
