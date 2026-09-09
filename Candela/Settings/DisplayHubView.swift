@@ -374,9 +374,7 @@ struct DisplayHubView: View {
   // MARK: - Sound
 
   @ViewBuilder private var soundCard: some View {
-    // `defaultOutputDevice()` does a blocking HAL round-trip when the CoreAudio
-    // listener has not primed its cache: read it once, not once per consumer.
-    let currentOutput = model.audioDevices.defaultOutputDevice()
+    let currentOutput = model.defaultAudioOutput
 
     SettingsCardSection(title: "Sound") {
       LabeledContent("Volume keys") {
