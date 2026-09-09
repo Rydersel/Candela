@@ -171,6 +171,8 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
   var onMirrorApplied: (@Sendable () -> Void)?
   /// Throw from `apply`, to reach the engage tail's bounce fallback.
   var refusesModeApplies = false
+  /// Suspends a hardware apply so tests can observe the coordinator mid-change.
+  var onModeApply: (@Sendable () -> Void)?
   /// A committed mode failure for coordinator recovery tests, consumed once.
   var nextModeApplyFailure: DisplayConfigError?
 
@@ -196,6 +198,7 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
   /// the call. The tail's achieved-state check then answers false, which is what
   /// puts the bounce under test.
   func apply(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope _: DisplayConfigScope) throws {
+    onModeApply?()
     if refusesModeApplies { throw DisplayConfigError(cgErrorCode: CGError.failure.rawValue) }
     world.recordApply(mode, to: displayID)
     if let failure = nextModeApplyFailure {

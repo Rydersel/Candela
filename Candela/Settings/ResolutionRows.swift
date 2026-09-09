@@ -2,6 +2,25 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
+/// Shared presentation for every Settings size and rate control. Both the
+/// disable and its explanation read the coordinator's live operation queue.
+@MainActor
+struct ModeChangeFeedback {
+  let coordinator: DisplayModeCoordinator
+  let displayID: CGDirectDisplayID
+
+  var controlsDisabled: Bool { coordinator.isApplying }
+
+  var caption: String? {
+    guard coordinator.isApplying, let selection = coordinator.applyingSelection else { return nil }
+    let target = selection.displayID == displayID ? "this display" : "another display"
+    if selection.mode.isSynthesized {
+      return "Applying a rendered size on \(target). This can take tens of seconds; size and refresh rate controls are unavailable until it finishes."
+    }
+    return "Changing \(target). Size and refresh rate controls are unavailable until it finishes."
+  }
+}
+
 /// The one apply path every resolution control in the settings window goes
 /// through. A value rather than a method on a view, because two panes offer the
 /// same choice and a second copy would be a second place to get the preview
@@ -36,8 +55,8 @@ struct ResolutionSelection {
 
   func apply(_ mode: DisplayMode, in catalog: DisplayModeCoordinator.Catalog) {
     // No `Task` here. `selectFromList` is fire-and-forget into the
-    // coordinator's queue, which is what serialises two fast clicks; one Task
-    // per click is how the banner ends up naming a different mode than the one
+    // coordinator's queue, with a synchronous busy guard for repeat clicks; one
+    // Task per click is how the banner ends up naming a different mode than the one
     // "Keep" would commit.
     //
     // `.settings` routes a failed `begin()` to the banner region, which the
@@ -77,12 +96,19 @@ struct DisplaySizeRows: View {
     )
   }
 
+  private var feedback: ModeChangeFeedback {
+    ModeChangeFeedback(coordinator: model.displayModes, displayID: displayID)
+  }
+
   var body: some View {
+    if let caption = feedback.caption {
+      SettingsRowNote(verbatim: caption)
+    }
     if !catalog.rows.isEmpty {
       SettingRow("Changes how big text and windows look.") {
-        sizePicker
+        sizePicker.disabled(feedback.controlsDisabled)
       }
-      refreshPicker
+      refreshPicker.disabled(feedback.controlsDisabled)
       synthesizedRateRow
     } else if !catalog.all.isEmpty {
       // Every size this panel reports is under the usability floor, so the
