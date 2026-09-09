@@ -38,12 +38,42 @@ immediately.
   were using.
 - **Dim while this display has nothing in focus.** For the display you are not
   working on. Only clicking into it brings it back, not typing elsewhere.
-- **Automatic static-region dimming.** Areas that stay bright and unchanged, a
-  toolbar or a sidebar, are dimmed a little while you work. Full-screen video
-  is never dimmed. This is the one dimming setting that is **off by default**
-  and not part of the recommended settings, because it is the only one that
-  changes the screen while you are looking at it. It also needs both
-  measurement settings on the Health pane; without them nothing is dimmed.
+- **Automatic static-region dimming.** Bright, stable regions in background
+  windows can dim a little while you work. Your foreground app stays undimmed across
+  displays, as does the area around the pointer for 30 seconds
+  after input. Full-screen content and anything holding the display awake
+  suspend this protection. Regional dimming is also withheld while Candela
+  itself is foreground, because its windows are excluded from capture. This
+  setting is **off by default** and needs both
+  measurement settings on the Health pane.
+
+### How adaptive regional protection decides
+
+The detector compares spatial fingerprints from the existing once-per-minute
+captures. A region needs six matching samples spanning at least five minutes,
+bright content, and a stationary window fully covering the cell. A changed
+sample or window owner restarts that region's evidence. A cell shared by
+multiple windows is left alone.
+
+An eligible region normally receives a 15% dark overlay. Once at least 30
+exposure samples have accumulated, regions above the panel's average recorded
+exposure receive a proportional increase, capped at 25% at twice the average.
+History alone never makes a dark, changing, or actively used region eligible.
+This is an exposure-based policy, not a calibrated prediction of physical wear.
+
+A gap longer than 90 seconds, a failed capture, sleep, display reconfiguration,
+or disabling the required settings discards temporary detection evidence.
+Protection needs fresh samples before it can resume. Your cumulative exposure
+history is retained and does not automatically decay; it begins when you enable
+measurement and cannot account for earlier use of the display.
+
+The detector retains only coarse brightness values and per-region fingerprints,
+not screenshots. It can miss motion between samples or changes too small to
+alter a fingerprint. A paused video or photograph is still static content;
+focus is a useful signal, not proof of what you are looking at. Keep regional
+dimming off when judging colors or brightness. Other apps' overlays that macOS
+omits from capture cannot be accounted for, and the exposure map is not a
+measurement of the panel's actual light output.
 
 ## Screen chrome
 

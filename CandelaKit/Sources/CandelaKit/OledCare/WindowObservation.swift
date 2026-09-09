@@ -47,17 +47,24 @@ public struct WindowObservation: Equatable, Sendable {
   /// True where the covering window has been stationary past the threshold.
   public let stationaryByCell: [Bool]
   public let fullScreenOwner: String?
+  /// Fully covered cells belonging to the first visible window. Mixed cells stay unknown.
+  public let windowIDByCell: [UInt32?]
+  public let ownerPIDByCell: [Int32?]
 
   public init(
     dominantOwnerByCell: [String?],
     stationarySecondsByWindowID: [UInt32: TimeInterval],
     stationaryByCell: [Bool],
-    fullScreenOwner: String?
+    fullScreenOwner: String?,
+    windowIDByCell: [UInt32?] = Array(repeating: nil, count: PanelGrid.cellCount),
+    ownerPIDByCell: [Int32?] = Array(repeating: nil, count: PanelGrid.cellCount)
   ) {
     self.dominantOwnerByCell = dominantOwnerByCell
     self.stationarySecondsByWindowID = stationarySecondsByWindowID
     self.stationaryByCell = stationaryByCell
     self.fullScreenOwner = fullScreenOwner
+    self.windowIDByCell = windowIDByCell
+    self.ownerPIDByCell = ownerPIDByCell
   }
 }
 
@@ -118,10 +125,22 @@ public struct WindowObserver: Sendable {
     var owners = [String?](repeating: nil, count: PanelGrid.cellCount)
     var stationary = [Bool](repeating: false, count: PanelGrid.cellCount)
     var best = [Double](repeating: 0, count: PanelGrid.cellCount)
+    var visibleWindows = [UInt32?](repeating: nil, count: PanelGrid.cellCount)
+    var visibleOwners = [Int32?](repeating: nil, count: PanelGrid.cellCount)
+    var covered = [Bool](repeating: false, count: PanelGrid.cellCount)
 
     for window in windows {
       let coverage = transform.coverage(ofDisplayRect: window.bounds)
       let isStationary = (ages[window.windowID] ?? 0) >= Self.stationaryThresholdSeconds
+      // Front-to-back, unlike dominant area attribution. A partially covered
+      // cell cannot safely inherit the identity or age of a window behind it.
+      for cell in 0..<PanelGrid.cellCount where coverage[cell] > 1e-9 && !covered[cell] {
+        covered[cell] = true
+        if coverage[cell] >= 1 - 1e-9, window.layer == Self.normalWindowLayer {
+          visibleWindows[cell] = window.windowID
+          visibleOwners[cell] = window.ownerPID
+        }
+      }
       for cell in 0..<PanelGrid.cellCount where coverage[cell] > best[cell] {
         best[cell] = coverage[cell]
         owners[cell] = window.ownerName
@@ -133,7 +152,8 @@ public struct WindowObserver: Sendable {
       dominantOwnerByCell: owners,
       stationarySecondsByWindowID: ages,
       stationaryByCell: stationary,
-      fullScreenOwner: fullScreenOwner(among: windows, on: transform.displaySize))
+      fullScreenOwner: fullScreenOwner(among: windows, on: transform.displaySize),
+      windowIDByCell: visibleWindows, ownerPIDByCell: visibleOwners)
   }
 
   private func fullScreenOwner(among windows: [WindowSnapshot], on displaySize: CGSize)

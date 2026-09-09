@@ -194,6 +194,14 @@ final class LockStateObserver {
 @MainActor
 final class FocusSampler {
   private var lastResolved: CGDirectDisplayID?
+  private let resolveCurrent: () -> CGDirectDisplayID?
+
+  init(resolver: (() -> CGDirectDisplayID?)? = nil) {
+    resolveCurrent = resolver ?? Self.resolve
+  }
+  /// Unlike the held value used by idle dimming, adaptive protection needs a
+  /// fresh resolution. A transient miss must not nominate a possibly active app.
+  private(set) var currentResolvedDisplayID: CGDirectDisplayID?
 
   /// Forgets the held resolution. The coordinator calls this on every display
   /// reconfiguration, and the reason is ID REASSIGNMENT, not departure: display
@@ -204,17 +212,16 @@ final class FocusSampler {
   /// must read as "no data" and never as "no display focused".
   func invalidate() {
     self.lastResolved = nil
+    currentResolvedDisplayID = nil
   }
 
   func focusedDisplayID() -> CGDirectDisplayID? {
-    if let resolved = self.resolve() {
-      self.lastResolved = resolved
-      return resolved
-    }
-    return self.lastResolved
+    currentResolvedDisplayID = resolveCurrent()
+    if let resolved = currentResolvedDisplayID { lastResolved = resolved }
+    return lastResolved
   }
 
-  private func resolve() -> CGDirectDisplayID? {
+  private static func resolve() -> CGDirectDisplayID? {
     guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
     guard let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
       as? [[String: Any]] else { return nil }
