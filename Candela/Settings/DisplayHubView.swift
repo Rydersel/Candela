@@ -469,13 +469,14 @@ struct DisplayHubView: View {
                 guard !audioNameFocused else { return } // never fight a live edit
                 audioNameDraft = prefs.audioDeviceNameOverride
               }
-              .frame(width: 180)
+              .frame(minWidth: 100, idealWidth: 180, maxWidth: 180)
               .prefIdentifier(.audioDeviceNameOverride, persistenceKey: persistenceKey)
             Button("Use Current") {
               audioNameDraft = currentOutput?.name ?? ""
               commitAudioName()
             }
             .buttonStyle(SettingsSecondaryButtonStyle())
+            .fixedSize(horizontal: true, vertical: false)
             .accessibilityLabel("Use Current")
             .disabled(currentOutput == nil)
           }
@@ -600,7 +601,10 @@ struct DisplayHubView: View {
     SettingsCardSection {
       // The only hedge on the page, and it sits before the navigation rather
       // than on the sub-page, where it would arrive too late to save the trip.
-      SettingRow("Settings most displays don't need.") {
+      SettingRow(
+        "Settings most displays don't need.",
+        captionLeadingInset: NavigationRow.contentHorizontalInset
+      ) {
         NavigationRow(title: "Advanced", value: advancedPreview) { path.append(.advanced) }
           .focused($focusedRow, equals: .advanced)
       }

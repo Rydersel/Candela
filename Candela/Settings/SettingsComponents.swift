@@ -93,16 +93,27 @@ struct SettingRow<Control: View>: View {
   @Environment(\.isEnabled) private var isEnabled
 
   private let caption: SettingsCaption?
+  private let captionLeadingInset: CGFloat
   private let safety: SafetySentence?
   private let controlLabel: LocalizedStringKey?
   private let control: Control
 
-  init(_ caption: LocalizedStringKey? = nil, @ViewBuilder control: () -> Control) {
-    self.init(caption: caption.map { SettingsCaption($0) }, control: control)
+  init(
+    _ caption: LocalizedStringKey? = nil,
+    captionLeadingInset: CGFloat = 0,
+    @ViewBuilder control: () -> Control
+  ) {
+    self.init(caption: caption.map { SettingsCaption($0) },
+              captionLeadingInset: captionLeadingInset, control: control)
   }
 
-  init(caption: SettingsCaption?, @ViewBuilder control: () -> Control) {
+  init(
+    caption: SettingsCaption?,
+    captionLeadingInset: CGFloat = 0,
+    @ViewBuilder control: () -> Control
+  ) {
     self.caption = caption
+    self.captionLeadingInset = captionLeadingInset
     self.safety = nil
     self.controlLabel = nil
     self.control = control()
@@ -131,6 +142,7 @@ struct SettingRow<Control: View>: View {
   ) {
     self.caption = caption
     self.safety = safety
+    self.captionLeadingInset = 0
     self.controlLabel = label
     self.control = control(label)
   }
@@ -171,6 +183,7 @@ struct SettingRow<Control: View>: View {
         .foregroundStyle(SettingsTheme.faintColor)
         .fixedSize(horizontal: false, vertical: true)
         .opacity(isEnabled ? 1 : SettingsTheme.disabledOpacity)
+        .padding(.leading, captionLeadingInset)
     }
   }
 

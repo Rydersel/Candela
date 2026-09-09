@@ -17,6 +17,8 @@ import SwiftUI
 /// `.accessibilityAction` gives the press back but not the focus. The `Button`
 /// is already one element with the button trait and merges its own content.
 struct NavigationRow: View {
+  static let contentHorizontalInset: CGFloat = 6
+
   let title: String
   let value: String?
   var spokenValue: String? = nil
@@ -46,7 +48,7 @@ struct NavigationRow: View {
         }
       }
       .padding(.vertical, 6)
-      .padding(.horizontal, 6)
+      .padding(.horizontal, Self.contentHorizontalInset)
       // The lift is the only thing saying a card row is a doorway; the chevron
       // alone reads as decoration at this density.
       .background(
