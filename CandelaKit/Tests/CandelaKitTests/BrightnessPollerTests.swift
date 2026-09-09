@@ -297,32 +297,33 @@ private func makePoller(
   task.cancel()
   #expect(started)
   // The idle interval here is the FAST one, so a poller that ignored the slow
-  // cadence would be at ~50 reads. The control below proves this window can carry
-  // them.
+  // cadence would be at ~50 reads.
   #expect(probe.reads.count <= 4)
 }
 
 @Test func aSurfaceAppearingShortensTheNextIntervalWithNoRestart() async {
   let probe = Probe(expected: 0.5, generation: 1, hardware: 0.5, isExternal: false)
-  let poller = makePoller(probe, fast: .milliseconds(5), idle: .milliseconds(5), slowIdle: .milliseconds(200))
-  let task = Task { await poller.run() }
-  _ = await waitUntil { !probe.reads.isEmpty }
-  // Flipped mid-run, on the SAME poll job: the cadence is re-read every tick, so
-  // nothing restarts it.
+  let poller = makePoller(probe, idle: .milliseconds(5), slowIdle: .seconds(30))
+  #expect(await poller.pollOnce() == .seconds(30))
+  // Change the signal on the same job so a cached launch-time answer cannot pass.
   probe.setSurfaceVisible(true)
-  let sped = await waitUntil { probe.reads.count >= 20 }
-  task.cancel()
-  #expect(sped)
+  #expect(await poller.pollOnce() == .milliseconds(5))
+  probe.setSurfaceVisible(false)
+  #expect(await poller.pollOnce() == .seconds(30))
+  #expect(probe.reads.count == 3)
+  #expect(probe.adoptions.isEmpty)
 }
 
 @Test func syncOnKeepsTheShortIntervalWithNoExternalNative() async {
   let probe = Probe(expected: 0.5, generation: 1, hardware: 0.5, isExternal: false)
+  let poller = makePoller(probe, idle: .milliseconds(5), slowIdle: .seconds(30))
   probe.setSyncEnabled(true)
-  let poller = makePoller(probe, fast: .milliseconds(5), idle: .milliseconds(5), slowIdle: .seconds(30))
-  let task = Task { await poller.run() }
-  let sped = await waitUntil { probe.reads.count >= 20 }
-  task.cancel()
-  #expect(sped)
+  #expect(await poller.pollOnce() == .milliseconds(5))
+  #expect(await poller.pollOnce() == .milliseconds(5))
+  probe.setSyncEnabled(false)
+  #expect(await poller.pollOnce() == .seconds(30))
+  #expect(probe.reads.count == 3)
+  #expect(probe.adoptions.isEmpty)
 }
 
 @Test func batteryLengthensTheSlowIntervalFurther() async {
@@ -407,13 +408,15 @@ private func makePoller(
 @Test func aNativeExternalDoesHoldTheShortInterval() async {
   let external = Probe(expected: 0.5, generation: 1, hardware: 0.5, displayID: 8)
   let builtIn = Probe(expected: 0.5, generation: 1, hardware: 0.5, isExternal: false, displayID: 9)
-  let poller = makePoller(
-    [builtIn, external], fast: .milliseconds(5), idle: .milliseconds(5),
-    slowIdle: .seconds(30))
-  let task = Task { await poller.run() }
-  let sped = await waitUntil { builtIn.reads.count >= 20 }
-  task.cancel()
-  #expect(sped)
+  let poller = makePoller([builtIn, external], idle: .milliseconds(5), slowIdle: .seconds(30))
+  #expect(await poller.pollOnce() == .milliseconds(5))
+  #expect(await poller.pollOnce() == .milliseconds(5))
+  external.setNativeActive(false)
+  #expect(await poller.pollOnce() == .seconds(30))
+  #expect(builtIn.reads.count == 3)
+  #expect(external.reads.count == 2)
+  #expect(builtIn.adoptions.isEmpty)
+  #expect(external.adoptions.isEmpty)
 }
 
 /// The poll job must survive every idle state: an external entering HDR reaches

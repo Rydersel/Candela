@@ -18,15 +18,6 @@
 name: Build and test
 
 on:
-  # push is restricted to main while pull_request carries everything else, and
-  # the split is deliberate rather than copied. A workflow triggered by an
-  # unrestricted push AND by pull_request runs twice on every commit to an open
-  # PR's branch. macOS runner minutes are the expensive ones here, so a
-  # duplicate run would be the costliest thing in the pipeline and would buy no
-  # signal at all.
-  #
-  # paths-ignore holds only what no job below reads. Keep the push and
-  # pull_request lists identical.
   push:
     branches: [main]
     paths-ignore:
@@ -38,21 +29,10 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
       - '.github/PULL_REQUEST_TEMPLATE.md'
       - '.github/workflows/site.yml'
+  # Every PR gets a result. Suite selection below avoids macOS work for docs and site changes.
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'site/**'
-      - 'LICENSE'
-      - '.github/assets/**'
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.github/PULL_REQUEST_TEMPLATE.md'
-      - '.github/workflows/site.yml'
   workflow_dispatch:
-
-# `paths-ignore:`, never `paths:`. A stale allow-list hides a real break as
-# green; a stale ignore-list only costs one extra run.
 
 permissions:
   contents: read
@@ -72,7 +52,24 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      app: ${{ steps.scope.outputs.app }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Test suite selection and result handling
+        run: python3 tools/ci/test_verification.py
+      - name: Select suites
+        id: scope
+        run: python3 tools/ci/verification.py scope >> "$GITHUB_OUTPUT"
+
   test:
+    needs: scope
+    if: needs.scope.outputs.app == 'true'
     # Pinned to macos-26, not macos-latest, and matched to the dev machine's
     # major version on purpose. The label decides which Swift compiler runs, and
     # a compiler older than the one the code is written against produces reds
@@ -202,6 +199,8 @@ jobs:
   # window presentation, reset ordering, `SMAppService` registration, TCC
   # grants. Those need a launched app in front of a person and stay manual.
   app-build:
+    needs: scope
+    if: needs.scope.outputs.app == 'true'
     # Not `needs: test`. They are independent questions and running them in
     # parallel answers both on every push, where chaining would hide a build
     # break behind an unrelated test failure and cost a second round trip to
@@ -245,6 +244,9 @@ jobs:
 
       # project.yml is the source of truth and Candela.xcodeproj is gitignored,
       # so CI has to generate it exactly as a developer does.
+      - name: Test contributor build and Release verification tools
+        run: python3 -m unittest discover -s tools/build -p 'test_*.py'
+
       - name: Generate the project
         run: xcodegen generate
 
@@ -386,6 +388,8 @@ jobs:
   # certificate, so it builds with the same signing override app-build uses.
   # Signing, the hardened runtime and notarisation stay verified at deploy time.
   release-build:
+    needs: scope
+    if: needs.scope.outputs.app == 'true'
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -428,52 +432,18 @@ jobs:
             -configuration Release -derivedDataPath "$RUNNER_TEMP/dd-release" build \
             CODE_SIGN_IDENTITY="-" DEVELOPMENT_TEAM=""
 
-      # The debug-marker grep, plus a positive control, because as usually
-      # written this check cannot fail: a grep pointed at the wrong path returns
-      # zero and reads exactly like a clean build.
-      #
-      # Two measured traps. `strings` without -a misses sections; it once found
-      # the bundle identifier and missed a SwiftUI literal in the same binary.
-      # And Swift stores literals of 15 UTF-8 bytes or fewer inline in the code
-      # rather than in a string section, out of reach, so keep the control
-      # literal and every marker longer than that.
       - name: Debug markers are absent from the Release build
-        shell: bash
-        run: |
-          set -euo pipefail
-          app="$RUNNER_TEMP/dd-release/Build/Products/Release/Candela.app"
-          bin="$app/Contents/MacOS/Candela"
+        run: tools/build/check-release-markers.sh "$RUNNER_TEMP/dd-release/Build/Products/Release/Candela.app"
 
-          if [ ! -x "$bin" ]; then
-            echo "::error::Release build reported success but produced no executable at $bin. Nothing below would be measuring the shipped product."
-            exit 1
-          fi
-          echo "Scanning: $(file -b "$bin")"
-          echo "  sha256: $(shasum -a 256 "$bin" | cut -d' ' -f1)"
-
-          # grep -c exits 1 on no match, which pipefail would turn into a job
-          # failure before the count could be read. It still prints the 0.
-          control="$(strings -a "$bin" | grep -c 'Where this display has been lit' || true)"
-          if [ "$control" -eq 0 ]; then
-            echo "::error::Positive control found none of a literal that is definitely in the app. strings is not reading this binary, so a zero marker count below would mean nothing. Fix the method, not the build."
-            exit 1
-          fi
-          echo "Positive control OK: the control literal is visible to strings ($control hit(s))."
-
-          # Every Mach-O in the bundle, not just the main executable: a marker
-          # compiled into an embedded framework ships just as surely.
-          found=0
-          while IFS= read -r macho; do
-            hits="$(strings -a "$macho" | grep -c 'CANDELA_DEBUG' || true)"
-            if [ "$hits" -ne 0 ]; then
-              echo "::error::${macho#"$app/"} carries $hits CANDELA_DEBUG marker reference(s) in a Release build."
-              strings -a "$macho" | grep 'CANDELA_DEBUG' | sort -u | sed 's/^/    /'
-              found=$(( found + hits ))
-            fi
-          done < <(find "$app" -type f -exec sh -c 'file -b "$1" | grep -q "Mach-O" && printf "%s\n" "$1"' _ {} \;)
-
-          if [ "$found" -ne 0 ]; then
-            echo "::error::$found debug-marker reference(s) reached the Release build. An env-var switch or diagnostic added while iterating has not come back out."
-            exit 1
-          fi
-          echo "No CANDELA_DEBUG markers in any Mach-O in the bundle."
+  verification:
+    name: App verification
+    if: ${{ always() }}
+    needs: [scope, test, app-build, release-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require every selected app job to pass
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 tools/ci/verification.py gate app
