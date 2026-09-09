@@ -397,7 +397,7 @@ struct ModePreviewSessionTests {
     _ = await session.begin(mode: mode(2), on: 7)
 
     let previewed = await session.previewedMode
-    // The question is still the mode that was asked for: Keep re-applies it.
+    // The requested mode identifies the preview while recovery names the result.
     #expect(previewed?.mode == mode(2))
     #expect(previewed?.unhonouredCommit?.requested == mode(2))
     #expect(previewed?.unhonouredCommit?.achieved == mode(9))
@@ -441,17 +441,21 @@ struct ModePreviewSessionTests {
     #expect(await session.revert(answer(2)) == .reverted)
   }
 
-  /// Keep re-applies what the user ASKED for, so an unhonoured commit cannot
-  /// become permanent by being kept: the session-scope apply verifies again.
-  @Test func keepingAfterAnUnhonouredCommitCommitsTheRequestedMode() async {
+  /// A mode that never appeared cannot be approved by answering its recovery UI.
+  @Test func keepingAfterAnUnhonouredCommitAppliesNothing() async {
     let fake = FakeConfigurator()
     fake.current = mode(1)
     fake.divergeNextApplyTo = mode(9)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
 
-    #expect(await session.confirm(answer(2)) == .committed)
-    #expect(fake.applied.last == .init(modeID: 2, scope: .session))
+    let before = fake.applied
+    #expect(await session.confirm(answer(2)) != .committed)
+    #expect(fake.applied == before)
+    #expect(await session.hasOutstandingPreview)
+    #expect(await session.isCountingDown)
+    #expect(await session.revert(answer(2)) == .reverted)
+    #expect(fake.current == mode(1))
   }
 
   @Test func tickingAfterResolutionDoesNothing() async {
@@ -792,5 +796,131 @@ struct ModePreviewSessionTests {
 
     fake.failWith = nil
     #expect(await session.confirm(answer(2)) == .committed)
+  }
+}
+
+extension ModePreviewSessionTests {
+  private func distinctMode(
+    _ id: Int32, width: Int, height: Int,
+    provenance: ModeProvenance = .coreGraphics
+  ) -> DisplayMode {
+    DisplayMode(
+      ioModeID: id, logicalWidth: width, logicalHeight: height,
+      pixelWidth: width * 2, pixelHeight: height * 2,
+      refreshHz: 60, isNative: false, provenance: provenance)
+  }
+
+  @Test func keepCannotCommitARevealedModeThatWasNeverPreviewed() async {
+    let original = distinctMode(1, width: 1720, height: 720)
+    let requested = distinctMode(
+      2, width: 2048, height: 858, provenance: .coreGraphicsServices)
+    let actuallyPreviewed = distinctMode(9, width: 1920, height: 804)
+    let fake = FakeConfigurator()
+    fake.current = original
+    fake.divergeNextApplyTo = actuallyPreviewed
+    let session = ModePreviewSession(configurator: fake, countdownSeconds: 30)
+    let started = await session.begin(mode: requested, on: 7)
+    #expect(started.failureError == nil)
+    #expect(fake.current == actuallyPreviewed)
+    #expect(fake.applied == [.init(modeID: requested.ioModeID, scope: .preview)])
+    #expect(await session.previewedMode?.unhonouredCommit?.achieved == actuallyPreviewed)
+
+    let answer = PreviewedMode(displayID: 7, mode: requested)
+    let outcome = await session.confirm(answer)
+
+    // This answer was given while another mode was visible. Only a fresh
+    // preview can make the requested mode eligible for a session commit.
+    #expect(outcome != .committed)
+    #expect(!fake.applied.contains(.init(modeID: requested.ioModeID, scope: .session)))
+    #expect(await session.hasOutstandingPreview)
+    #expect(await session.isCountingDown)
+
+    // A rejected Keep preserves the original rollback.
+    #expect(await session.revert(answer) == .reverted)
+    #expect(fake.current == original)
+  }
+
+  @Test func achievedEvidenceFollowsRepeatedCommittedFailures() async {
+    let original = distinctMode(1, width: 1720, height: 720)
+    let requested = distinctMode(2, width: 2048, height: 858)
+    let firstAchieved = distinctMode(9, width: 1920, height: 804)
+    let secondAchieved = distinctMode(8, width: 1280, height: 536)
+    let fake = FakeConfigurator()
+    fake.current = original
+    fake.divergeNextApplyTo = firstAchieved
+    let session = ModePreviewSession(configurator: fake, countdownSeconds: 30)
+    let started = await session.begin(mode: requested, on: 7)
+    #expect(started.failureError == nil)
+    #expect(await session.previewedMode?.unhonouredCommit?.achieved == firstAchieved)
+
+    fake.divergeNextApplyTo = secondAchieved
+    let answer = PreviewedMode(displayID: 7, mode: requested)
+    let outcome = await session.revert(answer)
+    let secondFailure = DisplayConfigError(
+      unhonouredCommit: .init(requested: original, achieved: secondAchieved))
+    #expect(outcome == .failed(secondFailure))
+    #expect(fake.current == secondAchieved)
+    #expect(await session.hasOutstandingPreview)
+
+    // All three confirmation surfaces use this field for the present-tense
+    // sentence identifying the resolution the display is showing.
+    #expect(await session.previewedMode?.unhonouredCommit?.achieved == secondAchieved)
+
+    // A later refusal moves nothing and must not erase the latest observation.
+    fake.failWith = DisplayConfigError(cgErrorCode: CGError.cannotComplete.rawValue)
+    _ = await session.revert(answer)
+    #expect(fake.current == secondAchieved)
+    #expect(await session.previewedMode?.unhonouredCommit?.achieved == secondAchieved)
+  }
+}
+
+extension ModePreviewSessionTests {
+  @Test func aDelayedRecoveryAnswerCannotKeepAFreshPreviewOfTheSameMode() async throws {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    fake.divergeNextApplyTo = mode(9)
+    let session = ModePreviewSession(configurator: fake)
+    _ = await session.begin(mode: mode(2), on: 7)
+    let recoveryAnswer = try #require(await session.previewedMode)
+    _ = await session.begin(mode: mode(2), on: 7)
+    let before = fake.applied
+    #expect(await session.confirm(recoveryAnswer) == .stale)
+    #expect(fake.applied == before)
+    #expect(await session.isCountingDown)
+    #expect(await session.confirm(answer(2)) == .committed)
+  }
+
+  @Test func aFailedKeepUpdatesEvidenceAndRefusesADelayedSecondKeep() async throws {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake)
+    _ = await session.begin(mode: mode(2), on: 7)
+    let renderedBeforeFailure = try #require(await session.previewedMode)
+    fake.divergeNextApplyTo = mode(9)
+    let failure = PreviewOutcome.failed(
+      DisplayConfigError(unhonouredCommit: .init(requested: mode(2), achieved: mode(9))))
+    #expect(await session.confirm(renderedBeforeFailure) == failure)
+    #expect(await session.previewedMode?.unhonouredCommit?.achieved == mode(9))
+    let before = fake.applied
+    #expect(await session.confirm(renderedBeforeFailure) == failure)
+    #expect(fake.applied == before)
+    #expect(await session.isCountingDown)
+    #expect(await session.revert(renderedBeforeFailure) == .reverted)
+    #expect(fake.current == mode(1))
+  }
+
+  @Test func aRefusedFreshPreviewPreservesRecoveryEvidenceAndTheFallback() async {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    fake.divergeNextApplyTo = mode(9)
+    let session = ModePreviewSession(configurator: fake, countdownSeconds: 1)
+    _ = await session.begin(mode: mode(2), on: 7)
+    fake.failWith = DisplayConfigError(cgErrorCode: 1001)
+    #expect(await session.begin(mode: mode(3), on: 7).failureError != nil)
+    #expect(await session.previewedMode?.unhonouredCommit?.achieved == mode(9))
+    #expect(await session.confirm(answer(3)) == .stale)
+    fake.failWith = nil
+    #expect(await session.tick() == .reverted)
+    #expect(fake.current == mode(1))
   }
 }

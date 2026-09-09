@@ -670,3 +670,193 @@ private final class InterleavingDDC: DDCWriting, @unchecked Sendable {
   #expect(controller.maxDDCValue == 120)
   #expect(controller.didReadMaxDDC)
 }
+
+// MARK: - Remapped read registers
+
+private actor RemappedRegisterDDC: DDCWriting {
+  private(set) var commandsRead: [UInt8] = []
+  private var outcomes: [UInt8: DDCReadOutcome] = [:]
+  private var duringNextRead: (@MainActor @Sendable () async -> Void)?
+
+  func setOutcome(_ outcome: DDCReadOutcome, for code: UInt8) { outcomes[code] = outcome }
+  func onNextRead(_ hook: @escaping @MainActor @Sendable () async -> Void) {
+    duringNextRead = hook
+  }
+  func write(command _: UInt8, value _: UInt16) async -> Bool { true }
+  func read(command: UInt8) async -> (current: UInt16, max: UInt16)? {
+    await readOutcome(command: command).value
+  }
+  func readOutcome(command: UInt8) async -> DDCReadOutcome {
+    commandsRead.append(command)
+    let outcome = outcomes[command] ?? .refused
+    let hook = duringNextRead
+    duringNextRead = nil
+    await hook?()
+    return outcome
+  }
+}
+
+@MainActor
+private func remap(_ prefs: DisplayPrefs, command: DDCCommand, codes: [UInt8]) {
+  var tuning = prefs.tuning(for: command)
+  tuning.remapCodes = codes
+  prefs.setTuning(tuning, for: command)
+}
+
+@MainActor
+private func makeRemapBrightnessController(
+  writer: any DDCWriting, prefs: DisplayPrefs
+) -> BrightnessController {
+  BrightnessController(
+    writer: writer,
+    backends: BrightnessBackends(
+      applierNative: NativeBrightnessApplier(displayID: 1) { _, _ in false },
+      hdr: nil, shade: nil, gamma: nil
+    ),
+    prefs: prefs, displayID: 1, panelIdentity: "remap-panel", wireSiblings: []
+  )
+}
+
+@MainActor
+@Test func brightnessRemapRetriesAfterThePreviousRegisterWasRefused() async {
+  let defaults = InMemoryDefaults()
+  defaults.set(true, forKey: "disableCombinedBrightness")
+  let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "brightness-remap")
+  let wire = RemappedRegisterDDC()
+  let controller = makeRemapBrightnessController(writer: wire, prefs: prefs)
+  await controller.refreshFromHardware()
+  await controller.refreshFromHardware()
+  #expect(controller.readEvidence == .refused)
+  #expect(await wire.commandsRead == [0x10, 0x10])
+
+  // Settings commits reapply dimming; the next menu refresh reuses the panel.
+  remap(prefs, command: .brightness, codes: [0x12])
+  await wire.setOutcome(.frame(current: 40, max: 80), for: 0x12)
+  controller.reapplyAfterPrefChange()
+  await controller.waitForPendingWrites()
+  controller.rebind(writer: wire, panelIdentity: "remap-panel")
+  await controller.refreshFromHardware()
+  #expect(await wire.commandsRead == [0x10, 0x10, 0x12])
+  #expect(controller.readEvidence == .answered)
+  #expect(controller.didReadMaxDDC)
+  #expect(controller.maxDDCValue == 80)
+  #expect(controller.brightness == 0.5)
+
+  // Returning to the default register also starts a fresh run and scale.
+  remap(prefs, command: .brightness, codes: [])
+  await controller.refreshFromHardware()
+  #expect(controller.readEvidence == .refused)
+  #expect(!controller.didReadMaxDDC)
+  #expect(controller.maxDDCValue == 100)
+  await controller.refreshFromHardware()
+  #expect(await wire.commandsRead == [0x10, 0x10, 0x12, 0x10, 0x10])
+
+  // A trailing write code and an unrelated preference do not change the read.
+  remap(prefs, command: .brightness, codes: [0x10, 0x13])
+  prefs.pollingMode = .heavy
+  controller.reapplyAfterPrefChange()
+  await controller.waitForPendingWrites()
+  await controller.refreshFromHardware()
+  #expect(await wire.commandsRead == [0x10, 0x10, 0x12, 0x10, 0x10])
+}
+
+@MainActor
+@Test(arguments: [DDCCommand.volume, DDCCommand.contrast])
+func valueRemapRetriesAfterThePreviousRegisterWasRefused(command: DDCCommand) async {
+  let prefs = DisplayPrefs(defaults: InMemoryDefaults(), persistenceKey: "value-remap")
+  prefs.startupAction = .read
+  prefs.pollingMode = .minimal
+  remap(prefs, command: command, codes: [0x11])
+  let wire = RemappedRegisterDDC()
+  let controller = DDCValueController(
+    writer: wire, command: command, prefs: prefs, panelIdentity: "remap-panel"
+  )
+  await controller.refreshFromHardware()
+  await controller.refreshFromHardware()
+  #expect(controller.readEvidence == .refused)
+
+  remap(prefs, command: command, codes: [0x12])
+  await wire.setOutcome(.frame(current: 40, max: 80), for: 0x12)
+  controller.rebind(writer: wire, panelIdentity: "remap-panel")
+  await controller.refreshFromHardware()
+  #expect(await wire.commandsRead.contains(0x12))
+  #expect(controller.readEvidence == .answered)
+  #expect(controller.readMax == 80)
+  #expect(controller.value == 0.5)
+
+  remap(prefs, command: command, codes: [0x11])
+  await controller.refreshFromHardware()
+  #expect(controller.readEvidence == .refused)
+  #expect(controller.readMax == nil)
+  await controller.refreshFromHardware()
+  #expect(await wire.commandsRead.filter { $0 == 0x11 }.count == 4)
+  remap(prefs, command: command, codes: [0x11, 0x13])
+  prefs.pollingMode = .heavy
+  await controller.refreshFromHardware()
+  #expect(await wire.commandsRead.filter { $0 == 0x11 }.count == 4)
+
+  remap(prefs, command: command, codes: [])
+  await wire.setOutcome(.frame(current: 30, max: 60), for: command.code)
+  await controller.refreshFromHardware()
+  #expect(controller.readEvidence == .answered)
+  #expect(controller.readMax == 60)
+  #expect(controller.value == 0.5)
+}
+
+@MainActor
+@Test(arguments: [false, true])
+func brightnessRemapDropsAnOldRegistersInFlightAnswer(returnToOriginalCode: Bool) async {
+  let defaults = InMemoryDefaults()
+  defaults.set(true, forKey: "disableCombinedBrightness")
+  let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "brightness-remap-flight")
+  let wire = RemappedRegisterDDC()
+  let controller = makeRemapBrightnessController(writer: wire, prefs: prefs)
+  await wire.setOutcome(.frame(current: 60, max: 120), for: 0x10)
+  await wire.onNextRead {
+    remap(prefs, command: .brightness, codes: [0x12])
+    await controller.refreshFromHardware()
+    if returnToOriginalCode {
+      remap(prefs, command: .brightness, codes: [])
+      await wire.setOutcome(.refused, for: 0x10)
+    }
+    await controller.refreshFromHardware()
+    await controller.refreshFromHardware()
+  }
+  await controller.refreshFromHardware()
+  #expect(controller.readEvidence == .refused)
+  #expect(controller.maxDDCValue == 100)
+  #expect(!controller.didReadMaxDDC)
+  await controller.refreshFromHardware()
+  #expect(await wire.commandsRead == (returnToOriginalCode
+    ? [0x10, 0x12, 0x10, 0x10] : [0x10, 0x12, 0x12]))
+}
+
+@MainActor
+@Test(arguments: [DDCCommand.volume, DDCCommand.contrast], [false, true])
+func valueRemapDropsAnOldRegistersInFlightAnswer(
+  command: DDCCommand, returnToOriginalCode: Bool
+) async {
+  let prefs = DisplayPrefs(defaults: InMemoryDefaults(), persistenceKey: "value-remap-flight")
+  prefs.startupAction = .read
+  prefs.pollingMode = .minimal
+  let wire = RemappedRegisterDDC()
+  let controller = DDCValueController(writer: wire, command: command, prefs: prefs)
+  await wire.setOutcome(.frame(current: 60, max: 120), for: command.code)
+  await wire.onNextRead {
+    remap(prefs, command: command, codes: [0x11])
+    await controller.refreshFromHardware()
+    if returnToOriginalCode {
+      remap(prefs, command: command, codes: [])
+      await wire.setOutcome(.refused, for: command.code)
+    }
+    await controller.refreshFromHardware()
+    await controller.refreshFromHardware()
+  }
+  await controller.refreshFromHardware()
+  #expect(controller.readEvidence == .refused)
+  #expect(controller.readMax == nil)
+  let readsBeforeRefresh = await wire.commandsRead
+  await controller.refreshFromHardware()
+  let valueReads = await wire.commandsRead.filter { $0 != VCP.audioMuteScreenBlank }
+  #expect(valueReads == readsBeforeRefresh.filter { $0 != VCP.audioMuteScreenBlank })
+}

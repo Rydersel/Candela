@@ -210,18 +210,32 @@ struct OnboardingSizePage: View {
 
   /// The keep and revert bar, the safety shape the picker ships. The copy
   /// states the semantic: expiry reverts, so the size sticks only on Keep.
+  static func countdownCaption(seconds: Int, canKeep: Bool) -> String {
+    guard seconds > 0 else {
+      return "The automatic revert could not restore the previous size. Choose Revert to try again."
+    }
+    return canKeep
+      ? "Reverting to the previous size in \(seconds)s unless you keep it"
+      : "Reverting to the previous size in \(seconds)s"
+  }
+
   private func countdownBar(seconds: Int) -> some View {
     VStack(spacing: 12) {
-      Text("Reverting to the previous size in \(seconds)s unless you keep it")
+      Text(verbatim: Self.countdownCaption(
+        seconds: seconds, canKeep: model.pendingAchievedSize(forKey: displayKey) == nil))
         .font(.callout)
         .foregroundStyle(OnboardingStyle.bodyColor)
         .monospacedDigit()
         .contentTransition(.numericText())
-      // Beside the question, in the words the settings banner and the
-      // confirmation card use. The GLYPH above keeps naming the REQUESTED size:
-      // Keep re-applies and re-verifies that size, so it is what the question is
-      // about, and this line is what the glass shows in the meantime.
       if let achieved = model.pendingAchievedSize(forKey: displayKey) {
+        Text("Size preview could not be verified")
+          .font(.callout.weight(.semibold))
+          .foregroundStyle(OnboardingStyle.bodyColor)
+        Text(verbatim: DisplayModeCopy.recoveryInstruction(dialect: .size))
+          .font(.callout)
+          .foregroundStyle(OnboardingStyle.bodyColor)
+          .multilineTextAlignment(.center)
+          .fixedSize(horizontal: false, vertical: true)
         Text(verbatim: Self.achievedCaption(achieved))
           .font(.callout)
           .foregroundStyle(OnboardingStyle.faintColor)
@@ -229,11 +243,14 @@ struct OnboardingSizePage: View {
           .fixedSize(horizontal: false, vertical: true)
       }
       HStack(spacing: 14) {
-        Button("Keep") { model.keepSize() }
-          .buttonStyle(OnboardingPrimaryButtonStyle(accent: accent))
-          .keyboardShortcut(.defaultAction)
+        if model.pendingAchievedSize(forKey: displayKey) == nil {
+          Button("Keep") { model.keepSize() }
+            .buttonStyle(OnboardingPrimaryButtonStyle(accent: accent))
+            .keyboardShortcut(.defaultAction)
+        }
         Button("Revert") { model.revertSize() }
           .buttonStyle(OnboardingSecondaryButtonStyle())
+          .keyboardShortcut(.cancelAction)
       }
     }
   }

@@ -105,11 +105,11 @@ private func makePoller(
 @Test func readMatchingExpectedIsDiscardedAsEcho() async {
   let probe = Probe(expected: 0.5, generation: 3, hardware: 0.5)
   let poller = makePoller(probe)
-  let task = Task { await poller.run() }
-  _ = await waitUntil { probe.reads.count >= 3 }
-  task.cancel()
-  #expect(probe.reads.count >= 3)
+  var intervals: [Duration] = []
+  for _ in 0..<3 { intervals.append(await poller.pollOnce()) }
+  #expect(probe.reads.count == 3)
   #expect(probe.adoptions.isEmpty)
+  #expect(intervals == Array(repeating: .milliseconds(30), count: 3))
 }
 
 @Test func readWithinToleranceIsDiscardedAsEcho() async {
@@ -198,15 +198,12 @@ private func makePoller(
 
 @Test func divergenceSwitchesToFastCadence() async {
   let probe = Probe(expected: 0.5, generation: 1, hardware: 0.9)
-  // The idle interval dwarfs waitUntil's window on purpose: `run()` ticks before it
-  // sleeps, so a fast poller produces five reads in ~40 ms while an idle one cannot
-  // produce read two inside 3 s. The gate below is the cadence assertion; an elapsed-time
-  // bound crossed 1.198 s under runner starvation while still on the fast cadence.
   let poller = makePoller(probe, fast: .milliseconds(10), idle: .seconds(30))
-  let task = Task { await poller.run() }
-  let got = await waitUntil { probe.reads.count >= 5 }
-  task.cancel()
-  #expect(got)
+  var intervals: [Duration] = []
+  for _ in 0..<5 { intervals.append(await poller.pollOnce()) }
+  #expect(probe.reads.count == 5)
+  #expect(probe.adoptions.count == 5)
+  #expect(intervals == Array(repeating: .milliseconds(10), count: 5))
 }
 
 @Test func echoStaysOnIdleCadence() async {

@@ -403,6 +403,17 @@ struct CopyBuilderTests {
     #expect(DisplayModeCopy.passiveCountdown(9).contains("Answer in the confirmation window"))
   }
 
+  @Test func menuBarModeStatusOnlyOffersTheAnswersAvailableToThePreview() {
+    let recovery = DisplayModeCopy.pendingAnswer(displayName: "Desk display", canKeep: false)
+    #expect(recovery.contains("Desk display"))
+    #expect(recovery.contains("could not be verified"))
+    #expect(recovery.contains("Revert"))
+    #expect(!recovery.lowercased().contains("keep"))
+    let ordinary = DisplayModeCopy.pendingAnswer(displayName: "Desk display", canKeep: true)
+    #expect(ordinary.contains("keep or revert"))
+    #expect(ordinary.contains("Desk display"))
+  }
+
   @Test func displayModePreviewAnnouncementSpeaksTheModeAndTheDeadline() {
     let spoken = DisplayModeCopy.previewAnnouncement(mode: Self.mode, seconds: 15)
     #expect(spoken.contains("2,560 by 1,440 at 60 hertz"))
@@ -423,16 +434,17 @@ struct CopyBuilderTests {
     let spoken = DisplayModeCopy.previewAnnouncement(
       mode: Self.mode, seconds: 15,
       unhonouredCommit: .init(requested: Self.mode, achieved: Self.landedMode))
-    // The question and its deadline still lead.
-    #expect(spoken.hasPrefix("Keep 2,560 by 1,440 at 60 hertz?"))
+    #expect(spoken.hasPrefix("Resolution preview could not be verified."))
+    #expect(!spoken.contains("Keep "))
+    #expect(spoken.contains("Revert"))
     #expect(spoken.contains(DisplayModeCopy.countdown(15)))
     // The same statement the caption makes, in the spoken spelling: grouped
     // digits, words for the rate, and no times sign.
     #expect(spoken.hasSuffix("The display is showing 1,920 by 1,080 at 30 hertz."))
     #expect(!spoken.contains("×"))
     #expect(!spoken.contains("Hz"))
-    // The size that was ASKED for still leads; the achieved one never replaces it.
-    #expect(spoken.contains("2,560 by 1,440"))
+    // A new choice is needed before another preview can be approved.
+    #expect(spoken.contains("choose the resolution again"))
 
     // A display that cannot say what it is showing gets the other sentence,
     // never silence.

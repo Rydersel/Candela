@@ -121,15 +121,15 @@ public final class BrightnessController: PendingWireDraining {
   ///   pass that trips the latch. Wake, reconfiguration and HDR-off clear the skip
   ///   and leave this standing, because the read pass runs BEFORE the
   ///   reconfiguration clear and a clear there wiped its verdict [MEASURED]. Only
-  ///   `rebind` onto a different panel resets it.
+  ///   a different panel or read register resets it.
   ///
   /// This controller reads one code, at most once, per pass, so the within-pass fold
   /// here is trivial and the assignments are plain. `DDCValueController`, which
   /// retries, has to spell the fold out.
   public private(set) var readEvidence: DDCReadEvidence = .notAttempted
 
-  /// Whether this display's reads are still worth attempting. Cleared with
-  /// `readEvidence` at every route that gives the panel another hearing.
+  /// Whether the current read register is still worth attempting. Wake and
+  /// reconfiguration clear the skip; a register change also resets its evidence.
   @ObservationIgnored private var readSkip = DDCReadSkipLatch()
 
   /// Whether this display's DDC wire has stopped carrying writes
@@ -516,6 +516,9 @@ public final class BrightnessController: PendingWireDraining {
     guard !usesNative else { return }
     let tuning = prefs.tuning(for: .brightness)
     guard !tuning.unavailableDDC else { return }
+    // Reads use only the first remap code; trailing codes affect writes alone.
+    let readCode = tuning.remapCodes.first ?? VCP.brightness
+    bindReadRegister(to: readCode)
     // Two silent passes and the panel is asked once per plug: every futile pass
     // holds the wire for the full retry ladder, which is the menu-close stall a
     // person feels. This controller's own verdict, not the siblings' fold: volume
@@ -539,7 +542,12 @@ public final class BrightnessController: PendingWireDraining {
     // submitted meanwhile (a key press, the panel's surface fan-out) is newer
     // than anything this read can be carrying. Any submit bumps the generation.
     let issuedAtStart = issuedGeneration
-    let outcome = await writer.readOutcome(command: tuning.remapCodes.first ?? VCP.brightness)
+    let registerAtStart = readSkip.registerGeneration
+    let outcome = await writer.readOutcome(command: readCode)
+    // Preferences can change while the wire is busy, with or without another
+    // refresh. Evidence and scale from the old register belong to that register.
+    bindReadRegister(to: prefs.tuning(for: .brightness).remapCodes.first ?? VCP.brightness)
+    guard readSkip.registerGeneration == registerAtStart else { return }
     // Dropped before the latch sees it, so a settling pass leaves the count, the
     // verdict and the skip exactly as it found them.
     if settling, outcome.evidence == .noReply { return }
@@ -844,6 +852,13 @@ public final class BrightnessController: PendingWireDraining {
     // mirror above is still updated: the panel says what it knows either way.
     guard !usesNative else { return }
     reapplyAfterPrefChange()
+  }
+
+  private func bindReadRegister(to code: UInt8) {
+    guard readSkip.bind(to: code) else { return }
+    readEvidence = .notAttempted
+    maxDDCValue = Self.assumedMaxDDC
+    didReadMaxDDC = false
   }
 
   /// The wire-health reset, from every route that means the wire deserves a fresh

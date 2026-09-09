@@ -38,9 +38,8 @@ enum OnboardingApplyState: Equatable, Sendable {
   case failed
 }
 
-/// What the display is showing when the apply that opened the countdown
-/// COMMITTED without landing on the size that was asked for. Absent means the
-/// apply landed, which is the ordinary case.
+/// Latest evidence of a committed failure during preview, Keep, or Revert.
+/// Absent means the preview remains eligible for Keep.
 ///
 /// Its own type rather than the engine's `UnhonouredCommit`, so this model stays
 /// free of engine types the way the rest of it is; the live applier maps one
@@ -380,7 +379,7 @@ final class OnboardingFlowModel {
   /// click racing an expiry answers nothing. In live mode the shipped
   /// coordinator refuses a stale answer on its own; this guard mirrors it.
   func keepSize() {
-    guard case .counting = applyState else { return }
+    guard case .counting = applyState, pendingAchieved == nil else { return }
     onKeepSize()
   }
 

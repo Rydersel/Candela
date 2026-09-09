@@ -171,6 +171,8 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
   var onMirrorApplied: (@Sendable () -> Void)?
   /// Throw from `apply`, to reach the engage tail's bounce fallback.
   var refusesModeApplies = false
+  /// A committed mode failure for coordinator recovery tests, consumed once.
+  var nextModeApplyFailure: DisplayConfigError?
 
   init(_ world: FakeDisplayWorld) { self.world = world }
 
@@ -196,6 +198,16 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
   func apply(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope _: DisplayConfigScope) throws {
     if refusesModeApplies { throw DisplayConfigError(cgErrorCode: CGError.failure.rawValue) }
     world.recordApply(mode, to: displayID)
+    if let failure = nextModeApplyFailure {
+      nextModeApplyFailure = nil
+      if let achieved = failure.unhonouredCommit?.achieved,
+         let display = world.displays().first(where: { $0.id == displayID }) {
+        world.attach(
+          display, modes: world.modes(for: displayID), current: achieved,
+          nativePixels: world.nativePixels(for: displayID))
+      }
+      throw failure
+    }
   }
 
   func applyMirroring(_ changes: [MirrorChange], scope _: DisplayConfigScope) throws {

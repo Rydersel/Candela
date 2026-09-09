@@ -16,6 +16,20 @@
 struct DDCReadSkipLatch: Sendable, Equatable {
   static let latchAfter = 2
 
+  private var readCode: UInt8?
+  private(set) var registerGeneration: UInt64 = 0
+
+  /// A remap asks a different register, even on the same panel. The generation
+  /// also rejects an old in-flight answer after observing a change away and back.
+  @discardableResult
+  mutating func bind(to code: UInt8) -> Bool {
+    guard readCode != code else { return false }
+    readCode = code
+    registerGeneration &+= 1
+    clear()
+    return true
+  }
+
   /// Which nothing the current run is made of, so a run is only ever the same
   /// finding repeating. nil once a pass has answered.
   private var runningNonAnswer: DDCReadEvidence?

@@ -101,11 +101,11 @@ struct PanelResolutionSection: View {
           }
           .transition(.opacity)
         }
-        if isAwaitingAnswer {
-          PanelCaption("Waiting for you to keep or revert the new resolution on \(displayName).", style: .tertiary)
+        if isAwaitingAnswer, let preview = coordinator.preview {
+          PanelCaption("\(DisplayModeCopy.pendingAnswer(displayName: displayName, canKeep: preview.canKeep))", style: .tertiary)
           // The answer is elsewhere, but this list names sizes, and a list
           // whose checkmark disagrees with the glass needs to say why.
-          if let commit = coordinator.preview?.unhonouredCommit {
+          if let commit = preview.unhonouredCommit {
             PanelCaption("\(DisplayModeCopy.achievedGeometry(commit))", style: .tertiary)
           }
         }

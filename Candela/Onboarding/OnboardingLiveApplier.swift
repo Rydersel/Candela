@@ -168,7 +168,7 @@ final class OnboardingLiveApplier {
       // auto-retries, so the model stays counting and the next click retries
       // through the same path. Not `applyFailed`: that is for an apply that
       // never started, and it would abandon a preview still on the glass.
-      break
+      processCoordinatorState()
     case .stale:
       // The answer named a preview that had already resolved (an expiry
       // racing the click). The coordinator's own handling ran; read what it

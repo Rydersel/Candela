@@ -68,13 +68,18 @@ public actor BrightnessPoller {
   /// Returns on cancellation.
   public func run() async {
     while !Task.isCancelled {
-      let moving = tick()
+      let delay = pollOnce()
       do {
-        try await Task.sleep(for: moving ? fastInterval : idleInterval)
+        try await Task.sleep(for: delay)
       } catch {
         return
       }
     }
+  }
+
+  /// Performs one poll and returns the delay before the next one.
+  func pollOnce() -> Duration {
+    tick() ? fastInterval : idleInterval
   }
 
   /// Returns true when any target moved this tick (drives the fast cadence).

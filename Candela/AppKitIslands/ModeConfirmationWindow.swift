@@ -87,12 +87,11 @@ struct ModeConfirmationView: View {
     // remembered passing in.
     if let preview = coordinator.preview {
       ConfirmationCard {
-        ConfirmationTitle("Keep this resolution?")
+        ConfirmationTitle(LocalizedStringKey(DisplayModeCopy.previewTitle(canKeep: preview.canKeep)))
         ConfirmationSubtitle(verbatim: subtitle(preview))
 
-        // The subtitle names what Keep re-applies; this names what the display
-        // is showing while the question sits on it.
         if let commit = preview.unhonouredCommit {
+          ConfirmationCaption(Text(verbatim: DisplayModeCopy.recoveryInstruction()))
           ConfirmationCaption(Text(verbatim: DisplayModeCopy.achievedGeometry(commit)))
         }
 
@@ -117,11 +116,13 @@ struct ModeConfirmationView: View {
           // refused as stale rather than resolved by an answer given about
           // something else.
           Button("Revert Now") { Task { await coordinator.revert(preview) } }
-            .buttonStyle(AnswerButtonStyle(isPrimary: false))
+            .buttonStyle(AnswerButtonStyle(isPrimary: !preview.canKeep))
             .keyboardShortcut(.cancelAction)
-          Button("Keep") { Task { await coordinator.confirm(preview) } }
-            .buttonStyle(AnswerButtonStyle(isPrimary: true))
-            .keyboardShortcut(.defaultAction)
+          if preview.canKeep {
+            Button("Keep") { Task { await coordinator.confirm(preview) } }
+              .buttonStyle(AnswerButtonStyle(isPrimary: true))
+              .keyboardShortcut(.defaultAction)
+          }
         }
         // While a selection is still landing the window is about to change, so
         // offering an answer to the old one is pointless, though harmless.

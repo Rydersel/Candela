@@ -6,15 +6,10 @@ import Foundation
 public struct PreviewedMode: Sendable, Equatable {
   public let displayID: CGDirectDisplayID
   public let mode: DisplayMode
-  /// Set when the apply that began this preview COMMITTED without landing on
-  /// `mode`: the display is on a third mode nobody picked. The keep question
-  /// still names `mode`, because that is what Keep re-applies; this is what a
-  /// surface needs to say what the glass is showing while the question is read.
-  ///
-  /// Defaulted, so an ANSWER can be built from a display and a mode alone.
-  /// `matches` compares those two and never this, or a UI that rendered the
-  /// preview before the divergence was known would have its answer refused as
-  /// stale over a caption.
+  /// Latest evidence of a commit that did not achieve its request. Once set,
+  /// this preview offers recovery only; choosing a mode starts a fresh preview.
+  /// Answers still match by display and mode, so an older caption cannot block
+  /// a revert or bypass recovery-only confirmation.
   public let unhonouredCommit: DisplayConfigError.UnhonouredCommit?
 
   public init(
@@ -37,8 +32,8 @@ public struct PreviewedMode: Sendable, Equatable {
 ///
 /// Invariants the safety argument rests on:
 /// - No preview begins until the fallback mode has been read.
-/// - Confirm commits the mode that was previewed, not what the display reports
-///   now; the two differ exactly when something went wrong.
+/// - Confirm never commits a mode after a known unhonoured commit. A fresh
+///   preview is required before that mode can be kept.
 /// - A preview stays outstanding until a resolution succeeds, which is why every
 ///   guard asks "is a preview applied?" and never "was an answer given?". A
 ///   throw never invalidates the fallback: a refusal left the display alone, and
@@ -51,11 +46,8 @@ public actor ModePreviewSession {
     /// Captured before the preview was applied. Survives failed resolutions.
     let previousMode: DisplayMode
     let previewedMode: DisplayMode
-    /// What the apply achieved, when it committed and did not honour the
-    /// request. Held here rather than derived later: the display can be
-    /// reconfigured again before anyone reads it, and this is the state at the
-    /// moment the question was asked.
-    let unhonouredCommit: DisplayConfigError.UnhonouredCommit?
+    /// Updated only after a committed failure; precommit refusals move nothing.
+    var unhonouredCommit: DisplayConfigError.UnhonouredCommit?
   }
 
   private let configurator: any DisplayConfiguring
@@ -148,15 +140,12 @@ public actor ModePreviewSession {
       // countdown. So it is captured like a success; the fallback read before the
       // apply is still the way back, and the countdown takes it.
       guard let commit = error.unhonouredCommit else { return .failure(error) }
-      // Carried out to the surfaces so the keep question can say what is on the
-      // glass. Silence here is what made the question unanswerable: the banner
-      // named a size the display was not showing and gave no way to tell.
       unhonoured = commit
     } catch {
       return .failure(DisplayConfigError(cgErrorCode: -1))
     }
-    // The mode ASKED for, not what the display landed on: keep re-applies and
-    // re-verifies it, so an unhonoured commit cannot become permanent.
+    // Retain the requested mode to match answers, even when recovery is the
+    // only available action.
     outstanding = OutstandingPreview(
       displayID: displayID, previousMode: previous, previewedMode: mode,
       unhonouredCommit: unhonoured
@@ -180,14 +169,19 @@ public actor ModePreviewSession {
       return lastOutcome ?? .reverted
     }
     guard matches(answered, outstanding) else { return .stale }
+    if let commit = outstanding.unhonouredCommit {
+      let failure = PreviewOutcome.failed(DisplayConfigError(unhonouredCommit: commit))
+      lastOutcome = failure
+      return failure
+    }
+    guard answered.unhonouredCommit == nil else { return .stale }
     return resolve(
       applying: outstanding.previewedMode, to: outstanding.displayID, success: .committed
     )
   }
 
-  /// Safe to call repeatedly for the same preview. A revert that threw left the
-  /// display where it was, so retrying once CoreGraphics recovers is the
-  /// recovery path the error UI drives.
+  /// Safe to retry for the same preview. Failed attempts preserve the original
+  /// fallback, even when the display committed a different mode.
   public func revert(_ answered: PreviewedMode) -> PreviewOutcome {
     guard let outstanding else { return lastOutcome ?? .reverted }
     guard matches(answered, outstanding) else { return .stale }
@@ -229,6 +223,9 @@ public actor ModePreviewSession {
     do {
       try configurator.apply(mode, to: displayID, scope: .session)
     } catch let error as DisplayConfigError {
+      if let commit = error.unhonouredCommit {
+        outstanding?.unhonouredCommit = commit
+      }
       lastOutcome = .failed(error)
       return .failed(error)
     } catch {

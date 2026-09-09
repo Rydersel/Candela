@@ -39,6 +39,18 @@ struct PreviewSurfaceOwnershipTests {
     )
   }
 
+  @Test func everySurfaceOffersKeepOnlyForAVerifiedPreview() {
+    for surface in [DisplayModeCoordinator.PreviewSurface.settingsBanner, .floatingPanel, .guidedSetup] {
+      var preview = Self.preview(surface: surface)
+      #expect(preview.canKeep)
+      preview.unhonouredCommit = .init(requested: Self.mode, achieved: nil)
+      #expect(!preview.canKeep)
+      preview.failure = DisplayConfigError(cgErrorCode: 1001)
+      #expect(!preview.canKeep)
+      #expect(!DisplayModeCopy.previewTitle(canKeep: preview.canKeep).contains("Keep"))
+    }
+  }
+
   // MARK: - The settings banner (BannerRegion.countdownForm)
 
   /// Both stack states, because the answerable placement follows the navigation
@@ -131,4 +143,64 @@ private final class FakeModeConfirmation: ModeConfirmationPresenting {
 
   func presentConfirmation(_ content: ModeConfirmationContent) { presented.append(content) }
   func dismissConfirmation() { dismissals += 1 }
+}
+
+extension PreviewSurfaceOwnershipTests {
+  @Test func coordinatorKeepsLatestRecoveryEvidenceAcrossFailures() async throws {
+    let fixture = SynthesisFixture(optedIn: false)
+    defer { fixture.forgetPrefs() }
+    let displayID = SynthesisFixture.panelID
+    let original = try #require(fixture.configurator.currentMode(for: displayID))
+    let requested = try #require(fixture.modes.catalogs[displayID]?.all.first { !$0.isNative })
+    let first = DisplayMode(
+      ioModeID: 80, logicalWidth: 1920, logicalHeight: 804,
+      pixelWidth: 3840, pixelHeight: 1608, refreshHz: 60, isNative: false)
+    let second = DisplayMode(
+      ioModeID: 81, logicalWidth: 1280, logicalHeight: 536,
+      pixelWidth: 2560, pixelHeight: 1072, refreshHz: 60, isNative: false)
+    fixture.configurator.nextModeApplyFailure = DisplayConfigError(
+      unhonouredCommit: .init(requested: requested, achieved: first))
+    fixture.modes.select(requested, on: displayID, from: .settings, surface: .settingsBanner)
+    await fixture.settle()
+    let recovery = try #require(fixture.modes.preview)
+    #expect(!recovery.canKeep)
+    #expect(recovery.unhonouredCommit?.achieved == first)
+
+    fixture.configurator.nextModeApplyFailure = DisplayConfigError(
+      unhonouredCommit: .init(requested: original, achieved: second))
+    _ = await fixture.modes.revert(recovery)
+    #expect(fixture.modes.preview?.unhonouredCommit?.achieved == second)
+    fixture.configurator.refusesModeApplies = true
+    _ = await fixture.modes.revert(recovery)
+    #expect(fixture.modes.preview?.unhonouredCommit?.achieved == second)
+    let beforeKeep = fixture.configurator.applies.count
+    #expect(await fixture.modes.confirm(recovery) != .committed)
+    #expect(fixture.configurator.applies.count == beforeKeep)
+    #expect(fixture.modes.preview?.isCountingDown == true)
+    fixture.configurator.refusesModeApplies = false
+    #expect(await fixture.modes.revert(recovery) == .reverted)
+    #expect(fixture.configurator.applies.last?.mode == original)
+  }
+
+  @Test func coordinatorDoesNotStripTheRecoveryAnswerBeforeAFreshSameModePreview() async throws {
+    let fixture = SynthesisFixture(optedIn: false)
+    defer { fixture.forgetPrefs() }
+    let displayID = SynthesisFixture.panelID
+    let requested = try #require(fixture.modes.catalogs[displayID]?.all.first { !$0.isNative })
+    let original = try #require(fixture.configurator.currentMode(for: displayID))
+    fixture.configurator.nextModeApplyFailure = DisplayConfigError(
+      unhonouredCommit: .init(requested: requested, achieved: original))
+    fixture.modes.select(requested, on: displayID, from: .settings, surface: .settingsBanner)
+    await fixture.settle()
+    let oldAnswer = try #require(fixture.modes.preview)
+    fixture.modes.select(requested, on: displayID, from: .settings, surface: .settingsBanner)
+    await fixture.settle()
+    let fresh = try #require(fixture.modes.preview)
+    #expect(fresh.canKeep)
+    let before = fixture.configurator.applies.count
+    #expect(await fixture.modes.confirm(oldAnswer) == .stale)
+    #expect(fixture.configurator.applies.count == before)
+    #expect(fixture.modes.preview != nil)
+    #expect(await fixture.modes.confirm(fresh) == .committed)
+  }
 }

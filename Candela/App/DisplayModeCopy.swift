@@ -109,17 +109,21 @@ enum DisplayModeCopy {
       : "Reverting in \(seconds) seconds. Answer in the confirmation window."
   }
 
-  /// A11y contract 8: posted when the answerable banner appears. The 10- and
-  /// 3-second re-announcements reuse `countdown(_:)`.
-  ///
-  /// Names the resolution, never says the display changed to it: an unhonoured
-  /// commit leaves something else on the glass, and the listener cannot check.
-  ///
-  /// When the apply DID commit onto something else, the achieved geometry is
-  /// spoken after the countdown. A sighted person reads that off the caption
-  /// beside the question; someone listening has no caption, and the question
-  /// alone would have them approve a size the display is not showing. Last, so
-  /// the question and its deadline still lead.
+  static func pendingAnswer(displayName: String, canKeep: Bool) -> String {
+    canKeep
+      ? "Waiting for you to keep or revert the new resolution on \(displayName)."
+      : "The preview on \(displayName) could not be verified. Use Revert to restore the previous resolution."
+  }
+
+  static func previewTitle(canKeep: Bool) -> String {
+    canKeep ? "Keep this resolution?" : "Resolution preview could not be verified"
+  }
+
+  static func recoveryInstruction(dialect: SizeDialect = .resolution) -> String {
+    "Revert to the previous \(dialect.noun), then choose the \(dialect.noun) again to preview it."
+  }
+
+  /// A recovery preview never asks a listener to approve an unverified mode.
   static func previewAnnouncement(
     mode: DisplayMode, seconds: Int,
     unhonouredCommit: DisplayConfigError.UnhonouredCommit? = nil
@@ -129,9 +133,10 @@ enum DisplayModeCopy {
       logicalHeight: mode.logicalHeight,
       refreshHz: mode.refreshHz
     )
-    let question = "Keep \(spoken)? \(countdown(seconds))"
-    guard let unhonouredCommit else { return question }
-    return "\(question) \(spokenAchievedGeometry(unhonouredCommit))"
+    guard let unhonouredCommit else {
+      return "Keep \(spoken)? \(countdown(seconds))"
+    }
+    return "\(previewTitle(canKeep: false)). \(recoveryInstruction()) \(countdown(seconds)) \(spokenAchievedGeometry(unhonouredCommit))"
   }
 
   /// The achieved-geometry sentence in spoken form. Not `achievedGeometry`: that
@@ -147,15 +152,8 @@ enum DisplayModeCopy {
     return "The display is showing \(spoken)."
   }
 
-  /// Beside the keep question, when the apply that started the preview
-  /// committed onto something else. The question names what was ASKED for,
-  /// because that is what Keep re-applies; this names what the display is
-  /// showing, which is the one thing the person answering cannot check against
-  /// the question in front of them.
-  ///
-  /// States the geometry and nothing else. Whether the mode is wrong for the
-  /// panel, or scanned out on the wrong wire timing, is not something a
-  /// readback can tell us.
+  /// Latest achieved geometry beside the recovery instruction. Readback cannot
+  /// tell whether the display is using the correct wire timing.
   static func achievedGeometry(_ commit: DisplayConfigError.UnhonouredCommit) -> String {
     guard let achieved = commit.achieved else { return unreadableAchievedGeometry() }
     return achievedGeometry(

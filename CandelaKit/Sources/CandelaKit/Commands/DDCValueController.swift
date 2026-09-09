@@ -97,7 +97,8 @@ public final class DDCValueController: PendingWireDraining {
   /// before it in its pass.
   ///
   /// A pass that ends in silence does not supersede this either: `DDCReadSkipLatch`
-  /// decides, on two consecutive silent passes. Clears reach only the skip.
+  /// decides, on two consecutive silent passes. Wake and reconfiguration clear
+  /// only the skip; a different panel or read register also resets its evidence.
   public private(set) var readEvidence: DDCReadEvidence = .notAttempted
 
   /// Whether this register is still worth asking about. Its own, never the
@@ -411,13 +412,15 @@ public final class DDCValueController: PendingWireDraining {
     // guard to it; the readback could then setMuted(false) and persist over the
     // user's fresh mute.
     let muteIssuedAtStart = issuedMuteGeneration
+    let tuning = prefs.tuning(for: command)
+    // Reads use only the first remap code; trailing codes affect writes alone.
+    let readCode = tuning.remapCodes.first ?? command.code
+    bindReadRegister(to: readCode)
     // The skip is the VALUE register's own. VCP 0x8D is a separate register with
     // a separate answer, so a latched 0x62 must not stop the mute readback at
     // the end of this pass.
     if !readSkip.skipsRead {
-      let tuning = prefs.tuning(for: command)
-      // Fork parity: reads use only the FIRST remap code.
-      let readCode = tuning.remapCodes.first ?? command.code
+      let registerAtStart = readSkip.registerGeneration
       // Staleness fence. A read that began before a newer write must not
       // overwrite it: the loop can span seconds on a wedged bus, and a slider
       // drag or key that lands mid-flight must win over the stale read,
@@ -435,6 +438,10 @@ public final class DDCValueController: PendingWireDraining {
         // Silence and zeros are different facts; the transport tells them apart, and
         // `outcome.evidence` is the one place `max == 0` folds into zeros.
         let outcome = await writer.readOutcome(command: readCode)
+        // An old register's answer must not affect the new register's latch,
+        // evidence or scale, even if preferences changed without a refresh.
+        bindReadRegister(to: prefs.tuning(for: command).remapCodes.first ?? command.code)
+        guard readSkip.registerGeneration == registerAtStart else { return }
         // A refusal ends the pass the way it ends the transport's own ladder: the
         // panel read the request and said this register is not one it carries,
         // and no retry can change that.
@@ -648,6 +655,12 @@ public final class DDCValueController: PendingWireDraining {
   public func resetWriteMemo() {
     coalescer.resetDuplicateState()
     muteCoalescer.resetDuplicateState()
+  }
+
+  private func bindReadRegister(to code: UInt8) {
+    guard readSkip.bind(to: code) else { return }
+    readEvidence = .notAttempted
+    readMax = nil
   }
 
   /// Reached through the display's brightness controller, which owns the wire's

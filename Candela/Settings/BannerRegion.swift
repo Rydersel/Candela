@@ -465,20 +465,20 @@ private struct AnswerableModeBanner: View {
   let preview: DisplayModeCoordinator.Preview
 
   @AccessibilityFocusState private var keepFocused: Bool
+  @AccessibilityFocusState private var revertFocused: Bool
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
-      Text("Keep this resolution?")
+      Text(verbatim: DisplayModeCopy.previewTitle(canKeep: preview.canKeep))
         .font(.callout.weight(.semibold))
         .foregroundStyle(SettingsTheme.titleColor)
       Text(verbatim: "\(DisplayModeCopy.size(preview.mode)), \(DisplayModeCopy.refresh(preview.mode.refreshHz))")
         .font(.callout)
         .foregroundStyle(SettingsTheme.bodyColor)
 
-      // Beside the question, not instead of it: the size above is what Keep
-      // re-applies, and this is what the glass shows in the meantime.
       if let commit = preview.unhonouredCommit {
+        SettingsCaption(verbatim: DisplayModeCopy.recoveryInstruction())
         SettingsCaption(verbatim: DisplayModeCopy.achievedGeometry(commit))
       }
 
@@ -505,15 +505,18 @@ private struct AnswerableModeBanner: View {
         // landing between the click and the queued operation is refused as
         // stale. Keeping writes the stored mode when Remember is on; reverting
         // and expiry never do.
-        Button("Keep") { Task { await coordinator.confirm(preview) } }
-          .buttonStyle(SettingsPrimaryButtonStyle())
-          .keyboardShortcut(.defaultAction)
-          .accessibilityLabel("Keep")
-          .accessibilityFocused($keepFocused)
+        if preview.canKeep {
+          Button("Keep") { Task { await coordinator.confirm(preview) } }
+            .buttonStyle(SettingsPrimaryButtonStyle())
+            .keyboardShortcut(.defaultAction)
+            .accessibilityLabel("Keep")
+            .accessibilityFocused($keepFocused)
+        }
         Button("Revert Now") { Task { await coordinator.revert(preview) } }
           .buttonStyle(SettingsSecondaryButtonStyle())
           .keyboardShortcut(.cancelAction)
           .accessibilityLabel("Revert Now")
+          .accessibilityFocused($revertFocused)
       }
       // Belt to the intent check: while a selection is landing, an answer to
       // the old preview is pointless.
@@ -526,7 +529,8 @@ private struct AnswerableModeBanner: View {
     .animation(Motion.notice(reduceMotion: reduceMotion), value: preview.failure != nil)
     .accessibilityElement(children: .contain)
     .onAppear {
-      keepFocused = true
+      keepFocused = preview.canKeep
+      revertFocused = !preview.canKeep
       AccessibilityNotification.Announcement(
         DisplayModeCopy.previewAnnouncement(
           mode: preview.mode, seconds: preview.secondsRemaining,
@@ -534,6 +538,14 @@ private struct AnswerableModeBanner: View {
           // only route a listener has to it.
           unhonouredCommit: preview.unhonouredCommit
         )
+      ).post()
+    }
+    .onChange(of: preview.unhonouredCommit) { _, commit in
+      guard let commit else { return }
+      keepFocused = false
+      revertFocused = true
+      AccessibilityNotification.Announcement(
+        "\(DisplayModeCopy.previewTitle(canKeep: false)). \(DisplayModeCopy.recoveryInstruction()) \(DisplayModeCopy.spokenAchievedGeometry(commit))"
       ).post()
     }
     // Driven by the tick this view already re-renders on, never a timer of its own.

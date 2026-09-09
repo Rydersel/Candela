@@ -94,11 +94,34 @@ struct OnboardingFlowModelTests {
     #expect(model.applyState == .counting(secondsRemaining: 12))
     #expect(model.pendingAchievedSize(forKey: "dell")
       == .size(width: 1920, height: 1080, refreshHz: 30))
-    // The question is still about the size that was asked for: the glyph reads
-    // this, and Keep re-applies it.
+    // The glyph still identifies the requested size, while recovery explains
+    // that it did not arrive.
     #expect(model.pendingAppliedSize(forKey: "dell")?.width == 2560)
     // One display's divergence never captions another display's page.
     #expect(model.pendingAchievedSize(forKey: "mag") == nil)
+  }
+
+  @Test func recoveryCountdownNeverOffersKeepAndSpentCountdownOffersRetry() {
+    #expect(!OnboardingSizePage.countdownCaption(seconds: 12, canKeep: false).contains("keep"))
+    #expect(OnboardingSizePage.countdownCaption(seconds: 12, canKeep: false).contains("12s"))
+    #expect(OnboardingSizePage.countdownCaption(seconds: 0, canKeep: false).contains("Choose Revert"))
+    #expect(!OnboardingSizePage.countdownCaption(seconds: 0, canKeep: false).contains("0s"))
+    #expect(OnboardingSizePage.countdownCaption(seconds: 12, canKeep: true).contains("unless you keep it"))
+  }
+
+  @Test func anUnverifiedSizeAllowsOnlyRevert() {
+    let model = modelOnSizePage()
+    var keeps = 0
+    var reverts = 0
+    model.onKeepSize = { keeps += 1 }
+    model.onRevertSize = { reverts += 1 }
+    model.applySize(displayKey: "dell", choice: .recommended)
+    model.applyCountdownTicked(secondsRemaining: 12, achieved: .unreadable)
+    model.keepSize()
+    model.revertSize()
+    #expect(keeps == 0)
+    #expect(reverts == 1)
+    #expect(model.sizeChoices["dell"] == nil)
   }
 
   /// A commit that went through and could not be read back is its own case: a

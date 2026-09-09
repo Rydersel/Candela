@@ -195,19 +195,17 @@ final class DisplayModeCoordinator {
     /// The one answerable surface, fixed at preview start.
     let surface: PreviewSurface
     var secondsRemaining: Int
-    /// Set when `confirm()`, `revert()` or the expiry threw. The display did not
-    /// move, the session still holds the fallback, and both buttons stay live.
+    /// Set when `confirm()`, `revert()` or the expiry threw. The session still
+    /// holds the fallback and Revert stays available.
     /// Nothing auto-retries, so a silent failure would leave the user on a mode
     /// they never approved.
     var failure: DisplayConfigError?
     /// Reported by the session, not inferred: a failed expiry disarms the
     /// countdown while a failed commit deliberately leaves it armed.
     var isCountingDown: Bool
-    /// Set when the apply that began this preview committed onto something
-    /// other than `mode`. `mode` stays the question, since that is what Keep
-    /// re-applies; this is how a surface can also say what the glass shows,
-    /// which is the one thing a person answering cannot check for themselves.
+    /// Latest committed failure, retained across refusals that move nothing.
     var unhonouredCommit: DisplayConfigError.UnhonouredCommit?
+    var canKeep: Bool { unhonouredCommit == nil }
     /// Non-nil when this preview is a SYNTHESIZED size: the engine has a
     /// virtual display up and the panel mirrored onto it, and the answer goes
     /// to `SynthesisPreviewSession` rather than `ModePreviewSession`.
@@ -1581,7 +1579,10 @@ final class DisplayModeCoordinator {
     if let previewed = answered.synthesized {
       return await performSynthesisResolve(previewed, keeping: keeping)
     }
-    let answeredMode = PreviewedMode(displayID: answered.displayID, mode: answered.mode)
+    let answeredMode = PreviewedMode(
+      displayID: answered.displayID, mode: answered.mode,
+      unhonouredCommit: answered.unhonouredCommit
+    )
     let outcome = keeping
       ? await session.confirm(answeredMode)
       : await session.revert(answeredMode)
