@@ -63,6 +63,11 @@ exposure receive a proportional increase, capped at 25% at twice the average.
 History alone never makes a dark, changing, or actively used region eligible.
 This is an exposure-based policy, not a calibrated prediction of physical wear.
 
+Dimming tapers inward at a region's edges and corners to reduce visible box
+boundaries. The interior retains its eligible depth; narrow or isolated regions
+receive less dimming. This taper does not make additional cells eligible and
+does not change the uniform idle-dimming or exposure-compensation masks.
+
 A gap longer than 90 seconds, a failed capture, sleep, display reconfiguration,
 or disabling the required settings discards temporary detection evidence.
 Protection needs fresh samples before it can resume. Your cumulative exposure

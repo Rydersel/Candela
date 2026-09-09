@@ -80,6 +80,49 @@ struct AdaptiveRegionProtectionTests {
     #expect((result?.cells[239] ?? 0) > 0)
   }
 
+  @Test func aStaticRectangleHasATaperedBoundaryAndRoundedCorners() throws {
+    var pixels = Array(repeating: 0.2, count: 240)
+    for row in 2...7 {
+      for col in 4...15 { pixels[row * 24 + col] = 0.8 }
+    }
+    var protection = AdaptiveRegionProtection()
+    for second in stride(from: 0, through: 300, by: 60) {
+      protection.record(displayGrid: pixels, cols: 24, rows: 10,
+        through: transform, observation: observation(),
+        at: start.addingTimeInterval(Double(second)))
+    }
+    let result = try #require(mask(protection))
+    let edge = result.cells[4 * 24 + 4]
+    let shoulder = result.cells[4 * 24 + 5]
+    let interior = result.cells[4 * 24 + 6]
+    #expect(edge > 0 && edge < shoulder)
+    #expect(shoulder < interior)
+    #expect(interior == 38.0 / 255) // Original 15% depth, quantized to 8 bits.
+    #expect(result.cells[2 * 24 + 4] < edge) // Corner fades in both directions.
+    for cell in pixels.indices where pixels[cell] == 0.2 {
+      #expect(result.cells[cell] == 0) // Feathering cannot nominate dark content.
+    }
+  }
+
+  @Test func featheringKeepsAdjacentMovingContentClear() throws {
+    var protection = AdaptiveRegionProtection()
+    for sample in 0...5 {
+      let pixels = (0..<240).map { cell in
+        cell % 24 < 12 ? 0.8 : (sample.isMultiple(of: 2) ? 0.6 : 0.9)
+      }
+      protection.record(displayGrid: pixels, cols: 24, rows: 10,
+        through: transform, observation: observation(),
+        at: start.addingTimeInterval(Double(sample * 60)))
+    }
+    let result = try #require(mask(protection))
+    #expect(result.cells[5 * 24 + 11] < result.cells[5 * 24 + 9])
+    for cell in result.cells.indices where cell % 24 >= 12 {
+      #expect(result.cells[cell] == 0)
+    }
+    // The physical display edge has no adjacent content to protect.
+    #expect(result.cells[0] == 38.0 / 255)
+  }
+
   @Test func focusedAppAndEntireHoveredWindowAreProtected() {
     let protection = warmed()
     #expect(mask(protection, activity: .init(
@@ -110,10 +153,12 @@ struct AdaptiveRegionProtectionTests {
         activity: .init(isFocusedDisplay: false, frontmostPID: 99, pointerPosition: point),
         windows: windows, at: start.addingTimeInterval(second))
     }
+    let beforeHover = nominate(nil, 300)
     let hovered = nominate(CGPoint(x: 1, y: 1), 300)
     #expect(protection.needsInputTracking)
     #expect(hovered?.cells[216] == 0) // Far corner of the hovered window.
     #expect((hovered?.cells[239] ?? 0) > 0) // Same app, different window.
+    #expect(hovered?.cells[5 * 24 + 12] == beforeHover?.cells[5 * 24 + 12])
     #expect(nominate(nil, 301)?.cells[216] == 0)
     #expect(nominate(nil, 303)?.cells[216] == 0) // Grace has just ended.
     let fading = nominate(nil, 303.5)
@@ -203,6 +248,7 @@ struct AdaptiveRegionProtectionTests {
     let baseline = mask(protection)
     let weighted = mask(protection, exposure: accumulator.map)
     #expect((weighted?.cells[0] ?? 0) > (baseline?.cells[0] ?? 0))
+    #expect(weighted?.cells[0] == 64.0 / 255) // Full 25% depth survives away from boundaries.
     #expect(weighted?.cells[239] == baseline?.cells[239])
     #expect((weighted?.peak ?? 1) <= 0.251)
 

@@ -122,10 +122,46 @@ public struct AdaptiveRegionProtection: Sendable {
       // These are conservative policy limits, not calibrated wear estimates.
       let extra = useHistory ? min(1, max(0, exposure.cells[cell] / mean - 1)) * 0.10 : 0
       cells[cell] = min(0.25, StaticRegionDetector.Thresholds.defaultDepth + extra)
-        * (windowScales[window] ?? 1)
+    }
+    cells = Self.featherBoundaries(cells)
+    // Hover changes opacity, not eligibility. Feather first so restoring one
+    // window cannot weaken protection at a neighboring window's boundary.
+    for cell in cells.indices {
+      if let window = observation.windowIDByCell[cell] {
+        cells[cell] *= windowScales[window] ?? 1
+      }
     }
     let mask = OverlayMask(cells: cells)
     return mask.peak > 0 ? mask : nil
+  }
+
+  /// Taper inward over two cells before the renderer interpolates the grid.
+  /// Filtering eligibility (not depth) keeps exposure-weighted interiors intact.
+  /// Only reduce nominated cells: a blur that spread alpha outward would dim
+  /// moving content, foreground windows, and cells with ambiguous ownership.
+  private static func featherBoundaries(_ cells: [Double]) -> [Double] {
+    let weights = [1.0, 4, 6, 4, 1]
+    var result = cells
+    for row in 0..<PanelGrid.rows {
+      for col in 0..<PanelGrid.cols {
+        let cell = row * PanelGrid.cols + col
+        guard cells[cell] > 0 else { continue }
+        var support = 0.0
+        for dy in -2...2 {
+          // There is no adjacent content beyond the physical panel. Clamp so
+          // a region reaching the display edge doesn't acquire a bright rim.
+          let y = min(PanelGrid.rows - 1, max(0, row + dy))
+          for dx in -2...2 {
+            let x = min(PanelGrid.cols - 1, max(0, col + dx))
+            if cells[y * PanelGrid.cols + x] > 0 {
+              support += weights[dy + 2] * weights[dx + 2]
+            }
+          }
+        }
+        result[cell] *= support / 256
+      }
+    }
+    return result
   }
 
   private static func valid(_ observation: WindowObservation) -> Bool {
