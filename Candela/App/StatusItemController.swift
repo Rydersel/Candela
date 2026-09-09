@@ -118,6 +118,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// Sleep/wake observation tokens: block-based observers stay registered only
   /// while retained. Never removed, app-lifetime.
   private var sleepWakeObservers: [any NSObjectProtocol] = []
+  /// Belt on the panel-open flag: AppKit's end-of-tracking signal, held like the
+  /// tokens above.
+  private var menuTrackingObserver: (any NSObjectProtocol)?
   /// Startup/wake DDC restore choreography. `startupAction` is app-level
   /// but read through DisplayPrefs like every other engine pref, and under safe
   /// mode through a prefs object whose getter reports `.doNothing`, which
@@ -193,6 +196,19 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     statusItem = item
     updateStatusItemImage()
     trackKeepAwake()
+
+    // A panel-open flag left true is a poller that never slows down, so the end of
+    // tracking clears it as well as `menuDidClose`. AppKit posts this for every
+    // session end, including the `cancelTracking` routes below.
+    menuTrackingObserver = NotificationCenter.default.addObserver(
+      forName: NSMenu.didEndTrackingNotification, object: menu, queue: .main
+    ) { [weak self] _ in
+      // Delivered on the main queue, so the flag is cleared in this turn rather
+      // than in a task the next open could outrun: menu tracking starves
+      // main-actor task execution, and a reopen inside that window would have its
+      // fresh `menuWillOpen` flag cleared by the previous session's late hop.
+      MainActor.assumeIsolated { self?.model.surfaceVisibility.setPanelOpen(false) }
+    }
 
     // Panel controls that have to end this tracking session reach it through
     // here: the gear button (a window cannot take focus while it runs) and
@@ -295,6 +311,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // every mode write through the seam. Static because the manager instance is
       // private here and the KeyboardShortcuts registry is global.
       ShortcutManager.syncRegistration()
+      // Here as well as in `recheckPermissions`, which the settings reset does not
+      // call: a reset from an all-custom ungranted rig restores the media-key
+      // defaults, so the tap becomes wanted with no timer left to notice the grant
+      // arriving. The door WITHOUT the hunt re-stamp, because most prefs that re-arm
+      // the tap say nothing about whether anyone is at System Settings; the key-mode
+      // write below is the one that does.
+      self?.model.accessibility.noteTapRearmed()
     }
     settingsActions.recheckPermissions = { [weak self] in
       // The fork computes this and never calls it, so changing a
@@ -302,10 +325,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // change actually made the CGEvent tap wanted. Custom shortcuts are Carbon
       // hotkeys and need no grant, so an all-custom rig must not be shown a TCC
       // prompt it can only refuse.
-      let prefs = DisplayPrefs(persistenceKey: "app")
-      guard KeyModePolicy.requiresAccessibility(
-        brightness: prefs.keyboardBrightness, volume: prefs.keyboardVolume
-      ) else { return }
+      // Ahead of the guard: the backstop must hear a key family going off as well as
+      // coming on. This is the edge that reopens the hunt, and the only one.
+      self?.model.accessibility.noteKeyModesChanged()
+      guard AccessibilityPermission.storedModesRequireGrant() else { return }
       self?.model.accessibility.promptIfNeeded()
     }
     settingsActions.updateStatusItem = { [weak self] in self?.updateStatusItemVisibility() }
@@ -1013,7 +1036,17 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     return false
   }
 
+  /// The panel consumes every polled value. Set synchronously: menu tracking
+  /// starves main-actor work, so a hop would land after the menu closed. The flag
+  /// changes only the NEXT interval, so the first frame takes a direct read; a
+  /// rebuilt poll job would adopt after the panel closed, for the same reason.
+  func menuWillOpen(_: NSMenu) {
+    model.surfaceVisibility.setPanelOpen(true)
+    model.refreshNativeBrightnessForSurface()
+  }
+
   func menuDidClose(_: NSMenu) {
+    model.surfaceVisibility.setPanelOpen(false)
     // Re-discover displays and re-read hardware once tracking has ended and
     // the run loop is back in default mode, so the next open starts fresh.
     Task {
@@ -1415,9 +1448,31 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
 
   private func startMediaKeyTap() {
     guard let mediaKeyTap else { return }
+    // Every start route stops here rather than failing and logging again.
+    guard !model.isTapPermanentlyUnavailable else { return }
     // Computed once and recorded only on success: `lastArmedTapConfig` is what is
     // actually being watched, and a config that failed to arm is not that.
     let config = model.tapConfig
+    // An empty tap still costs three threads for nothing. The empty config, not a
+    // disarm, keeps diagnostics on "watching nothing" and the restart edge visible.
+    guard !config.watchedKeys.isEmpty else {
+      mediaKeyTap.stop()
+      model.noteTapArmed(config)
+      return
+    }
+    // The tracked grant is refreshed by a poll, so a revocation made in System
+    // Settings and followed by a plug-in inside that window would run `tapCreate`
+    // while TCC is still committing the delete, which is the wedge the emergency
+    // teardown's settle closure waits out. One live read costs nothing here (no
+    // options, so it can never prompt) and it is only taken on a start edge.
+    // Not the policy input: the tracked flag stays what decides the lifecycle.
+    guard AXIsProcessTrustedWithOptions(nil) else {
+      // `.info` rather than `.error`: an expected decline, and the only observable
+      // that separates it from a start nobody attempted. The next edge retries.
+      log.info("media-key tap not started: the Accessibility grant reads false right now")
+      model.noteTapDisarmed()
+      return
+    }
     do {
       try mediaKeyTap.start(config: config)
       model.noteTapArmed(config)
@@ -1430,18 +1485,48 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         fields the media-key decode reads; media keys are off until Candela is updated
         """
       )
+      // No later edge may retry a start that cannot succeed.
+      model.noteTapPermanentlyUnavailable()
     } catch {
-      log.error("media-key tap failed to start: \(error); keys disabled until relaunch")
+      // Transient, usually a port refused while TCC was still settling: the next
+      // edge that wants keys tries again.
+      log.error("media-key tap failed to start: \(error); retried on the next edge")
+      model.noteTapDisarmed()
     }
   }
 
-  /// Re-arms or disarms brightness keys after display topology changes (the
-  /// fork's `updateMediaKeyTap`). No-op unless the tap is running.
+  /// Re-arms, re-configures or tears down the tap after the watched-key set can
+  /// have changed (the fork's `updateMediaKeyTap`). The edge comes from the last
+  /// committed set, never `mediaKeyTap.isRunning`: an emergency teardown leaves
+  /// that flag true.
   private func refreshTapConfig() {
-    guard let mediaKeyTap, mediaKeyTap.isRunning else { return }
+    guard let mediaKeyTap else { return }
     let config = model.tapConfig
-    mediaKeyTap.update(config: config)
-    model.noteTapArmed(config)
+    switch TapLifecyclePolicy.action(
+      previous: model.lastArmedTapConfig?.watchedKeys,
+      next: config.watchedKeys,
+      grantHeld: model.accessibility.isGranted,
+      permanentlyUnavailable: model.isTapPermanentlyUnavailable
+    ) {
+    case .start:
+      startMediaKeyTap()
+    case .stop:
+      // Not `noteTapDisarmed`: the keys are released on purpose, which is a
+      // different answer from a tap that cannot run.
+      mediaKeyTap.stop()
+      model.noteTapArmed(config)
+    case .reconfigure:
+      mediaKeyTap.update(config: config)
+      model.noteTapArmed(config)
+    case .recordEmpty:
+      // Nothing to stop: no tap was ever armed. Recording the empty set is what
+      // separates keys released on purpose from a tap that could not run.
+      model.noteTapArmed(config)
+    case .nothing:
+      // The stored config can carry a stale alternate-brightness flag while no tap
+      // exists; nothing reads it, and the next start recomputes the whole config.
+      break
+    }
   }
 
   /// Filled while a keep-awake assertion is held: it suppresses every OLED care

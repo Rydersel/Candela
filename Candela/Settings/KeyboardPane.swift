@@ -80,7 +80,7 @@ struct KeyboardPane: View {
         // The page's one action while the grant is missing, so it takes the
         // primary style. Trailing ellipsis: it opens another app (buttons.md).
         Button("Open System Settings…") {
-          AccessibilityPermission.openSystemSettings()
+          model.accessibility.openSystemSettings()
         }
         .buttonStyle(SettingsPrimaryButtonStyle())
         .accessibilityLabel("Open System Settings…")

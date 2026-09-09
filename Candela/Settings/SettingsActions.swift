@@ -95,6 +95,7 @@ final class SettingsActions {
       // must not put the DDC bus to work on every timeout tweak.
       model.oledCare.reapplyAfterPrefChange(persistenceKey: persistenceKey)
     }
+    if effects.contains(.restartBrightnessPoll) { model?.notePollConsumerAppeared() }
     if effects.contains(.syncVirtualDisplays) {
       // Converge live virtual displays to the slot prefs. The model hops
       // off the main actor itself; nothing here blocks.

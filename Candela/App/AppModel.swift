@@ -456,15 +456,23 @@ final class AppModel {
   /// refuse the second click.
   private(set) var isResetting = false
 
+  /// `isResetting` for the poll job's cadence closure, which runs off the main
+  /// actor. Written wherever the observable is, and nowhere else.
+  @ObservationIgnored private let resettingOffMain = OSAllocatedUnfairLock(initialState: false)
+
   /// Claims the latch. False means a reset is already running and this one must
   /// not start.
   func beginReset() -> Bool {
     guard !isResetting else { return false }
     isResetting = true
+    resettingOffMain.withLock { $0 = true }
     return true
   }
 
-  func endReset() { isResetting = false }
+  func endReset() {
+    isResetting = false
+    resettingOffMain.withLock { $0 = false }
+  }
 
   /// Per-display VCP 0x62 verdict from the capabilities string. Observable,
   /// so the panel's volume slider enables live the moment a probe lands. An ABSENT
@@ -500,20 +508,32 @@ final class AppModel {
   /// rather than reporting them unenumerated.
   private(set) var hardwareFacts: [String: DisplayHardwareFacts] = [:]
 
-  /// The `WatchConfig` most recently ARMED, not the one most recently computed.
-  /// Those differ exactly when a rearm failed, which is the case the row exists
-  /// for. Recorded at the arm site in `StatusItemController`, never at the compute
-  /// site here.
+  /// The `WatchConfig` most recently COMMITTED to, not the one most recently
+  /// computed; they differ exactly when a rearm failed. Recorded in
+  /// `StatusItemController`, never here.
+  ///
+  /// Empty is not nil. Empty: the app watches nothing on purpose, so no tap exists.
+  /// nil: no tap could be built, the one state diagnostics calls "not running".
   private(set) var lastArmedTapConfig: MediaKeyEventTap.WatchConfig?
 
   func noteTapArmed(_ config: MediaKeyEventTap.WatchConfig) {
     lastArmedTapConfig = config
   }
 
-  /// The tap was torn down (a revoked grant). Diagnostics must report "the
-  /// media-key tap is not running", not the config of a tap that no longer
-  /// exists.
+  /// No tap can run: grant gone, or the start failed. Retryable: the next edge
+  /// that wants keys tries again. A tap stopped for lack of keys is not this; that
+  /// records the empty config.
   func noteTapDisarmed() {
+    lastArmedTapConfig = nil
+  }
+
+  /// The one failure a retry cannot clear: this macOS version does not answer the
+  /// CGEvent fields the decode reads. Without the latch every reconfigure and menu
+  /// close would retry and re-log the error. Never cleared.
+  private(set) var isTapPermanentlyUnavailable = false
+
+  func noteTapPermanentlyUnavailable() {
+    isTapPermanentlyUnavailable = true
     lastArmedTapConfig = nil
   }
 
@@ -835,9 +855,12 @@ final class AppModel {
     }
   }
 
+  // All three key paths read native first: published state can be an idle poll
+  // interval stale, and a step from it jumps a Control Center move back.
   func stepBrightnessAllExternal(isUp: Bool, isFine: Bool) -> [(id: CGDirectDisplayID, name: String, newValue: Double)] {
     keyEnabledStates(displays).map { state in
-      (state.id, state.display.name, state.controller.step(isUp: isUp, isFine: isFine))
+      state.controller.syncFromNativeBeforeStep()
+      return (state.id, state.display.name, state.controller.step(isUp: isUp, isFine: isFine))
     }
   }
 
@@ -854,6 +877,7 @@ final class AppModel {
       // `isDisabled` filters the loop body: a resolved-but-disabled display
       // steps nothing and shows no HUD.
       guard let slot, !keyEnabledStates([slot]).isEmpty else { return nil }
+      slot.controller.syncFromNativeBeforeStep()
       return (slot.id, slot.display.name,
               slot.controller.step(isUp: isUp, isFine: isFine))
     }
@@ -864,6 +888,7 @@ final class AppModel {
   /// online.
   func stepBrightnessBuiltIn(isUp: Bool, isFine: Bool) -> (id: CGDirectDisplayID, name: String, newValue: Double)? {
     guard let builtIn, !keyEnabledStates([builtIn]).isEmpty else { return nil }
+    builtIn.controller.syncFromNativeBeforeStep()
     return (builtIn.id, builtIn.display.name,
             builtIn.controller.step(isUp: isUp, isFine: isFine))
   }
@@ -1219,6 +1244,10 @@ final class AppModel {
   /// must never outlive the pass that dropped it.
   @ObservationIgnored private var pollerTask: Task<Void, Never>?
 
+  /// Whether a surface showing a brightness value is on screen; one of the
+  /// poller's cadence signals.
+  let surfaceVisibility = SurfaceVisibility()
+
   deinit {
     pollerTask?.cancel()
   }
@@ -1566,6 +1595,37 @@ final class AppModel {
     )
   }
 
+  /// A new consumer (a surface opening, sync turned on) must not wait out the idle
+  /// interval in flight, up to 30 s on battery. A fresh `run()` ticks before it
+  /// sleeps, so rebuilding is the wake-up. Not the panel's route: menu tracking
+  /// starves the main actor, so the rebuilt job would land after the panel closed.
+  func notePollConsumerAppeared() {
+    restartPoller()
+  }
+
+  /// Adopts every native display's live brightness before a surface draws, through
+  /// the same route the poller takes: published, persisted, and fanned out to the
+  /// other displays when sync is on. Synchronous: the panel's open edge runs inside
+  /// menu tracking, which starves anything that hops. No-op off the native path, so
+  /// never DDC.
+  func refreshNativeBrightnessForSurface() {
+    let controllers = allControlledStates.map(\.controller)
+    // Every display is read before anything is written, so a fan-out cannot land on
+    // a display this pass has not looked at yet and be read back as a move of its own.
+    let adopted = controllers.compactMap { controller -> (BrightnessController, Double)? in
+      let delta = controller.adoptNativeForSurface()
+      return delta == 0 ? nil : (controller, delta)
+    }
+    for (source, delta) in adopted {
+      // The poller's own gate, reset latch included: a fan-out during a reset keeps
+      // that display's queue busy and the reset then gives up on restoring its HDR.
+      BrightnessSync.fanOut(
+        delta: delta, from: source, to: controllers,
+        isEnabled: appPrefs.enableBrightnessSync && !isResetting
+      )
+    }
+  }
+
   /// Rebuilds the native-brightness poll job for the current display set. Control
   /// Center and ambient changes bypass us entirely, so looking is the only way to
   /// stay in sync on the native path.
@@ -1576,6 +1636,8 @@ final class AppModel {
       return
     }
     let states = allControlledStates
+    // The built-in must not vote on the cadence; see `Target.isExternal`.
+    let externalIDs = Set(displays.map(\.id))
     let targets = states.map { state -> BrightnessPoller.Target in
       let controller = state.controller
       return BrightnessPoller.Target(
@@ -1616,7 +1678,8 @@ final class AppModel {
             )
           }
         },
-        isConverging: { controller.isConvergingFromExternal() }
+        isConverging: { controller.isConvergingFromExternal() },
+        isExternal: externalIDs.contains(state.id)
       )
     }
     let poller = BrightnessPoller(
@@ -1626,8 +1689,34 @@ final class AppModel {
       // suspended (mid-reconfigure burst or asleep): the poller's skip rule.
       isEpochCurrent: { [displayManager] in
         displayManager.isEpochCurrent(displayManager.currentEpoch())
-      }
+      },
+      // Read live every tick, never captured. Same predicate the fan-out is gated
+      // on, reset latch included: a consumer refusing to consume is not a consumer.
+      isSyncEnabled: { [appPrefs, resettingOffMain] in
+        appPrefs.enableBrightnessSync && !resettingOffMain.withLock { $0 }
+      },
+      isSurfaceVisible: { [surfaceVisibility] in surfaceVisibility.isVisible }
     )
     pollerTask = Task { await poller.run() }
   }
+}
+
+/// Whether a Candela surface showing a brightness value is on screen.
+///
+/// Lock-backed, not main-actor: the poller reads it off the main actor, and the
+/// panel writes it from inside a menu tracking session, where a hop would land
+/// after the menu closed.
+final class SurfaceVisibility: Sendable {
+  private struct State {
+    var isPanelOpen = false
+    var isSettingsVisible = false
+  }
+
+  private let state = OSAllocatedUnfairLock(initialState: State())
+
+  var isVisible: Bool { state.withLock { $0.isPanelOpen || $0.isSettingsVisible } }
+
+  func setPanelOpen(_ open: Bool) { state.withLock { $0.isPanelOpen = open } }
+
+  func setSettingsVisible(_ visible: Bool) { state.withLock { $0.isSettingsVisible = visible } }
 }

@@ -185,6 +185,12 @@ struct PrefPropagationTests {
     // row is added to it, not swapped in.
     #expect(PrefPropagation.effects(forChange: .unavailableDDC)
       == [.refreshUI, .rearmTap, .reapplyDimming, .rebuildPanel])
+    // Sync is one of the poll cadence's consumers, so turning it on rebuilds the
+    // poll job rather than leaving it asleep on a long interval. It still writes
+    // nothing to hardware: no `.reapplyDimming`.
+    #expect(PrefPropagation.effects(forChange: .enableBrightnessSync)
+      == [.refreshUI, .rebuildPanel, .restartBrightnessPoll])
+    #expect(!PrefPropagation.effects(forChange: .showContrast).contains(.restartBrightnessPoll))
   }
 
   @Test func oledCarePrefsFanOutToOledCare() {
