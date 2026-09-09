@@ -36,6 +36,40 @@ final class FakeDisplayWorld: @unchecked Sendable {
   }
   private(set) var mirrorChanges: [[MirrorChange]] = []
   private var _applies: [(mode: DisplayMode, displayID: CGDirectDisplayID)] = []
+  private var _enumerations: [EnumerationCall] = []
+
+  /// Each of these is one full CoreGraphics enumeration on the real configurator.
+  /// A fake answers from a dictionary, so this count is the only place a
+  /// hardware-free test sees that cost.
+  enum EnumerationCall: Equatable, Sendable {
+    case modes
+    case currentMode
+    case nativePixels
+    case withheldByWireTimingGuard
+    case snapshot
+  }
+
+  /// Every enumerating call the configurator was asked for, in order.
+  var enumerations: [EnumerationCall] { lock.withLock { _enumerations } }
+
+  private var _withheldByWireTimingGuard = 0
+
+  /// Zero by default: this world runs no revelation pass. One stored value so
+  /// the count and the snapshot cannot disagree; settable so a test can stage a
+  /// withholding guard; lock-backed because the configurator reads it from the
+  /// engine's executor.
+  var withheldByWireTimingGuard: Int {
+    get { lock.withLock { _withheldByWireTimingGuard } }
+    set { lock.withLock { _withheldByWireTimingGuard = newValue } }
+  }
+
+  func recordEnumeration(_ call: EnumerationCall) {
+    lock.withLock { _enumerations.append(call) }
+  }
+
+  func forgetEnumerations() {
+    lock.withLock { _enumerations.removeAll() }
+  }
 
   /// Every mode apply the configurator was asked for, in order. The engage
   /// tail's re-time is one of these, and it is the only evidence of it a fake
@@ -183,13 +217,32 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
   var applies: [(mode: DisplayMode, displayID: CGDirectDisplayID)] { world.applies }
 
   func displays() -> [ConfiguredDisplay] { world.displays() }
-  func modes(for displayID: CGDirectDisplayID) -> [DisplayMode] { world.modes(for: displayID) }
+
+  func modes(for displayID: CGDirectDisplayID) -> [DisplayMode] {
+    world.recordEnumeration(.modes)
+    return world.modes(for: displayID)
+  }
+
   func currentMode(for displayID: CGDirectDisplayID) -> DisplayMode? {
-    world.currentMode(for: displayID)
+    world.recordEnumeration(.currentMode)
+    return world.currentMode(for: displayID)
   }
 
   func nativePixels(for displayID: CGDirectDisplayID) -> (width: Int, height: Int)? {
-    world.nativePixels(for: displayID)
+    world.recordEnumeration(.nativePixels)
+    return world.nativePixels(for: displayID)
+  }
+
+  /// Read from the world directly, not through the four methods above, so the
+  /// recorded count is one call, as on the real configurator.
+  func modeSnapshot(for displayID: CGDirectDisplayID) -> DisplayModeSnapshot {
+    world.recordEnumeration(.snapshot)
+    return DisplayModeSnapshot(
+      modes: world.modes(for: displayID),
+      current: world.currentMode(for: displayID),
+      nativePixels: world.nativePixels(for: displayID),
+      withheldByWireTimingGuard: world.withheldByWireTimingGuard
+    )
   }
 
   /// Recorded, and the world is deliberately NOT moved. The engage tail's
@@ -221,7 +274,12 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
 
   var revealsHiddenModes: Bool { false }
   var guardsWireTiming: Bool { true }
-  func modesWithheldByWireTimingGuard(for _: CGDirectDisplayID) -> Int { 0 }
+
+  func modesWithheldByWireTimingGuard(for _: CGDirectDisplayID) -> Int {
+    world.recordEnumeration(.withheldByWireTimingGuard)
+    return world.withheldByWireTimingGuard
+  }
+
   var canRotate: Bool { false }
   func rotation(of _: CGDirectDisplayID) -> DisplayRotation? { .standard }
   func applyRotation(_: DisplayRotation, to _: CGDirectDisplayID) throws {}

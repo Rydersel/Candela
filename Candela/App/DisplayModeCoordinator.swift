@@ -492,16 +492,22 @@ final class DisplayModeCoordinator {
       dropPreviewOnDepartedDisplay()
       return
     }
-    let all = DisplayModeCatalog.full(configurator.modes(for: displayID))
+    // One enumeration for the whole pass: each separate configurator call
+    // re-runs the CoreGraphics mode copy and the per-mode CGS description loop.
+    let snapshot = configurator.modeSnapshot(for: displayID)
+    let all = DisplayModeCatalog.full(snapshot.modes)
     // While a synthesized size is engaged, panel-derived values come from the last
     // pass taken with this display on its own desktop: an engaged panel's
     // readbacks describe the virtual master. See `PanelBaseline`.
     let engagedSize = synthesis?.engagedSize(displayID: displayID)
-    let baseline = baseline(for: display, modes: all, isEngaged: engagedSize != nil)
+    let baseline = baseline(
+      for: display, modes: all, nativePixels: snapshot.nativePixels,
+      isEngaged: engagedSize != nil
+    )
     let native = baseline.nativePixels.map { (width: $0.width, height: $0.height) }
     // Sampled once and handed to both the catalog and the verdict: the size the
     // model calls "current" has to be the one this enumeration saw.
-    let current = configurator.currentMode(for: displayID)
+    let current = snapshot.current
     // Density is a claim about physical pixels, so no native size means no
     // geometry at all rather than geometry over zeros.
     let geometry = native.flatMap { native in
@@ -540,7 +546,7 @@ final class DisplayModeCoordinator {
       current: current,
       distinctLogicalSizes: Set(all.map { LogicalSize(mode: $0) }).count,
       nativePixels: baseline.nativePixels,
-      withheldForWireTiming: configurator.modesWithheldByWireTimingGuard(for: displayID),
+      withheldForWireTiming: snapshot.withheldByWireTimingGuard,
       density: geometry.map {
         PanelDensityModel.evaluate(
           // PUBLISHED rows only: the model ranks whatever it is handed, so the
@@ -562,15 +568,18 @@ final class DisplayModeCoordinator {
   /// The panel-derived values for this pass: freshly measured while the display
   /// shows its own desktop, and the last such measurement while a synthesized
   /// size is engaged.
+  /// - Parameter nativePixels: from the caller's enumeration, not re-read here;
+  ///   a second read is a second enumeration and could describe another instant.
   private func baseline(
-    for display: ConfiguredDisplay, modes: [DisplayMode], isEngaged: Bool
+    for display: ConfiguredDisplay, modes: [DisplayMode],
+    nativePixels: (width: Int, height: Int)?, isEngaged: Bool
   ) -> PanelBaseline {
     let key = display.identity.key
     if isEngaged, let cached = baselines[key] { return cached }
-    let nativePixels = configurator.nativePixels(for: display.id)
-      .map { PixelSize(width: $0.width, height: $0.height) }
-    // The native-flagged mode from the SAME list this catalog is built from,
-    // which is how `nativePixels(for:)` finds it too.
+    let pixels = nativePixels.map { PixelSize(width: $0.width, height: $0.height) }
+    // The native-flagged mode from the SAME list the catalog is built from, so
+    // ladder and rows agree. Only its LOGICAL size is read: this list is sorted
+    // and two modes can carry the flag, so it may not be `nativePixels`' mode.
     let native = modes.first(where: \.isNative)
     let stops: [SyntheticSize] = if let native, !display.isBuiltIn {
       SyntheticSizeCatalog.stops(
@@ -583,7 +592,7 @@ final class DisplayModeCoordinator {
       []
     }
     let baseline = PanelBaseline(
-      nativePixels: nativePixels,
+      nativePixels: pixels,
       nativeLogicalWidth: native?.logicalWidth,
       nativeLogicalHeight: native?.logicalHeight,
       stops: stops
@@ -828,19 +837,22 @@ final class DisplayModeCoordinator {
   private func reapplyStoredMode(for display: ConfiguredDisplay) -> ModeReapplyStep {
     let identity = display.identity
     let stored = persistence.storedMode(for: identity)
-    // Enumerated for every arrival, including displays that never opted in: the
-    // opt-in gate lives inside the tested policy, so asking costs one
-    // `CGDisplayCopyAllDisplayModes` per arrival, the same call `warmModeCatalogs`
-    // makes on every menu close.
+    let isEnabled = persistence.isEnabled(for: identity)
+    // The policy's own first guard, hoisted so a display nobody opted in for
+    // costs no enumeration. `decide` answers `.doNothing` for both, which is this `.done`.
+    guard isEnabled, stored != nil else { return .done }
+    // One pass: the policy checks the current mode against what the stored
+    // descriptor resolves to in the list, so both must describe one instant.
+    let snapshot = configurator.modeSnapshot(for: display.id)
     let decision = ModeReapplyPolicy.decide(
-      isEnabled: persistence.isEnabled(for: identity),
+      isEnabled: isEnabled,
       // From the entry the list handed us, not asked again now: the mirror state
       // has to describe the same instant as the enumeration that claimed this
       // arrival.
       isMirroringAnotherDisplay: display.isMirrorSlave,
       stored: stored,
-      available: configurator.modes(for: display.id),
-      current: configurator.currentMode(for: display.id)
+      available: snapshot.modes,
+      current: snapshot.current
     )
     // "Not now": a mirror slave, or a display that cannot say what mode it is
     // running. The claim goes back, since only an observed ABSENCE re-arms one and
@@ -907,9 +919,11 @@ final class DisplayModeCoordinator {
     // ladder computes from that, and every stop lands under the minor-axis floor.
     // The stored stop then resolves nil and the relaunch restore reports
     // staleDescriptor forever.
-    let modes = DisplayModeCatalog.full(configurator.modes(for: display.id))
+    let snapshot = configurator.modeSnapshot(for: display.id)
+    let modes = DisplayModeCatalog.full(snapshot.modes)
     let baseline = baseline(
-      for: display, modes: modes, isEngaged: synthesis.isEngaged(displayID: display.id)
+      for: display, modes: modes, nativePixels: snapshot.nativePixels,
+      isEngaged: synthesis.isEngaged(displayID: display.id)
     )
     let decision = await synthesis.reapply(
       for: display,
