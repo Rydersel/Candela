@@ -463,14 +463,7 @@ struct DiagnosticsPage: View {
     if !isBuiltIn {
       SettingsCardDivider()
       LabeledContent("Volume") {
-        valueText(DiagnosticsCopy.volumeAvailability(
-          override: prefs.audioSinkOverride,
-          isAvailable: state.volume.isAvailable,
-          support: model.volumeSupport[persistenceKey],
-          hasDescription: capabilities != nil,
-          forceSoftware: prefs.forceSoftware,
-          app: AppInfo.productName
-        ))
+        valueText(model.diagnosticsVolumeAvailability(state))
       }
       .help(DiagnosticsPageCopy.volumeHelp)
 
@@ -658,17 +651,7 @@ struct DiagnosticsPage: View {
   }
 
   private var audioMatchText: String {
-    guard let device = model.audioDevices.defaultOutputDevice() else {
-      return DiagnosticsCopy.noDefaultOutputDevice
-    }
-    return DiagnosticsCopy.audioMatch(
-      deviceName: device.name,
-      matches: AudioRoutingPolicy.displayMatchesDevice(
-        deviceName: device.name,
-        rawDisplayName: state.display.name,
-        nameOverride: prefs.audioDeviceNameOverride
-      )
-    )
+    model.diagnosticsSoundOutput(state, device: model.audioDevices.defaultOutputDevice())
   }
 
   // MARK: - Actions

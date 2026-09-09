@@ -719,18 +719,49 @@ final class AppModel {
   /// contract, bare pref names and never composed `UserDefaults` keys, is
   /// `DiagnosticsPrefSummary`'s, where a test pins every line it emits.
   func diagnosticsSnapshot() -> DiagnosticsReportSnapshot {
-    DiagnosticsReportSnapshot(
+    // One output snapshot keeps every display's match verdict consistent.
+    let audioOutput = audioDevices.defaultOutputDevice()
+    return DiagnosticsReportSnapshot(
       appVersion: AppInfo.version,
       osVersion: osVersionText,
       safeMode: safeMode,
       accessibilityGranted: accessibility.isGranted,
       launchAtLogin: launchAtLoginText,
-      displays: allControlledStates.map(diagnosticsEntry),
+      displays: allControlledStates.map { diagnosticsEntry($0, audioOutput: audioOutput) },
       recentEvents: recentDisplayEvents
     )
   }
 
-  private func diagnosticsEntry(_ state: DisplayState) -> DiagnosticsReportSnapshot.DisplayEntry {
+  func diagnosticsVolumeAvailability(_ state: DisplayState) -> String {
+    guard builtIn?.id != state.id else { return "Not applicable: built-in display" }
+    let key = state.display.persistenceKey
+    let prefs = DisplayPrefs(persistenceKey: key)
+    return DiagnosticsCopy.volumeAvailability(
+      override: prefs.audioSinkOverride,
+      isAvailable: state.volume.isAvailable,
+      support: volumeSupport[key],
+      hasDescription: capabilityString[key] != nil,
+      forceSoftware: prefs.forceSoftware,
+      app: AppInfo.productName
+    )
+  }
+
+  func diagnosticsSoundOutput(_ state: DisplayState, device: AudioOutputDevice?) -> String {
+    guard builtIn?.id != state.id else { return "Not applicable: built-in display" }
+    guard let device else { return DiagnosticsCopy.noDefaultOutputDevice }
+    let prefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
+    return DiagnosticsCopy.audioMatch(
+      deviceName: device.name,
+      matches: AudioRoutingPolicy.displayMatchesDevice(
+        deviceName: device.name, rawDisplayName: state.display.name,
+        nameOverride: prefs.audioDeviceNameOverride
+      )
+    )
+  }
+
+  private func diagnosticsEntry(
+    _ state: DisplayState, audioOutput: AudioOutputDevice?
+  ) -> DiagnosticsReportSnapshot.DisplayEntry {
     let persistenceKey = state.display.persistenceKey
     let prefs = DisplayPrefs(persistenceKey: persistenceKey)
     let facts = hardwareFacts[persistenceKey]
@@ -771,7 +802,9 @@ final class AppModel {
       hdrEngaged: state.controller.isHDREngaged,
       nonDefaultPrefs: DiagnosticsPrefSummary.nonDefaultPrefs(
         prefs, remembersMode: displayModes.isRemembering(state.id)
-      )
+      ),
+      volumeAvailability: diagnosticsVolumeAvailability(state),
+      soundOutput: diagnosticsSoundOutput(state, device: audioOutput)
     )
   }
 

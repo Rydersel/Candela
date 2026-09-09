@@ -8,7 +8,9 @@ struct DiagnosticsReportTests {
           manufacturer: "Dell", hasSerial: true,
           currentMode: "1296 × 2304 at 120 Hz", controlMethod: "Hardware (DDC)",
           readbackVerdict: "answers reads", hdrEngaged: false,
-          nonDefaultPrefs: nonDefaultPrefs)
+          nonDefaultPrefs: nonDefaultPrefs,
+          volumeAvailability: "Unavailable: this display lists no volume command",
+          soundOutput: "Headphones: not matched to this display")
   }
 
   private func snapshot() -> DiagnosticsReportSnapshot {
@@ -47,7 +49,9 @@ struct DiagnosticsReportTests {
       name: "Left", hardwareName: "DELL U2725QE", connection: nil,
       manufacturer: nil, hasSerial: false, currentMode: nil,
       controlMethod: "Software (gamma)", readbackVerdict: "never asked",
-      hdrEngaged: true, nonDefaultPrefs: [])
+      hdrEngaged: true, nonDefaultPrefs: [],
+      volumeAvailability: "Available: not asked yet",
+      soundOutput: "macOS reports no default output device")
     let s = DiagnosticsReportSnapshot(
       appVersion: "1", osVersion: "2", safeMode: true, accessibilityGranted: false,
       launchAtLogin: "disabled", displays: [e], recentEvents: [])
@@ -81,7 +85,9 @@ struct DiagnosticsReportTests {
         name: "Right", hardwareName: "MSI MAG 341C", connection: "HDMI",
         manufacturer: "MSI", hasSerial: false, currentMode: "3440 × 1440 at 175 Hz",
         controlMethod: "Hardware (DDC)", readbackVerdict: "write-only",
-        hdrEngaged: false, nonDefaultPrefs: ["forceSw = true", "minDDCOverride.brightness = 12"])],
+        hdrEngaged: false, nonDefaultPrefs: ["forceSw = true", "minDDCOverride.brightness = 12"],
+        volumeAvailability: "Available: no usable answer",
+        soundOutput: "MSI MAG 341C: matched to this display")],
       recentEvents: ["12:01 MSI MAG 341C arrived", "12:00 DELL U2725QE departed"])
     let text = DiagnosticsReport.render(s)
     for needle in ["Left", "Right", "MSI MAG 341C", "write-only",
@@ -108,7 +114,9 @@ struct DiagnosticsReportTests {
       name: "Left", hardwareName: "DELL U2725QE", connection: nil,
       manufacturer: nil, hasSerial: true, currentMode: nil,
       controlMethod: "Software (gamma)", readbackVerdict: "never asked",
-      hdrEngaged: true, nonDefaultPrefs: [])
+      hdrEngaged: true, nonDefaultPrefs: [],
+      volumeAvailability: "Available: not asked yet",
+      soundOutput: "macOS reports no default output device")
     let s = DiagnosticsReportSnapshot(
       appVersion: "1", osVersion: "2", safeMode: false, accessibilityGranted: true,
       launchAtLogin: "enabled", displays: [e], recentEvents: [])
