@@ -39,6 +39,7 @@ final class RotationCoordinator {
   /// fact about the display.
   private(set) var blockedBy: ReconfigurationClaimant?
   private(set) var isApplying = false
+  @ObservationIgnored var didConfirmRotation: () -> Void = {}
 
   @ObservationIgnored weak var confirmation: (any RotationConfirmationPresenting)?
 
@@ -227,9 +228,12 @@ final class RotationCoordinator {
   // MARK: - Serialisation
 
   private func resolve(_ answered: Preview, keeping: Bool) async -> PreviewOutcome {
+    let wasOutstanding = await session.previewed == answered.request
     let outcome = keeping
       ? await session.confirm(answered.request)
       : await session.revert(answered.request)
+    // Save the approved state before adopt releases the reconfiguration gate.
+    if wasOutstanding, case .committed = outcome { didConfirmRotation() }
     switch outcome {
     case .committed, .reverted: await adopt(.clear)
     case let .failed(error): await adopt(.set(error))

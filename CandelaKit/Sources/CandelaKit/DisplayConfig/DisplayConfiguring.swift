@@ -220,7 +220,7 @@ enum MirrorVerification {
 /// The seam between display-configuration policy and CoreGraphics. Everything
 /// decidable is tested against a fake conformance; the real one is a thin
 /// adapter with no judgement in it.
-public protocol DisplayConfiguring: Sendable {
+public protocol DisplayConfiguring: DisplayRotationConfiguring {
   /// Every display that is ONLINE, whether or not it is currently drawing.
   /// Deliberately not "active": callers read absence from this list as a
   /// DEPARTURE, and a display asleep on the idle timer has not gone anywhere.
@@ -279,6 +279,11 @@ public protocol DisplayConfiguring: Sendable {
   /// is off), so a caller reporting this must report `guardsWireTiming` with it.
   func modesWithheldByWireTimingGuard(for displayID: CGDirectDisplayID) -> Int
 
+}
+
+/// The rotation operations shared by interactive previews and saved-layout restore.
+public protocol DisplayRotationConfiguring: Sendable {
+
   /// Whether this build can rotate displays at all.
   ///
   /// A missing private symbol is a capability answer, not a crash. When
@@ -295,7 +300,8 @@ public protocol DisplayConfiguring: Sendable {
   /// `SLSConfigureDisplayRotation`, so rotation cannot be staged into a
   /// `CGBeginDisplayConfiguration` transaction the way a mirror change can. N
   /// displays would be N independent calls, each able to fail alone, so the
-  /// half-applied state stays unrepresentable by never offering the batch.
+  /// calls cannot form an atomic batch. Callers restoring several displays
+  /// must handle partial success.
   ///
   /// **Verifies the readback.** A `CGError` of 0 is not evidence: `-90`
   /// and `360` both return success and change nothing. Throws

@@ -13,6 +13,8 @@ hatches for hardware that misbehaves.
 - [Resolutions](resolutions.md). The size list, the HiDPI sizes macOS does not
   list, the in-between sizes Candela renders, and what happens when a size
   fails.
+- [Saved display setups](display-setups.md). Remembering rotations and positions,
+  what happens on reconnect, and when a saved setup cannot be restored.
 - [Diagnostics](diagnostics.md). What the per-display Diagnostics page reports
   and how to export it for an issue.
 - [Advanced settings](advanced-settings.md). The knobs that are set with
