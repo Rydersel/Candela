@@ -8,9 +8,8 @@ import os
 /// OLED care: the idle/blackout timers, the care dim and the hours tracker.
 ///
 /// Owned by `AppModel` for `DisplayModeCoordinator`'s reason: the timers must
-/// outlive whatever window or pane started them. Unlike the sibling
-/// coordinators it takes no dependencies at init: `start(model:)` hands it the
-/// model once, held weakly, and everything else is resolved fresh per tick.
+/// outlive whatever window or pane started them. `start(model:)` hands it the
+/// model once, held weakly, and display state is resolved fresh per tick.
 ///
 /// Shape rules this type is built around, each measured or ruled:
 ///
@@ -232,7 +231,20 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// section reads it.
   private var comparisons: [String: ModelComparison] = [:]
   /// The exposure model's wallpaper backdrop; its cache lives inside it.
-  @ObservationIgnored private let wallpaper = WallpaperLuminanceSource()
+  @ObservationIgnored private let wallpaper: WallpaperLuminanceSource
+
+  @ObservationIgnored private let windowList: (CGDirectDisplayID) -> [WindowSnapshot]
+
+  init(
+    wallpaper: WallpaperLuminanceSource = WallpaperLuminanceSource(),
+    windowList: @escaping (CGDirectDisplayID) -> [WindowSnapshot] = {
+      CGWindowListSource(displayID: $0).onScreenWindows()
+    }
+  ) {
+    self.wallpaper = wallpaper
+    self.windowList = windowList
+  }
+
   /// The most recent accepted reading, panel-native, for the hero's live
   /// thermal view. Not history: it is the frame the accumulator just folded
   /// in, kept so a surface can show what the display looked like at the last
@@ -556,6 +568,7 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// state under freshly resolved IDs, never `repinFrames()` alone, which would
   /// pin an overlay to the wrong panel.
   func displaysReconfigured() {
+    wallpaper.invalidate()
     guard let model, !model.isSafeMode, !resetting else { return }
     clearAllOverlays()
     // Old IDs may already name different panels, so pending removal checks
@@ -1482,7 +1495,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     guard let transform = Self.transform(target),
       let cached = latestSamples[key]
     else { return }
-    let windows = CGWindowListSource(displayID: target.surface).onScreenWindows()
+    let windows = windowList(target.surface)
     var observer = observers[key] ?? WindowObserver()
     let observation = observer.observe(windows, through: transform, at: Date())
     observers[key] = observer
@@ -1592,10 +1605,10 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// Constructed at the point of use rather than stored: the source is a display
   /// ID and one method, and IDs reassign across a replug. This cannot go stale,
   /// because the ID it gets is the one this tick resolved.
-  private func observeWindows(
+  func observeWindows(
     for key: String, on surface: CGDirectDisplayID, through transform: PanelSpaceTransform
   ) {
-    let windows = CGWindowListSource(displayID: surface).onScreenWindows()
+    let windows = windowList(surface)
     // Mutated IN PLACE: `observe` is mutating on a value type, and a local copy
     // would discard every window's age on return, so the stationary threshold
     // could never be reached.
@@ -1616,13 +1629,6 @@ final class OledCareCoordinator: CheckupCareHolding {
     owners.accumulate(observation, elapsed: Self.seconds(Self.samplingInterval))
     ownerHours[key] = owners
 
-    // The model's other inputs run on this permission-free clock too, not only
-    // beside a measured sample: the wallpaper source logs each recompute with
-    // the Screen Recording preflight inline, which is the standing evidence that
-    // the estimate's inputs stay readable while the grant is absent.
-    let appearanceIsDark =
-      NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-    _ = wallpaper.panelGrid(for: surface, appearanceIsDark: appearanceIsDark, through: transform)
     // Only a booked observation dirties the store: an all-uncovered panel adds
     // nothing, and marking it dirty would re-encode an unchanged value.
     if owners.hours.totalSeconds > before { unsavedExposureKeys.insert(key) }
@@ -1730,7 +1736,7 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// so both sides of the comparison cover identical instants and a grant
   /// outage stops them together. Runs inside the accepted branch, so the
   /// epoch, pref, ID, transform and qualification re-checks have all passed.
-  private func bookComparisonPair(
+  func bookComparisonPair(
     for key: String, on target: OledTelemetryTarget,
     measured: [Double], through transform: PanelSpaceTransform
   ) {
@@ -1744,7 +1750,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     // panel has no `NSScreen` for the wallpaper lookup to match at all, so
     // asking about the panel here would compare a measured desktop against a
     // model that fell back to the appearance prior.
-    let windows = CGWindowListSource(displayID: target.surface).onScreenWindows()
+    let windows = windowList(target.surface)
     let appearanceIsDark =
       NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
     let wallpaperCells = wallpaper.panelGrid(
