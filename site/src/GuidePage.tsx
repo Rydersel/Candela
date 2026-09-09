@@ -1,6 +1,6 @@
 import { Header } from './components/Header'
 import { Footer } from './components/Footer'
-import { guides as copy, hero, navigation } from './content/copy'
+import { guides as copy, githubStarLabel, hero, navigation } from './content/copy'
 import { formatGuideDate, type Guide } from './guides'
 import candelaMark from './assets/candela-c.svg'
 import './components/Guide.css'
@@ -57,7 +57,7 @@ export function GuidePage({ guide, guides }: { guide: Guide; guides: Guide[] }) 
                 {hero.ctaPrimary}
               </a>
               <a className="guide-try-secondary" href="/github?placement=guide">
-                {hero.ctaSecondary}
+                {githubStarLabel}
               </a>
               <span className="guide-try-foss">{hero.foss}</span>
             </div>

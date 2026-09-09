@@ -26,7 +26,7 @@ const brightness: Guide = {
 
 // Every accessible name the site gives a Download or GitHub control, so no
 // chrome escapes the placement sweep.
-const actionNames = ['Download', 'Download for macOS', 'GitHub', 'View on GitHub']
+const actionNames = ['Download', 'Download for macOS', 'GitHub', 'Star on GitHub']
 
 function actionHrefs(queryAllByRole: ReturnType<typeof render>['queryAllByRole']) {
   return actionNames.flatMap((name) =>
