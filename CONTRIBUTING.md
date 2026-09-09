@@ -19,19 +19,35 @@ security problem, do not open an issue: see [SECURITY.md](SECURITY.md).
 
 ## Building
 
+Install Xcode 26 or later, including its macOS 26 SDK and command-line tools.
+The app runs on macOS 14 or later, but compiling it requires the newer SDK.
+Select that Xcode installation in Xcode > Settings > Locations > Command Line
+Tools before building.
+
 The Xcode project is generated and not checked in. Edit `project.yml`, never
-the `.xcodeproj`.
+the `.xcodeproj`. App builds and tests regenerate it automatically so added,
+renamed, and removed source files stay in sync.
 
 ```sh
 brew install xcodegen
-make            # lists the targets
-make build      # Debug build of the app
-make check      # both test suites: the engine (swift test) and the app bundle
+make                       # lists the targets
+make build SIGNING=adhoc    # Debug build without a Developer ID certificate
+make check                 # both test suites: the engine and the app bundle
 ```
 
+Use `make release SIGNING=adhoc` for a Release build, or `make markers
+SIGNING=adhoc` to also check it for debug markers. Build products and the
+incremental build cache stay in `DerivedData/` within each checkout.
+
+Ad-hoc builds are for local testing only. Rebuilding can require granting
+Accessibility permission again. These commands only build the app; they do
+not install or launch it. The default, `SIGNING=developer-id`, preserves the
+project's maintainer Developer ID certificate and team settings.
+
 `make test-app` runs the app suite without launching the app, so it is safe
-with monitors attached. The engine suite is fast whole; do not filter it. Both
-suites and a Release build run in CI on every pull request.
+with monitors attached. The engine suite is fast whole; do not filter it.
+App changes run both suites and a Release build in CI. Documentation and site
+changes receive explicit gate results for the checks relevant to their scope.
 
 For a hardware smoke test with no UI, `cd CandelaKit && swift run
 candela-probe` prints the usage. It covers brightness, volume, contrast, DDC

@@ -17,61 +17,54 @@ SHELL := /bin/bash
 
 DD       ?= DerivedData
 PROJ     := Candela.xcodeproj
-PBXPROJ  := $(PROJ)/project.pbxproj
 SCHEME   := Candela
 APPTESTS := CandelaAppTests
 XCB      := xcodebuild -project $(PROJ) -quiet
 REL_APP  := $(DD)/Build/Products/Release/Candela.app
 REL_BIN  := $(REL_APP)/Contents/MacOS/Candela
 
-# The Release debug-marker gate. The control MUST be found or the method is
-# broken and a zero marker count means nothing: a check whose failure mode is
-# silence is not a check. The control string is 31 bytes, clearing the 16-byte
-# floor below which `strings` cannot see a Swift literal at all.
-# The marker is a PREFIX. CANDELA_DEBUG alone is 13 bytes, inline-stored, and
-# `strings` can never emit it, so that grep could not fail; and the one switch
-# that ever reached a Release build was CANDELA_TOOLBAR_STYLE, which no
-# CANDELA_DEBUG grep would match. Every Mach-O in the bundle is scanned, not
-# just the main binary. All real switches are #if DEBUG-gated, so any hit in a
-# Release Mach-O is a defect.
-CONTROL := Where this display has been lit
-MARKER  := CANDELA_
+# Keep the project's Developer ID settings unless local ad-hoc signing is
+# explicitly requested. Clearing Release's timestamp flag also avoids needing
+# Apple's timestamp service for a contributor build.
+SIGNING ?= developer-id
+ifeq ($(SIGNING),developer-id)
+APP_SIGNING :=
+else ifeq ($(SIGNING),adhoc)
+APP_SIGNING := CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= OTHER_CODE_SIGN_FLAGS=
+else
+$(error Invalid SIGNING '$(SIGNING)'; use SIGNING=developer-id or SIGNING=adhoc)
+endif
 
 .PHONY: help build release test test-app check markers regen probe conform clean
 
 help:
 	@echo "Candela targets            (DD=$(DD))"
 	@echo ""
-	@echo "  make build       Debug build of the app"
-	@echo "  make release     Release build of the app"
+	@echo "  make build       Debug build of the app       (SIGNING=$(SIGNING))"
+	@echo "  make release     Release build of the app     (SIGNING=$(SIGNING))"
 	@echo "  make test        CandelaKit engine suite      (hardware-free)"
 	@echo "  make test-app    CandelaAppTests bundle       (host-free, safe with panels attached)"
 	@echo "  make check       Both suites"
 	@echo "  make markers     Release build + debug-marker gate with its positive control"
 	@echo "  make probe A='list'      candela-probe (run with no A= for its usage)"
 	@echo "  make conform     Platform-conformance suite; the exit code is the verdict"
-	@echo "  make regen       Force xcodegen generate"
+	@echo "  make regen       Run xcodegen generate"
 	@echo "  make clean       Remove $(DD)/ and CandelaKit/.build"
 	@echo ""
-	@echo "The xcodeproj regenerates automatically when project.yml is newer."
+	@echo "Contributors: make build SIGNING=adhoc (also works with release and markers)."
+	@echo "The xcodeproj regenerates before each app build or test to track source changes."
 
 # Generated and gitignored: never edit the xcodeproj by hand, edit project.yml.
-# Making it a real dependency is what stops a stale project from failing a build
-# for a reason that looks like a code error. It did exactly that on 2026-08-19:
-# project.yml carried the Sparkle merge, the generated project did not, and the
-# build failed with "cannot find 'UpdaterModel' in scope".
-$(PBXPROJ): project.yml
-	@echo "==> project.yml is newer than the generated project, regenerating"
-	@xcodegen generate
-
+# Directory membership can change without project.yml changing. Regenerate on
+# every app operation so additions, renames, and deletions reach both targets.
 regen:
 	@xcodegen generate
 
-build: $(PBXPROJ)
-	$(XCB) -scheme $(SCHEME) -configuration Debug -derivedDataPath $(DD) build
+build: regen
+	$(XCB) -scheme $(SCHEME) -configuration Debug -derivedDataPath $(DD) $(APP_SIGNING) build
 
-release: $(PBXPROJ)
-	$(XCB) -scheme $(SCHEME) -configuration Release -derivedDataPath $(DD) build
+release: regen
+	$(XCB) -scheme $(SCHEME) -configuration Release -derivedDataPath $(DD) $(APP_SIGNING) build
 
 # The engine suite is hardware-free and fast whole, so it is never worth
 # filtering: the saving is negligible and a filter can hide a regression
@@ -86,7 +79,7 @@ test:
 # prints "** TEST SUCCEEDED **" and exits 0 having executed zero tests
 # [MEASURED 2026-08-19, the same positive control the app-test-target work used].
 # The only honest evidence is the "Test run with N tests" line with N > 0.
-test-app: $(PBXPROJ)
+test-app: regen
 	@out=$$(xcodebuild -project $(PROJ) -scheme $(APPTESTS) -destination 'platform=macOS' \
 	          -derivedDataPath $(DD) test 2>&1); rc=$$?; \
 	summary=$$(echo "$$out" | grep -E "Test run with [0-9]+ test" | tail -1); \
@@ -104,37 +97,7 @@ test-app: $(PBXPROJ)
 check: test test-app
 
 markers: release
-	@set -euo pipefail; \
-	if [ ! -x "$(REL_BIN)" ]; then \
-	  echo "FAIL: no Release binary at $(REL_BIN)"; exit 1; \
-	fi; \
-	ctl=$$(strings -a "$(REL_BIN)" | grep -c "$(CONTROL)" || true); \
-	if [ "$$ctl" -eq 0 ]; then \
-	  echo "FAIL: positive control found nothing in $(REL_BIN)."; \
-	  echo "      The grep method or the path is wrong, so a clean marker"; \
-	  echo "      result would mean nothing. Fix the method, do not ship it."; \
-	  exit 1; \
-	fi; \
-	machos=$$(find "$(REL_APP)" -type f -print0 | xargs -0 file \
-	          | grep "Mach-O" | cut -d: -f1 \
-	          | sed 's/ (for architecture.*$$//' | sort -u); \
-	if [ -z "$$machos" ]; then \
-	  echo "FAIL: no Mach-O files found under $(REL_APP); the scan is broken."; exit 1; \
-	fi; \
-	nbin=0; hits=0; \
-	while IFS= read -r b; do \
-	  nbin=$$((nbin + 1)); \
-	  n=$$(strings -a "$$b" | grep -c "$(MARKER)" || true); \
-	  if [ "$$n" -ne 0 ]; then \
-	    hits=$$((hits + n)); \
-	    echo "FAIL: $$n debug marker(s) matching '$(MARKER)*' in $$b:"; \
-	    strings -a "$$b" | grep "$(MARKER)" | sort -u | sed 's/^/        /'; \
-	  fi; \
-	done <<< "$$machos"; \
-	[ "$$hits" -eq 0 ] || exit 1; \
-	echo "markers: control found ($$ctl hits), no '$(MARKER)*' in any of $$nbin Mach-Os. OK"; \
-	echo "         NOTE: strings cannot see a Swift literal of 15 bytes or fewer;"; \
-	echo "         name debug switches CANDELA_DEBUG_<thing> so they clear 16."
+	@tools/build/check-release-markers.sh "$(REL_APP)"
 
 A ?=
 probe:

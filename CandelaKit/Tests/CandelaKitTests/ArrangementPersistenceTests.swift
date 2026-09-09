@@ -221,7 +221,7 @@ struct ArrangementPersistenceTests {
     let object = try #require(
       try JSONSerialization.jsonObject(with: data) as? [String: Any]
     )
-    #expect(object["version"] as? Int == 1)
+    #expect(object["version"] as? Int == 2)
     let entries = try #require(object["entries"] as? [[String: Any]])
     #expect(Set(entries[0].keys) == ["identity", "x", "y", "width", "height"])
   }

@@ -10,9 +10,6 @@ on:
       - '.github/workflows/site.yml'
   pull_request:
     branches: [main]
-    paths:
-      - 'site/**'
-      - '.github/workflows/site.yml'
   workflow_dispatch:
 
 permissions:
@@ -23,7 +20,24 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      site: ${{ steps.scope.outputs.site }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Test suite selection and result handling
+        run: python3 tools/ci/test_verification.py
+      - name: Select suites
+        id: scope
+        run: python3 tools/ci/verification.py scope >> "$GITHUB_OUTPUT"
+
   site:
+    needs: scope
+    if: needs.scope.outputs.site == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -51,3 +65,16 @@ jobs:
       # build time and is where a broken import or a bad asset path surfaces.
       - name: Build
         run: npm run build
+
+  verification:
+    name: Site verification
+    if: ${{ always() }}
+    needs: [scope, site]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require the selected site job to pass
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 tools/ci/verification.py gate site
