@@ -88,6 +88,36 @@ struct DDCValueControllerTests {
     func recordedWrites() -> [(command: UInt8, value: UInt16)] { writes }
   }
 
+  /// A panel whose registers answer differently: neither fake above can, and the
+  /// skip pin needs the value register silent while the mute register replies.
+  ///
+  /// `@unchecked Sendable` is not needed: an actor confines the state, and the
+  /// controller awaits every call.
+  private actor PerCommandDDC: DDCWriting {
+    private var answers: [UInt8: (current: UInt16, max: UInt16)]
+    private var readsByCommand: [UInt8: Int] = [:]
+    private var writes: [(command: UInt8, value: UInt16)] = []
+
+    init(_ answers: [UInt8: (current: UInt16, max: UInt16)]) { self.answers = answers }
+
+    func write(command: UInt8, value: UInt16) async -> Bool {
+      writes.append((command, value))
+      return true
+    }
+
+    func read(command: UInt8) async -> (current: UInt16, max: UInt16)? {
+      readsByCommand[command, default: 0] += 1
+      return answers[command]
+    }
+
+    func setAnswer(_ answer: (current: UInt16, max: UInt16)?, for command: UInt8) {
+      answers[command] = answer
+    }
+
+    func reads(of command: UInt8) -> Int { readsByCommand[command, default: 0] }
+    func recordedWrites() -> [(command: UInt8, value: UInt16)] { writes }
+  }
+
   // MARK: - Seeding
 
   @Test func volumeSeedsTheForkDefaultOfTwelvePointFivePercent() {
@@ -692,6 +722,22 @@ struct DDCValueControllerTests {
     #expect(harness.prefs.muted)
   }
 
+  /// The same rule for this controller's `readMax`: the staleness fence drops
+  /// the VALUE a user write superseded, never the panel's reported scale, which
+  /// is not about intent at all. Dropped, later writes scale against the assumed
+  /// 100 until some other pass happens to answer.
+  @Test func aValueWriteDuringTheReadStillKeepsThePanelsScale() async {
+    let scripted = ScriptedDDC(reads: [(current: 30, max: 80)], hookAfterRead: 1)
+    let harness = Harness(command: .contrast, savedValue: 0.6, writer: scripted) { prefs in
+      prefs.startupAction = .read
+    }
+    let controller = harness.controller
+    await scripted.setHook { await MainActor.run { controller.setValue(0.9) } }
+    await harness.controller.refreshFromHardware()
+    #expect(harness.controller.value == 0.9, "the write is the newer intent")
+    #expect(harness.controller.readMax == 80)
+  }
+
   @Test func minimalPollingReadsExactlyOnce() async {
     // A bug that reads once regardless of tries — or five times under
     // .minimal — fails one of this pair.
@@ -874,9 +920,14 @@ struct DDCValueControllerTests {
     #expect(harness.controller.readMax == nil) // nothing was learned; 100 is assumed
   }
 
-  @Test func asilentBusPublishesNoReply() async {
+  /// Two passes, unlike the zeros answer above: the Dell has answered silence on
+  /// a plug-in pass and a clean frame on the next. `BrightnessReadSkipTests` pins
+  /// the rule.
+  @Test func asilentBusPublishesNoReplyOnTheSecondPass() async {
     let harness = Harness(command: .contrast, savedValue: 0.6) { $0.startupAction = .read }
     await harness.controller.refreshFromHardware() // FakeDDC(readResult: nil) by default
+    #expect(harness.controller.readEvidence == .notAttempted)
+    await harness.controller.refreshFromHardware()
     #expect(harness.controller.readEvidence == .noReply)
   }
 
@@ -957,6 +1008,10 @@ struct DDCValueControllerTests {
   /// this suite green: the case that separates them is a zeros answer followed by
   /// a pass that hears nothing, where the carried seed republishes `.allZeros`.
   /// Within a pass attempts still fold worst-wins; only the seed is per-pass.
+  ///
+  /// Zeros and silence are different findings, so the zeros pass does not count
+  /// towards the silence after it: taking them as a pair flipped this panel to
+  /// "Not answering" on one bad pass. The zeros verdict stands until the second.
   @Test func apassThatHearsOnlySilenceReportsSilenceNotTheOldZeros() async {
     let harness = Harness(command: .contrast, savedValue: 0.6) { $0.startupAction = .read }
     await harness.fake.setReadResult((current: 0, max: 0))
@@ -965,7 +1020,44 @@ struct DDCValueControllerTests {
 
     await harness.fake.setReadResult(nil) // the bus goes quiet: every try returns nil
     await harness.controller.refreshFromHardware()
+    #expect(harness.controller.readEvidence == .allZeros)
+
+    await harness.controller.refreshFromHardware()
     #expect(harness.controller.readEvidence == .noReply)
+  }
+
+  /// The read skip belongs to the VALUE register. VCP 0x8D is a different
+  /// register with its own answer, so a latched 0x62 must not stop the mute
+  /// readback: it is the only thing that tells this controller what state the
+  /// panel's own mute command is in, and a pass that skips it leaves the flag
+  /// standing on nothing.
+  ///
+  /// The readback adopts `isMuted` and nothing else. No write leaves this pass,
+  /// which the recorded writes assert.
+  @Test func alatchedValueRegisterStillReadsTheMuteRegister() async {
+    let panel = PerCommandDDC([VCP.audioMuteScreenBlank: (current: 2, max: 2)]) // unmuted
+    let harness = Harness(command: .volume, savedValue: 0.5, writer: panel) { prefs in
+      prefs.startupAction = .read
+      prefs.enableMuteUnmute = true // wire mode: the mute lives on 0x8D
+    }
+    // Two silent passes on 0x62 and the value register is latched.
+    await harness.controller.refreshFromHardware()
+    await harness.controller.refreshFromHardware()
+    #expect(harness.controller.readEvidence == .noReply)
+    #expect(harness.controller.isMuted == false)
+    let valueReads = await panel.reads(of: VCP.audioSpeakerVolume)
+    #expect(valueReads > 0, "control: the value register was asked before the latch")
+
+    // The panel is muted from its own buttons while the value register stays quiet.
+    await panel.setAnswer((current: 1, max: 2), for: VCP.audioMuteScreenBlank)
+    await harness.controller.refreshFromHardware()
+    #expect(
+      await panel.reads(of: VCP.audioSpeakerVolume) == valueReads,
+      "the latch still spares the value register"
+    )
+    #expect(harness.controller.isMuted, "the mute register was asked and its answer adopted")
+    #expect(harness.prefs.muted)
+    #expect(await panel.recordedWrites().isEmpty, "a readback writes nothing")
   }
 
   // MARK: - The mute queue's own drain (the register the strand is about)

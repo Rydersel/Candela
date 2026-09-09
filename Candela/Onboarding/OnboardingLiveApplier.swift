@@ -168,7 +168,7 @@ final class OnboardingLiveApplier {
       // auto-retries, so the model stays counting and the next click retries
       // through the same path. Not `applyFailed`: that is for an apply that
       // never started, and it would abandon a preview still on the glass.
-      break
+      processCoordinatorState()
     case .stale:
       // The answer named a preview that had already resolved (an expiry
       // racing the click). The coordinator's own handling ran; read what it
@@ -208,6 +208,20 @@ final class OnboardingLiveApplier {
     }
   }
 
+  /// The engine's answer in the flow model's vocabulary. A commit that did not
+  /// land but could not be read back is its own case: a failed readback is not
+  /// evidence the size arrived, so it must not map to nil.
+  private static func achievedSize(
+    _ commit: DisplayConfigError.UnhonouredCommit?
+  ) -> OnboardingAchievedSize? {
+    guard let commit else { return nil }
+    guard let achieved = commit.achieved else { return .unreadable }
+    return .size(
+      width: achieved.logicalWidth, height: achieved.logicalHeight,
+      refreshHz: achieved.refreshHz
+    )
+  }
+
   private func processCoordinatorState() {
     guard let pendingID = pendingDisplayID else { return }
     let coordinator = model.displayModes
@@ -221,7 +235,10 @@ final class OnboardingLiveApplier {
         answer(keeping: keeping)
         return
       }
-      flow?.applyCountdownTicked(secondsRemaining: preview.secondsRemaining)
+      flow?.applyCountdownTicked(
+        secondsRemaining: preview.secondsRemaining,
+        achieved: Self.achievedSize(preview.unhonouredCommit)
+      )
       return
     }
     // No outstanding preview for this display. While an answer is in flight

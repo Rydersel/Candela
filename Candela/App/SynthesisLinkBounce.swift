@@ -163,7 +163,8 @@ struct BouncingSynthesisDriver: SynthesisDriving {
       // Session scope, matching the engine's own applies.
       try configurator.apply(target, to: displayID, scope: .session)
     } catch {
-      Self.log.info("synthesis.retime could not run for display \(displayID): \(String(describing: error), privacy: .public)")
+      // "Did not land": the apply also throws on a commit the display did not honour.
+      Self.log.info("synthesis.retime did not land on display \(displayID): \(String(describing: error), privacy: .public)")
       return false
     }
     // THE RETURN CODE IS NOT THE EVIDENCE. The apply cross-checks the RESOLVED
@@ -238,8 +239,9 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     do {
       try configurator.apply(ownMode, to: displayID, scope: .session)
     } catch {
+      // "Did not put back": the apply also throws on a commit the display did not honour.
       Self.log.error("""
-      synthesis.restore could not put display \(displayID, privacy: .public) back on \
+      synthesis.restore did not put display \(displayID, privacy: .public) back on \
       \(ownMode.logicalWidth, privacy: .public)x\(ownMode.logicalHeight, privacy: .public): \
       \(String(describing: error), privacy: .public)
       """)

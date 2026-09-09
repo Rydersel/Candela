@@ -85,17 +85,25 @@ public final class DDCValueController: PendingWireDraining {
   /// them: the display-level verdict is `DDCReadEvidence.worst` of the three,
   /// folded at whatever reads them.
   ///
-  /// Scope: the most recent pass that actually asked the panel something,
-  /// folded worst-wins over the FAILED attempts within that pass, so a late
-  /// `continue` cannot erase an earlier zeros observation and a pass that
-  /// returns early leaves the previous verdict standing.
+  /// Scope: the most recent pass that actually asked the panel something AND
+  /// concluded with an answer, folded worst-wins over the FAILED attempts within
+  /// that pass, so a late `continue` cannot erase an earlier zeros observation
+  /// and a pass that returns early leaves the previous verdict standing.
   ///
   /// Deliberately NOT a fold across passes and retries. DDC reads are flaky, so
   /// the common healthy case is attempt 1 returning nil and attempt 2
   /// answering; folding those publishes "this display does not reply" about a
   /// panel that just replied. A successful attempt supersedes the failures
   /// before it in its pass.
+  ///
+  /// A pass that ends in silence does not supersede this either: `DDCReadSkipLatch`
+  /// decides, on two consecutive silent passes. Wake and reconfiguration clear
+  /// only the skip; a different panel or read register also resets its evidence.
   public private(set) var readEvidence: DDCReadEvidence = .notAttempted
+
+  /// Whether this register is still worth asking about. Its own, never the
+  /// display's fold: volume can be silent on a panel whose brightness answers.
+  @ObservationIgnored private var readSkip = DDCReadSkipLatch()
 
   public init(
     writer: any DDCWriting,
@@ -381,70 +389,118 @@ public final class DDCValueController: PendingWireDraining {
     return true
   }
 
-  /// `.read`: validated DDC readback. `(0, 0)` and `max == 0` are FAILED
-  /// reads — the MAG341C answers every read with zeros, and the fork's
-  /// unvalidated read clobbers saved values to 0.
-  public func refreshFromHardware() async {
+  /// `.read`: validated DDC readback. `max == 0` is a FAILED read, not a value
+  /// of zero: the fork's unvalidated read clobbered saved values to 0.
+  ///
+  /// The value read is skipped after two silent passes (`DDCReadSkipLatch`). It
+  /// matters more here than for brightness: this loop spends `pollingTries`
+  /// transactions per pass, which is also why a refusal ends the loop on the try
+  /// that carried it. The skip covers that register alone; the VCP 0x8D mute
+  /// readback asks a different register, and a latched value register says
+  /// nothing about it.
+  ///
+  /// `settling` marks a pass a topology change triggered, where the wire is still
+  /// renegotiating and a silence is evidence about the moment rather than the
+  /// panel. Such a pass is dropped whole: not counted, not published, the skip
+  /// untouched. Zeros and frames publish as they always did.
+  public func refreshFromHardware(settling: Bool = false) async {
     guard prefs.startupAction == .read, isAvailable else { return }
     let tries = prefs.pollingTries
     guard tries > 0 else { return }
-    let tuning = prefs.tuning(for: command)
-    // Fork parity: reads use only the FIRST remap code.
-    let readCode = tuning.remapCodes.first ?? command.code
-    // Staleness fence (the I9 doctrine): the read loop can
-    // span seconds on a wedged bus — a slider drag or key that lands
-    // mid-flight must win over the stale read, INCLUDING in the persisted
-    // store. Any submit bumps the generation, so a mismatch means user
-    // input superseded this read.
-    let issuedAtStart = issuedGeneration
-    // Captured HERE, not after the value loop: a toggleMute
-    // landing mid-value-loop bumps the mute generation, and a later capture
-    // would blind the 0x8D-readback guard to it — the readback could then
-    // setMuted(false)+persist over the user's fresh mute.
+    // Captured before the value loop below: a toggleMute landing mid-loop bumps
+    // the mute generation, and a later capture would blind the 0x8D-readback
+    // guard to it; the readback could then setMuted(false) and persist over the
+    // user's fresh mute.
     let muteIssuedAtStart = issuedMuteGeneration
-    // This pass's own evidence, folded from `.notAttempted` rather than from
-    // what the last pass concluded (see `readEvidence`). Only the FAILED
-    // attempts fold, worst-wins; a success supersedes them outright.
-    var passEvidence = DDCReadEvidence.notAttempted
-    for _ in 0 ..< tries {
-      // Two guards, not one: a silent bus and a panel that answers zeros
-      // are different facts. Only the second is the write-only signature, and
-      // it is the one the MAG 341C produces on every one of `tries` attempts.
-      guard let result = await writer.read(command: readCode) else {
-        passEvidence = DDCReadEvidence.worse(passEvidence, .noReply)
-        readEvidence = passEvidence
-        continue
+    let tuning = prefs.tuning(for: command)
+    // Reads use only the first remap code; trailing codes affect writes alone.
+    let readCode = tuning.remapCodes.first ?? command.code
+    bindReadRegister(to: readCode)
+    // The skip is the VALUE register's own. VCP 0x8D is a separate register with
+    // a separate answer, so a latched 0x62 must not stop the mute readback at
+    // the end of this pass.
+    if !readSkip.skipsRead {
+      let registerAtStart = readSkip.registerGeneration
+      // Staleness fence. A read that began before a newer write must not
+      // overwrite it: the loop can span seconds on a wedged bus, and a slider
+      // drag or key that lands mid-flight must win over the stale read,
+      // INCLUDING in the persisted store. Any submit bumps the generation, so a
+      // mismatch means user input superseded this read.
+      let issuedAtStart = issuedGeneration
+      // This pass's own evidence, folded from `.notAttempted` rather than from
+      // what the last pass concluded (see `readEvidence`). Only the FAILED
+      // attempts fold; a success supersedes them outright.
+      var passEvidence = DDCReadEvidence.notAttempted
+      // The latch counts passes, not attempts: the retries are the reliability
+      // mechanism.
+      var answered = false
+      for _ in 0 ..< tries {
+        // Silence and zeros are different facts; the transport tells them apart, and
+        // `outcome.evidence` is the one place `max == 0` folds into zeros.
+        let outcome = await writer.readOutcome(command: readCode)
+        // An old register's answer must not affect the new register's latch,
+        // evidence or scale, even if preferences changed without a refresh.
+        bindReadRegister(to: prefs.tuning(for: command).remapCodes.first ?? command.code)
+        guard readSkip.registerGeneration == registerAtStart else { return }
+        // A refusal ends the pass the way it ends the transport's own ladder: the
+        // panel read the request and said this register is not one it carries,
+        // and no retry can change that.
+        //
+        // The ordering is the transport's, not `DDCReadEvidence.worse`: a
+        // refusal supersedes a silence and loses to zeros, because the more
+        // specific observation about the register wins and a panel that put
+        // zeros on the bus said something about every code. `worse` ranks a
+        // refusal below both silences, which is right for the fold ACROSS a
+        // display's controllers, where a refused register must never speak for
+        // the display. Inside the pass it is wrong twice over: one contended try
+        // ahead of the refusal would publish `.noReply` about a panel that
+        // replied every time, and the latch would then close on a finding the
+        // panel never gave.
+        if outcome.evidence == .refused {
+          passEvidence = passEvidence == .allZeros ? .allZeros : .refused
+          break
+        }
+        guard let result = outcome.value, result.max > 0 else {
+          // Held, not published: the latch below decides once the pass concludes.
+          passEvidence = DDCReadEvidence.worse(passEvidence, outcome.evidence)
+          continue
+        }
+        // Recorded BEFORE the staleness fence: the panel answered, and that is
+        // true whether or not user input superseded the value we were about to
+        // adopt. Returning here without recording would hide a good panel behind
+        // a race. The latch is recorded here for the same reason.
+        readSkip.record(.answered)
+        readEvidence = .answered
+        answered = true
+        // The max is real information on every validated read (the loop guard
+        // proved `max > 0`), and it is a fact about the panel rather than about
+        // anyone's intent, so it is learned before BOTH exits below: the staleness
+        // fence, which supersedes the value alone, and the artifact skip, which
+        // concerns `current` only. Either one taking the max with it leaves
+        // `readMax` nil and later writes scaled against the assumed 100.
+        readMax = Int(result.max)
+        guard issuedGeneration == issuedAtStart else { return }
+        // Muted default-strategy register 0 is the mute ARTIFACT, not
+        // information: adopting/persisting it would destroy the
+        // unmute restore target.
+        if command == .volume, isMuted, result.current == 0 { break }
+        let adopted = DimmingMath.ddcToValue(
+          result.current,
+          minDDC: Double(tuning.minDDCOverride),
+          maxDDC: Double(tuning.effectiveMaxDDC(readMax: Int(result.max))),
+          curve: tuning.curveMultiplier,
+          invert: tuning.invert
+        )
+        value = adopted
+        persist(adopted)
+        break
       }
-      guard result.max > 0 else {
-        passEvidence = DDCReadEvidence.worse(passEvidence, .allZeros)
-        readEvidence = passEvidence
-        continue
-      }
-      // Recorded BEFORE the staleness fence: the panel answered, and that is
-      // true whether or not user input superseded the value we were about to
-      // adopt. Returning here without recording would hide a good panel behind
-      // a race.
-      readEvidence = .answered
-      guard issuedGeneration == issuedAtStart else { return }
-      // The max is real information on every validated read (the loop guard
-      // proved `max > 0`); learn it BEFORE the artifact skip below, which
-      // concerns `current` only — otherwise the skip path leaves `readMax`
-      // nil and later writes scale against the assumed 100.
-      readMax = Int(result.max)
-      // Muted default-strategy register 0 is the mute ARTIFACT, not
-      // information: adopting/persisting it would destroy the
-      // unmute restore target.
-      if command == .volume, isMuted, result.current == 0 { break }
-      let adopted = DimmingMath.ddcToValue(
-        result.current,
-        minDDC: Double(tuning.minDDCOverride),
-        maxDDC: Double(tuning.effectiveMaxDDC(readMax: Int(result.max))),
-        curve: tuning.curveMultiplier,
-        invert: tuning.invert
-      )
-      value = adopted
-      persist(adopted)
-      break
+      // No answer this pass. Zeros publish at once; a lone silence waits for a
+      // second. A settling pass that only ever heard silence is dropped instead:
+      // the latch never sees it, so it cannot pair with a contended pass to brand
+      // a panel that answers.
+      if !answered, !(settling && passEvidence == .noReply),
+         readSkip.record(passEvidence) { readEvidence = passEvidence }
     }
     // The strategy in force, not the pref: 0x8D is where this display's mute
     // lives only if the display takes 0x8D. Asking a register the display
@@ -577,6 +633,7 @@ public final class DDCValueController: PendingWireDraining {
       boundPanelIdentity = panelIdentity
       readMax = nil
       readEvidence = .notAttempted
+      readSkip.clear()
     }
     coalescer.resetDuplicateState()
     muteCoalescer.resetDuplicateState()
@@ -598,6 +655,19 @@ public final class DDCValueController: PendingWireDraining {
   public func resetWriteMemo() {
     coalescer.resetDuplicateState()
     muteCoalescer.resetDuplicateState()
+  }
+
+  private func bindReadRegister(to code: UInt8) {
+    guard readSkip.bind(to: code) else { return }
+    readEvidence = .notAttempted
+    readMax = nil
+  }
+
+  /// Reached through the display's brightness controller, which owns the wire's
+  /// observers. The skip only: the read pass runs before the reconfiguration fans
+  /// out, so dropping the verdict here wiped what it had just earned [MEASURED].
+  public func noteReadWorthRetrying() {
+    readSkip.clear()
   }
 
   /// Whether the wire is open right now: the same gate the coalescer consults

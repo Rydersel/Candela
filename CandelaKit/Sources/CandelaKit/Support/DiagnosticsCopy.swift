@@ -9,8 +9,9 @@ import Foundation
 ///
 /// The three that matter most, all of them defects this feature exists to
 /// prevent rather than hypotheticals:
-/// - readback has THREE answers, not two: the display answered, it is not
-///   answering, or it answered something that could not be read;
+/// - readback has FOUR answers, not two: the display answered, it is not
+///   answering, it answered something that could not be read, or it answered
+///   that it does not carry the code;
 /// - a brightness maximum that was READ from the display never reads like one
 ///   that was assumed;
 /// - volume unavailable because the DISPLAY denied it is a different sentence
@@ -95,7 +96,9 @@ public enum DiagnosticsCopy {
       return "\(app) has not sent anything to this display yet."
     }
     return switch evidence {
-    case .answered, .notAttempted:
+    // A refusal earns no caveat here: it names a register the display does not
+    // carry, which says nothing about the brightness command just accepted.
+    case .answered, .notAttempted, .refused:
       "Brightness is being sent to this display and accepted."
     case .allZeros:
       "Brightness is being sent to this display and accepted, but it never answers a read."
@@ -267,25 +270,39 @@ public enum DiagnosticsCopy {
   /// some hardware, it explains every other value on the page, and a user who
   /// has it needs the words to search for.
   ///
-  /// THREE outcomes past "not asked", and none of them may be folded together:
-  /// answering, never answering, and not replying are three different faults
-  /// with three different next steps.
+  /// FOUR outcomes past "no answer recorded", and none of them may be folded
+  /// together: answering, never answering, not replying and refusing the code are
+  /// four different findings with four different next steps. The refusal is the
+  /// one that is not a fault at all.
+  ///
+  /// The unasked arm says "has not recorded an answer" rather than "has not
+  /// read": one silence is held rather than published, so this sentence is
+  /// reachable on a display that was asked and said nothing back.
   public static func readEvidence(_ evidence: DDCReadEvidence, app: String) -> String {
     switch evidence {
-    case .notAttempted: "\(app) has not read from this display"
+    case .notAttempted: "\(app) has not recorded an answer from this display yet"
     case .answered: "This display answers reads"
     case .allZeros: "Write-only: this display takes commands but never answers a read"
     case .noReply: "This display did not reply to a read"
+    case .refused: "This display answered that it does not carry the value \(app) asked for"
     }
   }
 
   /// The SHORT verdict: the hub's chevron preview and the report's `readback:`
   /// field. `readEvidence(_:app:)` says the same thing at length; both come off
   /// the same worst-of-three evidence, so they cannot disagree.
+  ///
+  /// A refusal summarises as "Answers reads" on purpose, the one arm where this
+  /// is broader than the long sentence. It is a whole-DISPLAY summary and the
+  /// display replied; worst-of-three resolves to a refusal only when nothing
+  /// else was asked, so a display whose brightness command is off and whose
+  /// volume register is refused would otherwise be summarised by the one
+  /// register it does not carry. WHICH register that was stays on the page, in
+  /// `readEvidence(_:app:)`, and in the per-command read log.
   public static func readbackVerdict(_ evidence: DDCReadEvidence) -> String {
     switch evidence {
-    case .notAttempted: "Not asked yet"
-    case .answered: "Answers reads"
+    case .notAttempted: "No answer recorded yet"
+    case .answered, .refused: "Answers reads"
     case .allZeros: "Write-only"
     case .noReply: "Not answering"
     }
@@ -296,6 +313,10 @@ public enum DiagnosticsCopy {
   /// path or with the brightness command turned off, and the pass may not have
   /// run yet, so the flag is false without anything having asked. "The display
   /// did not report one" there is an absence claim about a probe that never ran.
+  ///
+  /// The unasked arm claims no more than the record holds, for the reason
+  /// `readEvidence` does: a held silence leaves the evidence at the floor, so
+  /// "has not asked" would be a claim about the wire this cannot make.
   ///
   /// A maximum that was READ says so outright, and never wears the "Assumed" the
   /// other two arms carry.
@@ -310,7 +331,7 @@ public enum DiagnosticsCopy {
       return "This display reported a maximum of \(maxValue)"
     }
     if evidence == .notAttempted {
-      return "Assumed 100: \(app) has not asked this display for its scale"
+      return "Assumed 100: \(app) has not recorded an answer about this display's scale"
     }
     return "Assumed 100: the display did not report one"
   }

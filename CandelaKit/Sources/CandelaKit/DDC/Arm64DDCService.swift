@@ -1,5 +1,10 @@
 import CandelaPrivateAPIs
+import CoreGraphics
 import os
+
+/// One line per DDC read. Nothing else reports which of the two silent verdicts
+/// a panel earned, and that is the whole of a write-only panel's signature.
+let ddcReadLog = Logger(subsystem: "com.rydersel.Candela", category: "ddcread")
 
 /// Serializes DDC I/O for one display's IOAVService (spec §5: serial per-display actor).
 public actor Arm64DDCService: DDCWriting {
@@ -10,30 +15,68 @@ public actor Arm64DDCService: DDCWriting {
   }
 
   private let box: ServiceBox
+  /// This display's bus floor, shared with every service ever built for it: a
+  /// service retired mid-drain cannot spend the new one's floor.
+  private let pacer: DDCBusPacer
+  /// Hashed: a raw persistence key can embed the panel's serial number and
+  /// these log lines are `.public`.
+  private let logTag: String
 
-  private init(box: ServiceBox) {
+  private init(box: ServiceBox, pacer: DDCBusPacer, logTag: String) {
     self.box = box
+    self.pacer = pacer
+    self.logTag = logTag
   }
 
-  nonisolated static func create(service: IOAVService?) -> Arm64DDCService {
-    Arm64DDCService(box: ServiceBox(service: service))
+  /// `displayID` keys the shared pacer; `logTag` is `DisplayLogging.tag(for:)` of
+  /// the persistence key, so a read verdict is attributable with two panels.
+  nonisolated static func create(
+    service: IOAVService?, displayID: CGDirectDisplayID, logTag: String
+  ) -> Arm64DDCService {
+    Arm64DDCService(
+      box: ServiceBox(service: service),
+      pacer: DDCBusPacerRegistry.shared.pacer(for: displayID),
+      logTag: logTag
+    )
   }
 
   public func write(command: UInt8, value: UInt16) async -> Bool {
-    // start/end pair also exposes the per-transaction duration (~30 ms).
+    // start/end pair also exposes the per-transaction duration: ~14 ms, from
+    // the MAG's nine-write ramp measured at 0.129 s.
     // `.info`: the default level persists every one of these to disk at drag
     // rate, and `.debug` is invisible to the `log show` the regression rig parses.
     dragPerfLog.info("ddc.write.start value=\(value)")
-    let ok = Arm64DDC.write(service: box.service, command: command, value: value)
+    let ok = Arm64DDC.write(service: box.service, command: command, value: value, pacer: pacer)
     dragPerfLog.info("ddc.write.end value=\(value) ok=\(ok)")
     return ok
   }
 
   public func read(command: UInt8) async -> (current: UInt16, max: UInt16)? {
-    Arm64DDC.read(service: box.service, command: command)
+    await readOutcome(command: command).value
+  }
+
+  public func readOutcome(command: UInt8) async -> DDCReadOutcome {
+    let outcome = Arm64DDC.readOutcome(service: box.service, command: command, pacer: pacer)
+    // The only instrument for which branch a panel takes. Reads happen on
+    // menu open or wake, not at drag rate, so one line each is cheap; `.info`
+    // because `log show` does not persist `.debug`.
+    switch outcome {
+    case let .frame(current, max):
+      ddcReadLog.info("ddc.read display=\(self.logTag, privacy: .public) command=0x\(UInt(command), format: .hex) outcome=frame current=\(current) max=\(max)")
+    case .allZeros:
+      ddcReadLog.info("ddc.read display=\(self.logTag, privacy: .public) command=0x\(UInt(command), format: .hex) outcome=zeros")
+    case .noReply:
+      ddcReadLog.info("ddc.read display=\(self.logTag, privacy: .public) command=0x\(UInt(command), format: .hex) outcome=silent")
+    case .refused:
+      ddcReadLog.info("ddc.read display=\(self.logTag, privacy: .public) command=0x\(UInt(command), format: .hex) outcome=refused")
+    }
+    return outcome
   }
 
   public func readCapabilityString() async -> String? {
+    // The fragment loop paces itself, but it leaves the bus busy: without this
+    // the next write would see an idle bus and skip the floor.
+    defer { pacer.recordBusUse() }
     var bytes: [UInt8] = []
     var offset: UInt16 = 0
     // Real strings run 200–800 bytes. The caps exist so a panel that never

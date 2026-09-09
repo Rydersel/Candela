@@ -1260,8 +1260,16 @@ final class AppModel {
   /// Returns the IDs of displays that departed in this pass. A caller that
   /// JOINED an already-running pass gets `[]`, not that pass's result, which is
   /// why cleanup rides `onDisplaysDeparted` instead.
+  ///
+  /// `settling` says a topology change is what triggered this pass, so its DDC
+  /// reads run over a wire that is still renegotiating. Only the topology
+  /// consumer passes it: launch and menu close both run on a quiet bus and are
+  /// the passes a panel's read verdict is earned on. A caller that JOINS an
+  /// in-flight pass gets that pass's mode, not its own; the window is one
+  /// refresh wide and either direction of the mismatch is one pass of the
+  /// behaviour that shipped.
   @discardableResult
-  func refresh() async -> [CGDirectDisplayID] {
+  func refresh(settling: Bool = false) async -> [CGDirectDisplayID] {
     // Cleared HERE as well as inside `performRefresh`, and the piggyback is why: a
     // caller that JOINS an in-flight pass never reaches `performRefresh`, so its
     // own change would be remembered as answered until some later pass ran. Display
@@ -1272,7 +1280,7 @@ final class AppModel {
       _ = await refreshTask.value
       return []
     }
-    let task = Task { await performRefresh() }
+    let task = Task { await performRefresh(settling: settling) }
     refreshTask = task
     refreshTaskGeneration &+= 1
     let generation = refreshTaskGeneration
@@ -1330,7 +1338,7 @@ final class AppModel {
   /// controller's deinit finishes its coalescer, which lands any pending write
   /// before the drain task exits, so no explicit `waitForPendingWrites()` is
   /// needed.
-  private func performRefresh() async -> [CGDirectDisplayID] {
+  private func performRefresh(settling: Bool = false) async -> [CGDirectDisplayID] {
     // The display set is about to be re-derived, so a memoized "discovery does
     // not know this id" is no longer evidence about anything.
     discoveredPersistenceKeys.clear()
@@ -1480,24 +1488,25 @@ final class AppModel {
       // Safe mode issues NO DDC reads.
       // `BrightnessController.refreshFromHardware` is ungated on `startupAction` in
       // the engine, so the gate lands here.
-      if !safeMode { await state.controller.refreshFromHardware() }
-      await state.volume.refreshFromHardware() // no-op unless startupAction == .read
-      await state.contrast.refreshFromHardware()
+      if !safeMode { await state.controller.refreshFromHardware(settling: settling) }
+      // no-op unless startupAction == .read
+      await state.volume.refreshFromHardware(settling: settling)
+      await state.contrast.refreshFromHardware(settling: settling)
     }
     for state in kept {
       // Let any coalesced tail-write land before reading back, then resync from
       // hardware. Harmless no-op on write-only panels: the read fails its guard and
       // the last-written state stands.
       await state.controller.waitForPendingWrites()
-      if !safeMode { await state.controller.refreshFromHardware() }
+      if !safeMode { await state.controller.refreshFromHardware(settling: settling) }
       // Kept displays re-read volume and contrast too, both gated no-ops unless
       // startupAction == .read. Same drain-before-read shape as the brightness leg:
       // a queued coalescer write must not land after the read has already adopted
       // the pre-write hardware value.
       await state.volume.waitForPendingWrites()
-      await state.volume.refreshFromHardware()
+      await state.volume.refreshFromHardware(settling: settling)
       await state.contrast.waitForPendingWrites()
-      await state.contrast.refreshFromHardware()
+      await state.contrast.refreshFromHardware(settling: settling)
     }
     // Resync the built-in from its native read (cheap; a freshly created
     // controller already seeded from the same read at init). That read is native,

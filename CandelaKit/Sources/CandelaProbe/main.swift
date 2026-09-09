@@ -59,6 +59,10 @@ usage: candela-probe [--display <id>] <subcommand>
   vd online <id>                          is that display in THIS process's online list
   conform [--apply]                       assert the private-API platform assumptions; run after every macOS update
   regress [--apply] [--json <path>] [--record <dir>] [--commit <sha>] [--tools <dir>] [--debug-app <path>]  assert the app-behaviour invariants against the deployed app
+
+DDC pacing is per process: this tool keeps its own bus floor per display and
+knows nothing about the app's. One DDC writer at a time covers the probe, so
+quit or idle anything else driving the same panel before a DDC subcommand.
 """
 
 /// The DDC subcommands need a DDC-capable external display. The private-API
@@ -112,10 +116,17 @@ func parseHexByte(_ text: String) -> UInt8? {
 func ddcGet(code: UInt8, label: String) async {
   requireDDCDisplays()
   for entry in found {
-    let result = await entry.writer.read(command: code)
-    // A read failure is normal on write-only panels (the MAG 341C ACKs every
-    // write and returns all-zeros for every read), not a tool fault.
-    print("\(entry.display.name): \(label) \(result.map { "\($0.current)/\($0.max)" } ?? "read failed (panel may be write-only, or DDC is locked by HDR)")")
+    // A read failure is normal on a write-only panel, and WHICH failure is the
+    // verdict: zeros over the sentinel is a panel answering nothing, silence is
+    // no answer at all, and a refusal is the panel naming a code it does not carry.
+    let reading: String
+    switch await entry.writer.readOutcome(command: code) {
+    case let .frame(current, max): reading = "\(current)/\(max)"
+    case .allZeros: reading = "read answered with zeros (write-only panel)"
+    case .noReply: reading = "read got no reply (silent panel, or DDC is locked by HDR)"
+    case .refused: reading = "the display refused this code (it does not carry this register)"
+    }
+    print("\(entry.display.name): \(label) \(reading)")
   }
 }
 
@@ -476,8 +487,9 @@ case "modeapply":
   let before = configurator.currentMode(for: target)
   print("before: \(before.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID) \(String(format: "%g", $0.refreshHz)) Hz" } ?? "unknown")")
   print("applying: \(mode.logicalWidth)x\(mode.logicalHeight) fb \(mode.pixelWidth)x\(mode.pixelHeight) id \(mode.ioModeID) provenance \(mode.provenance) \(String(format: "%g", mode.refreshHz)) Hz")
-  do {
-    try configurator.apply(mode, to: target, scope: applyScope)
+  // Run for an unhonoured commit too: that apply MOVED the display, so what it
+  // shows and how it gets back matter more there.
+  func reportAchievedThenHold() {
     let after = configurator.currentMode(for: target)
     print("after:  \(after.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID) \(String(format: "%g", $0.refreshHz)) Hz" } ?? "unknown")")
     print("scope: \(applyScope); holding \(holdSeconds)s...")
@@ -487,6 +499,20 @@ case "modeapply":
         ? "exiting: session scope keeps the mode; put the display back."
         : "exiting: preview scope reverts now."
     )
+  }
+  do {
+    try configurator.apply(mode, to: target, scope: applyScope)
+    reportAchievedThenHold()
+  } catch let error as DisplayConfigError where error.didCommit {
+    // Not a refusal: the commit went through and the display took something
+    // else. The error's own achieved mode as well as the `after:` line, which
+    // goes through the deduplicated list and can answer "unknown".
+    let landed = error.unhonouredCommit?.achieved
+    print("""
+    apply UNHONOURED: the commit went through and the display did not take it; it reports \(landed.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) \(String(format: "%g", $0.refreshHz)) Hz" } ?? "nothing readable")
+    """)
+    reportAchievedThenHold()
+    exit(4)
   } catch {
     print("apply FAILED: \(error)")
     exit(4)

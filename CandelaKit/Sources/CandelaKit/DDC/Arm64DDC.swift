@@ -8,6 +8,80 @@ import CandelaPrivateAPIs
 let ARM64_DDC_7BIT_ADDRESS: UInt8 = 0x37 // This works with DisplayPort devices
 let ARM64_DDC_DATA_ADDRESS: UInt8 = 0x51
 
+/// The floor between two packets on one display's I2C bus, measured from the
+/// last call's return rather than paid before every packet. Paying it up front
+/// cost every command 10 ms of dead time on a transaction measured at about
+/// 14 ms, even on a bus idle for minutes; measuring keeps every gap that exists.
+///
+/// One per display for the life of the process (`DDCBusPacerRegistry`), so two
+/// panels never pace each other and two services for one panel never race.
+///
+/// `@unchecked Sendable`: both fields are confined by `lock` and the clock is a
+/// `@Sendable` closure; the static entry points and the registry share it
+/// across actors.
+final class DDCBusPacer: @unchecked Sendable {
+  private let now: @Sendable () -> UInt64
+  private let lock = NSLock()
+  private var lastCallEnd: UInt64
+
+  /// Injected clock so tests spend no real time. The bus starts SEEN, not quiet:
+  /// another writer may have used it microseconds ago, and on a write-only panel
+  /// a packet inside the floor fails silently. Costs one floor's wait per display
+  /// per process.
+  init(now: @escaping @Sendable () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }) {
+    self.now = now
+    self.lastCallEnd = now()
+  }
+
+  /// Microseconds still owed before the next packet may go out. Zero once the
+  /// bus has been quiet longer than the floor.
+  func deficit(floor: UInt32) -> UInt32 {
+    self.lock.lock()
+    defer { self.lock.unlock() }
+    let current = self.now()
+    // A clock that went backwards pays the full floor: the conservative direction.
+    let elapsed = current > self.lastCallEnd ? (current - self.lastCallEnd) / 1000 : 0
+    return elapsed >= UInt64(floor) ? 0 : floor - UInt32(elapsed)
+  }
+
+  /// Call after every I2C call on this display, whatever it returned: the bus
+  /// was busy either way.
+  func recordBusUse() {
+    self.lock.lock()
+    self.lastCallEnd = self.now()
+    self.lock.unlock()
+  }
+}
+
+/// One pacer per display, held for the life of the process. Services are rebuilt
+/// on every refresh while the retired one can still drain a queued write
+/// (`DDCCommandApplier` holds its writer as a `let`), so a per-service pacer let
+/// two pacers each believe one bus was quiet.
+///
+/// Keyed on display ID, which a replug can reassign; that costs at most one
+/// misattributed floor across an interval measured in seconds.
+/// `@unchecked Sendable`: the table is confined by `lock`.
+final class DDCBusPacerRegistry: @unchecked Sendable {
+  static let shared = DDCBusPacerRegistry()
+
+  private let lock = NSLock()
+  private var pacers: [CGDirectDisplayID: DDCBusPacer] = [:]
+
+  /// `now` seeds a pacer on first sight only: a rebuilt service does not restart
+  /// the clock.
+  func pacer(
+    for displayID: CGDirectDisplayID,
+    now: @escaping @Sendable () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }
+  ) -> DDCBusPacer {
+    self.lock.lock()
+    defer { self.lock.unlock() }
+    if let existing = self.pacers[displayID] { return existing }
+    let fresh = DDCBusPacer(now: now)
+    self.pacers[displayID] = fresh
+    return fresh
+  }
+}
+
 public class Arm64DDC: NSObject {
   static let MAX_MATCH_SCORE: Int = 20
 
@@ -62,32 +136,50 @@ public class Arm64DDC: NSObject {
     return matchedDisplayServices
   }
 
+  // WARNING: these pacer-less entry points neither pace from the bus nor record
+  // use of it, so calling one for a display an `Arm64DDCService` also drives
+  // leaves that actor's pacer believing the bus was quiet. Route DDC through
+  // the actor.
   public static func read(service: IOAVService?, command: UInt8, writeSleepTime: UInt32? = nil, numOfWriteCycles: UInt8? = nil, readSleepTime: UInt32? = nil, numOfRetryAttemps: UInt8? = nil, retrySleepTime: UInt32? = nil) -> (current: UInt16, max: UInt16)? {
-    var values: (UInt16, UInt16)?
+    self.readOutcome(service: service, command: command, writeSleepTime: writeSleepTime, numOfWriteCycles: numOfWriteCycles, readSleepTime: readSleepTime, numOfRetryAttemps: numOfRetryAttemps, retrySleepTime: retrySleepTime).value
+  }
+
+  /// `read`, keeping what the wire proved. `command` goes into the ladder so every
+  /// ATTEMPT is validated against it; a frame answering another code retries like
+  /// a failed read and ends as `noReply`, while the panel's own result code for
+  /// the code asked about ends as `refused`.
+  public static func readOutcome(service: IOAVService?, command: UInt8, writeSleepTime: UInt32? = nil, numOfWriteCycles: UInt8? = nil, readSleepTime: UInt32? = nil, numOfRetryAttemps: UInt8? = nil, retrySleepTime: UInt32? = nil) -> DDCReadOutcome {
+    self.readOutcome(service: service, command: command, pacer: nil, writeSleepTime: writeSleepTime, numOfWriteCycles: numOfWriteCycles, readSleepTime: readSleepTime, numOfRetryAttemps: numOfRetryAttemps, retrySleepTime: retrySleepTime)
+  }
+
+  static func readOutcome(service: IOAVService?, command: UInt8, pacer: DDCBusPacer?, writeSleepTime: UInt32? = nil, numOfWriteCycles: UInt8? = nil, readSleepTime: UInt32? = nil, numOfRetryAttemps: UInt8? = nil, retrySleepTime: UInt32? = nil) -> DDCReadOutcome {
     var send: [UInt8] = [command]
-    var reply = [UInt8](repeating: 0, count: 11)
-    if Self.performDDCCommunication(service: service, send: &send, reply: &reply, writeSleepTime: writeSleepTime, numOfWriteCycles: numOfWriteCycles, readSleepTime: readSleepTime, numOfRetryAttemps: numOfRetryAttemps, retrySleepTime: retrySleepTime) {
-      // The checksum alone is a 1-in-256 guard. Without the op-code and
-      // result-code check the Intel transport has always made, a display
-      // answering with stale bytes, or answering a DIFFERENT VCP code than the
-      // one asked for, produces a plausible `max` that silently compresses the
-      // whole range.
-      if DDCReplyFrame.rejection(for: reply, command: command) != nil {
-        return nil
-      }
-      let max = DDCReplyFrame.value(high: reply[6], low: reply[7])
-      let current = DDCReplyFrame.value(high: reply[8], low: reply[9])
-      values = (current, max)
-    } else {
-      values = nil
+    var reply = [UInt8](repeating: 0, count: DDCReplyFrame.expectedLength)
+    switch Self.performDDCCommunication(service: service, send: &send, reply: &reply, replyCommand: command, pacer: pacer, writeSleepTime: writeSleepTime, numOfWriteCycles: numOfWriteCycles, readSleepTime: readSleepTime, numOfRetryAttemps: numOfRetryAttemps, retrySleepTime: retrySleepTime) {
+    case .ok:
+      // Validated per attempt inside the ladder: `.ok` means a frame answering
+      // THIS code.
+      return .frame(
+        current: DDCReplyFrame.value(high: reply[8], low: reply[9]),
+        max: DDCReplyFrame.value(high: reply[6], low: reply[7])
+      )
+    case .answeredZeros:
+      return .allZeros
+    case .silent:
+      return .noReply
+    case .refused:
+      return .refused
     }
-    return values
   }
 
   public static func write(service: IOAVService?, command: UInt8, value: UInt16, writeSleepTime: UInt32? = nil, numOfWriteCycles: UInt8? = nil, numOfRetryAttemps: UInt8? = nil, retrySleepTime: UInt32? = nil) -> Bool {
+    self.write(service: service, command: command, value: value, pacer: nil, writeSleepTime: writeSleepTime, numOfWriteCycles: numOfWriteCycles, numOfRetryAttemps: numOfRetryAttemps, retrySleepTime: retrySleepTime)
+  }
+
+  static func write(service: IOAVService?, command: UInt8, value: UInt16, pacer: DDCBusPacer?, writeSleepTime: UInt32? = nil, numOfWriteCycles: UInt8? = nil, numOfRetryAttemps: UInt8? = nil, retrySleepTime: UInt32? = nil) -> Bool {
     var send: [UInt8] = [command, UInt8(value >> 8), UInt8(value & 255)]
     var reply: [UInt8] = []
-    return Self.performDDCCommunication(service: service, send: &send, reply: &reply, writeSleepTime: writeSleepTime, numOfWriteCycles: numOfWriteCycles, numOfRetryAttemps: numOfRetryAttemps, retrySleepTime: retrySleepTime)
+    return Self.performDDCCommunication(service: service, send: &send, reply: &reply, pacer: pacer, writeSleepTime: writeSleepTime, numOfWriteCycles: numOfWriteCycles, numOfRetryAttemps: numOfRetryAttemps, retrySleepTime: retrySleepTime) == .ok
   }
 
   /// One DDC/CI Capabilities Request (op 0xF3) at `offset`.
@@ -141,14 +233,117 @@ public class Arm64DDC: NSObject {
     return nil
   }
 
-  static func performDDCCommunication(service: IOAVService?, send: inout [UInt8], reply: inout [UInt8], writeSleepTime: UInt32? = nil, numOfWriteCycles: UInt8? = nil, readSleepTime: UInt32? = nil, numOfRetryAttemps: UInt8? = nil, retrySleepTime: UInt32? = nil) -> Bool {
-    let dataAddress = ARM64_DDC_DATA_ADDRESS
-    var success = false
-    guard service != nil else {
-      return success
+  /// What one DDC transaction proved. `write` collapses it back to a Bool;
+  /// `readOutcome` keeps the distinction the sentinel below buys.
+  enum TransactionOutcome: Equatable {
+    /// The write was acknowledged and, where a reply was expected, a
+    /// checksum-clean frame came back.
+    case ok
+    /// The panel wrote zeros over the sentinel: it is on the bus and saying
+    /// nothing. The write-only signature.
+    case answeredZeros
+    /// Nothing usable: a NAKed write, a failed read call, a buffer the read
+    /// left untouched, or a frame that failed its checksum.
+    case silent
+    /// The panel's own result code for the code asked about: it parsed the
+    /// request and answered that the register is not one it carries. Its own
+    /// outcome rather than a shade of `silent`, because it is a reply, and a
+    /// display that replies must not be reported as one that went quiet.
+    case refused
+  }
+
+  /// The reply buffer's fill before every read call. `IOAVServiceReadI2C` can
+  /// return success without writing the buffer, so a zero fill made "answered
+  /// zeros" and "wrote nothing" the same bytes. 0xFF is also what an idle I2C
+  /// line reads as, so a floating read counts as untouched.
+  static let replySentinel: UInt8 = 0xFF
+
+  /// How many failed reply-read CALLS one transaction pays for before it stops.
+  /// Counted across the whole ladder rather than consecutively: a transaction
+  /// that has seen two calls fail has learned what the wire is doing however the
+  /// other attempts went.
+  static let maxFailedReadCalls = 2
+
+  /// Verdict for a reply buffer whose read call reported success. Validated here,
+  /// inside the ladder, so a frame answering a DIFFERENT code gets the same retry
+  /// as any failed read.
+  static func replyVerdict(_ reply: [UInt8], command: UInt8? = nil) -> TransactionOutcome {
+    guard reply.count >= 2 else { return .silent }
+    var frame = reply
+    guard self.checksum(chk: 0x50, data: &frame, start: 0, end: frame.count - 2) == frame[frame.count - 1] else {
+      return reply.allSatisfy { $0 == 0 } ? .answeredZeros : .silent
     }
+    // The checksum alone is a 1-in-256 guard. Without the op-code and
+    // result-code check the Intel transport has always made, a display
+    // answering with stale bytes, or answering a DIFFERENT VCP code than the
+    // one asked for, produces a plausible `max` that silently compresses the
+    // whole range.
+    //
+    // A refusal is read only from a frame that PASSED the checksum, so the
+    // result code is a byte the panel meant to send rather than one landing
+    // there by luck.
+    if let command, DDCReplyFrame.rejection(for: reply, command: command) != nil {
+      return DDCReplyFrame.isRefusal(reply, of: command) ? .refused : .silent
+    }
+    return .ok
+  }
+
+  /// One attempt's verdict folded into the transaction's: `answeredZeros` outlives
+  /// a later silence, the ordering `DDCReadEvidence.worse` uses. The ladder returns
+  /// on `.ok` rather than folding it; the `.ok` arms only keep this total.
+  ///
+  /// A refusal outlives a silence and loses to zeros, for the same reason zeros
+  /// beat silence: the more specific observation about the register wins, and a
+  /// panel that put zeros on the bus said something about every code.
+  static func fold(_ transaction: TransactionOutcome, _ attempt: TransactionOutcome) -> TransactionOutcome {
+    switch (transaction, attempt) {
+    case (.ok, _), (_, .ok): .ok
+    case (.answeredZeros, _), (_, .answeredZeros): .answeredZeros
+    case (.refused, _), (_, .refused): .refused
+    default: .silent
+    }
+  }
+
+  /// The two I2C calls and the sleep between them, injected so a test can drive
+  /// the retry ladder and see the ORDER of sleeps against packets. `live` is the
+  /// private API; nothing but a test passes anything else.
+  struct I2CTransport: Sendable {
+    var write: @Sendable (IOAVService?, UnsafeMutableRawPointer, UInt32) -> Int32
+    var read: @Sendable (IOAVService?, UnsafeMutableRawPointer, UInt32) -> Int32
+    /// A recorded call, because where a sleep falls relative to a packet is the
+    /// write path's whole latency.
+    var sleep: @Sendable (UInt32) -> Void = { usleep($0) }
+
+    static let live = I2CTransport(
+      write: { service, bytes, count in
+        IOAVServiceWriteI2C(service, UInt32(ARM64_DDC_7BIT_ADDRESS), UInt32(ARM64_DDC_DATA_ADDRESS), bytes, count)
+      },
+      read: { service, bytes, count in
+        IOAVServiceReadI2C(service, UInt32(ARM64_DDC_7BIT_ADDRESS), 0, bytes, count)
+      }
+    )
+  }
+
+  static func performDDCCommunication(service: IOAVService?, send: inout [UInt8], reply: inout [UInt8], replyCommand: UInt8? = nil, pacer: DDCBusPacer? = nil, writeSleepTime: UInt32? = nil, numOfWriteCycles: UInt8? = nil, readSleepTime: UInt32? = nil, numOfRetryAttemps: UInt8? = nil, retrySleepTime: UInt32? = nil) -> TransactionOutcome {
+    guard service != nil else {
+      return .silent
+    }
+    return self.runTransaction(service: service, send: &send, reply: &reply, replyCommand: replyCommand, writeSleepTime: writeSleepTime, numOfWriteCycles: numOfWriteCycles, readSleepTime: readSleepTime, numOfRetryAttemps: numOfRetryAttemps, retrySleepTime: retrySleepTime, pacer: pacer, transport: .live)
+  }
+
+  /// The retry ladder. Split from the entry point so a nil service is refused
+  /// before any sleep, and so a test can hand it a panel.
+  static func runTransaction(service: IOAVService?, send: inout [UInt8], reply: inout [UInt8], replyCommand: UInt8?, writeSleepTime: UInt32?, numOfWriteCycles: UInt8?, readSleepTime: UInt32?, numOfRetryAttemps: UInt8?, retrySleepTime: UInt32?, pacer: DDCBusPacer?, transport: I2CTransport) -> TransactionOutcome {
+    let dataAddress = ARM64_DDC_DATA_ADDRESS
     var packet: [UInt8] = [UInt8(0x80 | (send.count + 1)), UInt8(send.count)] + send + [0] // Note: the last byte is the place of the checksum, see next line!
     packet[packet.count - 1] = self.checksum(chk: send.count == 1 ? ARM64_DDC_7BIT_ADDRESS << 1 : ARM64_DDC_7BIT_ADDRESS << 1 ^ dataAddress, data: &packet, start: 0, end: packet.count - 2)
+    var outcome = TransactionOutcome.silent
+    let pacing = writeSleepTime ?? 10000
+    // Only the FIRST packet is paced from the bus; a second write cycle or a
+    // retry keeps the full sleep it always had. With no pacer the floor is paid
+    // in full.
+    var firstPacket = true
+    var failedReadCalls = 0
     for _ in 1 ... (numOfRetryAttemps ?? 4) + 1 {
       // ONE packet per logical write. The inherited default of 2 put two
       // identical packets on the bus for every write and cost 20 ms of sleep
@@ -156,22 +351,53 @@ public class Arm64DDC: NSObject {
       // the apply; measured, halving the traffic halved the on-wire time, and
       // the Dell's readback confirms the value ACHIEVED at 1 cycle. Retries
       // above are the reliability mechanism, not a blind second copy.
+      var wrote = false
       for _ in 1 ... max(numOfWriteCycles ?? 1, 1) {
-        usleep(writeSleepTime ?? 10000)
-        success = IOAVServiceWriteI2C(service, UInt32(ARM64_DDC_7BIT_ADDRESS), UInt32(dataAddress), &packet, UInt32(packet.count)) == 0
+        let owed = firstPacket ? (pacer?.deficit(floor: pacing) ?? pacing) : pacing
+        firstPacket = false
+        if owed > 0 { transport.sleep(owed) }
+        wrote = transport.write(service, &packet, UInt32(packet.count)) == 0
+        pacer?.recordBusUse()
       }
-      if !reply.isEmpty {
-        usleep(readSleepTime ?? 50000)
-        if IOAVServiceReadI2C(service, UInt32(ARM64_DDC_7BIT_ADDRESS), 0, &reply, UInt32(reply.count)) == 0 {
-          success = self.checksum(chk: 0x50, data: &reply, start: 0, end: reply.count - 2) == reply[reply.count - 1]
+      if reply.isEmpty {
+        if wrote { return .ok }
+      } else {
+        // Not carried from `wrote`: a landed write with a failed reply read is a
+        // failed READ and retries like one. The read still runs after a NAKed
+        // write, as it always did: a clean frame behind it is still an answer.
+        for index in reply.indices { reply[index] = Self.replySentinel }
+        transport.sleep(readSleepTime ?? 50000)
+        let answered = transport.read(service, &reply, UInt32(reply.count))
+        // Recorded whatever it returned: the bus was busy either way.
+        pacer?.recordBusUse()
+        if answered == 0 {
+          let verdict = Self.replyVerdict(reply, command: replyCommand)
+          if verdict == .ok { return .ok }
+          outcome = Self.fold(outcome, verdict)
+          // The panel answered, and the answer was no. Retrying a refused code
+          // cannot change it, and the caller polls this ladder several times a
+          // pass. Folded first, so an earlier attempt's zeros still outlive it.
+          if verdict == .refused { return outcome }
+        } else {
+          failedReadCalls += 1
+          // A read CALL that failed never reached a panel, so the remaining
+          // attempts re-ask a wire that is not carrying reads, at about 80 ms
+          // each, on every pass for the life of the install. Two, not one: the
+          // inherited ladder stopped after a single attempt only because a failed
+          // read call left the WRITE result standing as the transaction's
+          // verdict, so the caller parsed a buffer the read never touched.
+          // Counting that call as a read failure is the fix, and this cap is the
+          // one extra attempt it costs, spent because a single dropped call on a
+          // busy bus is real and the next one usually lands. A read call that
+          // SUCCEEDS and leaves the buffer untouched, or brings back a frame
+          // that fails VALIDATION, keeps the full ladder: the wire is carrying
+          // reads there, and a garbled answer is the case retries exist for.
+          if failedReadCalls >= Self.maxFailedReadCalls { return outcome }
         }
       }
-      if success {
-        return success
-      }
-      usleep(retrySleepTime ?? 20000)
+      transport.sleep(retrySleepTime ?? 20000)
     }
-    return success
+    return outcome
   }
 
   /// DDC checksum calculator

@@ -192,8 +192,13 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
       throw DisplayConfigError(cgErrorCode: result.rawValue)
     }
 
-    // THE RETURN CODE IS NOT THE EVIDENCE — the achieved mode is.
-    let achieved = CGDisplayCopyDisplayMode(displayID)?.ioDisplayModeID
+    // THE RETURN CODE IS NOT THE EVIDENCE: the achieved mode is. Same bounded
+    // settle as the published path, for the same reason: the window server lands
+    // a mode change asynchronously, so one immediate read can still describe the
+    // outgoing mode and would report an honoured apply as unhonoured.
+    let achieved = settledRevealedModeID(requested: mode) {
+      CGDisplayCopyDisplayMode(displayID)?.ioDisplayModeID
+    }
     guard achieved == mode.ioModeID else {
       Logger(subsystem: "com.rydersel.Candela", category: "topology").error(
         """
@@ -202,14 +207,17 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
         \(mode.ioModeID, privacy: .public), reports \(achieved ?? -1, privacy: .public)
         """
       )
-      // Deliberately not a platform error code: the platform did not report
-      // one, which is the entire point of this check.
-      throw DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
+      // This commit went through, so the same error as the published path:
+      // callers must revert, not report "nothing changed". The id compare is
+      // sound here because CoreGraphics and CGS share one mode-ID space.
+      throw DisplayConfigError(
+        unhonouredCommit: .init(requested: mode, achieved: achievedMode(displayID)))
     }
   }
 
   /// The public path: resolve the `CGDisplayMode`, cross-check the geometry it
-  /// actually denotes, then stage and commit.
+  /// actually denotes, stage, commit, then read back what the display is
+  /// actually running.
   private func applyPublishedMode(
     _ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope
   ) throws {
@@ -250,6 +258,103 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     guard result == .success else {
       throw DisplayConfigError(cgErrorCode: result.rawValue)
     }
+
+    // THE RETURN CODE IS NOT THE EVIDENCE; the achieved mode is. Bounded settle
+    // rather than one read, as `applyRotation` does.
+    let achieved = settled(read: { achievedMode(displayID) }) {
+      ModeApplyVerification.verdict(requested: mode, achieved: $0) == .honoured
+    }
+    guard ModeApplyVerification.verdict(requested: mode, achieved: achieved) == .honoured else {
+      // Both geometries, here and in the error: a code alone says nothing about
+      // which mode is on the glass.
+      Logger(subsystem: "com.rydersel.Candela", category: "topology").error(
+        """
+        CoreGraphics returned success for a mode it did not apply: display \
+        \(displayID, privacy: .public) asked for \
+        \(Self.geometry(of: mode), privacy: .public), reports \
+        \(achieved.map(Self.geometry) ?? "nothing", privacy: .public)
+        """
+      )
+      // Its own error, not a platform code: THIS one committed, so a caller
+      // holding a fallback must use it.
+      throw DisplayConfigError(
+        unhonouredCommit: .init(requested: mode, achieved: achieved))
+    }
+  }
+
+  /// The window in which a committed mode change is still allowed to be landing.
+  /// Half a second, because a change not landed by then is not landing.
+  static let modeSettleWindow: TimeInterval = 0.5
+  static let modeSettlePoll: TimeInterval = 0.05
+
+  /// Re-reads the achieved state until it matches or the window closes, and
+  /// hands back the LAST reading either way, so the caller reports what the
+  /// display actually said rather than a stale first look.
+  ///
+  /// The window server lands a mode change asynchronously, so one immediate read
+  /// can still describe the outgoing mode. The read is taken before any sleep,
+  /// so an honoured apply pays nothing.
+  ///
+  /// Blocks the calling thread: the main actor for an interactive apply, a
+  /// cooperative thread for the preview session and checkup runners. The
+  /// alternative was reporting an unverified apply.
+  /// The revealed path's settle and its verdict together, split from the
+  /// CoreGraphics call so the pair tests without a display. The compare is
+  /// id-based and stays like with like across the loop: both sides are
+  /// `ioModeID`s in the one space CoreGraphics and CGS share, and the requested
+  /// id is fixed while only the read side moves. Geometry cannot stand in here,
+  /// because a revealed mode's CGS descriptor and the `CGDisplayMode` it lands as
+  /// do not have to spell the same size.
+  ///
+  /// Returns the LAST id read, so a caller that did not get what it asked for
+  /// can say what the display reports instead.
+  func settledRevealedModeID(
+    requested: DisplayMode,
+    window: TimeInterval = modeSettleWindow,
+    poll: TimeInterval = modeSettlePoll,
+    now: () -> Date = Date.init,
+    sleep: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) },
+    read: () -> Int32?
+  ) -> Int32? {
+    settled(window: window, poll: poll, now: now, sleep: sleep, read: read) {
+      $0 == requested.ioModeID
+    }
+  }
+
+  /// The clock and the sleep are injected so a test spends no real time here;
+  /// nothing in the app passes anything but the defaults. Real time and not an
+  /// iteration count, because the read itself costs some of the window.
+  func settled<Reading>(
+    window: TimeInterval = modeSettleWindow,
+    poll: TimeInterval = modeSettlePoll,
+    now: () -> Date = Date.init,
+    sleep: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) },
+    read: () -> Reading,
+    until landed: (Reading) -> Bool
+  ) -> Reading {
+    var observed = read()
+    let deadline = now().addingTimeInterval(window)
+    while !landed(observed), now() < deadline {
+      sleep(poll)
+      observed = read()
+    }
+    return observed
+  }
+
+  /// Not `currentMode(for:)`: that resolves against the deduplicated list and
+  /// answers nil for anything missing from it, which the settle loop would read
+  /// as a mode that never landed. It also re-enumerates every CGS descriptor.
+  private func achievedMode(_ displayID: CGDirectDisplayID) -> DisplayMode? {
+    CGDisplayCopyDisplayMode(displayID).map {
+      Self.displayMode(ioModeID: $0.ioDisplayModeID, mode: $0)
+    }
+  }
+
+  private static func geometry(of mode: DisplayMode) -> String {
+    """
+    \(mode.logicalWidth)x\(mode.logicalHeight) \
+    px\(mode.pixelWidth)x\(mode.pixelHeight) @\(mode.refreshHz)Hz
+    """
   }
 
   /// The same transaction discipline as `apply`, with the mirror call

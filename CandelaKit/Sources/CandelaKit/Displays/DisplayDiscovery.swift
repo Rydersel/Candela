@@ -36,15 +36,26 @@ public enum DisplayDiscovery {
       return Arm64DDC.getServiceMatches(displayIDs: Array(externalIDs))
         .filter { !$0.dummy && $0.service != nil }
         .map { match in
-          (ExternalDisplay(id: match.displayID,
-                           name: displayName(from: match.serviceDetails, displayID: match.displayID),
-                           persistenceKey: persistenceKey(from: match.serviceDetails)),
-           Arm64DDCService.create(service: match.service),
-           DisplayHardwareFacts.from(
-             service: match.serviceDetails,
-             matchScore: match.matchScore,
-             physicalSizeCm: Arm64DDC.physicalSizeCm(displayID: match.displayID)
-           ))
+          let key = persistenceKey(from: match.serviceDetails)
+          return (
+            ExternalDisplay(
+              id: match.displayID,
+              name: displayName(from: match.serviceDetails, displayID: match.displayID),
+              persistenceKey: key
+            ),
+            // The tag rather than the key: the service logs every read verdict,
+            // and a fallback key embeds the panel's serial number.
+            Arm64DDCService.create(
+              service: match.service,
+              displayID: match.displayID,
+              logTag: DisplayLogging.tag(for: key)
+            ),
+            DisplayHardwareFacts.from(
+              service: match.serviceDetails,
+              matchScore: match.matchScore,
+              physicalSizeCm: Arm64DDC.physicalSizeCm(displayID: match.displayID)
+            )
+          )
         }
     #else
       return [] // Intel adapter arrives in a later milestone; IntelDDC stays compiled.

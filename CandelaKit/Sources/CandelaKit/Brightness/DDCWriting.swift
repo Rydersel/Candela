@@ -2,6 +2,9 @@
 public protocol DDCWriting: Sendable {
   func write(command: UInt8, value: UInt16) async -> Bool
   func read(command: UInt8) async -> (current: UInt16, max: UInt16)?
+  /// `read` plus what the transport saw. Every site that publishes
+  /// `DDCReadEvidence` uses this one.
+  func readOutcome(command: UInt8) async -> DDCReadOutcome
   /// The display's MCCS capability string (VCP 0xF3), reassembled from its
   /// fragments. `nil` means the TRANSACTION failed — never read that as "this
   /// display has no capabilities" (unknown resolves to enabled).
@@ -9,6 +12,13 @@ public protocol DDCWriting: Sendable {
 }
 
 public extension DDCWriting {
+  /// Writers with no transport of their own cannot tell silence from zeros, so
+  /// nil keeps its old meaning: nothing came back.
+  func readOutcome(command: UInt8) async -> DDCReadOutcome {
+    guard let value = await read(command: command) else { return .noReply }
+    return .frame(current: value.current, max: value.max)
+  }
+
   /// Writers with no capabilities path — the built-in's `NoopDDCWriter`, test
   /// fakes — inherit the honest answer: we do not know.
   func readCapabilityString() async -> String? { nil }
@@ -40,6 +50,10 @@ public protocol PendingWireDraining {
   /// HDR window certifies values that never landed. Anything that knows the
   /// panel may have moved out from under the memo has to say so here.
   func resetWriteMemo()
+  /// Makes this controller's own DDC reads worth attempting again. Same events as
+  /// `resetWriteMemo`: a skip that outlives its cause leaves a panel unread for
+  /// the rest of the plug. Clears the skip only; what the reads proved stands.
+  func noteReadWorthRetrying()
   /// Waits the queue out and reports whether everything submitted has reached
   /// hardware. A target the queue completed WITHOUT applying is submitted again
   /// with a fresh epoch stamp, so one closed reconfiguration window is recovered
@@ -48,6 +62,10 @@ public protocol PendingWireDraining {
   /// "Reached hardware" is bounded by the panel: the applier ran and reported
   /// success. On a write-only display that is the end of the evidence.
   func drainPendingWrites() async -> Bool
+}
+
+public extension PendingWireDraining {
+  func noteReadWorthRetrying() {}
 }
 
 /// Drives a set of write queues to a state where nothing is owed to the panel.

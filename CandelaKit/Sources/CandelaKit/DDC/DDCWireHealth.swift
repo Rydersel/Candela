@@ -3,9 +3,9 @@ import Foundation
 /// Whether this display's DDC wire is still carrying writes, counted from what
 /// the applies ACTUALLY reported.
 ///
-/// Keyed on writes, not reads: the MAG341C answers every read with zeros and
-/// honours every write, so a rule keyed on read evidence would demote the panel
-/// it looks worst on.
+/// Keyed on writes, not reads: a write-only panel honours every write and returns
+/// nothing usable from any read, so a rule keyed on read evidence would demote the
+/// panel it looks worst on.
 ///
 /// No clock and no display in it, so the rule is tested without hardware; the
 /// controller decides which applies reach it.

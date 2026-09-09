@@ -6,6 +6,30 @@ import SwiftUI
 /// true native HiDPI at an arbitrary size), and a rule split across private
 /// helpers drifts the first time one is edited.
 enum DisplayModeCopy {
+  /// How a surface spells a size. Everything in the app windows writes
+  /// "2560 × 1440" and calls it a resolution; guided setup writes "2560 x 1440"
+  /// and calls it a size, on every line it has. A sentence that arrives in the
+  /// other dialect reads as a line borrowed from somewhere else, so the dialect
+  /// is a parameter here rather than a second copy of the sentence over there.
+  enum SizeDialect {
+    case resolution
+    case size
+
+    var times: String {
+      switch self {
+      case .resolution: "×"
+      case .size: "x"
+      }
+    }
+
+    var noun: String {
+      switch self {
+      case .resolution: "resolution"
+      case .size: "size"
+      }
+    }
+  }
+
   /// The plain size, with no hedge. This rule rides on the tags of surfaces that
   /// OFFER a size (the shared size vocabulary, one source in
   /// `DisplayModeCoordinator.Catalog.tags(for:isLowResolutionDuplicate:)`);
@@ -21,9 +45,10 @@ enum DisplayModeCopy {
   }
 
   /// Bare numbers, for the density model's recommendation: a logical size with
-  /// no mode behind it. Routed here so the times sign has one spelling.
-  static func size(width: Int, height: Int) -> String {
-    "\(width) × \(height)"
+  /// no mode behind it. Routed here so each dialect's times sign has one
+  /// spelling.
+  static func size(width: Int, height: Int, dialect: SizeDialect = .resolution) -> String {
+    "\(width) \(dialect.times) \(height)"
   }
 
   /// Marks an option this app's own enumeration found. States what WE did, not
@@ -84,15 +109,73 @@ enum DisplayModeCopy {
       : "Reverting in \(seconds) seconds. Answer in the confirmation window."
   }
 
-  /// A11y contract 8: posted when the answerable banner appears. The 10- and
-  /// 3-second re-announcements reuse `countdown(_:)`.
-  static func previewAnnouncement(mode: DisplayMode, seconds: Int) -> String {
+  static func pendingAnswer(displayName: String, canKeep: Bool) -> String {
+    canKeep
+      ? "Waiting for you to keep or revert the new resolution on \(displayName)."
+      : "The preview on \(displayName) could not be verified. Use Revert to restore the previous resolution."
+  }
+
+  static func previewTitle(canKeep: Bool) -> String {
+    canKeep ? "Keep this resolution?" : "Resolution preview could not be verified"
+  }
+
+  static func recoveryInstruction(dialect: SizeDialect = .resolution) -> String {
+    "Revert to the previous \(dialect.noun), then choose the \(dialect.noun) again to preview it."
+  }
+
+  /// A recovery preview never asks a listener to approve an unverified mode.
+  static func previewAnnouncement(
+    mode: DisplayMode, seconds: Int,
+    unhonouredCommit: DisplayConfigError.UnhonouredCommit? = nil
+  ) -> String {
     let spoken = ModeSpeech.spoken(
       logicalWidth: mode.logicalWidth,
       logicalHeight: mode.logicalHeight,
       refreshHz: mode.refreshHz
     )
-    return "Display changed to \(spoken). Keep this resolution? \(countdown(seconds))"
+    guard let unhonouredCommit else {
+      return "Keep \(spoken)? \(countdown(seconds))"
+    }
+    return "\(previewTitle(canKeep: false)). \(recoveryInstruction()) \(countdown(seconds)) \(spokenAchievedGeometry(unhonouredCommit))"
+  }
+
+  /// The achieved-geometry sentence in spoken form. Not `achievedGeometry`: that
+  /// is display text down to the times sign and the "Hz" abbreviation, and both
+  /// are read inconsistently. Same statement, said out loud.
+  static func spokenAchievedGeometry(_ commit: DisplayConfigError.UnhonouredCommit) -> String {
+    guard let achieved = commit.achieved else { return unreadableAchievedGeometry() }
+    let spoken = ModeSpeech.spoken(
+      logicalWidth: achieved.logicalWidth,
+      logicalHeight: achieved.logicalHeight,
+      refreshHz: achieved.refreshHz
+    )
+    return "The display is showing \(spoken)."
+  }
+
+  /// Latest achieved geometry beside the recovery instruction. Readback cannot
+  /// tell whether the display is using the correct wire timing.
+  static func achievedGeometry(_ commit: DisplayConfigError.UnhonouredCommit) -> String {
+    guard let achieved = commit.achieved else { return unreadableAchievedGeometry() }
+    return achievedGeometry(
+      width: achieved.logicalWidth, height: achieved.logicalHeight,
+      refreshHz: achieved.refreshHz
+    )
+  }
+
+  /// The same sentence from bare numbers, for a surface holding the geometry
+  /// without the error it came from: guided setup's flow model is deliberately
+  /// free of engine types, and its adapters carry them. That surface passes its
+  /// own dialect, so the caption reads in the page's spelling rather than
+  /// arriving in the settings window's.
+  static func achievedGeometry(
+    width: Int, height: Int, refreshHz: Double, dialect: SizeDialect = .resolution
+  ) -> String {
+    "The display is showing \(size(width: width, height: height, dialect: dialect)), \(refresh(refreshHz))."
+  }
+
+  /// The other arm, spelled once for both entry points.
+  static func unreadableAchievedGeometry(dialect: SizeDialect = .resolution) -> String {
+    "This display did not report which \(dialect.noun) it is showing."
   }
 
   // The CoreGraphics code stays out of these sentences: it is diagnostic, and
@@ -101,32 +184,79 @@ enum DisplayModeCopy {
   // Computed, not stored: `LocalizedStringKey` is not `Sendable`, so a static
   // `let` of one is a concurrency error under complete checking.
 
-  /// A `begin()` that failed. Nothing was applied, so nothing needs answering.
+  /// A `begin()` that failed with nothing committed. No preview is armed and no
+  /// transaction went through, so this display is where it was: the mode was
+  /// unreadable, the change would not stage, or the commit was refused.
   static var startFailure: LocalizedStringKey {
-    "\(AppInfo.productName) could not switch this display. Nothing changed."
+    "\(AppInfo.productName) could not switch this display to the resolution you picked. Nothing changed, so it is still showing the resolution it was on."
   }
 
-  /// One sentence for either reason a selection took no effect: a new reason
-  /// with no row here is a compile error, not surfaces quietly disagreeing.
+  /// The same failure with a commit behind it, which has exactly one route:
+  /// ending an outstanding preview on ANOTHER display committed without landing
+  /// where it was asked to, and `ModePreviewSession.begin` returns before it
+  /// touches this display. So this display did not move and that one did not go
+  /// back, and neither half may be said the other way round.
+  static var startFailureAfterACommit: LocalizedStringKey {
+    "\(AppInfo.productName) could not switch this display to the resolution you picked, because another display could not be put back to the resolution it was on. Check that display before trying again."
+  }
+
+  /// One sentence for each reason a selection took no effect: a new reason with
+  /// no row here is a compile error, not surfaces quietly disagreeing.
   static func startFailure(_ reason: DisplayModeCoordinator.StartFailure.Reason) -> LocalizedStringKey {
     switch reason {
-    case .failed: startFailure
+    case let .failed(error): error.didCommit ? startFailureAfterACommit : startFailure
     case let .blocked(claimant): ReconfigurationCopy.blocked(by: claimant)
     }
   }
 
+  /// The floating card's subject line, under a title that says this display's
+  /// resolution did not change.
+  ///
+  /// The committed arm names TWO displays. Its caption is about a display that
+  /// is not this one, so a card naming one display above that sentence reads as
+  /// a contradiction rather than as one story. The other display cannot be
+  /// named: `DisplayConfigError` carries no display ID, and widening it would
+  /// touch every caller.
+  static func startFailureSubject(
+    displayName: String, reason: DisplayModeCoordinator.StartFailure.Reason
+  ) -> String {
+    guard case let .failed(error) = reason, error.didCommit else { return displayName }
+    return displayName.isEmpty
+      ? "This display and another display"
+      : "\(displayName) and another display"
+  }
+
   /// The tooltip beside it: diagnostic, not part of the statement.
+  ///
+  /// Through `diagnostic(_:)`: ending a preview on ANOTHER display can commit
+  /// without taking, and that failure has no CoreGraphics code to print. It also
+  /// has no display ID on it, so which display it is about is said here, where
+  /// the route is known, rather than inside `diagnostic`, which several surfaces
+  /// share.
   static func startFailureDiagnostic(_ reason: DisplayModeCoordinator.StartFailure.Reason) -> String {
     switch reason {
-    case let .failed(error): "CoreGraphics error \(error.cgErrorCode)"
+    case let .failed(error):
+      error.didCommit ? "Another display: \(diagnostic(error))" : diagnostic(error)
     case let .blocked(claimant): "Held by \(claimant.rawValue)"
     }
   }
 
-  /// A `confirm()`/`revert()`/expiry that threw. The preview is still on the
-  /// display and nothing auto-retries, so this must invite another attempt.
+  /// The tooltip for any `DisplayConfigError`; no surface reads `cgErrorCode`
+  /// itself. An unhonoured commit's code is a sentinel, not a CoreGraphics
+  /// error, and the finding there is which resolution the display was left on.
+  static func diagnostic(_ error: DisplayConfigError) -> String {
+    guard let unhonoured = error.unhonouredCommit else {
+      return "CoreGraphics error \(error.cgErrorCode)"
+    }
+    let landed = unhonoured.achieved.map { "\(size($0)), \(refresh($0.refreshHz))" }
+    return "CoreGraphics reported success; display shows \(landed ?? "an unreadable resolution")"
+  }
+
+  /// A `confirm()`/`revert()`/expiry that threw. Nothing auto-retries, so this
+  /// must invite another attempt. It does not say which resolution is on the
+  /// glass: the readback can fail on a commit CoreGraphics already made.
   static var resolveFailure: LocalizedStringKey {
-    "\(AppInfo.productName) could not complete that change. The display is still showing the preview. Try again."
+    "\(AppInfo.productName) could not complete that change. Check this display, then try again."
   }
 
   /// Said only alongside `resolveFailure`: the countdown is spent, so the user
@@ -155,9 +285,11 @@ enum DisplayModeCopy {
   }
 
   /// The apply failed. Distinct from `reapplyUnavailable` because the mode
-  /// still exists, so trying again from the list is worth doing.
+  /// still exists, so trying again from the list is worth doing. No claim about
+  /// where the display was left: the readback can fail on a commit that went
+  /// through, unattended.
   static func reapplyFailed(requested: DisplayModeDescriptor) -> LocalizedStringKey {
-    "\(AppInfo.productName) could not restore the resolution saved for this display (\(size(requested)), \(refresh(requested.refreshHz))). Nothing was changed."
+    "\(AppInfo.productName) could not restore the resolution saved for this display (\(size(requested)), \(refresh(requested.refreshHz))). Pick it from the list of resolutions to try again."
   }
 
   /// One sentence for whichever happened, so both surfaces say the same thing.

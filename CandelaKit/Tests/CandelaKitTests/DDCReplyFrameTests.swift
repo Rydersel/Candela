@@ -51,6 +51,51 @@ struct DDCReplyFrameTests {
         == .echoedDifferentCommand(expected: 0x10, got: 0x12))
   }
 
+  // MARK: - Which rejections are the panel's own answer
+
+  /// The one rejection that ends the retry ladder, enumerated against every
+  /// other one: a result code is a display that parsed the request and said no,
+  /// and the rest are frames that never carried an answer at all.
+  @Test func onlyAResultCodeRefusalIsTheDisplaysOwnAnswer() {
+    var refused = goodFrame()
+    refused[3] = 0x01
+    #expect(DDCReplyFrame.isRefusal(refused, of: 0x10))
+
+    // A usable answer is not a refusal either: the ladder returns on it for its
+    // own reason.
+    #expect(!DDCReplyFrame.isRefusal(goodFrame(), of: 0x10))
+    #expect(!DDCReplyFrame.isRefusal([UInt8](repeating: 0, count: 11), of: 0x10))
+    #expect(!DDCReplyFrame.isRefusal([0x6E, 0x88], of: 0x10))
+    var notAReply = goodFrame()
+    notAReply[2] = 0xE3
+    #expect(!DDCReplyFrame.isRefusal(notAReply, of: 0x10))
+    #expect(!DDCReplyFrame.isRefusal(goodFrame(command: 0x12), of: 0x10))
+  }
+
+  /// Every non-zero result code, not only the 0x01 the spec names: the field's
+  /// meaning is "the display processed this and reports an error", and a panel
+  /// answering 0x02 has answered.
+  @Test func anyNonZeroResultCodeIsARefusal() {
+    for code: UInt8 in [0x01, 0x02, 0xFF] {
+      var frame = goodFrame()
+      frame[3] = code
+      #expect(DDCReplyFrame.isRefusal(frame, of: 0x10))
+    }
+  }
+
+  /// A result code on a frame naming ANOTHER code is a stale or mis-addressed
+  /// reply, not an answer about this one, so it keeps its retries. `rejection`
+  /// reports the result code before it reaches the echo, which is why this is
+  /// checked separately rather than read off that enum.
+  @Test func aResultCodeEchoingAnotherCommandIsNotAnAnswerAboutThisOne() {
+    var frame = goodFrame(command: 0x12)
+    frame[3] = 0x01
+    #expect(DDCReplyFrame.rejection(for: frame, command: 0x10) == .displayReportedError(0x01))
+    #expect(!DDCReplyFrame.isRefusal(frame, of: 0x10))
+    // The panel that really was asked about 0x12 gets the early exit.
+    #expect(DDCReplyFrame.isRefusal(frame, of: 0x12))
+  }
+
   // MARK: - Big-endian decode
 
   /// The IntelDDC bug, pinned: `UInt16(high << 8)` shifts in UInt8 and yields

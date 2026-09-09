@@ -17,11 +17,13 @@ struct DiagnosticsCopyTests {
 
   // MARK: - The three distinctions this type exists to keep
 
-  /// Readback has three answers past "not asked", not two. "Not answering" is a
-  /// display that stayed silent; "write-only" is one on the bus that takes every
-  /// command and never answers a read. That is the MAG, permanently, and folding
-  /// the two would delete the only sentence that names the fault.
-  @Test func readbackHasThreeAnswersAndNoneIsTheOther() {
+  /// Readback has four answers past "no answer recorded", not two. "Not
+  /// answering" is a display that stayed silent; "write-only" is one on the bus
+  /// that takes every command and never answers a read, which is the MAG,
+  /// permanently; a refusal is the display naming a code it does not carry, and
+  /// that one is not a fault at all. Folding any pair deletes a sentence that
+  /// names what happened.
+  @Test func readbackHasFourAnswersAndNoneIsTheOther() {
     #expect(
       DiagnosticsCopy.readEvidence(.answered, app: Self.app)
         == "This display answers reads")
@@ -32,22 +34,56 @@ struct DiagnosticsCopyTests {
       DiagnosticsCopy.readEvidence(.allZeros, app: Self.app)
         == "Write-only: this display takes commands but never answers a read")
     #expect(
+      DiagnosticsCopy.readEvidence(.refused, app: Self.app)
+        == "This display answered that it does not carry the value Candela asked for")
+    #expect(
       DiagnosticsCopy.readEvidence(.notAttempted, app: Self.app)
-        == "Candela has not read from this display")
+        == "Candela has not recorded an answer from this display yet")
 
-    // Four inputs, four sentences. A duplicate here is a collapsed state.
-    let all = [DDCReadEvidence.notAttempted, .answered, .allZeros, .noReply]
+    // Five inputs, five sentences. A duplicate here is a collapsed state.
+    let all = [DDCReadEvidence.notAttempted, .answered, .allZeros, .noReply, .refused]
       .map { DiagnosticsCopy.readEvidence($0, app: Self.app) }
-    #expect(Set(all).count == 4)
+    #expect(Set(all).count == 5)
+  }
+
+  /// The unasked sentences claim only what the record holds. One silent pass is
+  /// held rather than published (`DDCReadSkipLatch`), so a display that WAS asked
+  /// and said nothing back still reads `.notAttempted` here, and "has not read
+  /// from this display" was a claim about the wire that these cannot make.
+  @Test func theUnaskedSentencesSayNoAnswerRatherThanNoAttempt() {
+    for sentence in [
+      DiagnosticsCopy.readEvidence(.notAttempted, app: Self.app),
+      DiagnosticsCopy.readbackVerdict(.notAttempted),
+      DiagnosticsCopy.brightnessScale(
+        didReadMax: false, maxValue: 100, evidence: .notAttempted, app: Self.app),
+    ] {
+      #expect(sentence.lowercased().contains("answer"), "claims more than the record: \(sentence)")
+      #expect(!sentence.lowercased().contains("has not asked"), "claims more: \(sentence)")
+      #expect(!sentence.lowercased().contains("not asked yet"), "claims more: \(sentence)")
+    }
   }
 
   /// The short form the hub's chevron preview and the report's `readback:` field
   /// carry, capitalised as the page capitalises it.
-  @Test func theShortReadbackVerdictKeepsTheSameThreeStates() {
-    #expect(DiagnosticsCopy.readbackVerdict(.notAttempted) == "Not asked yet")
+  @Test func theShortReadbackVerdictKeepsEveryState() {
+    #expect(DiagnosticsCopy.readbackVerdict(.notAttempted) == "No answer recorded yet")
     #expect(DiagnosticsCopy.readbackVerdict(.answered) == "Answers reads")
     #expect(DiagnosticsCopy.readbackVerdict(.allZeros) == "Write-only")
     #expect(DiagnosticsCopy.readbackVerdict(.noReply) == "Not answering")
+    // The headline the fold exists for, at the surface that shows it: a display
+    // that replied is summarised as replying, whatever the reply said. This is a
+    // whole-display summary, and worst-of-three lands on a refusal only when
+    // nothing else was asked (brightness command off, volume refused), so the
+    // alternative was summarising a display by the one register it lacks.
+    #expect(DiagnosticsCopy.readbackVerdict(.refused) == "Answers reads")
+    #expect(
+      DiagnosticsCopy.readbackVerdict(
+        DDCReadEvidence.worst([.notAttempted, .refused, .notAttempted])) == "Answers reads")
+    // The distinction is not lost, only moved: the page's own sentence still
+    // names the refusal, and so does the per-command read log.
+    #expect(
+      DiagnosticsCopy.readEvidence(.refused, app: Self.app)
+        != DiagnosticsCopy.readEvidence(.answered, app: Self.app))
   }
 
   /// The capability request has FOUR states, and the middle two are the ones an
@@ -85,7 +121,7 @@ struct DiagnosticsCopyTests {
     #expect(
       DiagnosticsCopy.brightnessScale(
         didReadMax: false, maxValue: 100, evidence: .notAttempted, app: Self.app)
-        == "Assumed 100: Candela has not asked this display for its scale")
+        == "Assumed 100: Candela has not recorded an answer about this display's scale")
     #expect(
       DiagnosticsCopy.brightnessScale(
         didReadMax: false, maxValue: 100, evidence: .allZeros, app: Self.app)
@@ -93,6 +129,12 @@ struct DiagnosticsCopyTests {
     #expect(
       DiagnosticsCopy.brightnessScale(
         didReadMax: false, maxValue: 100, evidence: .noReply, app: Self.app)
+        == "Assumed 100: the display did not report one")
+    // A refused brightness register did report something, and what it reported
+    // is that there is nothing to report.
+    #expect(
+      DiagnosticsCopy.brightnessScale(
+        didReadMax: false, maxValue: 100, evidence: .refused, app: Self.app)
         == "Assumed 100: the display did not report one")
   }
 
@@ -453,6 +495,9 @@ struct DiagnosticsCopyTests {
     }
     #expect(verdict(.answered) == "Brightness is being sent to this display and accepted.")
     #expect(verdict(.notAttempted) == "Brightness is being sent to this display and accepted.")
+    // A refused register is not a caveat about the brightness command: it names
+    // a code the display does not carry.
+    #expect(verdict(.refused) == "Brightness is being sent to this display and accepted.")
     #expect(
       verdict(.allZeros)
         == "Brightness is being sent to this display and accepted, but it never answers a read.")
@@ -761,13 +806,13 @@ struct DiagnosticsCopyTests {
   /// bake in the literal.
   @Test func theProductNameIsNeverBakedIn() {
     let renamed = DiagnosticsCopy.readEvidence(.notAttempted, app: "Lumen")
-    #expect(renamed == "Lumen has not read from this display")
+    #expect(renamed == "Lumen has not recorded an answer from this display yet")
     #expect(!renamed.contains("Candela"))
 
     #expect(
       DiagnosticsCopy.brightnessScale(
         didReadMax: false, maxValue: 100, evidence: .notAttempted, app: "Lumen")
-        == "Assumed 100: Lumen has not asked this display for its scale")
+        == "Assumed 100: Lumen has not recorded an answer about this display's scale")
   }
 
   /// Hardware is always a "display" in user-visible copy. The type and
@@ -800,7 +845,7 @@ struct DiagnosticsCopyTests {
 
   /// Every sentence this type can produce, for the rules that bind all of them.
   private static func everySentence() -> [String] {
-    let evidences: [DDCReadEvidence] = [.notAttempted, .answered, .allZeros, .noReply]
+    let evidences: [DDCReadEvidence] = [.notAttempted, .answered, .allZeros, .noReply, .refused]
     let paths: [BrightnessPath] = [
       .native, .hardware, .software(.gamma), .software(.overlay),
       .combined(switchingValue: 0.25, backend: .gamma),

@@ -129,7 +129,10 @@ enum DiagnosticsPageCopy {
       notAttempted(isSafeMode: isSafeMode, readsBackAtStartup: readsBackAtStartup)
     case .answered:
       "The values shown elsewhere in this window come from the display itself."
-    case .allZeros, .noReply:
+    // A refusal joins them because this caption is about where the numbers on
+    // screen came from, and a register the display will not report is one more
+    // number it did not supply.
+    case .allZeros, .noReply, .refused:
       "The values shown elsewhere in this window are what \(AppInfo.productName) last wrote, not what the display reports."
     }
   }
@@ -142,6 +145,9 @@ enum DiagnosticsPageCopy {
   /// reports `.doNothing` whatever is stored, so reading the pref first
   /// would report the pref rather than the session. Everything else falls through
   /// to a sentence that claims no cause.
+  ///
+  /// "No answer recorded", not "nothing has been read": one silent pass is held,
+  /// not published (`DDCReadSkipLatch`), so the display may well have been read.
   static func notAttempted(isSafeMode: Bool, readsBackAtStartup: Bool) -> LocalizedStringKey {
     if isSafeMode {
       return "Safe Mode is on for this session, so nothing is read back from any display. The values shown elsewhere in this window come from your saved settings, not from the display."
@@ -149,7 +155,7 @@ enum DiagnosticsPageCopy {
     if !readsBackAtStartup {
       return "\(AppInfo.productName) is not set to read values back from displays at startup. The values shown elsewhere in this window come from your saved settings, not from the display."
     }
-    return "Nothing has been read from this display yet. The values shown elsewhere in this window come from your saved settings, not from the display."
+    return "No answer has been recorded from this display yet. The values shown elsewhere in this window come from your saved settings, not from the display."
   }
 
   // MARK: - Availability

@@ -455,18 +455,19 @@ struct AdvancedPage: View {
   /// NOT `DDCReadEvidence.worst(...)`: worst-wins folds a display whose
   /// brightness answered but whose volume came back all zeros to `.allZeros`,
   /// which would make "has never answered a read" false. One `.answered`
-  /// anywhere disqualifies it.
+  /// anywhere disqualifies it, and so does one refusal: the display replied,
+  /// so the caption this gates would be a false statement about the wire.
   private var readbackNeverAnswered: Bool {
     let evidence = [
       state.controller.readEvidence,
       state.volume.readEvidence,
       state.contrast.readEvidence,
     ]
-    guard !evidence.contains(.answered) else { return false }
+    guard !evidence.contains(.answered), !evidence.contains(.refused) else { return false }
     return evidence.contains { proves in
       switch proves {
       case .allZeros, .noReply: true
-      case .notAttempted, .answered: false
+      case .notAttempted, .answered, .refused: false
       }
     }
   }

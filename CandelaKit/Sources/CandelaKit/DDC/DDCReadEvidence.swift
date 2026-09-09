@@ -8,9 +8,11 @@
 /// answered with nothing. Wiring it up needs a decision about what a truncated
 /// string proves.
 ///
-/// [MEASURED] The MAG 341C answers every DDC read with zeros — verified across
-/// 13 timing/buffer combinations and 5 VCP codes. Silence about this is what
-/// let the fork's unvalidated reads clobber saved values to 0.
+/// [MEASURED] No DDC read of the MAG 341C returns anything usable: verified
+/// across 13 timing/buffer combinations and 5 VCP codes, into a zero-filled
+/// buffer that could not tell "answered zeros" from "wrote nothing". Which of the
+/// two verdicts below it earns is the transport's call, not assumed here.
+/// Silence about the failure is what let the fork clobber saved values to 0.
 ///
 /// Deliberately a pure value, not state on a controller-owner:
 /// `AppModel.DisplayState` holds `controller`, `volume` and `contrast` as
@@ -22,20 +24,35 @@ public enum DDCReadEvidence: Sendable, Equatable {
   case notAttempted
   /// At least one read came back with `max > 0`. This panel answers.
   case answered
-  /// Reads returned `(0, 0)` / `max == 0` — the write-only signature.
+  /// The panel wrote nothing but zeros over the transport's sentinel, or
+  /// answered a frame whose `max` is 0. The write-only signature either way.
   case allZeros
-  /// Reads returned nil: no reply, bad checksum, wrong opcode or wrong offset.
+  /// Nothing usable came back: a silent bus, a read call that left the reply
+  /// buffer untouched, or a frame that failed its checksum, op code or offset.
   case noReply
+  /// The panel answered with a result code: it parsed the request and said this
+  /// register is not one it carries. The Dell answers VCP 0x62 that way.
+  ///
+  /// An ANSWER, not a fault. The value is unreadable, but the wire carried a
+  /// reply, so a display whose volume register is refused is not a display that
+  /// stopped answering, and the two must not read the same.
+  case refused
 
   /// Worst-wins ordering. `allZeros` outranks `noReply` because it is the more
   /// SPECIFIC finding — the panel is on the bus and talking, it just never
   /// says anything true — and that is the sentence the user needs.
+  ///
+  /// `refused` sits between the floor and `answered`: it is a real finding, so it
+  /// supersedes "nothing asked yet", and it is the panel replying, so a sibling
+  /// that returned a value speaks for the display instead. Below both silences on
+  /// purpose, which is what keeps a refused register out of "not answering".
   private var severity: Int {
     switch self {
     case .notAttempted: 0
-    case .answered: 1
-    case .noReply: 2
-    case .allZeros: 3
+    case .refused: 1
+    case .answered: 2
+    case .noReply: 3
+    case .allZeros: 4
     }
   }
 

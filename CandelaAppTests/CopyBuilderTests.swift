@@ -71,6 +71,12 @@ struct CopyBuilderTests {
     logicalWidth: 3440, logicalHeight: 1440,
     pixelWidth: 3440, pixelHeight: 1440, refreshHz: 175)
 
+  /// Where an unhonoured commit left the display. Every field differs from
+  /// `mode`, so a sentence naming the wrong one of the two cannot pass.
+  private static let landedMode = DisplayMode(
+    ioModeID: 9, logicalWidth: 1920, logicalHeight: 1080,
+    pixelWidth: 1920, pixelHeight: 1080, refreshHz: 30, isNative: false)
+
   // MARK: - ArrangementCopy
 
   @Test func arrangementReportTitleNamesWhatTheCardReports() {
@@ -318,8 +324,11 @@ struct CopyBuilderTests {
     let notSet = render(DiagnosticsPageCopy.notAttempted(isSafeMode: false, readsBackAtStartup: false))
     #expect(notSet.contains("is not set to read values back from displays at startup"))
 
+    // One silent pass is held, not published, so the display may have been read;
+    // "nothing has been read" would be false there.
     let nothingYet = render(DiagnosticsPageCopy.notAttempted(isSafeMode: false, readsBackAtStartup: true))
-    #expect(nothingYet.contains("Nothing has been read from this display yet"))
+    #expect(nothingYet.contains("No answer has been recorded from this display yet"))
+    #expect(!nothingYet.contains("Nothing has been read"))
   }
 
   @Test func diagnosticsWriteGateLabelNamesNoWireTheBuiltInLacks() {
@@ -394,13 +403,63 @@ struct CopyBuilderTests {
     #expect(DisplayModeCopy.passiveCountdown(9).contains("Answer in the confirmation window"))
   }
 
+  @Test func menuBarModeStatusOnlyOffersTheAnswersAvailableToThePreview() {
+    let recovery = DisplayModeCopy.pendingAnswer(displayName: "Desk display", canKeep: false)
+    #expect(recovery.contains("Desk display"))
+    #expect(recovery.contains("could not be verified"))
+    #expect(recovery.contains("Revert"))
+    #expect(!recovery.lowercased().contains("keep"))
+    let ordinary = DisplayModeCopy.pendingAnswer(displayName: "Desk display", canKeep: true)
+    #expect(ordinary.contains("keep or revert"))
+    #expect(ordinary.contains("Desk display"))
+  }
+
   @Test func displayModePreviewAnnouncementSpeaksTheModeAndTheDeadline() {
     let spoken = DisplayModeCopy.previewAnnouncement(mode: Self.mode, seconds: 15)
     #expect(spoken.contains("2,560 by 1,440 at 60 hertz"))
-    #expect(spoken.contains("Keep this resolution?"))
+    #expect(spoken.hasPrefix("Keep 2,560 by 1,440 at 60 hertz?"))
+    // Spoken to someone who cannot look: an unhonoured commit leaves something
+    // else on the glass.
+    #expect(!spoken.contains("Display changed to"))
     #expect(spoken.contains(DisplayModeCopy.countdown(15)))
     // No glyphs in a spoken string: the times sign is read inconsistently.
     #expect(!spoken.contains("×"))
+  }
+
+  /// The caption beside the keep question is silent to a listener, so an
+  /// unhonoured commit's achieved geometry rides the announcement too. Otherwise
+  /// the one person who cannot check the screen approves a size the display is
+  /// not showing.
+  @Test func displayModePreviewAnnouncementSpeaksTheAchievedGeometryToo() {
+    let spoken = DisplayModeCopy.previewAnnouncement(
+      mode: Self.mode, seconds: 15,
+      unhonouredCommit: .init(requested: Self.mode, achieved: Self.landedMode))
+    #expect(spoken.hasPrefix("Resolution preview could not be verified."))
+    #expect(!spoken.contains("Keep "))
+    #expect(spoken.contains("Revert"))
+    #expect(spoken.contains(DisplayModeCopy.countdown(15)))
+    // The same statement the caption makes, in the spoken spelling: grouped
+    // digits, words for the rate, and no times sign.
+    #expect(spoken.hasSuffix("The display is showing 1,920 by 1,080 at 30 hertz."))
+    #expect(!spoken.contains("×"))
+    #expect(!spoken.contains("Hz"))
+    // A new choice is needed before another preview can be approved.
+    #expect(spoken.contains("choose the resolution again"))
+
+    // A display that cannot say what it is showing gets the other sentence,
+    // never silence.
+    let unreadable = DisplayModeCopy.previewAnnouncement(
+      mode: Self.mode, seconds: 15,
+      unhonouredCommit: .init(requested: Self.mode, achieved: nil))
+    #expect(unreadable.hasSuffix(DisplayModeCopy.unreadableAchievedGeometry()))
+  }
+
+  /// The control: an honoured apply says nothing extra, so the announcement does
+  /// not imply a divergence on every preview.
+  @Test func displayModePreviewAnnouncementStaysBareWhenTheCommitWasHonoured() {
+    #expect(
+      DisplayModeCopy.previewAnnouncement(mode: Self.mode, seconds: 15, unhonouredCommit: nil)
+        == DisplayModeCopy.previewAnnouncement(mode: Self.mode, seconds: 15))
   }
 
   @Test func displayModeMarksMakeNoQualityClaim() {
@@ -421,8 +480,57 @@ struct CopyBuilderTests {
     #expect(!scaled.contains("native"))
   }
 
+  /// The caption beside the keep question. The question names what Keep
+  /// re-applies; this names what the display is showing instead, which is the
+  /// half a person answering cannot check.
+  @Test func displayModeAchievedGeometryNamesWhatTheGlassShows() {
+    let caption = DisplayModeCopy.achievedGeometry(
+      .init(requested: Self.mode, achieved: Self.landedMode))
+    #expect(caption == "The display is showing 1920 × 1080, 30 Hz.")
+    // The requested size is already on screen above it, and repeating it there
+    // would make the two lines read as one contradiction.
+    #expect(!caption.contains(DisplayModeCopy.size(Self.mode)))
+
+    // A readback that failed is not evidence about the mode, so nothing is named.
+    let unreadable = DisplayModeCopy.achievedGeometry(
+      .init(requested: Self.mode, achieved: nil))
+    #expect(unreadable == "This display did not report which resolution it is showing.")
+    #expect(!unreadable.contains("×"))
+  }
+
+  /// One sentence, two dialects: the app windows write a size with the times
+  /// sign and call it a resolution, guided setup writes it with an x and calls
+  /// it a size. Both come from here, so neither surface can drift.
+  @Test func displayModeAchievedGeometrySpeaksEachSurfacesDialect() {
+    #expect(
+      DisplayModeCopy.achievedGeometry(width: 1920, height: 1080, refreshHz: 30, dialect: .size)
+        == "The display is showing 1920 x 1080, 30 Hz.")
+    #expect(
+      DisplayModeCopy.unreadableAchievedGeometry(dialect: .size)
+        == "This display did not report which size it is showing.")
+
+    // The control: the dialect is doing something, and the default is the one
+    // every existing surface already speaks.
+    for dialect in [DisplayModeCopy.SizeDialect.resolution, .size] {
+      let sentence = DisplayModeCopy.achievedGeometry(
+        width: 1920, height: 1080, refreshHz: 30, dialect: dialect)
+      #expect(sentence.contains(dialect.times))
+      #expect(sentence.contains("1920 \(dialect.times) 1080"))
+      #expect(DisplayModeCopy.unreadableAchievedGeometry(dialect: dialect).contains(dialect.noun))
+    }
+    #expect(DisplayModeCopy.SizeDialect.resolution.times != DisplayModeCopy.SizeDialect.size.times)
+    #expect(DisplayModeCopy.SizeDialect.resolution.noun != DisplayModeCopy.SizeDialect.size.noun)
+    #expect(
+      DisplayModeCopy.achievedGeometry(width: 1920, height: 1080, refreshHz: 30)
+        == DisplayModeCopy.achievedGeometry(
+          width: 1920, height: 1080, refreshHz: 30, dialect: .resolution))
+  }
+
   @Test func displayModeStartFailureStatesEitherReason() {
     #expect(render(DisplayModeCopy.startFailure).contains("could not switch this display"))
+    // Nothing committed on this route, so the sentence says so instead of
+    // sending the reader off to inspect a screen that did not change.
+    #expect(render(DisplayModeCopy.startFailure).contains("Nothing changed"))
     #expect(
       render(DisplayModeCopy.startFailure(.failed(DisplayConfigError(cgErrorCode: 1001))))
         == render(DisplayModeCopy.startFailure))
@@ -435,11 +543,100 @@ struct CopyBuilderTests {
       DisplayModeCopy.startFailureDiagnostic(.failed(DisplayConfigError(cgErrorCode: 1001)))
         == "CoreGraphics error 1001")
     #expect(DisplayModeCopy.startFailureDiagnostic(.blocked(by: .rotation)) == "Held by rotation")
+
+    // No code to print for an unhonoured commit. Achieved differs from requested
+    // so the assertions can tell which one the sentence names.
+    let landed = DisplayMode(
+      ioModeID: 9, logicalWidth: 1920, logicalHeight: 1080,
+      pixelWidth: 1920, pixelHeight: 1080, refreshHz: 30, isNative: false)
+    let unhonoured = DisplayModeCopy.startFailureDiagnostic(
+      .failed(
+        DisplayConfigError(
+          unhonouredCommit: .init(requested: Self.mode, achieved: landed))))
+    #expect(!unhonoured.contains("CoreGraphics error"))
+    #expect(unhonoured.contains("reported success"))
+    #expect(unhonoured.contains(DisplayModeCopy.size(landed)))
+    #expect(unhonoured.contains(DisplayModeCopy.refresh(landed.refreshHz)))
+    #expect(!unhonoured.contains(DisplayModeCopy.size(Self.mode)))
+  }
+
+  /// The one route that reaches a start failure with a commit behind it is a
+  /// preview on ANOTHER display that could not be put back: `begin` returns
+  /// before it touches this one. So neither the sentence nor the tooltip may
+  /// describe this display's screen, and neither may say nothing changed.
+  @Test func displayModeStartFailureAfterACommitTalksAboutTheOtherDisplay() {
+    let error = DisplayConfigError(
+      unhonouredCommit: .init(requested: Self.mode, achieved: Self.landedMode))
+    let sentence = render(DisplayModeCopy.startFailure(.failed(error)))
+    #expect(sentence == render(DisplayModeCopy.startFailureAfterACommit))
+    #expect(sentence.contains("another display"))
+    #expect(!sentence.contains("Nothing changed"))
+    #expect(sentence != render(DisplayModeCopy.startFailure))
+
+    let diagnostic = DisplayModeCopy.startFailureDiagnostic(.failed(error))
+    #expect(diagnostic.hasPrefix("Another display: "))
+    #expect(diagnostic.contains(DisplayModeCopy.size(Self.landedMode)))
+    // The shared tooltip carries no display: only this route knows which one it
+    // is about, which is why the naming lives here.
+    #expect(!DisplayModeCopy.diagnostic(error).contains("Another display"))
+  }
+
+  /// The floating card's three lines are one story: a title about this display,
+  /// a subject, then a sentence about a second display. The subject names both
+  /// exactly where the sentence does.
+  @Test func displayModeStartFailureSubjectNamesBothDisplaysOnlyWhenItCommitted() {
+    let committed = DisplayModeCoordinator.StartFailure.Reason.failed(
+      DisplayConfigError(unhonouredCommit: .init(requested: Self.mode, achieved: Self.landedMode)))
+    #expect(
+      DisplayModeCopy.startFailureSubject(displayName: "MAG 341C OLED", reason: committed)
+        == "MAG 341C OLED and another display")
+    // The card omits an empty subject, so the second display would go unnamed
+    // if this arm handed back nothing.
+    #expect(
+      DisplayModeCopy.startFailureSubject(displayName: "", reason: committed)
+        == "This display and another display")
+
+    // Every other reason is about this display alone, and the subject is its
+    // name unchanged.
+    for reason in Self.allStartFailureReasons where !Self.commits(reason) {
+      #expect(
+        DisplayModeCopy.startFailureSubject(displayName: "DELL U2725QE", reason: reason)
+          == "DELL U2725QE")
+      #expect(DisplayModeCopy.startFailureSubject(displayName: "", reason: reason).isEmpty)
+    }
+  }
+
+  private static func commits(_ reason: DisplayModeCoordinator.StartFailure.Reason) -> Bool {
+    guard case let .failed(error) = reason else { return false }
+    return error.didCommit
+  }
+
+  /// Every tooltip that renders a `DisplayConfigError` calls this, so the
+  /// unhonoured arm is pinned once.
+  @Test func displayModeDiagnosticRendersBothArms() {
+    #expect(DisplayModeCopy.diagnostic(DisplayConfigError(cgErrorCode: 1001)) == "CoreGraphics error 1001")
+
+    let landed = DisplayMode(
+      ioModeID: 9, logicalWidth: 1920, logicalHeight: 1080,
+      pixelWidth: 1920, pixelHeight: 1080, refreshHz: 30, isNative: false)
+    let committed = DisplayModeCopy.diagnostic(
+      DisplayConfigError(unhonouredCommit: .init(requested: Self.mode, achieved: landed)))
+    #expect(committed.contains(DisplayModeCopy.size(landed)))
+    // The sentinel is not a CoreGraphics code and must never be printed as one.
+    #expect(!committed.contains("\(DisplayConfigError.unhonouredCommitCode)"))
+
+    // An unreadable achieved mode is still an unhonoured commit, not the code arm.
+    let unreadable = DisplayModeCopy.diagnostic(
+      DisplayConfigError(unhonouredCommit: .init(requested: Self.mode, achieved: nil)))
+    #expect(unreadable.contains("unreadable resolution"))
+    #expect(!unreadable.contains("CoreGraphics error"))
   }
 
   @Test func displayModeResolveFailuresInviteAnotherAttempt() {
-    #expect(render(DisplayModeCopy.resolveFailure).contains("still showing the preview"))
-    #expect(render(DisplayModeCopy.resolveFailure).contains("Try again"))
+    // The readback can fail on a commit that went through, so no claim about
+    // what is showing.
+    #expect(!render(DisplayModeCopy.resolveFailure).contains("still showing the preview"))
+    #expect(render(DisplayModeCopy.resolveFailure).contains("then try again"))
     #expect(render(DisplayModeCopy.expiryAlreadyRan).contains("already run"))
   }
 
@@ -463,7 +660,10 @@ struct CopyBuilderTests {
     #expect(unavailable.contains("left this display as it found it"))
 
     let failed = render(DisplayModeCopy.reapplyFailed(requested: Self.descriptor))
-    #expect(failed.contains("Nothing was changed"))
+    // Unattended, and the readback can fail after the commit: must not say the
+    // display did not move.
+    #expect(!failed.contains("Nothing was changed"))
+    #expect(failed.contains("Pick it from the list of resolutions"))
 
     // One sentence per notice, and each routes to its own builder.
     #expect(
@@ -884,13 +1084,38 @@ struct CopyBuilderTests {
       add(
         "DisplayModeCopy.previewAnnouncement(\(seconds))",
         DisplayModeCopy.previewAnnouncement(mode: Self.mode, seconds: seconds))
+      add(
+        "DisplayModeCopy.previewAnnouncement(\(seconds), unhonoured)",
+        DisplayModeCopy.previewAnnouncement(
+          mode: Self.mode, seconds: seconds,
+          unhonouredCommit: .init(requested: Self.mode, achieved: Self.landedMode)))
+      add(
+        "DisplayModeCopy.previewAnnouncement(\(seconds), unreadable)",
+        DisplayModeCopy.previewAnnouncement(
+          mode: Self.mode, seconds: seconds,
+          unhonouredCommit: .init(requested: Self.mode, achieved: nil)))
     }
     add("DisplayModeCopy.startFailure", DisplayModeCopy.startFailure)
+    add("DisplayModeCopy.startFailureAfterACommit", DisplayModeCopy.startFailureAfterACommit)
+    add(
+      "DisplayModeCopy.achievedGeometry",
+      DisplayModeCopy.achievedGeometry(.init(requested: Self.mode, achieved: Self.landedMode)))
+    add(
+      "DisplayModeCopy.achievedGeometry(unreadable)",
+      DisplayModeCopy.achievedGeometry(.init(requested: Self.mode, achieved: nil)))
     add("DisplayModeCopy.resolveFailure", DisplayModeCopy.resolveFailure)
     add("DisplayModeCopy.expiryAlreadyRan", DisplayModeCopy.expiryAlreadyRan)
     for reason in Self.allStartFailureReasons {
       add("DisplayModeCopy.startFailure(reason)", DisplayModeCopy.startFailure(reason))
       add("DisplayModeCopy.startFailureDiagnostic(reason)", DisplayModeCopy.startFailureDiagnostic(reason))
+      add(
+        "DisplayModeCopy.startFailureSubject(reason)",
+        DisplayModeCopy.startFailureSubject(displayName: "MAG 341C OLED", reason: reason))
+    }
+    for achieved: OnboardingAchievedSize in [
+      .size(width: 1920, height: 1080, refreshHz: 30), .unreadable,
+    ] {
+      add("OnboardingSizePage.achievedCaption", OnboardingSizePage.achievedCaption(achieved))
     }
     for notice in Self.allModeReapplyNotices {
       add(
@@ -1113,7 +1338,8 @@ struct CopyBuilderTests {
     }
   }
 
-  private static let allReadEvidence: [DDCReadEvidence] = [.notAttempted, .answered, .allZeros, .noReply]
+  private static let allReadEvidence: [DDCReadEvidence] =
+    [.notAttempted, .answered, .allZeros, .noReply, .refused]
 
   private static func guardReadEvidence(_ evidence: DDCReadEvidence) -> Int {
     switch evidence {
@@ -1121,6 +1347,7 @@ struct CopyBuilderTests {
     case .answered: 1
     case .allZeros: 2
     case .noReply: 3
+    case .refused: 4
     }
   }
 
@@ -1178,8 +1405,14 @@ struct CopyBuilderTests {
     }
   }
 
+  /// Both shapes of `.failed`: the sentence and the tooltip each branch on
+  /// whether a commit went through, so one sample cannot cover the pair.
   private static let allStartFailureReasons: [DisplayModeCoordinator.StartFailure.Reason] =
-    [.failed(DisplayConfigError(cgErrorCode: 1001))]
+    [
+      .failed(DisplayConfigError(cgErrorCode: 1001)),
+      .failed(DisplayConfigError(unhonouredCommit: .init(requested: mode, achieved: landedMode))),
+      .failed(DisplayConfigError(unhonouredCommit: .init(requested: mode, achieved: nil))),
+    ]
       + ReconfigurationClaimant.allCases.map { .blocked(by: $0) }
 
   private static func guardStartFailureReason(_ reason: DisplayModeCoordinator.StartFailure.Reason) -> Int {
@@ -1274,7 +1507,7 @@ struct CopyBuilderTests {
     #expect(Set(Self.allApplyNotices.map(Self.guardApplyNotice)).count == 2)
     #expect(Set(Self.allProblemShapes.flatMap { $0 }.map(Self.guardProblem)).count == 2)
     #expect(Set(Self.allBrightnessPaths.map(Self.guardBrightnessPath)).count == 8)
-    #expect(Set(Self.allReadEvidence.map(Self.guardReadEvidence)).count == 4)
+    #expect(Set(Self.allReadEvidence.map(Self.guardReadEvidence)).count == 5)
     #expect(Set(Self.allMirrorRefusals.map(Self.guardMirrorRefusal)).count == 8)
     #expect(Set(Self.allRotationRefusals.map(Self.guardRotationRefusal)).count == 6)
     #expect(Set(Self.allModeReapplyNotices.map(Self.guardModeReapplyNotice)).count == 3)

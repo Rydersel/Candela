@@ -87,15 +87,22 @@ struct ModeConfirmationView: View {
     // remembered passing in.
     if let preview = coordinator.preview {
       ConfirmationCard {
-        ConfirmationTitle("Keep this resolution?")
+        ConfirmationTitle(LocalizedStringKey(DisplayModeCopy.previewTitle(canKeep: preview.canKeep)))
         ConfirmationSubtitle(verbatim: subtitle(preview))
+
+        if let commit = preview.unhonouredCommit {
+          ConfirmationCaption(Text(verbatim: DisplayModeCopy.recoveryInstruction()))
+          ConfirmationCaption(Text(verbatim: DisplayModeCopy.achievedGeometry(commit)))
+        }
 
         if let failure = preview.failure {
           // Nothing auto-retries a failed resolution. Staying silent would
           // leave the display on a mode the user never approved, held only
           // until the app exits.
           ConfirmationCaption(DisplayModeCopy.resolveFailure)
-            .help("CoreGraphics error \(failure.cgErrorCode)")
+            // Not the bare code: an unhonoured commit's code is a sentinel, not a
+            // CoreGraphics error.
+            .help(DisplayModeCopy.diagnostic(failure))
         }
         if preview.isCountingDown {
           ConfirmationCountdown(DisplayModeCopy.countdown(preview.secondsRemaining))
@@ -109,11 +116,13 @@ struct ModeConfirmationView: View {
           // refused as stale rather than resolved by an answer given about
           // something else.
           Button("Revert Now") { Task { await coordinator.revert(preview) } }
-            .buttonStyle(AnswerButtonStyle(isPrimary: false))
+            .buttonStyle(AnswerButtonStyle(isPrimary: !preview.canKeep))
             .keyboardShortcut(.cancelAction)
-          Button("Keep") { Task { await coordinator.confirm(preview) } }
-            .buttonStyle(AnswerButtonStyle(isPrimary: true))
-            .keyboardShortcut(.defaultAction)
+          if preview.canKeep {
+            Button("Keep") { Task { await coordinator.confirm(preview) } }
+              .buttonStyle(AnswerButtonStyle(isPrimary: true))
+              .keyboardShortcut(.defaultAction)
+          }
         }
         // While a selection is still landing the window is about to change, so
         // offering an answer to the old one is pointless, though harmless.
@@ -135,8 +144,14 @@ struct ModeConfirmationView: View {
     if let failure = coordinator.startFailure {
       ConfirmationCard {
         ConfirmationTitle("Resolution not changed")
-        if !displayName.isEmpty {
-          ConfirmationSubtitle(verbatim: displayName)
+        // Names both displays where the caption below is about a second one, so
+        // the title, the subject and the sentence read as one story rather than
+        // as a card that contradicts itself.
+        let subject = DisplayModeCopy.startFailureSubject(
+          displayName: displayName, reason: failure.reason
+        )
+        if !subject.isEmpty {
+          ConfirmationSubtitle(verbatim: subject)
         }
         ConfirmationCaption(DisplayModeCopy.startFailure(failure.reason))
           .help(DisplayModeCopy.startFailureDiagnostic(failure.reason))

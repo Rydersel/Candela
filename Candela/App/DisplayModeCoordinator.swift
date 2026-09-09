@@ -195,14 +195,17 @@ final class DisplayModeCoordinator {
     /// The one answerable surface, fixed at preview start.
     let surface: PreviewSurface
     var secondsRemaining: Int
-    /// Set when `confirm()`, `revert()` or the expiry threw. The display did not
-    /// move, the session still holds the fallback, and both buttons stay live.
+    /// Set when `confirm()`, `revert()` or the expiry threw. The session still
+    /// holds the fallback and Revert stays available.
     /// Nothing auto-retries, so a silent failure would leave the user on a mode
     /// they never approved.
     var failure: DisplayConfigError?
     /// Reported by the session, not inferred: a failed expiry disarms the
     /// countdown while a failed commit deliberately leaves it armed.
     var isCountingDown: Bool
+    /// Latest committed failure, retained across refusals that move nothing.
+    var unhonouredCommit: DisplayConfigError.UnhonouredCommit?
+    var canKeep: Bool { unhonouredCommit == nil }
     /// Non-nil when this preview is a SYNTHESIZED size: the engine has a
     /// virtual display up and the panel mirrored onto it, and the answer goes
     /// to `SynthesisPreviewSession` rather than `ModePreviewSession`.
@@ -781,6 +784,9 @@ final class DisplayModeCoordinator {
       // reconfiguration and the event it produces calls this again.
       arrivals.release(previewed)
     }
+    // Synchronous on the main actor, so an unhonoured commit blocks here for the
+    // configurator's whole settle window. An honoured one returns on the first
+    // read; the alternative is reporting a restore that did not happen.
     for display in displays where display.id != previewed {
       // Synthesis reapply runs AFTER the stored-mode decision for the same
       // display, never beside it: engaging makes the panel a mirror slave, and a
@@ -845,11 +851,10 @@ final class DisplayModeCoordinator {
         try configurator.apply(mode, to: display.id, scope: .session)
         log.log("reapplied stored mode on display \(display.id): \(mode.logicalWidth)x\(mode.logicalHeight) @\(mode.refreshHz)Hz")
       } catch {
-        // `apply` throws when staging or completion fails AND when the resolved
-        // `CGDisplayMode`'s descriptor does not match the one asked for, a
-        // reassigned `ioModeID` now denoting a different mode. On the unattended
-        // path that second case must not be swallowed: `try?` would leave the
-        // display on some third mode with the app reporting a successful restore.
+        // Not `try?`: that would report a successful restore over a refused
+        // transaction, a reassigned `ioModeID`, or a commit the display did not
+        // honour. Only the last one moved the display, so the notice claims
+        // nothing about where it was left.
         let configError = error as? DisplayConfigError
           ?? DisplayConfigError(cgErrorCode: -1)
         notice = .failed(configError)
@@ -1130,6 +1135,7 @@ final class DisplayModeCoordinator {
       secondsRemaining: 0,
       failure: nil,
       isCountingDown: false,
+      unhonouredCommit: outstanding.unhonouredCommit,
       synthesized: nil,
       synthesisFailure: nil
     )
@@ -1150,6 +1156,9 @@ final class DisplayModeCoordinator {
       secondsRemaining: 0,
       failure: nil,
       isCountingDown: false,
+      // The mode session is not the engine here, so there is no committed mode
+      // apply to have gone unhonoured.
+      unhonouredCommit: nil,
       synthesized: outstanding,
       synthesisFailure: nil
     )
@@ -1229,8 +1238,9 @@ final class DisplayModeCoordinator {
     // claim is then held continuously through the countdown's resolution.
     //
     // The refusal is REPORTED by the synthesis coordinator rather than as a
-    // `StartFailure`: that surface says "CoreGraphics error <n>", and what went
-    // wrong was a virtual display refusing to come down.
+    // `StartFailure`: that surface reports a display-configuration failure and
+    // its diagnostic prints a CoreGraphics code, and what went wrong here was a
+    // virtual display refusing to come down.
     guard await endOutstandingSynthesisPreview() else {
       log.error("Refused a mode change on display \(displayID): an outstanding synthesized size could not be disengaged")
       await adopt(.keep)
@@ -1490,8 +1500,9 @@ final class DisplayModeCoordinator {
   /// keeps this one in.
   ///
   /// An engine failure goes through the refusal the synthesis coordinator renders,
-  /// never a `StartFailure`: that surface says "CoreGraphics error <n>", and what
-  /// would have gone wrong is a virtual display.
+  /// never a `StartFailure`: that surface reports a display-configuration failure
+  /// and its diagnostic prints a CoreGraphics code, and what would have gone
+  /// wrong here is a virtual display.
   private func restoreStopAfterAFallenPick(on displayID: CGDirectDisplayID) async {
     guard let size = restoreStopIfPickFalls.removeValue(forKey: displayID) else { return }
     guard let synthesis,
@@ -1568,7 +1579,10 @@ final class DisplayModeCoordinator {
     if let previewed = answered.synthesized {
       return await performSynthesisResolve(previewed, keeping: keeping)
     }
-    let answeredMode = PreviewedMode(displayID: answered.displayID, mode: answered.mode)
+    let answeredMode = PreviewedMode(
+      displayID: answered.displayID, mode: answered.mode,
+      unhonouredCommit: answered.unhonouredCommit
+    )
     let outcome = keeping
       ? await session.confirm(answeredMode)
       : await session.revert(answeredMode)
@@ -1745,6 +1759,7 @@ final class DisplayModeCoordinator {
         secondsRemaining: await coordinator.session.secondsRemaining,
         failure: nil,
         isCountingDown: counting,
+        unhonouredCommit: nil,
         synthesized: outstanding,
         synthesisFailure: carried
       )
@@ -1780,6 +1795,10 @@ final class DisplayModeCoordinator {
       secondsRemaining: await session.secondsRemaining,
       failure: carried,
       isCountingDown: counting,
+      // Read from the session on every rebuild, not carried across like
+      // `failure`: the session holds it for as long as the preview stands, so a
+      // countdown tick cannot lose it and a fresh preview cannot inherit it.
+      unhonouredCommit: outstanding.unhonouredCommit,
       synthesized: nil,
       synthesisFailure: nil
     )
