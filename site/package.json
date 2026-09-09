@@ -34,5 +34,10 @@
     "vite": "^8.2.0",
     "vitest": "^4.1.11",
     "wrangler": "^4.127.1"
+  },
+  "overrides": {
+    "miniflare": {
+      "sharp@0.35.2": "0.35.4"
+    }
   }
 }
