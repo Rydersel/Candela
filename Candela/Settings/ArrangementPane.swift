@@ -363,9 +363,9 @@ struct ArrangementPane: View {
   /// Present with one display attached, for the reason the whole pane is.
   /// What changes is the caption, not the control.
   private var savedLayoutSection: some View {
-    SettingsCardSection(title: "Saved Arrangements") {
+    SettingsCardSection(title: "Saved Display Setups") {
       SettingRow(caption: rememberCaption) {
-        Toggle("Remember how these displays are arranged", isOn: Binding(
+        Toggle("Remember display rotations and positions", isOn: Binding(
           get: { coordinator.isRestoringLayout },
           set: { restoring in
             // Only the FLAG is announced here. Turning it on ALSO saves the
@@ -377,7 +377,7 @@ struct ArrangementPane: View {
           }
         ))
         .themedSwitch()
-        .accessibilityLabel("Remember how these displays are arranged")
+        .accessibilityLabel("Remember display rotations and positions")
         .prefIdentifier(.restoreArrangement)
       }
       // The mirror hooks hang HERE, on the one row of this section that is
@@ -445,12 +445,9 @@ struct ArrangementPane: View {
     // `SettingsCaption`'s `verbatim` initialiser keeps the pane's caption
     // styling on a composed sentence.
     let restores = coordinator.arrangement.tiles.count > 1
-      ? "Puts these displays back this way when they reconnect or \(AppInfo.productName) launches."
-      : "Puts a set of displays back the way you left them when that set reconnects or \(AppInfo.productName) launches."
-    guard coordinator.arrangement.tiles.count > 1 else {
-      return SettingsCaption(verbatim: "\(restores) With one display connected there is no arrangement to save yet.")
-    }
-    let updates = "Turning it on saves the arrangement on screen now, and keeping a change you make here updates it."
+      ? "Restores these displays’ rotations and positions when they reconnect or \(AppInfo.productName) launches."
+      : "Restores a saved display setup when that set reconnects or \(AppInfo.productName) launches."
+    let updates = "Turning it on saves the current positions and rotations. Keeping arrangement or rotation changes in Candela updates the saved setup."
     let elsewhere = "Changes you make in System Settings are left alone until the displays reconnect."
     return SettingsCaption(verbatim: "\(restores) \(updates) \(elsewhere)")
   }

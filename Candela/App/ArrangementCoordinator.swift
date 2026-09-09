@@ -89,6 +89,16 @@ final class ArrangementCoordinator {
   @ObservationIgnored var synthesisPairings: () -> [SynthesisPairing] = { [] }
 
   @ObservationIgnored private let configurator: any DisplayArrangementConfiguring
+  @ObservationIgnored private let rotationConfigurator: any DisplayRotationConfiguring
+  @ObservationIgnored private let savedLayoutRestorer: SavedArrangementRestorer
+  private var pendingRememberChoice: Bool?
+  @ObservationIgnored private var rememberRequestRevision = 0
+
+  /// A visible choice on the confirmation, committed only with Keep.
+  var remembersThisLayout: Bool {
+    get { pendingRememberChoice ?? persistence.remembersConfirmedLayout }
+    set { pendingRememberChoice = newValue }
+  }
   /// The display-reconfiguration gate. Held from just before the layout applies until nothing is outstanding.
   /// Not defaulted: a per-coordinator default would compile, run, and exclude
   /// nobody.
@@ -117,11 +127,14 @@ final class ArrangementCoordinator {
     gate: DisplayReconfigurationGate,
     configurator: any DisplayArrangementConfiguring = CoreGraphicsArrangementConfigurator(),
     persistence: ArrangementPersistence = ArrangementPersistence(),
+    rotationConfigurator: any DisplayRotationConfiguring = CoreGraphicsDisplayConfigurator(),
     countdownSeconds: Int = 30
   ) {
     self.gate = gate
     self.configurator = configurator
     self.persistence = persistence
+    self.rotationConfigurator = rotationConfigurator
+    savedLayoutRestorer = SavedArrangementRestorer(arrangements: configurator, rotations: rotationConfigurator)
     session = ArrangementPreviewSession(
       configurator: configurator, countdownSeconds: countdownSeconds
     )
@@ -445,19 +458,12 @@ final class ArrangementCoordinator {
       return
     }
 
-    let decision = ArrangementReapplyPolicy.decide(
-      isEnabled: persistence.isRestoreEnabled,
-      arrivals: claimed,
-      stored: persistence.savedArrangement(
-        // The ONLINE spelling of the signature, the one the arrival gate above
-        // signs. They diverge on one input, a display whose bounds are unreadable,
-        // which the layout spelling drops and this one keeps: inert here, because
-        // `decide` defers on that discrepancy before it consults `stored`.
-        for: TopologySignature(online: topology.displays, substituting: substituting)
-      ),
-      attached: topology.displays,
-      current: topology.arrangement,
-      substituting: substituting
+    let stored = persistence.savedArrangement(
+      for: TopologySignature(online: topology.displays, substituting: substituting)
+    )
+    let decision = await savedLayoutRestorer.restore(
+      stored, arrivals: claimed, substituting: substituting,
+      isEnabled: { [persistence] in persistence.isRestoreEnabled }
     )
 
     if decision.isDeferred {
@@ -466,14 +472,9 @@ final class ArrangementCoordinator {
       // event tries again with a machine that can answer.
       release(claimed)
     } else {
-      // Handled independently rather than as an either/or: the decision type does
-      // not promise they are exclusive, and a policy that both applies something
-      // and has something to say must not have the apply skipped by a `??`.
-      var notice = decision.notice
-      if let layout = decision.arrangementToApply {
-        notice = apply(restored: layout, over: topology.arrangement) ?? notice
-      }
-      restoreNotice = notice
+      // The restore actor has already applied any accepted layout. Report its
+      // outcome here without submitting the same configuration again.
+      restoreNotice = decision.notice
       if let restoreNotice {
         // Not every notice is a failure. A layout declined because the displays are
         // no longer the size it was recorded at is ordinary, and `.error` would put
@@ -493,32 +494,6 @@ final class ArrangementCoordinator {
     // authority on whether anything is outstanding, and freeing a claim that
     // protects a preview is the interleave the gate exists to prevent.
     if await session.previewedArrangement == nil { await gate.release(.arrangement) }
-  }
-
-  /// Commits a restored layout. Returns `nil` on success, or what to report.
-  private func apply(
-    restored layout: DisplayArrangement, over live: DisplayArrangement
-  ) -> ArrangementReapplyNotice? {
-    guard let plan = ArrangementPlan(applying: layout, to: live) else {
-      // A structural refusal of the layout as a whole: an origin outside `Int32`,
-      // or a display that became a mirror slave since the read. Reported rather
-      // than swallowed, since unattended silence looks like a restore that worked.
-      return .failed(DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue))
-    }
-    do {
-      _ = try configurator.apply(plan, scope: ArrangementReapplyPolicy.scope)
-      log.log("Restored the saved layout for \(plan.changes.count, privacy: .public) displays")
-      return nil
-    } catch let error as DisplayConfigError {
-      // `apply` throws when a stage or the completion fails AND when the achieved
-      // layout is not the requested one. On the unattended path that second case is
-      // precisely what must not be swallowed: the machine is in a layout
-      // CoreGraphics chose, and `try?` would leave the app reporting a successful
-      // restore.
-      return .failed(error)
-    } catch {
-      return .failed(DisplayConfigError(cgErrorCode: -1))
-    }
   }
 
   private func release(_ claimed: Set<CGDirectDisplayID>) {
@@ -542,20 +517,35 @@ final class ArrangementCoordinator {
   /// The `savedArrangements` fan-out is announced from inside `saveIfRestoring`,
   /// not by the caller.
   func setRestoringLayout(_ restoring: Bool) {
-    persistence.setRestoreEnabled(restoring)
-    guard restoring else { return }
+    rememberRequestRevision += 1
+    let revision = rememberRequestRevision
+    if !restoring {
+      persistence.setRestoreEnabled(false)
+      return
+    }
     queue.enqueue {
-      // NOT while a preview stands: the layout on screen during a countdown is one
-      // nobody has approved, and the settings window and the confirmation panel sit
-      // on screen together for thirty seconds, so this is reachable. Asked of the
-      // SESSION, which `preview` cannot answer for several awaits after a `begin()`
-      // succeeds. Keeping the change saves it through `resolve` anyway.
-      guard await self.session.previewedArrangement == nil else { return }
-      // A fresh sample rather than the last one this coordinator holds: the pane
-      // can sit open across a reconfiguration, and saving a stale layout would file
-      // an arrangement the machine is not in.
+      guard revision == self.rememberRequestRevision else { return }
+      // Enabling saves the current setup, so it must obey the same exclusion
+      // as a display change. A preview is not an approved setup.
+      guard await self.session.previewedArrangement == nil else {
+        self.blockedBy = .arrangement
+        self.syncConfirmation()
+        return
+      }
+      if let holder = await self.gate.claim(.arrangement).refusedBy {
+        self.blockedBy = holder
+        self.syncConfirmation()
+        return
+      }
+      guard revision == self.rememberRequestRevision else {
+        await self.gate.release(.arrangement)
+        return
+      }
+      self.blockedBy = nil
+      self.persistence.setRestoreEnabled(true)
       self.refreshArrangement()
       self.saveIfRestoring()
+      await self.gate.release(.arrangement)
     }
   }
 
@@ -570,8 +560,27 @@ final class ArrangementCoordinator {
     // Filed under the panel, never under the virtual display standing in
     // for it. A layout saved while a synthesized size stands has to survive the
     // size being dropped, and the virtual display does not.
-    persistence.save(arrangement, substituting: synthesisSubstitutions)
+    persistence.save(arrangement, substituting: synthesisSubstitutions,
+                     rotations: savedRotations())
     didSaveArrangement()
+  }
+
+  /// A kept rotation changes both the angle and the layout's footprint.
+  /// It updates an enabled saved setup, without opting a rotation-only user in.
+  func rotationWasConfirmed() {
+    // Called synchronously before RotationCoordinator releases its gate. Do
+    // not enqueue a later sample that might belong to another preview.
+    guard persistence.isRestoreEnabled else { return }
+    refreshArrangement()
+    saveIfRestoring()
+  }
+
+  private func savedRotations() -> [CGDirectDisplayID: DisplayRotation] {
+    var result: [CGDirectDisplayID: DisplayRotation] = [:]
+    for tile in arrangement.tiles where tile.mirroredIDs.isEmpty && synthesisSubstitutions[tile.id] == nil {
+      result[tile.id] = rotationConfigurator.rotation(of: tile.id)
+    }
+    return result
   }
 
   /// Remembers the layout to offer back after an apply that DIVERGED.
@@ -592,9 +601,23 @@ final class ArrangementCoordinator {
   }
 
   private func resolve(_ answered: Preview, keeping: Bool) async -> PreviewOutcome {
+    let remember = remembersThisLayout
+    let revision = rememberRequestRevision
+    let wasOutstanding = await session.previewedArrangement == answered.value
     let outcome = keeping
       ? await session.confirm(answered.value)
       : await session.revert(answered.value)
+    // Capture the achieved, approved setup while the preview still owns the
+    // gate. The session can repeat its last outcome on a duplicate answer.
+    if wasOutstanding, case .committed = outcome {
+      refreshArrangement()
+      // A Settings opt-out made while the hardware commit was running is newer
+      // than the checkbox captured with Keep and must win.
+      let currentChoice = revision == rememberRequestRevision ? remember : persistence.isRestoreEnabled
+      persistence.saveConfirmed(arrangement, remember: currentChoice,
+                                substituting: synthesisSubstitutions, rotations: savedRotations())
+      didSaveArrangement()
+    }
     switch outcome {
     case .committed, .reverted:
       await adopt(.clear)
@@ -606,10 +629,6 @@ final class ArrangementCoordinator {
       await adopt(.keep)
     }
     refreshArrangement()
-    // AFTER the re-read, and only for a layout the user kept: the one moment a
-    // layout is known to be both on screen and approved. macOS adjusts a request
-    // silently, so saving the requested layout would store one never achieved.
-    if case .committed = outcome { saveIfRestoring() }
     return outcome
   }
 
@@ -620,6 +639,7 @@ final class ArrangementCoordinator {
   private func adopt(_ failure: FailureUpdate) async {
     guard let outstanding = await session.previewedArrangement else {
       preview = nil
+      pendingRememberChoice = nil
       stopCountdown()
       // THE release. Here rather than at each call site because this funnel
       // already runs after every path that can end a preview. Unconditional: the

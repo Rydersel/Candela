@@ -97,6 +97,15 @@ struct ArrangementConfirmationView: View {
           ConfirmationCaption(ArrangementCopy.expiryAlreadyRan)
         }
 
+        Toggle("Remember this display setup", isOn: Binding(
+          get: { coordinator.remembersThisLayout },
+          set: { coordinator.remembersThisLayout = $0 }
+        ))
+        .toggleStyle(.checkbox)
+        .font(.callout)
+        .disabled(coordinator.isApplying)
+        ConfirmationCaption("Restore saved rotations and positions when these displays reconnect.")
+
         ConfirmationAnswers {
           // Both answers carry the preview THIS window is rendering, so an
           // answer can only ever resolve what the user was looking at.

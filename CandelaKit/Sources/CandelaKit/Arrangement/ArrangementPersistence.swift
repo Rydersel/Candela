@@ -93,13 +93,17 @@ public struct SavedArrangementEntry: Sendable, Equatable, Codable {
   public let y: Int
   public let width: Int
   public let height: Int
+  /// Missing in version 1. Absence means leave rotation alone, never assume 0°.
+  public let rotation: DisplayRotation?
 
-  public init(identity: String, x: Int, y: Int, width: Int, height: Int) {
+  public init(identity: String, x: Int, y: Int, width: Int, height: Int,
+              rotation: DisplayRotation? = nil) {
     self.identity = identity
     self.x = x
     self.y = y
     self.width = width
     self.height = height
+    self.rotation = rotation
   }
 
   /// Spelled out rather than synthesized: these strings are an on-disk format, and
@@ -111,6 +115,7 @@ public struct SavedArrangementEntry: Sendable, Equatable, Codable {
     case y
     case width
     case height
+    case rotation
   }
 }
 
@@ -127,7 +132,7 @@ public struct SavedArrangement: Sendable, Equatable, Codable {
   public let version: Int
   public let entries: [SavedArrangementEntry]
 
-  public static let currentVersion = 1
+  public static let currentVersion = 2
 
   public init(version: Int = SavedArrangement.currentVersion, entries: [SavedArrangementEntry]) {
     self.version = version
@@ -138,12 +143,15 @@ public struct SavedArrangement: Sendable, Equatable, Codable {
   /// identities for the same reason it applies to the key: a layout saved while a
   /// synthesized size stood would otherwise name a virtual display that is gone the
   /// moment it is read back.
-  public init(_ arrangement: DisplayArrangement, substituting: [CGDirectDisplayID: String] = [:]) {
+  public init(_ arrangement: DisplayArrangement, substituting: [CGDirectDisplayID: String] = [:],
+              rotations: [CGDirectDisplayID: DisplayRotation] = [:]) {
     self.init(entries: arrangement.tiles.map {
       SavedArrangementEntry(
         identity: substituting[$0.id] ?? $0.identity.key,
         x: $0.rect.x, y: $0.rect.y,
-        width: $0.rect.width, height: $0.rect.height
+        width: $0.rect.width, height: $0.rect.height,
+        // A synthesized desktop is not the physical panel's orientation.
+        rotation: substituting[$0.id] == nil ? rotations[$0.id] : nil
       )
     })
   }
@@ -195,6 +203,23 @@ public final class ArrangementPersistence: @unchecked Sendable {
     defaults.bool(forKey: PrefName.restoreArrangement.rawValue)
   }
 
+  /// The initial confirmation suggests remembering; launch alone enables nothing.
+  /// An explicitly stored false remains false across upgrades and confirmations.
+  public var remembersConfirmedLayout: Bool {
+    defaults.object(forKey: PrefName.restoreArrangement.rawValue) == nil || isRestoreEnabled
+  }
+
+  public func saveConfirmed(
+    _ arrangement: DisplayArrangement, remember: Bool? = nil,
+    substituting: [CGDirectDisplayID: String] = [:],
+    rotations: [CGDirectDisplayID: DisplayRotation] = [:]
+  ) {
+    guard !arrangement.isEmpty else { return }
+    let remembering = remember ?? remembersConfirmedLayout
+    setRestoreEnabled(remembering)
+    if remembering { save(arrangement, substituting: substituting, rotations: rotations) }
+  }
+
   public func setRestoreEnabled(_ enabled: Bool) {
     defaults.set(enabled, forKey: PrefName.restoreArrangement.rawValue)
   }
@@ -223,12 +248,13 @@ public final class ArrangementPersistence: @unchecked Sendable {
   /// exists only while the size does, which reads back as a different set. The map is
   /// runtime IDs, handed in with the sample; nothing here stores one.
   public func save(
-    _ arrangement: DisplayArrangement, substituting: [CGDirectDisplayID: String] = [:]
+    _ arrangement: DisplayArrangement, substituting: [CGDirectDisplayID: String] = [:],
+    rotations: [CGDirectDisplayID: DisplayRotation] = [:]
   ) {
     let signature = TopologySignature(arrangement, substituting: substituting)
     guard !signature.isEmpty,
           let data = try? JSONEncoder().encode(
-            SavedArrangement(arrangement, substituting: substituting)
+            SavedArrangement(arrangement, substituting: substituting, rotations: rotations)
           )
     else { return }
     defaults.set(data, forKey: key(.savedArrangements, signature))

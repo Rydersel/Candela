@@ -403,6 +403,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     rotationConfirmation.displayName = displayName
     self.rotationConfirmation = rotationConfirmation
     model.rotation.confirmation = rotationConfirmation
+    model.rotation.didConfirmRotation = { [weak model] in
+      model?.arrangement.rotationWasConfirmed()
+    }
 
     // Arrangement's own surface: another CALLER of `ConfirmationPanel`, not
     // another window type, which is how one of the others once shipped with an
@@ -436,6 +439,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // No persistence key, since the layout is a fact about the display SET.
     model.arrangement.didSaveArrangement = { [weak self] in
       self?.settingsActions.prefDidChange(.savedArrangements)
+      self?.settingsActions.prefDidChange(.restoreArrangement)
     }
 
     // The orphaned-shade fix (see `MirroringCoordinator.rebuildSoftwareDimming`).
