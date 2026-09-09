@@ -3,6 +3,22 @@ import CandelaKit
 import Observation
 import SwiftUI
 
+/// Whether the settings window is on screen and not fully covered. Published by
+/// the shell so a pane can stop work whose only output is on that window.
+///
+/// Defaults to `true`: views outside this window (onboarding, the Heat Map
+/// window, render tests) have no shell to answer for them and must not go still.
+private struct SettingsWindowIsVisibleKey: EnvironmentKey {
+  static let defaultValue = true
+}
+
+extension EnvironmentValues {
+  var settingsWindowIsVisible: Bool {
+    get { self[SettingsWindowIsVisibleKey.self] }
+    set { self[SettingsWindowIsVisibleKey.self] = newValue }
+  }
+}
+
 /// Sidebar navigation over a pane registry.
 ///
 /// The shell is hand-built: a canvas, a fixed-width sidebar, a hairline,
@@ -126,6 +142,8 @@ struct SettingsRootView: View {
     // Published once for the whole shell, so the wordmark and every themed
     // component read one destination's lighting.
     .environment(\.settingsAccent, currentAccent)
+    // The same signal the poll consumer flag rides, handed to the panes.
+    .environment(\.settingsWindowIsVisible, isOnScreen)
     // Dark-only: every colour comes from the theme layer and none of
     // them has a light-appearance answer.
     .preferredColorScheme(.dark)

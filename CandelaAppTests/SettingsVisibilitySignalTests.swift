@@ -38,4 +38,11 @@ struct SettingsVisibilitySignalTests {
     #expect(onScreen(nil, .active))
     #expect(onScreen(nil, .inactive) == false)
   }
+
+  /// Every reader stops something while this is false, so the default must be
+  /// `true`: onboarding, the Heat Map window and the render tests draw outside
+  /// the shell and must not go still.
+  @Test func theEnvironmentValueDefaultsToVisibleOutsideTheShell() {
+    #expect(EnvironmentValues().settingsWindowIsVisible)
+  }
 }

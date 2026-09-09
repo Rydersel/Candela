@@ -548,10 +548,15 @@ struct OledTelemetryTicker: View {
 /// The breathing measurement indicator. It may only breathe while readings
 /// genuinely land (`lastSample` within `OledCareCadence.livenessWindowSeconds`),
 /// so the motion IS the telemetry: a dead grant stills it within a few minutes.
+///
+/// A covered window stills it too; nobody is reading it then. `isActive`
+/// re-arms the effect on uncover, and the colour, the words beside it and the
+/// ticker are unchanged while it is stopped.
 struct OledMeasuringDot: View {
   let live: Bool
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.settingsWindowIsVisible) private var windowIsVisible
 
   var body: some View {
     // A symbol effect, not a custom repeatForever animation: a repeating
@@ -562,7 +567,8 @@ struct OledMeasuringDot: View {
       // Green stays: it is the ticker's "grant OK" in a colour, and the words
       // beside it carry the same fact anyway.
       .foregroundStyle(live ? Color.green : SettingsTheme.faintColor)
-      .symbolEffect(.pulse, options: .repeating, isActive: live && !reduceMotion)
+      .symbolEffect(
+        .pulse, options: .repeating, isActive: live && !reduceMotion && windowIsVisible)
       .accessibilityHidden(true)
   }
 }
