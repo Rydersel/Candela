@@ -65,6 +65,18 @@ takes a week.
 - No em dashes in user-visible text or in new comments.
 - English only. No localization tooling.
 
+## GitHub release notes
+
+After the changes, append the contents of
+[`.github/RELEASE_NOTES_FOOTER.md`](.github/RELEASE_NOTES_FOOTER.md) to the
+GitHub release description. GitHub does not apply this file automatically;
+include it when preparing the description, including when using generated
+release notes.
+
+Keep the original change-only notes for Sparkle. Its appcast generator
+accepts only `New`, `Changed`, `Fixed`, and `Removed` sections with change
+bullets, so the GitHub support footer belongs only in the GitHub description.
+
 ## Two rules that protect hardware
 
 Read these before touching anything that writes to a display.
