@@ -21,7 +21,7 @@ import os
 ///   luminance values and reads as a legible screenshot, with window layout,
 ///   large text and app identity recoverable from it, where the reduced grid is
 ///   not. It stays transient by the shape of the call graph: the `CGImage` dies
-///   with `sample(displayID:)`, the caller reduces `Sample` to its cells and
+///   with `sample(displayID:content:)`, the caller reduces `Sample` to its cells and
 ///   stores only those. A consumer that started holding a `Sample` is the thing
 ///   to look at.
 /// - Performance. [MEASURED 2026-08-18, 20 captures per leg on this rig] Median
@@ -58,34 +58,46 @@ final class LuminanceSampler {
     CGPreflightScreenCaptureAccess()
   }
 
-  /// Captures `displayID` once and reduces it to a mean-luminance grid.
-  /// Nil on any failure: permission denied, display gone, capture error,
-  /// empty result.
-  func sample(displayID: CGDirectDisplayID) async -> Sample? {
-    guard Self.hasScreenRecordingPermission() else { return nil }
-
+  /// One XPC round trip per sampling wave rather than one per enrolled display.
+  /// Nil when the grant is absent or the enumeration fails; the caller skips the sample.
+  ///
+  /// Fetched per wave, never cached: `displays` goes stale when a panel departs
+  /// or is mirrored, and a stale `applications` loses our own entry, which puts
+  /// our overlays back into the measurement they feed.
+  static func shareableContent() async -> SCShareableContent? {
+    guard hasScreenRecordingPermission() else { return nil }
     // Desktop windows are NOT excluded: wallpaper is emitted light and belongs
     // in the measurement. On-screen only, since an offscreen window emits nothing.
-    let content: SCShareableContent
     do {
-      content = try await SCShareableContent.excludingDesktopWindows(
+      return try await SCShareableContent.excludingDesktopWindows(
         false, onScreenWindowsOnly: true)
     } catch {
-      Self.log.debug("luminance sample: shareable content unavailable (\(error.localizedDescription, privacy: .public))")
+      log.debug("luminance sample: shareable content unavailable (\(error.localizedDescription, privacy: .public))")
       return nil
     }
+  }
 
+  /// Captures `displayID` once against the wave's `shareableContent()` and
+  /// reduces it to a mean-luminance grid. Nil on display gone, capture error or empty result.
+  func sample(displayID: CGDirectDisplayID, content: SCShareableContent) async -> Sample? {
     guard let scDisplay = content.displays.first(where: { $0.displayID == displayID }) else {
       return nil
     }
 
-    // Our own overlays must not be sampled, or detection dimming feeds
-    // back into the measurement it derives from: band dims region, region reads
-    // cooler, band lifts, region reheats. `owningApplication` is nil for some
-    // system windows, which are correctly kept.
+    // Our own overlays must not be sampled, or detection dimming feeds back into
+    // the measurement it derives from: band dims region, region reads cooler,
+    // band lifts, region reheats.
+    //
+    // Excluded by OWNER, not by window list: the list is a snapshot taken before
+    // the capture and shared by the whole wave, so an overlay raised in between
+    // would be in the frame. Naming the application excludes every window this
+    // process owns at CAPTURE time. Windows with no owning application (some
+    // system windows) and the desktop and dock are still kept, as before. An
+    // empty `ourApps` excludes nothing, exactly as an empty window list did.
     let ourPID = ProcessInfo.processInfo.processIdentifier
-    let ownWindows = content.windows.filter { $0.owningApplication?.processID == ourPID }
-    let filter = SCContentFilter(display: scDisplay, excludingWindows: ownWindows)
+    let ourApps = content.applications.filter { $0.processID == ourPID }
+    let filter = SCContentFilter(
+      display: scDisplay, excludingApplications: ourApps, exceptingWindows: [])
 
     let config = SCStreamConfiguration()
     let (requestedWidth, requestedHeight) = LuminanceReduction.requestedSize(
@@ -115,7 +127,14 @@ final class LuminanceSampler {
     let rows = image.height
     guard cols > 0, rows > 0 else { return nil }
 
-    guard let grid = LuminanceReduction.meanLuminance(of: image, cols: cols, rows: rows) else { return nil }
+    // Every captured pixel (83,000 to 96,000 here) walked on the main thread is
+    // a stall the driver loop has to answer input through. Detached so it does
+    // not inherit cancellation: bounded pure compute over an immutable image is
+    // cheaper to let finish than to abandon, and the caller drops the result.
+    let reduced = await Task.detached(priority: .utility) {
+      LuminanceReduction.meanLuminance(of: image, cols: cols, rows: rows)
+    }.value
+    guard let grid = reduced else { return nil }
     // `image` dies with this scope. Nothing retains a CGImage past here.
     return Sample(grid: grid, cols: cols, rows: rows)
   }
