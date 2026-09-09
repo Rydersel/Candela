@@ -19,10 +19,10 @@
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
       <description sparkle:format="markdown"><![CDATA[
 ## New
-- Updates: updates from 1.0.3 onward show a brief, dismissible version confirmation with an animation that respects Reduce Motion.
+- Updates: updates from 1.0.3 onward show a brief, dismissible version confirmation.
 
 ## Changed
-- Controls: background polling does less work while idle.
+- Controls: background polling is optimized to reduce CPU usage while idle.
 - Settings: animated backgrounds stop when the Settings window closes.
 - Settings: copied and saved diagnostic reports include each display's volume availability and sound output, including whether the output matches that display.
 
