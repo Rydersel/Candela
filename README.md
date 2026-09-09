@@ -25,6 +25,8 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-e8a13a" alt="MIT license"></a>
 </p>
 
+<p align="center">Find Candela useful? Star this repository to support the project.</p>
+
 <p align="center">
   <img src=".github/assets/hero.webp" width="880" alt="Candela: the headline The display software Apple forgot to ship, beside a display's page, the Health pane, the heat map, and the menu-bar controls">
 </p>

@@ -5,9 +5,6 @@ import SwiftUI
 /// `@MainActor` matches every other pane: on `View` only `body` is isolated,
 /// and both `SettingsActions` and `UpdaterModel` are `@MainActor` types.
 ///
-/// No Donate button and no project links: every fork link points at a
-/// project Candela is not.
-///
 /// Sparkle owns every updater setting (`SUEnableAutomaticChecks` and friends
 /// are its schema, not `PrefName` cases), so writes here go through
 /// `UpdaterModel` and we persist nothing.
@@ -64,8 +61,14 @@ struct AboutPane: View {
       // display's Diagnostics page, which disappears with the display; this one
       // survives the monitor that just stopped working.
       SettingsCardSection(title: "Support") {
-        SettingsActionRow("Covers every display. The report doesn't include serial numbers.") {
+        SettingsActionRow("Covers every display. The report doesn't include serial numbers.", dividerFollows: true) {
           DiagnosticsReportActions()
+        }
+        SettingsCardDivider()
+        SettingsActionRow("\(AppInfo.productName) is free and open source.") {
+          Link("Star on GitHub", destination: AppInfo.repositoryURL)
+            .buttonStyle(SettingsSecondaryButtonStyle())
+            .accessibilityLabel("Star on GitHub")
         }
       }
 

@@ -1,4 +1,4 @@
-import { footer, hero, navigation } from '../content/copy'
+import { footer, githubStarLabel, hero, navigation } from '../content/copy'
 import candelaMark from '../assets/candela-c.svg'
 import './Closing.css'
 
@@ -18,7 +18,7 @@ export function Footer({ placement = 'footer' }: { placement?: 'footer' | 'guide
             {hero.ctaPrimary}
           </a>
           <a className="footer-link" href={`/github?placement=${placement}`}>
-            {hero.ctaSecondary}
+            {githubStarLabel}
           </a>
           <a className="footer-link" href="/guides/">
             {navigation.guides}
