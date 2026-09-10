@@ -12,8 +12,8 @@ import IOKit.pwr_mgt
 /// nonisolated: the platform calls are thread-safe and none touches stored
 /// state, so the two on the 10 Hz tick path must not be forced through a
 /// main-actor hop [MEASURED 2026-08-06: sub-microsecond and 0.07 ms per call].
-/// Only `displaySleepMinutes()` is `@MainActor`, because it owns a cache, and it
-/// costs 1000x the tick reads.
+/// Only `displaySleepMinutes()` is `@MainActor`, for its cache; the spawn it
+/// waits on costs 1000x a tick read and runs off the actor.
 enum OledCareSignalSources {
   /// Seconds since the last user input, system-wide.
   ///
@@ -86,38 +86,61 @@ enum OledCareSignalSources {
 
   @MainActor private static var cachedDisplaySleep: (minutes: Int?, at: ContinuousClock.Instant)?
 
+  /// The spawn in flight: a second caller during those 79 ms waits on it rather
+  /// than starting a second `pmset`.
+  @MainActor private static var displaySleepProbe: Task<Int?, Never>?
+
   /// The system `displaysleep` setting in minutes (0 = never), for the pane's
   /// "your dim never fires" warning. Read via `pmset -g`, since no public API
   /// reports it.
   ///
-  /// **79 ms process spawn** [MEASURED 2026-08-06], on the main actor. Call it
-  /// once per pane appearance, NEVER from a timer: the 60 s cache is a backstop
-  /// against a re-render loop, not a licence to poll.
+  /// **79 ms process spawn** [MEASURED 2026-08-06], so the wait happens off the
+  /// main actor and only the cache is main-actor state. Call it once per pane
+  /// appearance, NEVER from a timer: the 60 s cache is a backstop against a
+  /// re-render loop, not a licence to poll.
   @MainActor
-  static func displaySleepMinutes() -> Int? {
+  static func displaySleepMinutes() async -> Int? {
     if let cached = cachedDisplaySleep, cached.at.duration(to: .now) < .seconds(60) {
       return cached.minutes
     }
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
-    process.arguments = ["-g"]
-    let pipe = Pipe()
-    process.standardOutput = pipe
-    var minutes: Int?
-    if (try? process.run()) != nil {
-      // Drain BEFORE waiting: a child that fills the pipe buffer blocks on write
-      // while we block on its exit. `pmset -g` is far under 64 KB today.
-      let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-      process.waitUntilExit()
-      for line in output.split(separator: "\n") {
-        let parts = line.split(separator: " ", omittingEmptySubsequences: true)
-        if parts.count >= 2, parts[0] == "displaysleep" { minutes = Int(parts[1]) }
-      }
+    if let probe = displaySleepProbe { return await probe.value }
+    let probe = Task { @MainActor in
+      let minutes = await readDisplaySleepMinutes()
+      // The failure is cached too: a pmset that cannot run will not start
+      // working within the next 60 s, and re-spawning per poll would be worse
+      // than nil.
+      cachedDisplaySleep = (minutes, .now)
+      displaySleepProbe = nil
+      return minutes
     }
-    // The failure is cached too: a pmset that cannot run will not start working
-    // within the next 60 s, and re-spawning per poll would be worse than nil.
-    cachedDisplaySleep = (minutes, .now)
-    return minutes
+    displaySleepProbe = probe
+    return await probe.value
+  }
+
+  /// Detached, not merely `nonisolated async`: the hop off the main actor is a
+  /// language-mode property and vanishes under `NonisolatedNonsendingByDefault`.
+  /// Touches no stored state, so it can run anywhere.
+  private nonisolated static func readDisplaySleepMinutes() async -> Int? {
+    await Task.detached(priority: .utility) { () -> Int? in
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+      process.arguments = ["-g"]
+      let pipe = Pipe()
+      process.standardOutput = pipe
+      var minutes: Int?
+      if (try? process.run()) != nil {
+        // Drain BEFORE waiting: a child that fills the pipe buffer blocks on
+        // write while we block on its exit. `pmset -g` is far under 64 KB today.
+        let output =
+          String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        process.waitUntilExit()
+        for line in output.split(separator: "\n") {
+          let parts = line.split(separator: " ", omittingEmptySubsequences: true)
+          if parts.count >= 2, parts[0] == "displaysleep" { minutes = Int(parts[1]) }
+        }
+      }
+      return minutes
+    }.value
   }
 }
 

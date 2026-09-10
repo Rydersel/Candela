@@ -41,11 +41,10 @@ public actor Arm64DDCService: DDCWriting {
   }
 
   public func write(command: UInt8, value: UInt16) async -> Bool {
-    // start/end pair also exposes the per-transaction duration: ~14 ms, from
-    // the MAG's nine-write ramp measured at 0.129 s.
-    // `.info`: the default level persists every one of these to disk at drag
-    // rate, and `.debug` is invisible to the `log show` the regression rig parses.
-    dragPerfLog.info("ddc.write.start value=\(value)")
+    // End line `.info`, start line `.debug`: see `dragPerfLog`. With debug
+    // persistence on, the pair gives the per-transaction duration (~14 ms, from
+    // the MAG's nine-write ramp at 0.129 s).
+    dragPerfLog.debug("ddc.write.start value=\(value)")
     let ok = Arm64DDC.write(service: box.service, command: command, value: value, pacer: pacer)
     dragPerfLog.info("ddc.write.end value=\(value) ok=\(ok)")
     return ok

@@ -112,8 +112,10 @@ public class Arm64DDC: NSObject {
     var matchedDisplayServices: [Arm64Service] = []
     var scoredCandidateDisplayServices: [Int: [Arm64Service]] = [:]
     for displayID in displayIDs {
+      // Once per display: every candidate in the walk scores against this record.
+      let displayInfo = self.displayInfoDictionary(displayID: displayID)
       for ioregServiceForMatching in ioregServicesForMatching {
-        let score = self.ioregMatchScore(displayID: displayID, ioregEdidUUID: ioregServiceForMatching.edidUUID, ioDisplayLocation: ioregServiceForMatching.ioDisplayLocation, ioregProductName: ioregServiceForMatching.productName, ioregSerialNumber: ioregServiceForMatching.serialNumber)
+        let score = self.ioregMatchScore(displayInfo: displayInfo, ioregEdidUUID: ioregServiceForMatching.edidUUID, ioDisplayLocation: ioregServiceForMatching.ioDisplayLocation, ioregProductName: ioregServiceForMatching.productName, ioregSerialNumber: ioregServiceForMatching.serialNumber)
         let dummy = self.checkIfDummy(ioregService: ioregServiceForMatching)
         let displayService = Arm64Service(displayID: displayID, service: ioregServiceForMatching.service, serviceLocation: ioregServiceForMatching.serviceLocation, dummy: dummy, serviceDetails: ioregServiceForMatching, matchScore: score)
         if scoredCandidateDisplayServices[score] == nil {
@@ -409,9 +411,17 @@ public class Arm64DDC: NSObject {
     return chkd
   }
 
-  static func ioregMatchScore(displayID: CGDirectDisplayID, ioregEdidUUID: String, ioDisplayLocation: String = "", ioregProductName: String = "", ioregSerialNumber: Int64 = 0) -> Int {
+  /// What macOS parsed from this display's EDID at connection; nil when the
+  /// private call declines. Built once per display and scored against every candidate.
+  static func displayInfoDictionary(displayID: CGDirectDisplayID) -> NSDictionary? {
+    CoreDisplay_DisplayCreateInfoDictionary(displayID)?.takeRetainedValue() as NSDictionary?
+  }
+
+  /// Scores one IOReg service's identity fields against `displayInfo`. Nil
+  /// scores 0: nothing to compare against.
+  static func ioregMatchScore(displayInfo: NSDictionary?, ioregEdidUUID: String, ioDisplayLocation: String = "", ioregProductName: String = "", ioregSerialNumber: Int64 = 0) -> Int {
     var matchScore = 0
-    if let dictionary = CoreDisplay_DisplayCreateInfoDictionary(displayID)?.takeRetainedValue() as NSDictionary? {
+    if let dictionary = displayInfo {
       if let kDisplayYearOfManufacture = dictionary[kDisplayYearOfManufacture] as? Int64, let kDisplayWeekOfManufacture = dictionary[kDisplayWeekOfManufacture] as? Int64, let kDisplayVendorID = dictionary[kDisplayVendorID] as? Int64, let kDisplayProductID = dictionary[kDisplayProductID] as? Int64, let kDisplayVerticalImageSize = dictionary[kDisplayVerticalImageSize] as? Int64, let kDisplayHorizontalImageSize = dictionary[kDisplayHorizontalImageSize] as? Int64 {
         struct KeyLoc {
           var key: String
@@ -488,9 +498,10 @@ public class Arm64DDC: NSObject {
     defer { IOObjectRelease(iterator) }
     var candidates: [(score: Int, entry: io_service_t)] = []
     defer { for candidate in candidates { IOObjectRelease(candidate.entry) } }
+    let displayInfo = self.displayInfoDictionary(displayID: displayID)
     while let objectOfInterest = self.ioregIterateToNextObjectOfInterest(interests: ["AppleCLCD2", "IOMobileFramebufferShim"], iterator: &iterator) {
       let details = self.getIORegServiceAppleCDC2Properties(entry: objectOfInterest.entry)
-      let score = self.ioregMatchScore(displayID: displayID, ioregEdidUUID: details.edidUUID, ioDisplayLocation: details.ioDisplayLocation, ioregProductName: details.productName, ioregSerialNumber: details.serialNumber)
+      let score = self.ioregMatchScore(displayInfo: displayInfo, ioregEdidUUID: details.edidUUID, ioDisplayLocation: details.ioDisplayLocation, ioregProductName: details.productName, ioregSerialNumber: details.serialNumber)
       candidates.append((score, objectOfInterest.entry))
     }
     return self.bestMatchingRecord(among: candidates.map { candidate in

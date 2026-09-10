@@ -33,6 +33,7 @@ extension EnvironmentValues {
 @MainActor
 struct OledCarePane: View {
   @Environment(AppModel.self) private var model
+  @Environment(\.settingsWindowIsVisible) private var windowIsVisible
 
   /// The last chrome value asked for and not granted, per control.
   /// `ChromeAutoHideController` records what the SYSTEM reports, so a write that
@@ -68,7 +69,13 @@ struct OledCarePane: View {
     // `com.apple.dock autohide` change is only visible on a re-read. Cancelled
     // with the pane, or it would be a permanent timer for a hidden window. The
     // same poll covers the menu bar, which needs no observer of its own.
-    .task {
+    //
+    // Keyed on visibility so a covered or closed window polls nothing. Becoming
+    // visible restarts the task, and the loop refreshes before its first sleep,
+    // so the switches catch up on the way back in rather than up to two seconds
+    // later (the first frame can still show the pre-cover value).
+    .task(id: windowIsVisible) {
+      guard windowIsVisible else { return }
       while !Task.isCancelled {
         // Resolved inside the loop, never captured before it: the coordinator
         // builds `chrome` during launch wiring, so a `guard else { return }`

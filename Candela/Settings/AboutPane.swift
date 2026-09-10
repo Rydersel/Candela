@@ -13,6 +13,7 @@ struct AboutPane: View {
   @Environment(SettingsActions.self) private var actions
   @Environment(UpdaterModel.self) private var updater
   @Environment(\.settingsAccent) private var lighting
+  @Environment(\.settingsWindowIsVisible) private var windowIsVisible
 
   var body: some View {
     @Bindable var updater = updater
@@ -104,8 +105,8 @@ struct AboutPane: View {
 
   // MARK: - Hero
 
-  /// The window's only float; `onboardingFloat` stills it under Reduce
-  /// Motion.
+  /// The window's only float; stilled while the window is covered so a
+  /// hidden About pane costs no CPU.
   private var hero: some View {
     VStack(spacing: 10) {
       ZStack {
@@ -125,7 +126,7 @@ struct AboutPane: View {
           .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
       }
       .frame(height: 176)
-      .onboardingFloat(active: true)
+      .onboardingFloat(active: windowIsVisible)
       .accessibilityHidden(true)
 
       Text(verbatim: AppInfo.productName)

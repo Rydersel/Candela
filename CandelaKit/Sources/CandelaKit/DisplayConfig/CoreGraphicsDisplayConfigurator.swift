@@ -66,17 +66,35 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// two computed nothing but `!isHiDPI`, which `DisplayMode` already derives.
   /// Neither list corresponds to what Displays settings shows.
   public func modes(for displayID: CGDirectDisplayID) -> [DisplayMode] {
-    let (published, revealed) = enumerate(displayID)
-    // Collapse AFTER the merge, not inside `copyModes`. Revelation dedupes
-    // against the published IDs, so a twin removed before it ran would free its
-    // ID and come back wearing the revealed badge. Its own gates would reject it
-    // today, but that is a fact about this hardware, not about the ordering.
-    return DisplayModeList.deduplicated(published + (revealed?.modes ?? []))
+    Self.merged(enumerate(displayID))
   }
 
   public func modesWithheldByWireTimingGuard(for displayID: CGDirectDisplayID) -> Int {
-    enumerate(displayID).revealed?.dropped.noNativeParentTiming ?? 0
+    Self.withheld(enumerate(displayID))
   }
+
+  /// The mode list one enumeration answers with. One expression for every
+  /// reader, `modeSnapshot` included, so merge and collapse cannot diverge.
+  ///
+  /// Collapse AFTER the merge, not inside `copyModes`. Revelation dedupes
+  /// against the published IDs, so a twin removed before it ran would free its
+  /// ID and come back wearing the revealed badge. Its own gates would reject it
+  /// today, but that is a fact about this hardware, not about the ordering.
+  private static func merged(_ pass: EnumerationPass) -> [DisplayMode] {
+    DisplayModeList.deduplicated(pass.published + (pass.revealed?.modes ?? []))
+  }
+
+  /// How many revealed modes that pass's guard withheld. One expression, for
+  /// `merged`'s reason.
+  private static func withheld(_ pass: EnumerationPass) -> Int {
+    pass.revealed?.dropped.noNativeParentTiming ?? 0
+  }
+
+  /// What `enumerate` hands back: the CoreGraphics list and the revelation pass
+  /// over it.
+  typealias EnumerationPass = (
+    published: [DisplayMode], revealed: CGSModeRevelation.RevelationResult?
+  )
 
   /// The CoreGraphics list, and the revelation pass over it when one ran.
   ///
@@ -86,9 +104,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   // published list and the revelation result SEPARATELY. The subset cross-check
   // is only meaningful against modes CoreGraphics computed on its own; a
   // revealed mode agreeing with the CGS entry it was built from proves nothing.
-  func enumerate(
-    _ displayID: CGDirectDisplayID
-  ) -> (published: [DisplayMode], revealed: CGSModeRevelation.RevelationResult?) {
+  func enumerate(_ displayID: CGDirectDisplayID) -> EnumerationPass {
     let published = copyModes(displayID).map { ioID, mode in
       Self.displayMode(ioModeID: ioID, mode: mode)
     }
@@ -130,18 +146,44 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// `kCGDisplayShowDuplicateLowResolutionModes`, measured on hardware at
   /// 132/132, 332/332 and 120/120 across three panels.
   public func currentMode(for displayID: CGDirectDisplayID) -> DisplayMode? {
-    guard let mode = CGDisplayCopyDisplayMode(displayID) else { return nil }
-    // Resolved rather than looked up: the display can be running a duplicate the
-    // enumeration collapsed, and this call answers with the live id either way.
-    // See `DisplayModeList.resolve`.
-    return DisplayModeList.resolve(
-      Self.displayMode(ioModeID: mode.ioDisplayModeID, mode: mode),
-      in: modes(for: displayID))
+    Self.resolveCurrent(read: { achievedMode(displayID) }, in: modes(for: displayID))
+  }
+
+  /// Resolved rather than looked up: the display can be running a duplicate the
+  /// enumeration collapsed, and `CGDisplayCopyDisplayMode` answers with the live
+  /// id either way. See `DisplayModeList.resolve`.
+  ///
+  /// Delay the caller's list until the live read succeeds. An unreadable current
+  /// mode must not trigger enumeration, and resolution must use that captured
+  /// reading even if the display changes during enumeration. The snapshot hands
+  /// back its existing list, so it still pays for only one enumeration.
+  /// The read is injected at the hardware boundary for tests without displays.
+  static func resolveCurrent(
+    read: () -> DisplayMode?, in modes: @autoclosure () -> [DisplayMode]
+  ) -> DisplayMode? {
+    guard let mode = read() else { return nil }
+    return DisplayModeList.resolve(mode, in: modes())
   }
 
   public func nativePixels(for displayID: CGDirectDisplayID) -> (width: Int, height: Int)? {
-    guard let native = modes(for: displayID).first(where: \.isNative) else { return nil }
-    return (native.pixelWidth, native.pixelHeight)
+    DisplayModeSnapshot.nativePixels(in: modes(for: displayID))
+  }
+
+  /// One `enumerate` for all four answers where the default costs four.
+  /// Measured 2026-09-09: one mode apply and its revert produced 16 catalog
+  /// refreshes and 64 full enumerations of the same displays.
+  ///
+  /// The current mode is a live `CGDisplayCopyDisplayMode` read resolved into
+  /// THIS list, not a call to `currentMode(for:)`, which would enumerate again.
+  public func modeSnapshot(for displayID: CGDirectDisplayID) -> DisplayModeSnapshot {
+    let pass = enumerate(displayID)
+    let modes = Self.merged(pass)
+    return DisplayModeSnapshot(
+      modes: modes,
+      current: Self.resolveCurrent(read: { achievedMode(displayID) }, in: modes),
+      nativePixels: DisplayModeSnapshot.nativePixels(in: modes),
+      withheldByWireTimingGuard: Self.withheld(pass)
+    )
   }
 
   public func apply(

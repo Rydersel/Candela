@@ -2,9 +2,19 @@ import CoreGraphics
 import Observation
 import os
 
-/// Drag-perf diagnostics: one line per post-coalescing stage (target adoption, DDC
-/// write start/end). Cheap at ~30 Hz during a drag, and the fastest way to localize
-/// a "slider moves but hardware doesn't" report.
+/// Drag-perf diagnostics: one line per post-coalescing stage (target adoption,
+/// DDC write start/end), the fastest way to localize a "slider moves but
+/// hardware doesn't" report.
+///
+/// Split by level on purpose. `ddc.write.end` stays `.info`: it is the persisted
+/// evidence a write reached the wire, and the regression suite's post-wake write
+/// count is built on it. One line per bus transaction at about 20 ms each, so a
+/// sustained drag persists roughly 50 lines a second.
+///
+/// Target adoption and `ddc.write.start` are `.debug`: drag rate (about 30 Hz)
+/// and neither proves anything landed. Debug records are not persisted until
+/// `log config --mode "level:debug" --subsystem com.rydersel.Candela` runs
+/// before the drag; read them back with `log show --info --debug`.
 let dragPerfLog = Logger(subsystem: "com.rydersel.Candela", category: "dragperf")
 
 /// Path-selection/HDR diagnostics (mode changes, settle completion, cache
@@ -2626,7 +2636,7 @@ actor BrightnessWriteCoalescer {
 
   private func drain() async {
     while let write = await nextTarget() {
-      dragPerfLog.info(
+      dragPerfLog.debug(
         "coalescer.target \(String(describing: write.target), privacy: .public) gen=\(write.generation)"
       )
       // Epoch gate: a target stamped before a display reconfiguration must not land

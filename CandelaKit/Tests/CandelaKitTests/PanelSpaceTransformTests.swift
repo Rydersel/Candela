@@ -313,6 +313,41 @@ struct PanelSpaceTransformTests {
         == [Double](repeating: 0, count: PanelGrid.cellCount))
   }
 
+  /// One re-bin per accepted capture is shared by the accumulator, the live view
+  /// and the nomination. Sound only while the re-bin is a pure function of grid
+  /// and transform and the accumulator books exactly what it returns; both are
+  /// pinned so a path-dependent re-bin fails here, not as a drifting exposure map.
+  @Test func theRebinIsOneValueEveryConsumerCanShare() {
+    let transform = PanelSpaceTransform(
+      displaySize: CGSize(width: 2160, height: 3840), rotation: .twoSeventy)
+    let cols = 48
+    let rows = 27
+    var display = [Double](repeating: 0, count: cols * rows)
+    for row in 0..<rows {
+      for col in 0..<cols {
+        // Structured, not uniform: a constant field re-bins to itself and would
+        // hide an orientation or weighting difference between two calls.
+        display[row * cols + col] = Double((row * 7 + col * 3) % 11) / 10
+      }
+    }
+
+    let first = transform.panelNativeGrid(fromDisplayGrid: display, cols: cols, rows: rows)
+    let second = transform.panelNativeGrid(fromDisplayGrid: display, cols: cols, rows: rows)
+    #expect(first == second)
+    #expect(first.count == PanelGrid.cellCount)
+    #expect(first.contains { $0 > 0 })
+
+    var accumulator = ExposureAccumulator()
+    let elapsed: TimeInterval = 60
+    accumulator.accumulate(
+      displayGrid: display, cols: cols, rows: rows, through: transform,
+      elapsed: elapsed, at: Date(timeIntervalSince1970: 0))
+    #expect(accumulator.map.sampleCount == 1)
+    for cell in first.indices {
+      #expect(abs(accumulator.map.cells[cell] - first[cell] * elapsed) < 1e-12)
+    }
+  }
+
   @Test func theGridIsTwentyFourByTen() {
     #expect(PanelGrid.cols == 24)
     #expect(PanelGrid.rows == 10)

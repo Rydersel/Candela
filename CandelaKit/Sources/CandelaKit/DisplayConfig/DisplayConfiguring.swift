@@ -217,6 +217,43 @@ enum MirrorVerification {
   }
 }
 
+/// Everything one enumeration of a display can answer, taken at one instant.
+///
+/// Asked separately, each answer re-runs `CGDisplayCopyAllDisplayModes` plus
+/// the CGS revelation pass on the real configurator, and the four need not
+/// describe the same instant.
+public struct DisplayModeSnapshot: Sendable {
+  public let modes: [DisplayMode]
+  public let current: DisplayMode?
+  public let nativePixels: (width: Int, height: Int)?
+  public let withheldByWireTimingGuard: Int
+
+  public init(
+    modes: [DisplayMode],
+    current: DisplayMode?,
+    nativePixels: (width: Int, height: Int)?,
+    withheldByWireTimingGuard: Int
+  ) {
+    self.modes = modes
+    self.current = current
+    self.nativePixels = nativePixels
+    self.withheldByWireTimingGuard = withheldByWireTimingGuard
+  }
+
+  /// The panel's own pixel count, from the FIRST native-flagged mode in
+  /// ENUMERATION order.
+  ///
+  /// Order is load-bearing. A Retina panel flags two modes (measured: the
+  /// built-in flags both 1512x982@2x and 3024x1964@1x, since the flag means
+  /// framebuffer == panel pixels) and `DisplayModeCatalog.full` sorts the other
+  /// one first. Both report the same pixel count on the panels measured, so a
+  /// read off the sorted list would look right here and diverge on the first
+  /// panel where they differ.
+  public static func nativePixels(in modes: [DisplayMode]) -> (width: Int, height: Int)? {
+    modes.first(where: \.isNative).map { (width: $0.pixelWidth, height: $0.pixelHeight) }
+  }
+}
+
 /// The seam between display-configuration policy and CoreGraphics. Everything
 /// decidable is tested against a fake conformance; the real one is a thin
 /// adapter with no judgement in it.
@@ -231,6 +268,9 @@ public protocol DisplayConfiguring: DisplayRotationConfiguring {
   /// The panel's own pixel count, from the mode flagged native. Needed to tell
   /// scaled modes from native ones.
   func nativePixels(for displayID: CGDirectDisplayID) -> (width: Int, height: Int)?
+  /// The four answers above from ONE enumeration. The default asks the four
+  /// methods; the real configurator overrides it with a single pass.
+  func modeSnapshot(for displayID: CGDirectDisplayID) -> DisplayModeSnapshot
   /// Stages one mode change, commits it, then reads back what the display runs.
   ///
   /// Throws `DisplayConfigError` if the mode cannot be resolved, staging or the
@@ -311,4 +351,17 @@ public protocol DisplayRotationConfiguring: Sendable {
   /// **Blocks.** Measured at 0.4 to 1.1s: the call does not return until
   /// the rotation has taken effect. Never call it on the main actor.
   func applyRotation(_ rotation: DisplayRotation, to displayID: CGDirectDisplayID) throws
+}
+
+extension DisplayConfiguring {
+  /// Correct for any conformance and cheap for a fake; the real configurator
+  /// overrides it.
+  public func modeSnapshot(for displayID: CGDirectDisplayID) -> DisplayModeSnapshot {
+    DisplayModeSnapshot(
+      modes: modes(for: displayID),
+      current: currentMode(for: displayID),
+      nativePixels: nativePixels(for: displayID),
+      withheldByWireTimingGuard: modesWithheldByWireTimingGuard(for: displayID)
+    )
+  }
 }

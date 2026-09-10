@@ -122,9 +122,9 @@ struct AppRegressionTests {
     "Timestamp               Ty Process[PID:TID]",
     "2026-08-11 17:15:22.031 Df Candela[80328:9875ec] [com.rydersel.Candela:path] sync fan-out delta=-0.0306 from=1 to=3",
     "2026-08-11 17:15:22.033 Df Candela[80328:998b3a] [com.rydersel.Candela:dragperf] ddc.write.start value=89",
-    "2026-08-11 17:15:22.055 Df Candela[80328:998b3a] [com.rydersel.Candela:dragperf] ddc.write.end value=0 ok=true",
-    "2026-08-11 17:15:22.057 Df Candela[80328:99dfc5] [com.rydersel.Candela:dragperf] ddc.write.end value=37 ok=true",
-    "2026-08-11 17:15:22.061 Df Candela[80328:99dfc5] [com.rydersel.Candela:dragperf] ddc.write.end value=93 ok=false",
+    "2026-08-11 17:15:22.055 I  Candela[80328:998b3a] [com.rydersel.Candela:dragperf] ddc.write.end value=0 ok=true",
+    "2026-08-11 17:15:22.057 I  Candela[80328:99dfc5] [com.rydersel.Candela:dragperf] ddc.write.end value=37 ok=true",
+    "2026-08-11 17:15:22.061 I  Candela[80328:99dfc5] [com.rydersel.Candela:dragperf] ddc.write.end value=93 ok=false",
   ]
 
   @Test func onlyAcknowledgedWriteEndLinesYieldValues() {
@@ -140,7 +140,7 @@ struct AppRegressionTests {
   }
 
   @Test func multiDigitValuesSurviveTheParse() {
-    let line = "2026-08-11 17:15:22.055 Df Candela[1:2] [com.rydersel.Candela:dragperf] ddc.write.end value=100 ok=true"
+    let line = "2026-08-11 17:15:22.055 I  Candela[1:2] [com.rydersel.Candela:dragperf] ddc.write.end value=100 ok=true"
     #expect(AppRegression.ddcWriteValues(fromLogLines: [line]) == [100])
   }
 
@@ -429,7 +429,7 @@ struct AppRegressionTests {
     "2026-08-11 17:15:22.031 Df Candela[80328:9875ec] [com.rydersel.Candela:path] sync fan-out delta=-0.0306 from=1 to=3",
     "2026-08-11 17:15:22.032 Df Candela[80328:9875ec] [com.rydersel.Candela:path] sync fan-out delta=-0.0306 from=1 to=5",
     "2026-08-11 17:15:22.033 Df Candela[80328:9875ec] [com.rydersel.Candela:path] sync fan-out delta=0.0400 from=10 to=3",
-    "2026-08-11 17:15:22.055 Df Candela[80328:998b3a] [com.rydersel.Candela:dragperf] ddc.write.end value=0 ok=true",
+    "2026-08-11 17:15:22.055 I  Candela[80328:998b3a] [com.rydersel.Candela:dragperf] ddc.write.end value=0 ok=true",
   ]
 
   @Test func everyFanOutLineYieldsItsSourceAndNothingElseDoes() {
@@ -645,7 +645,7 @@ struct AppRegressionTests {
   private static let quietLine =
     "2026-08-18 09:12:12.010 Df Candela[80328:3] [com.rydersel.Candela:topology] topology quiet window elapsed, signaling refresh"
   private static func writeLine(_ value: Int, ok: Bool = true) -> String {
-    "2026-08-18 09:12:13.000 Df Candela[80328:4] [com.rydersel.Candela:dragperf] ddc.write.end value=\(value) ok=\(ok)"
+    "2026-08-18 09:12:13.000 I  Candela[80328:4] [com.rydersel.Candela:dragperf] ddc.write.end value=\(value) ok=\(ok)"
   }
 
   @Test func aQuietWakeReadsAsTheWholeTripleAndNoWrites() {

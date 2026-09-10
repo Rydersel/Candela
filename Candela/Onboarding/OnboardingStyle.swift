@@ -147,32 +147,39 @@ struct OnboardingSkipLink: View {
 }
 
 /// A slow idle bob for hero objects, so a resting page keeps a pulse.
-/// Reduce Motion stills it.
+/// Reduce Motion stills it, and so does `active` going false.
+///
+/// The still state is a separate branch, not a stopped animation. A
+/// `repeatForever` animation never completes, so nothing detaches it while
+/// the animated offset stays in the tree. [MEASURED 2026-09-09], stop path
+/// confirmed running in the log: writing `up` back under
+/// `Transaction.disablesAnimations` left the covered window at about 28% CPU;
+/// `.animation(_:value:)` on the value, about 18%. Dropping the branch tears
+/// the offset and its animation down with it, and the covered window then
+/// reads 0.0 to 0.1%, the same as a pane with no animation. Never collapse
+/// the two branches into one with a conditional modifier.
 struct OnboardingFloatModifier: ViewModifier {
   var active: Bool
 
   @State private var up = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-  func body(content: Content) -> some View {
-    content
-      .offset(y: up ? -4 : 3)
-      .onAppear { updateFloat() }
-      .onChange(of: active) { updateFloat() }
-      // Reduce Motion turned on while the page is open stops the float now,
-      // not at the next rebuild.
-      .onChange(of: reduceMotion) { updateFloat() }
-  }
+  private var floats: Bool { active && !reduceMotion }
 
-  private func updateFloat() {
-    guard active, !reduceMotion else {
-      var stop = Transaction()
-      stop.disablesAnimations = true
-      withTransaction(stop) { up = false }
-      return
-    }
-    withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) {
-      up = true
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if floats {
+      content
+        .offset(y: up ? -4 : 3)
+        .animation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true), value: up)
+        // Reset on removal so the next insertion's `up = true` is a real
+        // change and re-arms the animation.
+        .onAppear { up = true }
+        .onDisappear { up = false }
+    } else {
+      // Matches the moving branch's first frame (`up` false), so nothing
+      // jumps on the edge.
+      content.offset(y: 3)
     }
   }
 }

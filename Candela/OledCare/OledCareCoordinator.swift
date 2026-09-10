@@ -85,7 +85,8 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// like `synthesisSuspensions`, so the pane cannot disagree about the reason.
   private(set) var checkupSuspensions: Set<String> = []
 
-  private struct PerDisplay {
+  /// Internal so the host-free test bundle can drive one tick's telemetry gate directly.
+  struct PerDisplay {
     var engine: IdleDimmingEngine
     /// Cached from prefs (refreshed by `reconcileEnrollment`) so the tick can
     /// decide whether to run the focus sampler without a per-tick prefs read.
@@ -143,9 +144,6 @@ final class OledCareCoordinator: CheckupCareHolding {
     /// halves, so a display is never sampled and observed on drifting cadences
     /// that each pay their own cost.
     var lastSampleAt: SuspendingClock.Instant?
-    /// A capture is out on the XPC round trip. Nothing else may issue one: two
-    /// in flight would double-book the interval they both stand for.
-    var sampleInFlight = false
     /// USER mirror-set membership as of the last tick, for the mirror-set pause's entry EDGE.
     /// The steady state is already handled (a mirrored display never
     /// qualifies); this exists so the observer's ageing state is dropped
@@ -206,7 +204,8 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// because it measures the same thing about the same glass: how long, and now
   /// also at what level.
   @ObservationIgnored private var wearTrackers: [String: WearSignalTracker] = [:]
-  @ObservationIgnored private let sampler = LuminanceSampler()
+  /// Owns one pending request per panel, including its identity across re-enrollment.
+  @ObservationIgnored private let exposureCapture: OledExposureCapture
   @ObservationIgnored private var adaptiveProtection: [String: AdaptiveRegionProtection] = [:]
   @ObservationIgnored private lazy var adaptiveInputRestore = AdaptiveInputRestore { [weak self] in
     self?.tick()
@@ -241,14 +240,22 @@ final class OledCareCoordinator: CheckupCareHolding {
 
   @ObservationIgnored private let windowList: (CGDirectDisplayID) -> [WindowSnapshot]
 
+  /// Injectable so a test can count reads: the IOKit power-source copy belongs
+  /// on the 60 s decision point, never on the tick.
+  @ObservationIgnored private let lowBattery: () -> Bool
+
   init(
     wallpaper: WallpaperLuminanceSource = WallpaperLuminanceSource(),
     windowList: @escaping (CGDirectDisplayID) -> [WindowSnapshot] = {
       CGWindowListSource(displayID: $0).onScreenWindows()
-    }
+    },
+    lowBattery: @escaping () -> Bool = { OledCareSignalSources.onLowBattery() },
+    exposureCapture: OledExposureCapture = OledExposureCapture(prepare: LuminanceSampler.prepareWave)
   ) {
     self.wallpaper = wallpaper
     self.windowList = windowList
+    self.lowBattery = lowBattery
+    self.exposureCapture = exposureCapture
   }
 
   /// The most recent accepted reading, panel-native, for the hero's live
@@ -282,6 +289,10 @@ final class OledCareCoordinator: CheckupCareHolding {
   @ObservationIgnored private var exposureEpoch = 0
   /// Per enrolled-and-connected display, by persistenceKey.
   @ObservationIgnored private var states: [String: PerDisplay] = [:]
+  /// One display's place in a capture wave. The epoch is stamped when the tick
+  /// queues it, so a delete between the tick and the wave still invalidates
+  /// what comes back. Internal for `PerDisplay`'s reason.
+  typealias CaptureRequest = OledExposureCapture.Request
   /// Displays with a checkup field on them, by persistenceKey. Not enrollment
   /// state, so `reconcileEnrollment` leaves it alone: only the window that
   /// raised a field takes it down, and a display can be un-enrolled and
@@ -423,7 +434,7 @@ final class OledCareCoordinator: CheckupCareHolding {
             self.disarmInputMonitor()
           }
         }
-        try? await Task.sleep(for: interval)
+        try? await Task.sleep(for: interval, tolerance: Self.sleepTolerance(for: interval))
       }
     }
   }
@@ -550,6 +561,9 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// let the health view keep naming apps for a history the user just deleted.
   func clearExposureHistory(for persistenceKey: String) {
     exposureEpoch += 1
+    // The epoch is global, so every old request is obsolete. Release their
+    // reservations now, even if a compositor reply never comes back.
+    exposureCapture.invalidateAll()
     accumulators[persistenceKey] = ExposureAccumulator()
     ownerHours[persistenceKey] = OwnerHoursAccumulator()
     forgetWindowObservation(for: persistenceKey)
@@ -622,6 +636,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     // epoch bump does the same for a capture already in flight.
     exposureEpoch += 1
     unsavedExposureKeys.removeAll()
+    exposureCapture.invalidateAll()
     // The wipe removes the stored bytes the quarantine existed to protect, so
     // holding the flag past it would leave a display recording nothing forever
     // over a file that is already gone.
@@ -758,6 +773,7 @@ final class OledCareCoordinator: CheckupCareHolding {
         }
         existing.hoursTracking = tracking
         existing.telemetryEnabled = prefs.oledTelemetry
+        if !existing.telemetryEnabled { exposureCapture.invalidate(key: key) }
         existing.windowObservationEnabled = prefs.oledWindowObservation
         // Turning detection dimming off must drop the nomination, not merely
         // stop consulting it. A retained mask would come straight back on the
@@ -811,6 +827,7 @@ final class OledCareCoordinator: CheckupCareHolding {
   }
 
   private func dropState(for key: String) {
+    exposureCapture.invalidate(key: key)
     guard var state = states.removeValue(forKey: key) else { return }
     // BEFORE the controller lookup, which misses a departed display: the state
     // owning the ramp is being discarded, so nothing else can cancel it.
@@ -889,6 +906,9 @@ final class OledCareCoordinator: CheckupCareHolding {
       model.displays.map { ($0.display.persistenceKey, $0) },
       uniquingKeysWith: { first, _ in first }
     )
+    // Tick-local, never a stored property: the wave is issued at the end of the
+    // tick that fills it, so nothing can be left behind.
+    var captures: [CaptureRequest] = []
     var published = dimStates
     // Built empty rather than copied from the published set: a display that
     // stopped being a synthesis slave simply does not get re-added, so a
@@ -985,6 +1005,9 @@ final class OledCareCoordinator: CheckupCareHolding {
       // departure and is already handled. macOS exposes no signal that
       // distinguishes a soft-standby panel, and the one signal Candela had, its
       // own 0xD6 write, went with the power-off action that was cut.
+      //
+      // One read per display per tick, shared with the telemetry gate below
+      // (`target.panel` is `id`).
       let awake = CGDisplayIsAsleep(id) == 0
       if state.hoursTracking {
         if state.wasAwake, !awake { hoursTracker(for: key).noteStandby() }
@@ -1045,7 +1068,9 @@ final class OledCareCoordinator: CheckupCareHolding {
         state.nominatedMask = nil
         state.lastNominationRefreshAt = nil
       }
-      updateTelemetry(for: key, state: &state, dimState: newState, on: target, at: now)
+      updateTelemetry(
+        for: key, state: &state, dimState: newState, on: target, panelIsAwake: awake, at: now,
+        into: &captures)
       // Mutates the LOCAL copy, deliberately before this tick's render: the
       // sample path's `renominate` writes `states[key]` because it lands
       // between ticks, but a mid-tick write there would be clobbered by the
@@ -1087,6 +1112,33 @@ final class OledCareCoordinator: CheckupCareHolding {
     if published != dimStates { dimStates = published }
     if synthesisPaused != synthesisSuspensions { synthesisSuspensions = synthesisPaused }
     if checkupPaused != checkupSuspensions { checkupSuspensions = checkupPaused }
+    // After the loop, so every display that took this slot shares one wave and
+    // one content enumeration.
+    issueCaptureWave(captures)
+  }
+
+  /// How far a tick may be deferred so the kernel can coalesce the wakeup with
+  /// whatever else the machine is waking for.
+  ///
+  /// Per cadence, never one constant: the fast cadence answers input inside
+  /// 100 ms and cannot spend slack. An unrecognized interval is one nobody has
+  /// reasoned about, so it gets the strict answer too.
+  static func sleepTolerance(for interval: Duration) -> Duration {
+    switch interval {
+    case OledCareCadence.fast: .zero
+    // The one-second follow cadence can be deferred by another 100 ms.
+    case OledCareCadence.windowFollow: .milliseconds(100)
+    // The sampling throttle rides this tick and books a fixed 60 s of exposure
+    // however late the slot lands. These are repeated relative sleeps, not a
+    // 60 s deadline: 28 fully deferred 2.2 s ticks reach 61.6 s while booking
+    // 60 s, about 2.6% less. Nominal exposure already ignores scheduling jitter;
+    // this tolerance is a wakeup allowance, not a bound on measurement error.
+    case OledCareCadence.slow: .milliseconds(200)
+    // Nothing rides the idle tick: it waits for an enrollment that restarts the
+    // loop itself, so 33 s reaches the same verdict as 30 s.
+    case OledCareCadence.idle: .seconds(3)
+    default: .zero
+    }
   }
 
   /// A given-up verify drops the fast cadence only when nothing is wanted (the
@@ -1455,6 +1507,7 @@ final class OledCareCoordinator: CheckupCareHolding {
   private func clearAllOverlays(verifyRemoval: Bool = false) {
     adaptiveInputRestore.cancel()
     exposureEpoch += 1
+    exposureCapture.invalidateAll()
     adaptiveProtection.removeAll()
     observers.removeAll()
     latestObservations.removeAll()
@@ -1507,14 +1560,20 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// [MEASURED 2026-08-06: 0.46 ms]. The luminance capture is not, since it
   /// suspends for ~70 ms across an `SCShareableContent` XPC round trip and the
   /// driver loop has to answer input inside 100 ms when an overlay is up. It
-  /// goes to a ONE-SHOT task; the loop itself stays synchronous.
-  private func updateTelemetry(
+  /// goes to a ONE-SHOT task per wave; the loop itself stays synchronous.
+  func updateTelemetry(
     for key: String, state: inout PerDisplay, dimState: OledDimState,
-    on target: OledTelemetryTarget, at now: SuspendingClock.Instant
+    on target: OledTelemetryTarget, panelIsAwake: Bool, at now: SuspendingClock.Instant,
+    into captures: inout [CaptureRequest]
   ) {
     guard state.telemetryEnabled || state.windowObservationEnabled else { return }
-    guard samplingQualifies(dimState: dimState, on: target) else { return }
+    // Throttle FIRST: qualification ends in an IOKit power-source copy, the
+    // loop's most expensive read, and every tick in the interval but one is
+    // turned away here. `lastSampleAt` is written only when both gates pass, so
+    // the order does not change the schedule.
     if let last = state.lastSampleAt, now - last < Self.samplingInterval { return }
+    guard samplingQualifies(dimState: dimState, on: target, panelIsAwake: panelIsAwake)
+    else { return }
     state.lastSampleAt = now
 
     // A degenerate transform does NOT reject the sample downstream:
@@ -1531,9 +1590,9 @@ final class OledCareCoordinator: CheckupCareHolding {
     if state.windowObservationEnabled {
       observeWindows(for: key, on: target.surface, through: transform)
     }
-    if state.telemetryEnabled, !state.sampleInFlight {
-      state.sampleInFlight = true
-      captureExposure(for: key, on: target, through: transform)
+    if state.telemetryEnabled,
+       let request = queuedCapture(for: key, on: target, through: transform) {
+      captures.append(request)
     }
     persistExposureHistoryIfDue(at: now)
   }
@@ -1624,13 +1683,17 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// holds `.suspended` whatever the idle counter says. Do not "fix" this with a
   /// readback or a DPMS probe: a write-only panel answers neither, and the
   /// probe itself can strand the display.
-  private func samplingQualifies(dimState: OledDimState, on target: OledTelemetryTarget) -> Bool {
+  ///
+  /// `panelIsAwake` is passed in so one tick asks the panel once. It is the
+  /// PANEL's sleep, never the surface's: a virtual display has no panel to
+  /// sleep, and the wear being measured is the glass's.
+  private func samplingQualifies(
+    dimState: OledDimState, on target: OledTelemetryTarget, panelIsAwake: Bool
+  ) -> Bool {
     guard !resetting, target.samplingMayRun(dimState: dimState), !lockObserver.isLocked
     else { return false }
-    // The panel's own sleep, never the surface's: a virtual display has no
-    // panel to sleep, and the wear being measured is the glass's.
-    guard CGDisplayIsAsleep(target.panel) == 0 else { return false }
-    return !OledCareSignalSources.onLowBattery()
+    guard panelIsAwake else { return false }
+    return !lowBattery()
   }
 
   /// Display geometry for the transform, from `CGDisplayBounds`: the same source
@@ -1724,55 +1787,63 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// every time the display is recreated. The panel's key is the only stable
   /// identity in the pair, and booking to it once is also what keeps one desktop
   /// from being counted twice.
-  private func captureExposure(
+  private func queuedCapture(
     for key: String, on target: OledTelemetryTarget, through transform: PanelSpaceTransform
-  ) {
-    let epoch = exposureEpoch
+  ) -> CaptureRequest? {
+    guard let request = exposureCapture.reserve(
+      key: key, target: target, transform: transform, epoch: exposureEpoch)
+    else { return nil }
     log.debug("""
-    OLED care: exposure capture issued for display \(target.panel, privacy: .public) \
+    OLED care: exposure capture queued for display \(target.panel, privacy: .public) \
     (surface \(target.surface, privacy: .public))
     """)
-    // One shot, not a loop. `self` is deliberately not held across the await,
-    // the driver loop's rule: the sampler is a separate object, so awaiting
-    // through it retains the sampler and not this coordinator.
+    return request
+  }
+
+  /// One `SCShareableContent` enumeration (an XPC round trip) shared by every
+  /// capture this tick queued.
+  ///
+  /// Each screenshot completes independently, with the content snapshot confined
+  /// to MainActor. Only the pipeline is retained across the await; both callbacks
+  /// capture the coordinator weakly so a delayed screenshot cannot keep it alive.
+  private func issueCaptureWave(_ requests: [CaptureRequest]) {
+    guard !requests.isEmpty else { return }
+    let pipeline = exposureCapture
     Task { @MainActor [weak self] in
-      guard let sampler = self?.sampler else { return }
-      let sample = await sampler.sample(displayID: target.surface)
-      self?.finishExposureCapture(sample, for: key, on: target, through: transform, epoch: epoch)
+      await pipeline.run(requests,
+        current: { [weak self] request in self?.exposureCaptureContext(for: request) },
+        accept: { [weak self] request, sample in
+          self?.finishExposureCapture(sample, request: request)
+        },
+        failed: { [weak self] request in
+          self?.adaptiveProtection.removeValue(forKey: request.key)
+          self?.states[request.key]?.nominatedMask = nil
+        })
     }
   }
 
-  /// Everything the capture's suspension can invalidate is re-checked here.
-  /// ~70 ms is long enough for the display to lock, mirror, sleep, dim, be
-  /// reconfigured, be un-enrolled, or have its history deleted, and a sample
-  /// taken before any of those is exposure the panel did not emit.
-  private func finishExposureCapture(
-    _ sample: LuminanceSampler.Sample?, for key: String, on target: OledTelemetryTarget,
-    through transform: PanelSpaceTransform, epoch: Int
-  ) {
-    states[key]?.sampleInFlight = false
-    guard epoch == exposureEpoch else { return }
-    guard let sample else {
-      adaptiveProtection.removeValue(forKey: key)
-      states[key]?.nominatedMask = nil
-      return
-    }
-    // Re-resolved, never re-used: a synthesized size can be disengaged inside
-    // the suspension, which moves the desktop back onto the panel and changes
-    // both the surface the sample came from and the qualification that let it
-    // run. An unequal target describes a machine the sample was not taken of,
-    // so it is dropped rather than attributed.
-    let current = telemetryTarget(for: target.panel)
-    guard current == target else { return }
-    let id = target.panel
-    guard let state = states[key], state.telemetryEnabled, state.lastDisplayID == id,
-      let dimState = dimStates[key], samplingQualifies(dimState: dimState, on: current)
-    else { return }
-    // Geometry can change under a capture without the display departing (a
-    // rotation, a mode switch). The grid was reduced through the OLD geometry,
-    // so it is binned rather than re-mapped through geometry it never saw.
-    guard Self.transform(current) == transform else { return }
+  /// Re-sample everything that can change across the screenshot's suspension.
+  /// The pipeline rejects old history, enrollment, target, geometry and state
+  /// before invoking the bookkeeping callback, in one non-suspending actor turn.
+  private func exposureCaptureContext(for request: CaptureRequest) -> OledExposureCapture.Context? {
+    guard let state = states[request.key], let id = state.lastDisplayID,
+          let dimState = dimStates[request.key] else { return nil }
+    let current = telemetryTarget(for: request.target.panel)
+    var context = OledExposureCapture.Context(
+      epoch: exposureEpoch, displayID: id, target: current, transform: Self.transform(current),
+      telemetryEnabled: state.telemetryEnabled, dimState: dimState,
+      isResetting: resetting, isLocked: lockObserver.isLocked,
+      panelIsAwake: CGDisplayIsAsleep(current.panel) == 0, isLowBattery: false)
+    // Keep the expensive power-source read behind the other rejection gates.
+    if context.accepts(request) { context.isLowBattery = lowBattery() }
+    return context
+  }
 
+  private func finishExposureCapture(_ sample: LuminanceSampler.Sample, request: CaptureRequest) {
+    let key = request.key
+    let current = request.target
+    let id = current.panel
+    let transform = request.transform
     var accumulator = exposureAccumulator(for: key)
     let before = accumulator.map.sampleCount
     // Handed over whole: `accumulate` is all-or-nothing and refuses a malformed
@@ -1792,8 +1863,8 @@ final class OledCareCoordinator: CheckupCareHolding {
     }
     accumulators[key] = accumulator
     unsavedExposureKeys.insert(key)
-    // Re-binned once here for the live view and the pair; `accumulate` does
-    // the same internally and does not expose its result.
+    // Share the panel grid between the live view and model pair. Adaptive
+    // evidence below also needs the raw capture for its per-cell fingerprints.
     let panelGrid = transform.panelNativeGrid(
       fromDisplayGrid: sample.grid, cols: sample.cols, rows: sample.rows)
     latestSamples[key] = (panelGrid, Date())
@@ -1801,7 +1872,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     // Detection dimming's luminance half nominates here, off the sampling clock:
     // the grid changes once a minute, so recomputing faster reaches the same
     // answer. The window half does NOT wait for it.
-    if state.detectionDimmingEnabled, state.windowObservationEnabled {
+    if let state = states[key], state.detectionDimmingEnabled, state.windowObservationEnabled {
       let windows = windowList(current.surface)
       var observer = observers[key] ?? WindowObserver()
       latestObservations[key] = observer.observe(windows, through: transform, at: Date())

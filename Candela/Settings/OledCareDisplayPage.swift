@@ -152,7 +152,9 @@ struct OledCareDisplayPage: View {
       }
     }
     // Two tasks: keyed together, every dim transition would re-spawn pmset.
-    .task { displaySleepMinutes = OledCareSignalSources.displaySleepMinutes() }
+    // The `pmset` spawn behind the await waits off the main actor, so opening
+    // this page does not stall the window; nil draws nothing.
+    .task { displaySleepMinutes = await OledCareSignalSources.displaySleepMinutes() }
     .task(id: model.oledCare.dimStates[persistenceKey]) {
       displaySleepAssertionHeld = OledCareSignalSources.displaySleepAssertionHeld()
     }

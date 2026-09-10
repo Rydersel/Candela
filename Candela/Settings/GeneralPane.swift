@@ -39,14 +39,19 @@ struct GeneralPane: View {
     // this body after a write. Without it the switches below keep drawing the
     // value they were built with after a reset or an outside write.
     let _ = model.prefsRevision
+    // One live read per render pass, not a mirror: handed to the badge and the
+    // toggle so they cannot disagree and the service is asked once. Safe to hold
+    // for the pass because `LoginItem.setEnabled` calls `refresh()` on every
+    // path, failure included, so each write re-evaluates this body.
+    let openAtLogin = loginItem.isEnabled
     SettingsPageScaffold {
       SettingsPageHeader(
         title: "General",
         subtitle:
           "How \(AppInfo.productName) opens, how far it dims, and whether your other displays follow the built-in one."
       )
-      statusStrip
-      applicationSection
+      statusStrip(openAtLogin: openAtLogin)
+      applicationSection(openAtLogin: openAtLogin)
       brightnessSection
       syncSection
     }
@@ -81,7 +86,7 @@ struct GeneralPane: View {
   /// The page's one standing object: the app itself, with its login state read
   /// off the same live `SMAppService` status the row below writes. No
   /// float; the About icon is the window's only one.
-  private var statusStrip: some View {
+  private func statusStrip(openAtLogin: Bool) -> some View {
     SettingsCard {
       HStack(spacing: 16) {
         Image(nsImage: NSApp.applicationIconImage)
@@ -105,7 +110,7 @@ struct GeneralPane: View {
         Spacer(minLength: 12)
 
         VStack(alignment: .trailing, spacing: 6) {
-          SettingsBadge(text: loginItem.isEnabled ? "Opens at Login" : "Manual start")
+          SettingsBadge(text: openAtLogin ? "Opens at Login" : "Manual start")
           Text(verbatim: connectedLine)
             .font(.caption2)
             .foregroundStyle(SettingsTheme.faintColor)
@@ -127,13 +132,14 @@ struct GeneralPane: View {
 
   // MARK: - Application
 
-  private var applicationSection: some View {
+  private func applicationSection(openAtLogin: Bool) -> some View {
     SettingsCardSection(title: "Application") {
       SettingRow {
         // The system's own wording in System Settings, and Setup uses the
         // identical string (familiarity beats novelty).
         Toggle("Open at Login", isOn: Binding(
-          get: { loginItem.isEnabled },
+          // The pass's own live read; `setEnabled` re-evaluates the body.
+          get: { openAtLogin },
           set: { loginItem.setEnabled($0) } // the live-status rule: the readback happens inside
         ))
         .themedSwitch()
