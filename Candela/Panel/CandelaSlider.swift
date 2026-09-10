@@ -40,10 +40,21 @@ struct CandelaSlider: View {
 
   private let height: CGFloat = 30
   private let strokeColor = Color.gray.opacity(0.5)
-  /// Wide enough for "100%" with monospaced digits, so the capsule never resizes
-  /// as the number changes width. It scales with the readout's text style, so a
-  /// larger accessibility size widens the column instead of truncating.
-  @ScaledMetric(relativeTo: .caption2) private var readoutWidth: CGFloat = 34
+  /// Wide enough for "100%" in monospaced digits at `readoutFontSize`, so the
+  /// number cannot truncate and the capsule does not resize as it changes width.
+  ///
+  /// Fixed rather than scaled with the text style: the rest of the panel is fixed
+  /// point counts, so a few readouts growing at a large accessibility size while
+  /// the labels beside them hold still reads worse than nothing growing. That is
+  /// a trade against a person who needs larger text, and it stands until the
+  /// panel has a bounded, scrolling height: a panel that grows with the text size
+  /// pushes Settings and Quit off the bottom of the menu, stranding that same
+  /// person with no way to reach either.
+  static let readoutWidth: CGFloat = 34
+  /// What `.caption2` resolved to at the default text size [MEASURED 2026-09-10],
+  /// so dropping the scaling moved nothing. It resolves MEDIUM weight as well as
+  /// 10 pt, which is why the use site names a weight.
+  static let readoutFontSize: CGFloat = 10
 
   /// Applied to the whole control rather than per layer. The fill, knob and
   /// glyph are tuned against each other (a black glyph on a white fill), so
@@ -64,9 +75,9 @@ struct CandelaSlider: View {
         .frame(height: height)
       if showsPercent {
         Text(SliderSnap.percentText(value))
-          .font(.caption2.monospacedDigit())
+          .font(.system(size: Self.readoutFontSize, weight: .medium).monospacedDigit())
           .foregroundStyle(.secondary)
-          .frame(width: readoutWidth, alignment: .trailing)
+          .frame(width: Self.readoutWidth, alignment: .trailing)
           // The row is one accessibility element and already publishes this
           // number as its value; reading it twice is noise.
           .accessibilityHidden(true)

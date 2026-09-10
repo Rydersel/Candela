@@ -513,43 +513,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         // The counter zeroes on every configure so unrelated events across a long
         // session never add up to an offer. `suspendedForSession` survives.
         self.interferenceMonitor.resetCounter()
-        // HDR state may have changed under the 2 s cache, since a mode switch is
-        // itself a reconfiguration. Dropped BEFORE the per-display re-evaluation
-        // so fresh state is read.
-        await self.model.hdrToggling.displaysReconfigured()
-        // Gamma reset once per event, before any recapture (reset →
-        // recapture → re-apply; recapture must see an OS-owned table). Done
-        // here rather than per display so a later display's
-        // reset cannot wipe an earlier display's just-reapplied dim.
-        self.gammaController.resetAllGamma()
-        // Shades reset the same way, for a reason the gamma line does not have: a
-        // shade is keyed by the DRAWABLE id, so a topology change MOVES ITS KEY.
-        //
-        // A mirror ENGAGING is the direction that strands one. A display dimming
-        // under its own key becomes a slave, its controller resolves to the master
-        // from that instant, the key is never named again, and `repinFrames()`
-        // skips it (a slave has no `NSScreen`). What is left is a full-screen
-        // black window at `CGShieldingWindowLevel()` holding its last dim alpha
-        // over a display with no desktop, with no way out short of quitting.
-        //
-        // A mirror BREAKING strands nothing: the ex-master re-names its own key
-        // and the ex-slave gets a fresh shade. Stated so nobody narrows this call
-        // to that path; removing wholesale covers both, so it is unconditional.
-        //
-        // `MirroringCoordinator` performs the same teardown from the RAW
-        // screen-parameters notification, earlier than this debounced stream, so
-        // this is the backstop for a change that posts no notification.
-        //
-        // Safe wholesale because the loop below re-establishes it:
-        // `handleReconfigure` nils the software dedupe memo and re-runs the
-        // software leg, recreating the shade under the NEW drawable id. Displays
-        // with no shade (native path, pure DDC, the built-in slot) are
-        // unaffected.
-        self.shadeOverlay.removeAllShades()
-        for state in self.model.displays {
-          await state.controller.noteHDRStateMayHaveChanged()
-          await state.controller.handleReconfigure()
-        }
+        await ReconfigureDimming.run(
+          displays: self.model.displays,
+          hdrToggling: self.model.hdrToggling,
+          gamma: self.gammaController,
+          shade: self.shadeOverlay)
         #if DEBUG
           // Panel row model, last in the pass: the HDR state above and the
           // re-applied dimming are what a dump taken here can report.
@@ -1622,6 +1590,79 @@ private final class PanelHostingView: NSHostingView<PanelRoot> {
     let target = fittingSize
     if frame.size != target {
       setFrameSize(target)
+    }
+  }
+}
+
+/// The reconfiguration dimming pass, in the one order that does not flash.
+/// Outside `StatusItemController` so the host-free suite can drive the order
+/// without building an `NSStatusItem`.
+@MainActor
+enum ReconfigureDimming {
+  /// `displays` is ONE snapshot, a parameter rather than a re-read: both halves
+  /// of the pass must see the same set even if a display departs mid-pass.
+  static func run(
+    displays: [AppModel.DisplayState],
+    hdrToggling: any HDRToggling,
+    gamma: any GammaApplying,
+    shade: any ShadeRendering
+  ) async {
+    // HDR state may have changed under the 2 s cache, since a mode switch is
+    // itself a reconfiguration. Dropped BEFORE the per-display re-evaluation
+    // so fresh state is read.
+    await hdrToggling.displaysReconfigured()
+    // The HDR re-evaluation runs HERE, above the reset and the removal, which is
+    // the point of the whole pass: each call awaits two `MonitorPanelService`
+    // reads and the actor re-enumerates MonitorPanel for both, because MPDisplay
+    // objects cannot be cached across a reconfiguration. Below the removal, that
+    // suspension is a visibly undimmed display for as long as it takes.
+    for state in displays {
+      await state.controller.noteHDRStateMayHaveChanged()
+    }
+    // Gamma reset once per event, above the recapture loop at the end (reset →
+    // recapture → re-apply; recapture must see an OS-owned table). Here rather
+    // than per display, so a later display's reset cannot wipe an earlier
+    // display's just-reapplied dim.
+    //
+    // The HDR pass above can capture a baseline LAZILY: a display entering HDR
+    // clears its software leg there, reaching `GammaController.applyGammaScale`,
+    // whose `defaultTable(for:)` captures the INSTALLED table whenever it holds
+    // none, and that table can be Candela's own scaled one. Safe only because
+    // `handleReconfigure` recaptures by default (this pass never asks it not to),
+    // above its native guard, and this reset runs first in the same pass, so a
+    // baseline with our curve baked in is replaced before anything scales against
+    // it. Moving either half breaks that.
+    gamma.resetAllGamma()
+    // Shades reset the same way, for a reason the gamma line does not have: a
+    // shade is keyed by the DRAWABLE id, so a topology change MOVES ITS KEY.
+    //
+    // A mirror ENGAGING is the direction that strands one. A display dimming
+    // under its own key becomes a slave, its controller resolves to the master
+    // from that instant, the key is never named again, and `repinFrames()`
+    // skips it (a slave has no `NSScreen`). What is left is a full-screen
+    // black window at `CGShieldingWindowLevel()` holding its last dim alpha
+    // over a display with no desktop, with no way out short of quitting.
+    //
+    // A mirror BREAKING strands nothing: the ex-master re-names its own key
+    // and the ex-slave gets a fresh shade. Stated so nobody narrows this call
+    // to that path; removing wholesale covers both, so it is unconditional.
+    //
+    // `MirroringCoordinator` performs the same teardown from the RAW
+    // screen-parameters notification, earlier than this debounced stream, so
+    // this is the backstop for a change that posts no notification. It also
+    // covers the delay this line carries: a shade reaching here has waited out
+    // every enumeration in the HDR pass above.
+    //
+    // Safe wholesale because the re-apply loop below re-establishes it:
+    // `handleReconfigure` nils the software dedupe memo and re-runs the
+    // software leg, recreating the shade under the NEW drawable id. Displays
+    // with no shade (native path, pure DDC, the built-in slot) are unaffected.
+    // Safe from a flash because that loop follows IMMEDIATELY and has no
+    // suspension point of its own, so nothing runs between this line and the
+    // dim going back on.
+    shade.removeAllShades()
+    for state in displays {
+      await state.controller.handleReconfigure()
     }
   }
 }

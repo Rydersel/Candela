@@ -5,10 +5,17 @@
 import AVFoundation
 import Foundation
 
+/// The blip as the executor sees it, so a test can count plays instead of
+/// sounding them.
+@MainActor
+protocol VolumeFeedbackPlaying {
+  func play()
+}
+
 /// Fork AppDelegate.playVolumeChangedSound: the system volume-feedback blip,
 /// honoring the user's "Play feedback when volume is changed" Sound setting.
 @MainActor
-final class VolumeFeedbackSound {
+final class VolumeFeedbackSound: VolumeFeedbackPlaying {
   private static let soundURL = URL(
     fileURLWithPath: "/System/Library/LoginPlugins/BezelServices.loginPlugin/Contents/Resources/volume.aiff"
   )
