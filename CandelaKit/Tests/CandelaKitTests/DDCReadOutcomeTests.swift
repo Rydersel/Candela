@@ -645,3 +645,43 @@ private func recoveredSeed(_ packet: [UInt8]) -> UInt8 {
   #expect(recoveredSeed(read) == ddcDestinationAddress ^ ddcSourceAddress)
   #expect(recoveredSeed(write) == recoveredSeed(read))
 }
+
+private func firstCapabilityPacket(offset: UInt16) -> [UInt8]? {
+  let recorder = PacketRecorder()
+  _ = Arm64DDC.runCapabilityRequest(
+    service: nil, offset: offset, writeSleepTime: 0, readSleepTime: 0,
+    numOfRetryAttempts: 0, retrySleepTime: 0, transport: recorder.transport
+  )
+  return recorder.packets.first
+}
+
+/// This packet is built by hand, not by `runTransaction`, so its seal needs its
+/// own pin. Expected byte comes from the spec by hand, not from `checksum`.
+@Test func aCapabilitiesRequestIsSealedOverBothAddresses() {
+  // [0x80 | 3][op 0xF3][offset hi][offset lo][checksum]
+  let lengthByte: UInt8 = 0x83
+  let capabilities: UInt8 = 0xF3
+  let expected = ddcDestinationAddress ^ ddcSourceAddress ^ lengthByte ^ capabilities
+  #expect(expected == 0x4F)
+  #expect(firstCapabilityPacket(offset: 0) == [0x83, 0xF3, 0x00, 0x00, expected])
+}
+
+/// Both offset bytes seed the checksum, so a later fragment cannot reuse the first's seal.
+@Test func aLaterFragmentSealsItsOwnOffset() {
+  let expected = ddcDestinationAddress ^ ddcSourceAddress ^ 0x83 ^ 0xF3 ^ 0x01 ^ 0x20
+  #expect(firstCapabilityPacket(offset: 0x0120) == [0x83, 0xF3, 0x01, 0x20, expected])
+  #expect(firstCapabilityPacket(offset: 0x0120)?.last != firstCapabilityPacket(offset: 0)?.last)
+}
+
+/// Recovered from the bytes rather than the expression, so a capabilities
+/// request drifting from the other two is caught whatever shape the drift takes.
+@Test func theCapabilitiesRequestSharesTheOneSeed() {
+  guard let caps = firstCapabilityPacket(offset: 0),
+        let read = firstPacket(send: [0x10], expectsReply: true)
+  else {
+    Issue.record("no packet reached the bus")
+    return
+  }
+  #expect(recoveredSeed(caps) == ddcDestinationAddress ^ ddcSourceAddress)
+  #expect(recoveredSeed(caps) == recoveredSeed(read))
+}
