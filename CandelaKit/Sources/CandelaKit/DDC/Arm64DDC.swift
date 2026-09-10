@@ -206,13 +206,9 @@ public class Arm64DDC: NSObject {
     let dataAddress = ARM64_DDC_DATA_ADDRESS
     // [0x80 | messageLength][op][offsetHi][offsetLo][checksum]
     var packet: [UInt8] = [0x80 | 3, 0xF3, UInt8(offset >> 8), UInt8(offset & 0xFF), 0]
-    // Seeded like the READ path (0x6E alone, not 0x6E ^ 0x51): a capabilities
-    // request is a request-with-reply exactly like Get VCP, and the fork's two
-    // seeds are empirical, not derived. If a panel NAKs every fragment while
-    // answering Get VCP fine, try the write seed (0x6E ^ dataAddress) before
-    // concluding the panel is silent.
+    // Neither I2C address travels inside the packet, so both seed the checksum.
     packet[packet.count - 1] = self.checksum(
-      chk: ARM64_DDC_7BIT_ADDRESS << 1, data: &packet, start: 0, end: packet.count - 2
+      chk: ARM64_DDC_7BIT_ADDRESS << 1 ^ dataAddress, data: &packet, start: 0, end: packet.count - 2
     )
     // Max frame: source + length byte + (op + 2 offset + 32 payload) + checksum.
     var reply = [UInt8](repeating: 0, count: 38)
@@ -242,7 +238,8 @@ public class Arm64DDC: NSObject {
     /// checksum-clean frame came back.
     case ok
     /// The panel wrote zeros over the sentinel: it is on the bus and saying
-    /// nothing. The write-only signature.
+    /// nothing. Not proof it cannot read back; a malformed request checksum drew
+    /// the same answer from a panel that validates the seal.
     case answeredZeros
     /// Nothing usable: a NAKed write, a failed read call, a buffer the read
     /// left untouched, or a frame that failed its checksum.
@@ -336,9 +333,13 @@ public class Arm64DDC: NSObject {
   /// The retry ladder. Split from the entry point so a nil service is refused
   /// before any sleep, and so a test can hand it a panel.
   static func runTransaction(service: IOAVService?, send: inout [UInt8], reply: inout [UInt8], replyCommand: UInt8?, writeSleepTime: UInt32?, numOfWriteCycles: UInt8?, readSleepTime: UInt32?, numOfRetryAttemps: UInt8?, retrySleepTime: UInt32?, pacer: DDCBusPacer?, transport: I2CTransport) -> TransactionOutcome {
-    let dataAddress = ARM64_DDC_DATA_ADDRESS
     var packet: [UInt8] = [UInt8(0x80 | (send.count + 1)), UInt8(send.count)] + send + [0] // Note: the last byte is the place of the checksum, see next line!
-    packet[packet.count - 1] = self.checksum(chk: send.count == 1 ? ARM64_DDC_7BIT_ADDRESS << 1 : ARM64_DDC_7BIT_ADDRESS << 1 ^ dataAddress, data: &packet, start: 0, end: packet.count - 2)
+    // Same seed for reads and writes: neither I2C address travels inside the
+    // packet, so both go into the checksum.
+    packet[packet.count - 1] = self.checksum(
+      chk: ARM64_DDC_7BIT_ADDRESS << 1 ^ ARM64_DDC_DATA_ADDRESS,
+      data: &packet, start: 0, end: packet.count - 2
+    )
     var outcome = TransactionOutcome.silent
     let pacing = writeSleepTime ?? 10000
     // Only the FIRST packet is paced from the bus; a second write cycle or a
