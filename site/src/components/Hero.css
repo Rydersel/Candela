@@ -1,6 +1,5 @@
-/* The first screen: one warm light source in a near-black room (SR12). Every
-   colour here is derived from a token with color-mix; nothing bypasses the
-   palette. */
+/* The first screen: one warm light source in a near-black room. Every colour
+   here is derived from a token with color-mix; nothing bypasses the palette. */
 
 .hero {
   --hero-edge: color-mix(in srgb, var(--text) 10%, transparent);
@@ -122,7 +121,7 @@
   text-decoration-color: var(--accent);
 }
 
-/* SR2 keeps Download the one conversion. Homebrew is a single-line install
+/* Download stays the one conversion. Homebrew is a single-line install
    rail, not a second CTA or a miniature terminal: open sides and measured
    hairlines carry the same visual grammar as the feature sections. */
 .hero-brew {
@@ -195,8 +194,8 @@
   color: var(--danger);
 }
 
-/* SR8: hero-level, load-bearing. Amber, tracked, and lit; part of the action
-   cluster rather than a caption under it. */
+/* The foss line is hero-level and load-bearing. Amber, tracked, and lit; part
+   of the action cluster rather than a caption under it. */
 .hero-foss {
   margin-top: 1.4rem;
   font-size: var(--fs-small);

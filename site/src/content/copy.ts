@@ -1,11 +1,11 @@
 // Every user-visible string on candela.fyi. Components import from here and
 // hold no copy of their own, so the two gates run in one place: the product's
-// copy filter on every lead, and an editing pass on all of it (SR15).
+// copy filter on every lead, and the editing pass on all of it.
 //
 // Rules that bind edits to this file:
 // - No em dashes anywhere, site copy included. scripts/check-copy.sh enforces it.
 // - Competitor names appear in exactly one place, the FAQ entry below, question
-//   and answer both (SR5).
+//   and answer both.
 // - Measured claims only. Estimates are labeled as estimates in the sentence
 //   that makes them, not in a footnote. The idle dim is described as the
 //   shipped staged dim, not the wear-weighted dim, until that feature lands;
