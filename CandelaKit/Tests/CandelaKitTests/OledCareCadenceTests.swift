@@ -20,6 +20,15 @@ struct OledCareCadenceNominationTests {
     #expect(OledCareCadence.windowFollow == .seconds(1))
   }
 
+  @Test func hoverReturnKeepsAFastTickEvenWhenItsMaskIsCurrentlyClear() {
+    #expect(OledCareCadence.interval(
+      anyOverlayUp: false, anyLockDimEngaged: false, verificationPending: false,
+      windowRestorationPending: true, nominationDisplayed: false) == .milliseconds(100))
+    #expect(OledCareCadence.interval(
+      anyOverlayUp: false, anyLockDimEngaged: false, verificationPending: false,
+      windowRestorationPending: false, nominationDisplayed: false) == .seconds(2))
+  }
+
   /// The geometry refresh under the mask is throttled at one second, so the
   /// slow fall-through would double the wait a moved window's dim sheds in.
   @Test func theWindowFollowIntervalSitsBetweenFastAndSlow() {

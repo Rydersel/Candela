@@ -148,6 +148,24 @@ final class MemoInvalidationRecorder: PendingWireDraining {
   func drainPendingWrites() async -> Bool { true }
 }
 
+private actor HDRExitSettleGate {
+  private(set) var entered = false
+  private var released = false
+  private var continuation: CheckedContinuation<Void, Never>?
+
+  func wait() async {
+    entered = true
+    if released { return }
+    await withCheckedContinuation { continuation = $0 }
+  }
+
+  func release() {
+    released = true
+    continuation?.resume()
+    continuation = nil
+  }
+}
+
 /// A DDC writer that holds every write until released, and records what the HDR
 /// backend had been told at the moment it finally applied one. A shared
 /// timeline rather than two independent counters, so "the write landed before
@@ -946,24 +964,36 @@ struct PathSelectionTests {
   @Test func anExitSupersededDuringItsSettleDropsNoMemos() async {
     let volume = MemoInvalidationRecorder()
     let contrast = MemoInvalidationRecorder()
-    // Sized against the poll below, which returns within a few milliseconds of
-    // the drop being issued: the supersession lands inside the settle window by
-    // construction rather than by scheduling luck.
-    let h = Harness(
-      hdrEnabled: true, settle: .milliseconds(150),
-      configure: { prefs, _ in prefs.hdrMode = .alwaysOn },
-      wireSiblings: { _ in [volume, contrast] }
+    let prefs = DisplayPrefs(defaults: InMemoryDefaults(), persistenceKey: "t")
+    prefs.hdrMode = .alwaysOn
+    let hdr = GatedTransitionHDR()
+    let settle = HDRExitSettleGate()
+    let controller = BrightnessController(
+      writer: FakeDDC(readResult: nil),
+      backends: BrightnessBackends(
+        applierNative: FakeNativeApplier(), hdr: hdr,
+        shade: RecordingShade(), gamma: RecordingGamma()
+      ),
+      prefs: prefs, displayID: 7, wireSiblings: [volume, contrast]
     )
-    await h.prime()
+    controller.settleDelay = .milliseconds(5)
+    controller.waitForHDRExitSettle = { _ in await settle.wait() }
+    await controller.initialHDRRefresh?.value
+    await hdr.releaseDisengage()
 
-    let exit = Task { await h.controller.setHDRMode(.off) }
-    #expect(await eventually { await h.hdr!.recordedSetCalls() == [false] })
-    let engage = Task { await h.controller.setHDRMode(.alwaysOn) }
+    // Hold the exit after its first fence until the newer transition has
+    // taken ownership. Neither order depends on a wall-clock window.
+    let exit = Task { await controller.setHDRMode(.off) }
+    #expect(await eventually { await settle.entered })
+    let engage = Task { await controller.setHDRMode(.alwaysOn) }
+    #expect(await eventually { await hdr.engageCallCount() == 1 })
+    await settle.release()
     await exit.value
 
     #expect(volume.memoResets == 0)
     #expect(contrast.memoResets == 0)
 
+    await hdr.releaseEngage()
     await engage.value
   }
 

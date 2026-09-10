@@ -56,12 +56,15 @@ final class OledExposureCapture {
 
   func run(
     _ requests: [Request], current: @escaping @MainActor (Request) -> Context?,
-    accept: @escaping @MainActor (Request, LuminanceSampler.Sample) -> Void
+    accept: @escaping @MainActor (Request, LuminanceSampler.Sample) -> Void,
+    failed: @escaping @MainActor (Request) -> Void = { _ in }
   ) async {
     let requests = requests.filter { pending[$0.key] == $0.id }
     guard !requests.isEmpty else { return }
     guard let wave = await prepare() else {
-      for request in requests { finish(nil, request: request, current: current, accept: accept) }
+      for request in requests {
+        finish(nil, request: request, current: current, accept: accept, failed: failed)
+      }
       return
     }
     // Launch every capture before waiting for any of them. The snapshot stays
@@ -72,7 +75,7 @@ final class OledExposureCapture {
       let capture = wave.start(request.target.surface)
       return Task { @MainActor [weak self] in
         let sample = await capture.value
-        self?.finish(sample, request: request, current: current, accept: accept)
+        self?.finish(sample, request: request, current: current, accept: accept, failed: failed)
       }
     }
     for completion in completions { await completion.value }
@@ -81,13 +84,21 @@ final class OledExposureCapture {
   private func finish(
     _ sample: LuminanceSampler.Sample?, request: Request,
     current: @MainActor (Request) -> Context?,
-    accept: @MainActor (Request, LuminanceSampler.Sample) -> Void
+    accept: @MainActor (Request, LuminanceSampler.Sample) -> Void,
+    failed: @MainActor (Request) -> Void
   ) {
     // A departure, opt-out or reset can replace this key's reservation while
     // the old screenshot is still out. It owns neither the new slot nor its data.
     guard pending[request.key] == request.id else { return }
     pending.removeValue(forKey: request.key)
-    guard let sample, let context = current(request), context.accepts(request) else { return }
+    guard let context = current(request), context.accepts(request) else { return }
+    // A current capture failure breaks adaptive evidence continuity. An old
+    // failure must pass the same ownership and context gates as a sample before
+    // it can clear evidence belonging to this enrollment.
+    guard let sample else {
+      failed(request)
+      return
+    }
     accept(request, sample)
   }
 }

@@ -3,6 +3,26 @@
 /// `recentEvents` arrive pre-formatted so the renderer stays pure: one snapshot
 /// always renders to the same bytes, which is what makes two pasted reports diffable.
 public struct DiagnosticsReportSnapshot: Sendable {
+  public struct Field: Sendable {
+    public let name: String
+    public let value: String
+
+    public init(_ name: String, _ value: String) {
+      self.name = name
+      self.value = value
+    }
+  }
+
+  public struct Section: Sendable {
+    public let name: String
+    public let fields: [Field]
+
+    public init(_ name: String, _ fields: [Field]) {
+      self.name = name
+      self.fields = fields
+    }
+  }
+
   public struct DisplayEntry: Sendable {
     public let name: String
     public let hardwareName: String
@@ -21,11 +41,13 @@ public struct DiagnosticsReportSnapshot: Sendable {
     /// name and value only (`forceSw = true`), never a full storage key: a
     /// persistence key carries the display's serial.
     public let nonDefaultPrefs: [String]
+    public let sections: [Section]
 
     public init(name: String, hardwareName: String, connection: String?,
                 manufacturer: String?, hasSerial: Bool, currentMode: String?,
                 controlMethod: String, readbackVerdict: String, hdrEngaged: Bool,
-                nonDefaultPrefs: [String], volumeAvailability: String, soundOutput: String) {
+                nonDefaultPrefs: [String], volumeAvailability: String, soundOutput: String,
+                sections: [Section] = []) {
       self.name = name
       self.hardwareName = hardwareName
       self.connection = connection
@@ -38,6 +60,7 @@ public struct DiagnosticsReportSnapshot: Sendable {
       self.nonDefaultPrefs = nonDefaultPrefs
       self.volumeAvailability = volumeAvailability
       self.soundOutput = soundOutput
+      self.sections = sections
     }
   }
 
@@ -49,10 +72,11 @@ public struct DiagnosticsReportSnapshot: Sendable {
   public let displays: [DisplayEntry]
   /// Newest first, each already carrying its own short timestamp.
   public let recentEvents: [String]
+  public let sections: [Section]
 
   public init(appVersion: String, osVersion: String, safeMode: Bool,
               accessibilityGranted: Bool, launchAtLogin: String,
-              displays: [DisplayEntry], recentEvents: [String]) {
+              displays: [DisplayEntry], recentEvents: [String], sections: [Section] = []) {
     self.appVersion = appVersion
     self.osVersion = osVersion
     self.safeMode = safeMode
@@ -60,12 +84,13 @@ public struct DiagnosticsReportSnapshot: Sendable {
     self.launchAtLogin = launchAtLogin
     self.displays = displays
     self.recentEvents = recentEvents
+    self.sections = sections
   }
 }
 
 public enum DiagnosticsReport {
   public static func render(_ s: DiagnosticsReportSnapshot) -> String {
-    var lines = ["Candela diagnostics report", ""]
+    var lines = ["Candela diagnostics report", "report format: 2", ""]
 
     lines += [
       "app: \(s.appVersion)",
@@ -75,6 +100,9 @@ public enum DiagnosticsReport {
       "launch at login: \(s.launchAtLogin)",
       "",
     ]
+    for section in s.sections {
+      lines += render(section, indent: "") + [""]
+    }
 
     if s.displays.isEmpty {
       lines += ["displays: none", ""]
@@ -100,6 +128,9 @@ public enum DiagnosticsReport {
           lines.append("  non-default settings:")
           lines += display.nonDefaultPrefs.map { "    \($0)" }
         }
+        for section in display.sections {
+          lines += render(section, indent: "  ")
+        }
       }
       lines.append("")
     }
@@ -118,5 +149,13 @@ public enum DiagnosticsReport {
   /// absent capability to whoever triages the paste.
   private static func reported(_ value: String?) -> String {
     value ?? "not reported"
+  }
+
+  private static func render(_ section: DiagnosticsReportSnapshot.Section, indent: String) -> [String] {
+    ["\(indent)\(section.name):"] + section.fields.flatMap { field in
+      let parts = field.value.split(separator: "\n", omittingEmptySubsequences: false)
+      return ["\(indent)  \(field.name): \(parts.first ?? "")"]
+        + parts.dropFirst().map { "\(indent)    \($0)" }
+    }
   }
 }

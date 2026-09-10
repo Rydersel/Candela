@@ -230,7 +230,7 @@ enum DiagnosticsPageCopy {
   // MARK: - Actions
 
   static var reportScope: LocalizedStringKey {
-    "Covers every display. The report doesn't include serial numbers."
+    "Covers your display setup, reported capabilities and control state. Identifying fields are redacted."
   }
 
   /// `NavigationRow` takes plain strings, so these are not `LocalizedStringKey`.

@@ -58,6 +58,7 @@ struct OledExposureCaptureTests {
 
     #expect(rig.maps["first"] == nil)
     #expect(rig.maps["second"]?.map.sampleCount == 1)
+    #expect(rig.failures == ["first"])
     #expect(rig.pipeline.reserve(key: "first", target: first.target,
       transform: first.transform, epoch: 0) != nil)
   }
@@ -72,6 +73,7 @@ struct OledExposureCaptureTests {
     #expect(rig.enumerations == 1)
     #expect(rig.startedDisplays.isEmpty)
     #expect(rig.maps.isEmpty)
+    #expect(rig.failures == ["first", "second"])
     #expect(rig.pipeline.reserve(key: "first", target: first.target,
       transform: first.transform, epoch: 0) != nil)
     #expect(rig.pipeline.reserve(key: "second", target: second.target,
@@ -89,8 +91,8 @@ struct OledExposureCaptureTests {
     case dimmed, userMirrored, rotated, resized, departed, lowBattery, missingGeometry
   }
 
-  @Test(arguments: Invalidation.allCases)
-  func aChangeDuringCaptureRejectsTheSample(_ change: Invalidation) async throws {
+  @Test(arguments: Invalidation.allCases, [true, false])
+  func aChangeDuringCaptureRejectsTheResult(_ change: Invalidation, succeeded: Bool) async throws {
     let rig = CaptureRig()
     let request = try #require(rig.reserve("panel", panel: 11))
     let work = Task { await rig.run([request]) }
@@ -114,10 +116,11 @@ struct OledExposureCaptureTests {
         displaySize: CGSize(width: 480, height: 240), rotation: .standard)
     case .departed: rig.contexts["panel"] = nil
     }
-    rig.resolve(0, Self.sample)
+    rig.resolve(0, succeeded ? Self.sample : nil)
     await work.value
 
     #expect(rig.maps.isEmpty)
+    #expect(rig.failures.isEmpty)
     #expect(rig.pipeline.reserve(key: request.key, target: request.target,
       transform: request.transform, epoch: 1) != nil)
   }
@@ -152,7 +155,8 @@ struct OledExposureCaptureTests {
       transform: request.transform, epoch: 0) == nil)
   }
 
-  @Test func anOldEnrollmentCannotBookOrReleaseItsReplacementsCapture() async throws {
+  @Test(arguments: [true, false])
+  func anOldEnrollmentCannotBookOrReleaseItsReplacementsCapture(succeeded: Bool) async throws {
     let rig = CaptureRig()
     let old = try #require(rig.reserve("panel", panel: 11))
     let oldWork = Task { await rig.run([old]) }
@@ -162,9 +166,10 @@ struct OledExposureCaptureTests {
     let newWork = Task { await rig.run([replacement]) }
     await rig.waitForCaptureStart()
 
-    rig.resolve(0, Self.sample)
+    rig.resolve(0, succeeded ? Self.sample : nil)
     await oldWork.value
     #expect(rig.maps.isEmpty)
+    #expect(rig.failures.isEmpty)
     #expect(rig.pipeline.reserve(key: replacement.key, target: replacement.target,
       transform: replacement.transform, epoch: 0) == nil)
 
@@ -246,6 +251,7 @@ struct OledExposureCaptureTests {
 
     #expect(rig.startedDisplays.isEmpty)
     #expect(rig.maps.isEmpty)
+    #expect(rig.failures.isEmpty)
     #expect(rig.pipeline.reserve(key: request.key, target: request.target,
       transform: request.transform, epoch: 0) == nil)
   }
@@ -273,6 +279,7 @@ struct OledExposureCaptureTests {
   var startedDisplays: [CGDirectDisplayID] = []
   var contexts: [String: OledExposureCapture.Context] = [:]
   var maps: [String: ExposureAccumulator] = [:]
+  var failures: [String] = []
   private var results: [Int: Resolution] = [:]
   private var waiting: [Int: CheckedContinuation<LuminanceSampler.Sample?, Never>] = [:]
   private let starts = CaptureEvent()
@@ -323,7 +330,7 @@ struct OledExposureCaptureTests {
           through: request.transform, elapsed: 60, at: Date(timeIntervalSince1970: 0))
         maps[request.key] = map
         accepts.signal()
-      })
+      }, failed: { [unowned self] request in failures.append(request.key) })
   }
 
   func resolve(_ index: Int, _ sample: LuminanceSampler.Sample?) {

@@ -114,13 +114,15 @@ final class OledCareCoordinator: CheckupCareHolding {
     /// `.active` is exactly when detection dimming runs.
     var assertionHeld = false
     /// The current nomination in PANEL space. The LUMINANCE half changes only
-    /// when a new sample lands; the WINDOW half is re-read once a second while a
-    /// nomination is displayed (`refreshNominationGeometry`), so a moved window
+    /// when a new sample lands; the WINDOW half is refreshed while evidence is
+    /// present (`refreshNominationGeometry`), so a moved window
     /// sheds its dim in about a second. Nil means "nothing qualifies",
     /// deliberately distinguishable from an all-zero mask: the render then keeps
     /// the cheaper scalar path.
     var nominatedMask: OverlayMask?
-    /// Throttle for `refreshNominationGeometry`; nil until a mask first shows.
+    var adaptiveActivity = AdaptiveRegionProtection.Activity(
+      isFocusedDisplay: nil, frontmostPID: nil, pointerPosition: nil)
+    /// Throttle for `refreshNominationGeometry`; nil until evidence first arrives.
     var lastNominationRefreshAt: SuspendingClock.Instant?
     /// Verification marker: the last render mutated window-server state; verify it on a
     /// LATER tick than the one that mutated.
@@ -204,6 +206,10 @@ final class OledCareCoordinator: CheckupCareHolding {
   @ObservationIgnored private var wearTrackers: [String: WearSignalTracker] = [:]
   /// Owns one pending request per panel, including its identity across re-enrollment.
   @ObservationIgnored private let exposureCapture: OledExposureCapture
+  @ObservationIgnored private var adaptiveProtection: [String: AdaptiveRegionProtection] = [:]
+  @ObservationIgnored private lazy var adaptiveInputRestore = AdaptiveInputRestore { [weak self] in
+    self?.tick()
+  }
   /// Accumulated exposure per panel, by persistenceKey, restored from disk on
   /// first touch and kept for the app's lifetime: wear is a fact about a panel,
   /// not about a connection, exactly like `trackers`.
@@ -372,6 +378,16 @@ final class OledCareCoordinator: CheckupCareHolding {
     // standby edge on the wrong side of it. AppKit posts these on the main
     // thread, which is what `assumeIsolated` asserts and would trap on.
     let center = NSWorkspace.shared.notificationCenter
+    // App activation is observable without Accessibility permission. It covers
+    // keyboard app switching even when the global key monitor cannot see it.
+    sleepWakeObservers.append(center.addObserver(
+      forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated {
+        guard let self, self.states.values.contains(where: \.detectionDimmingEnabled) else { return }
+        self.inputArrived()
+      }
+    })
     sleepWakeObservers.append(center.addObserver(
       forName: NSWorkspace.willSleepNotification, object: nil, queue: nil
     ) { [weak self] _ in
@@ -412,7 +428,7 @@ final class OledCareCoordinator: CheckupCareHolding {
           guard let self else { return }
           self.tick()
           interval = self.cadence()
-          if self.anyDimUp() {
+          if self.anyDimUp() || self.needsAdaptiveInput() {
             self.armInputMonitor()
           } else {
             self.disarmInputMonitor()
@@ -774,6 +790,7 @@ final class OledCareCoordinator: CheckupCareHolding {
         let hasProducers = existing.telemetryEnabled && existing.windowObservationEnabled
         if !existing.detectionDimmingEnabled || !hasProducers {
           existing.nominatedMask = nil
+          adaptiveProtection.removeValue(forKey: key)
         }
         // The window ages go with it. `WindowObserver` holds a per-window
         // "unchanged since" instant and that clock keeps running while
@@ -872,12 +889,16 @@ final class OledCareCoordinator: CheckupCareHolding {
     let isLocked = lockObserver.isLocked
     let topology = model.mirrorTopology.topology()
     let now = SuspendingClock.now
-    // Focus is sampled only when some enrolled display wants unfocused dim, at
+    // Focus is sampled when an enrolled display wants unfocused or regional dim, at
     // whatever cadence the loop is running, which IS the overlay-up cadence
     // whenever an overlay is up: a clicked display must not stay dimmed for
     // seconds. 0.46 ms per call [MEASURED], under 1% of a core at 10 Hz.
-    let anyUnfocusedEnabled = states.values.contains(where: \.unfocusedDimEnabled)
-    let focusedDisplay = anyUnfocusedEnabled ? focus.focusedDisplayID() : nil
+    let anyAdaptiveEnabled = states.values.contains(where: \.detectionDimmingEnabled)
+    let needsFocus = anyAdaptiveEnabled || states.values.contains(where: \.unfocusedDimEnabled)
+    let focusedDisplay = needsFocus ? focus.focusedDisplayID() : nil
+    let currentFocus = needsFocus ? focus.currentResolvedDisplayID : nil
+    let frontmostPID = anyAdaptiveEnabled ? NSWorkspace.shared.frontmostApplication?.processIdentifier : nil
+    let pointer = anyAdaptiveEnabled ? CGEvent(source: nil)?.location : nil
     // ID to key resolved fresh every tick; IDs reassign and are never cached as
     // identity. Uniquing defensively: two identical panels can collide on
     // persistenceKey, and a crash would be worse than one of them winning.
@@ -1022,6 +1043,31 @@ final class OledCareCoordinator: CheckupCareHolding {
       // target is built from THIS tick's topology sample, so the surface it
       // resolves and the `isSynthesis` verdict above describe one instant.
       let target = OledTelemetryTarget(panel: id, topology: topology)
+      if state.detectionDimmingEnabled {
+        let surfaceBounds = CGDisplayBounds(target.surface)
+        let pointerPosition = pointer.map { point in
+          // Keep off-display coordinates: a window spanning displays restores
+          // on both when hovered on either half. The window list does the same.
+          CGPoint(x: point.x - surfaceBounds.minX, y: point.y - surfaceBounds.minY)
+        }
+        let activity = AdaptiveRegionProtection.Activity(
+          isFocusedDisplay: currentFocus.map { $0 == target.surface },
+          frontmostPID: frontmostPID, pointerPosition: pointerPosition,
+          captureExcludedPID: ProcessInfo.processInfo.processIdentifier)
+        if activity != state.adaptiveActivity {
+          // A newly raised foreground window must not inherit the cached
+          // geometry of the app it just covered.
+          state.lastNominationRefreshAt = nil
+          state.adaptiveActivity = activity
+        }
+      }
+      // Pauses invalidate short-lived evidence, never cumulative exposure.
+      // History cannot make a post-wake frame instantly count as static.
+      if newState != .active || !awake || isLocked || assertionHeld || hdrSettling {
+        adaptiveProtection.removeValue(forKey: key)
+        state.nominatedMask = nil
+        state.lastNominationRefreshAt = nil
+      }
       updateTelemetry(
         for: key, state: &state, dimState: newState, on: target, panelIsAwake: awake, at: now,
         into: &captures)
@@ -1107,6 +1153,7 @@ final class OledCareCoordinator: CheckupCareHolding {
       anyLockDimEngaged: states.values.contains(where: \.lockDimEngaged),
       verificationPending: states.values.contains(where: \.needsVerify)
         || !pendingRemovalVerifications.isEmpty,
+      windowRestorationPending: adaptiveProtection.values.contains(where: \.isRestoringWindows),
       nominationDisplayed: anyNominationDisplayed(),
       anythingEnrolled: !states.isEmpty
     )
@@ -1116,10 +1163,11 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// cadence but gives an input event nothing to do.
   private func anyDimUp() -> Bool {
     anyOverlayDimUp() || states.values.contains(where: \.lockDimEngaged)
+      || anyNominationDisplayed()
   }
 
-  /// An overlay that is up BECAUSE the display is dimmed, as opposed to detection
-  /// dimming's mask on an `.active` display, which no input clears. `tick()`
+  /// An overlay that is up BECAUSE the whole display is dimmed, as opposed to
+  /// regional protection on an `.active` display. `tick()`
   /// assigns `dimStates` before the driver asks, so this is this tick's verdict.
   /// A display that departed mid-debounce reads as no dim; its teardown
   /// verification rides the pending-removal list, which runs fast on its own.
@@ -1135,6 +1183,12 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// harmlessly, since every one of those states takes the fast term first.
   private func anyNominationDisplayed() -> Bool {
     states.values.contains { $0.nominatedMask != nil && $0.lastAppliedAlpha != nil }
+  }
+
+  /// Hovering may remove the last visible mask. Keep listening so leaving it
+  /// starts the grace promptly, without forcing fast polling while parked.
+  private func needsAdaptiveInput() -> Bool {
+    anyNominationDisplayed() || adaptiveProtection.values.contains(where: \.needsInputTracking)
   }
 
   // MARK: - Event-driven restore
@@ -1164,15 +1218,22 @@ final class OledCareCoordinator: CheckupCareHolding {
   }
 
   private func disarmInputMonitor() {
+    adaptiveInputRestore.cancel()
     for monitor in inputMonitors { NSEvent.removeMonitor(monitor) }
     inputMonitors.removeAll()
   }
 
-  /// Single-shot: a pointer move is a stream of events and a tick per event would
-  /// run the loop at the input rate. The driver re-arms next turn if a dim is still up.
+  /// Uniform dims retain the immediate, one-shot restore. For regional masks
+  /// the monitor stays armed: a mouse move followed by an app switch belongs
+  /// in one bounded batch, not two events separated by the slow driver tick.
   private func inputArrived() {
-    disarmInputMonitor()
-    tick()
+    if needsAdaptiveInput(), !anyOverlayDimUp(),
+      !states.values.contains(where: \.lockDimEngaged) {
+      adaptiveInputRestore.request()
+    } else {
+      disarmInputMonitor()
+      tick()
+    }
   }
 
   // MARK: - Lock dim (delivered on the wire, not by an overlay)
@@ -1387,26 +1448,25 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// uniform dim and orients the result, so keeping it panel-side means one
   /// orientation per render instead of one here plus a re-orientation whenever
   /// the display rotates under a cached mask.
-  ///
-  /// The grid arrives re-binned: the caller already has it for the live view and
-  /// the model pair, and a second derivation is a second chance to disagree.
-  private func renominate(for key: String, panelGrid: [Double]) {
-    guard states[key]?.detectionDimmingEnabled == true else {
-      states[key]?.nominatedMask = nil
-      return
-    }
-    guard states[key]?.windowObservationEnabled == true,
-      let observation = latestObservations[key]
+  private func renominate(
+    for key: String, grid: [Double], cols: Int, rows: Int, through transform: PanelSpaceTransform
+  ) {
+    guard let state = states[key], state.detectionDimmingEnabled,
+      state.telemetryEnabled, state.windowObservationEnabled,
+      !state.assertionHeld, let observation = latestObservations[key]
     else {
-      // No window list means no staticness prior, and the conjunction is the
-      // feature. The pref is checked as well as the value: a retained
-      // observation from before the user switched it off is exactly as stale
-      // as the nomination it would produce.
+      adaptiveProtection.removeValue(forKey: key)
       states[key]?.nominatedMask = nil
       return
     }
-    states[key]?.nominatedMask = StaticRegionDetector.nominate(
-      recentGrid: panelGrid, observation: observation, thresholds: .default)
+    let now = Date()
+    var protection = adaptiveProtection[key] ?? AdaptiveRegionProtection()
+    protection.record(displayGrid: grid, cols: cols, rows: rows, through: transform,
+                      observation: observation, at: now)
+    states[key]?.nominatedMask = protection.nominate(
+      observation: observation, exposure: accumulators[key]?.map ?? .empty,
+      activity: state.adaptiveActivity, windows: latestWindows[key] ?? [], at: now)
+    adaptiveProtection[key] = protection
   }
 
   private enum VerifyOutcome {
@@ -1445,11 +1505,21 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// sleep): after a reconfiguration the old IDs may name different panels, so a
   /// verify keyed on the new resolution would ask the wrong question.
   private func clearAllOverlays(verifyRemoval: Bool = false) {
+    adaptiveInputRestore.cancel()
+    exposureEpoch += 1
+    exposureCapture.invalidateAll()
+    adaptiveProtection.removeAll()
+    observers.removeAll()
+    latestObservations.removeAll()
+    latestWindows.removeAll()
     overlay.removeAll()
     for key in states.keys {
       states[key]?.lastAppliedAlpha = nil
       states[key]?.lastAppliedBlackout = false
       states[key]?.needsVerify = verifyRemoval
+      states[key]?.lastAppliedMask = nil
+      states[key]?.nominatedMask = nil
+      states[key]?.lastNominationRefreshAt = nil
       states[key]?.verifyAttempts = 0
     }
   }
@@ -1527,42 +1597,43 @@ final class OledCareCoordinator: CheckupCareHolding {
     persistExposureHistoryIfDue(at: now)
   }
 
-  /// Re-checks the WINDOW half of a displayed nomination on the fast loop.
-  ///
-  /// On the sampling clock alone the mask stayed frozen against window geometry
-  /// for up to a minute, so a dim sat on whatever slid under it after a move,
-  /// which is what burn-in looks like. This re-reads the window list and re-runs
-  /// the pure rule against the cached panel grid. Gated on a mask being
-  /// DISPLAYED: a nomination appearing one slot late is fine, one lingering a
-  /// slot too long is the defect.
-  ///
-  /// Books NOTHING. Owner hours accumulate at the nominal sampling interval
-  /// per observation in `observeWindows`; booking here would multiply them by
-  /// the refresh rate. Refreshing the shared observer is safe because its
-  /// ages are wall-clock spans, not per-call accumulation.
+  /// Refresh geometry once a second while adaptive evidence exists. Activity
+  /// and sample freshness are evaluated on every tick, so an input-driven tick
+  /// can lift the foreground app without waiting for another capture.
+  /// Books no owner hours; the minute observation remains their only writer.
   private func refreshNominationGeometry(
     for key: String, state: inout PerDisplay, on target: OledTelemetryTarget,
     at now: SuspendingClock.Instant
   ) {
-    guard state.nominatedMask != nil, state.detectionDimmingEnabled,
-      state.windowObservationEnabled
-    else { return }
-    if let last = state.lastNominationRefreshAt,
-      now - last < Self.nominationGeometryInterval { return }
-    state.lastNominationRefreshAt = now
-    guard let transform = Self.transform(target),
-      let cached = latestSamples[key]
-    else { return }
-    let windows = windowList(target.surface)
-    var observer = observers[key] ?? WindowObserver()
-    let observation = observer.observe(windows, through: transform, at: Date())
-    observers[key] = observer
-    latestObservations[key] = observation
-    latestWindows[key] = windows
-    // `cells` is already panel-native: it is the same array `renominate` was
-    // handed at accept time, and the rule below is the same one.
-    state.nominatedMask = StaticRegionDetector.nominate(
-      recentGrid: cached.cells, observation: observation, thresholds: .default)
+    guard state.detectionDimmingEnabled, state.telemetryEnabled,
+      state.windowObservationEnabled, var protection = adaptiveProtection[key]
+    else {
+      state.nominatedMask = nil
+      return
+    }
+    if state.lastNominationRefreshAt == nil
+      || now - state.lastNominationRefreshAt! >= Self.nominationGeometryInterval {
+      state.lastNominationRefreshAt = now
+      guard let transform = Self.transform(target) else {
+        adaptiveProtection.removeValue(forKey: key)
+        state.nominatedMask = nil
+        return
+      }
+      let windows = windowList(target.surface)
+      var observer = observers[key] ?? WindowObserver()
+      let observation = observer.observe(windows, through: transform, at: Date())
+      observers[key] = observer
+      latestObservations[key] = observation
+      latestWindows[key] = windows
+    }
+    guard let observation = latestObservations[key] else {
+      state.nominatedMask = nil
+      return
+    }
+    state.nominatedMask = protection.nominate(
+      observation: observation, exposure: accumulators[key]?.map ?? .empty,
+      activity: state.adaptiveActivity, windows: latestWindows[key] ?? [], at: Date())
+    adaptiveProtection[key] = protection
   }
 
   /// The panel-to-surface resolution against the topology AS IT STANDS NOW.
@@ -1697,6 +1768,8 @@ final class OledCareCoordinator: CheckupCareHolding {
   }
 
   private func forgetWindowObservation(for key: String) {
+    adaptiveProtection.removeValue(forKey: key)
+    states[key]?.nominatedMask = nil
     observers.removeValue(forKey: key)
     latestObservations.removeValue(forKey: key)
     latestWindows.removeValue(forKey: key)
@@ -1741,6 +1814,10 @@ final class OledCareCoordinator: CheckupCareHolding {
         current: { [weak self] request in self?.exposureCaptureContext(for: request) },
         accept: { [weak self] request, sample in
           self?.finishExposureCapture(sample, request: request)
+        },
+        failed: { [weak self] request in
+          self?.adaptiveProtection.removeValue(forKey: request.key)
+          self?.states[request.key]?.nominatedMask = nil
         })
     }
   }
@@ -1786,8 +1863,8 @@ final class OledCareCoordinator: CheckupCareHolding {
     }
     accumulators[key] = accumulator
     unsavedExposureKeys.insert(key)
-    // Re-binned once for the live view, the model pair and the nomination;
-    // `accumulate` re-bins internally and does not expose its result.
+    // Share the panel grid between the live view and model pair. Adaptive
+    // evidence below also needs the raw capture for its per-cell fingerprints.
     let panelGrid = transform.panelNativeGrid(
       fromDisplayGrid: sample.grid, cols: sample.cols, rows: sample.rows)
     latestSamples[key] = (panelGrid, Date())
@@ -1795,7 +1872,15 @@ final class OledCareCoordinator: CheckupCareHolding {
     // Detection dimming's luminance half nominates here, off the sampling clock:
     // the grid changes once a minute, so recomputing faster reaches the same
     // answer. The window half does NOT wait for it.
-    renominate(for: key, panelGrid: panelGrid)
+    if let state = states[key], state.detectionDimmingEnabled, state.windowObservationEnabled {
+      let windows = windowList(current.surface)
+      var observer = observers[key] ?? WindowObserver()
+      latestObservations[key] = observer.observe(windows, through: transform, at: Date())
+      observers[key] = observer
+      latestWindows[key] = windows
+    }
+    renominate(for: key, grid: sample.grid, cols: sample.cols, rows: sample.rows,
+               through: transform)
     log.debug("""
     OLED care: exposure sample accepted for display \(id, privacy: .public) \
     (\(accumulator.map.sampleCount, privacy: .public) total)

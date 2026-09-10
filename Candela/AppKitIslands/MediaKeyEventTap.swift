@@ -139,6 +139,12 @@ final class MediaKeyEventTap {
       (pingPosted: Date?, pingSeen: Date, probing: Date?, alive: Date)
     >(initialState: (nil, Date(), nil, Date()))
     let callback: EventTapCallback = { type, event in
+      // Record the notification before inspecting its payload: a disabled tap
+      // and a stalled event stream otherwise produce the same watchdog verdict.
+      if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        let marked = event.getIntegerValueField(.eventSourceUserData) == Self.pingMagic
+        Self.watchdogLog.notice("tap disabled: type=\(type.rawValue) pingMarker=\(marked)")
+      }
       // Self-ping marker: our own prober posted this event. Stamp its arrival
       // and swallow it, since it is not for the system.
       if event.getIntegerValueField(.eventSourceUserData) == Self.pingMagic {
@@ -221,6 +227,7 @@ final class MediaKeyEventTap {
         // spinning orphaned.
         CFRunLoopAddSource(runLoop, threadSource, .commonModes)
         CFRunLoopRun()
+        Self.watchdogLog.notice("tap run loop exited")
       }
     }
     thread.name = "MediaKeyEventTap"
@@ -354,8 +361,10 @@ final class MediaKeyEventTap {
           heartbeat.withLock { $0.pingPosted = nil; $0.probing = nil; $0.alive = now.wall }
           continue
         case .wedged(let pingLost, let probeStuck, let proberDead):
+          let pingAge = hb.pingPosted.map { now.wall.timeIntervalSince($0) } ?? -1
+          let seenAge = now.wall.timeIntervalSince(hb.pingSeen)
           Self.watchdogLog.fault(
-            "EMERGENCY: pingLost=\(pingLost) probeStuck=\(probeStuck) proberDead=\(proberDead)"
+            "EMERGENCY: pingLost=\(pingLost) probeStuck=\(probeStuck) proberDead=\(proberDead) pingAge=\(pingAge) lastPingSeenAge=\(seenAge)"
           )
           Self.teardown(watchdogRuntime)
           // Invalidating the port is NOT enough once the wedge has formed
