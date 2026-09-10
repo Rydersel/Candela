@@ -1,6 +1,8 @@
 // Restore latency at the pixel, not the window list: ScreenCaptureKit samples
-// of one rect around a synthetic mouse move. The first reading is the dimmed
-// control, so a run with no overlay up reports "no dim to measure", not a latency.
+// of one rect around a synthetic mouse move. The control is two readings 0.6 s
+// apart rather than one, so a dim that is still fading in cannot be measured as
+// though it had settled; a control that is still moving aborts, and a run with
+// no overlay up reports "no dim to measure" rather than a latency.
 // Usage: pixeltime <displayID> <localX> <localY>
 import CoreGraphics
 import Foundation
@@ -32,8 +34,26 @@ func run() async throws {
     }
     return n == 0 ? -1 : Double(sum) / Double(n)
   }
+  // Two samples: an idle dim or blackout fades in over OverlayFade.entrySeconds
+  // (0.4 s), so a run started mid-fade would report a latency that is partly the
+  // entry's. 0.6 is that fade plus margin, a literal because a standalone script
+  // cannot import CandelaKit.
+  let firstControl = await mean()
+  try await Task.sleep(for: .seconds(0.6))
   let dimmed = await mean()
-  print(String(format: "dimmed control: %.1f", dimmed))
+  // A failed capture returns -1, which looks exactly like a control that is still
+  // moving. Exit 3 is the hardware pass's proof that a settle can fail, so a
+  // capture failure must not wear it.
+  guard firstControl >= 0, dimmed >= 0 else { print("capture failed"); exit(2) }
+  // Mean channel value on 0...255. The sampled region is static while a dim is
+  // up, so a move larger than this is the fade, not noise.
+  let controlTolerance = 1.0
+  if abs(dimmed - firstControl) > controlTolerance {
+    print(String(format: "entry fade still in flight: control moved %.1f to %.1f. Rerun once the dim has settled",
+                 firstControl, dimmed))
+    exit(3)
+  }
+  print(String(format: "dimmed control: %.1f (steady over 0.6 s)", dimmed))
   let f = DateFormatter(); f.dateFormat = "HH:mm:ss.SSS"
   let loc = CGEvent(source: nil)?.location ?? CGPoint(x: 100, y: 100)
   let ev = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,

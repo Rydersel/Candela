@@ -38,6 +38,10 @@ struct PrefPropagationTests {
     // reason (`pollingMode` is read at use and IS a case); having no pane to
     // write it through is, so nothing can route a change.
     #expect(PrefName(rawValue: "wireTimingGuard") == nil)
+    // The controller writes the interrupted-dim marker on the dim's own edges.
+    // No pane writes it, and a reset that cleared it as a setting would discard
+    // the recovery signal.
+    #expect(PrefName(rawValue: "temporaryDimEngaged") == nil)
   }
 
   @Test func oledEngineStateIsNotAPrefName() {

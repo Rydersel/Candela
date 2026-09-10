@@ -138,6 +138,20 @@ struct DisplayPrefsTests {
     }
   }
 
+  /// Per display: a launch that recovered one must not write over another.
+  /// Absent reads false, so an older domain needs no migration.
+  @Test func theInterruptedDimMarkerIsPerDisplay() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "one")
+      let other = DisplayPrefs(defaults: defaults, persistenceKey: "two")
+      #expect(prefs.temporaryDimEngaged == false)
+      prefs.temporaryDimEngaged = true
+      #expect(prefs.temporaryDimEngaged)
+      #expect(other.temporaryDimEngaged == false)
+      #expect(defaults.object(forKey: "temporaryDimEngaged.one") as? Bool == true)
+    }
+  }
+
   @Test func unknownStoredHDRModeFallsBackToOff() {
     withSuite { defaults in
       defaults.set(42, forKey: "hdrMode.pk")

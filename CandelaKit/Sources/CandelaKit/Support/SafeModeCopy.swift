@@ -28,6 +28,10 @@ public enum SafeModeCopy {
     /// stored, closing both `RestoreCoordinator` passes, and
     /// `StatusItemController.restoreUnattended()` returns early, which is where the
     /// stored resolution and the saved arrangement would have been reapplied.
+    ///
+    /// Neither of those closes the interrupted-dim recovery, since safe mode
+    /// reports the same `.doNothing` the shipped default does. It carries its own
+    /// guard, in `StatusItemController` and in `InterruptedDimRecovery.action`.
     case restore
     /// `AppModel` skips `refreshFromHardware` for appeared and kept displays,
     /// the volume and contrast passes return early because `startupAction`

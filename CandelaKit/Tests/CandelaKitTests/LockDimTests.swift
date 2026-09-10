@@ -19,6 +19,7 @@ struct LockDimTests {
     let ddc: FakeDDC
     let native: FakeNativeApplier
     let store: PathMemoryStore
+    let prefs: DisplayPrefs
     let controller: BrightnessController
   }
 
@@ -47,7 +48,7 @@ struct LockDimTests {
       storageKey: Self.storageKey,
       wireSiblings: []
     )
-    return Rig(ddc: ddc, native: native, store: store, controller: controller)
+    return Rig(ddc: ddc, native: native, store: store, prefs: prefs, controller: controller)
   }
 
   /// Pure DDC: `disableCombinedBrightness` app-wide, so the whole range is on
@@ -430,5 +431,120 @@ struct LockDimTests {
     // brightness is an 80% opaque overlay.
     #expect(abs(engine.alpha(for: .idleDim)! - 0.8) < 1e-9)
     #expect(abs(engine.lockDimFactor - 0.2) < 1e-9)
+  }
+
+  // MARK: - The interrupted-dim marker
+
+  /// Set synchronously on the dim's own turn, so a crash any time after the
+  /// first submit finds it, and gone once the restoring submit is made. No
+  /// `await` before the first expectation on purpose: a marker written after the
+  /// wire settled would leave the dim window unrecorded.
+  @Test func aDimMarksTheDisplayBeforeAnyWriteCanLandAndUnmarksAfterTheRestore() async {
+    let rig = makeHardwareRig()
+    rig.controller.setBrightness(0.8)
+    await rig.controller.waitForPendingWrites()
+    #expect(!rig.prefs.temporaryDimEngaged)
+    rig.controller.beginTemporaryDim(factor: 0.5)
+    #expect(rig.prefs.temporaryDimEngaged)
+    await rig.controller.waitForPendingWrites()
+    rig.controller.endTemporaryDim()
+    #expect(!rig.prefs.temporaryDimEngaged)
+  }
+
+  /// The token discipline, at the marker. A step still in the air when the user
+  /// unlocked must not re-mark a display whose register was already handed back,
+  /// or the next launch reasserts over a session that ended clean.
+  @Test func aStepFromASupersededRampCannotReMarkAfterTheRestore() async {
+    let rig = makeHardwareRig()
+    rig.controller.lockDimRampInterval = .milliseconds(20)
+    rig.controller.setBrightness(0.8)
+    await rig.controller.waitForPendingWrites()
+    let ramp = rig.controller.rampTemporaryDim(to: 0.1)
+    try? await Task.sleep(for: .milliseconds(50)) // a few steps in, not finished
+    // That the ramp marks at all, asserted first: without it the rest passes
+    // just as happily if a ramp stopped marking.
+    #expect(rig.prefs.temporaryDimEngaged)
+    rig.controller.endTemporaryDim()
+    await rig.controller.waitForPendingWrites()
+    #expect(!rig.prefs.temporaryDimEngaged)
+
+    // NOT cancelled: let the remaining steps run out and confirm none re-marked.
+    _ = await ramp.value
+    try? await Task.sleep(for: .milliseconds(60))
+    await rig.controller.waitForPendingWrites()
+    #expect(!rig.prefs.temporaryDimEngaged)
+  }
+
+  /// The marker records THAT a dim was outstanding and nothing about its value.
+  /// Sibling of `theDimNeverTouchesThePublishedValueOrTheStore`.
+  @Test func aMarkedDisplayIsStillTheUsersValueEverywhereElse() async {
+    let rig = makeHardwareRig()
+    rig.controller.setBrightness(0.8)
+    rig.controller.beginTemporaryDim(factor: 0.5)
+    await rig.controller.waitForPendingWrites()
+    #expect(rig.prefs.temporaryDimEngaged)
+    #expect(rig.controller.brightness == 0.8 && rig.store.values[Self.storageKey] == 0.8)
+  }
+
+  // MARK: - The readback guard the marker carries
+
+  /// A marked register holds a dim nothing has undone, so the panel would answer
+  /// our own multiplier and adopting it persists the dim over the saved value.
+  /// The live-dim guard cannot cover it: the launch readback runs before the
+  /// recovery, so the store is clobbered first and then "recovered" to the
+  /// clobbered number.
+  @Test func aSurvivingMarkerStopsTheReadbackFromAdoptingOurOwnDim() async {
+    let rig = makeHardwareRig()
+    rig.controller.setBrightness(0.8)
+    await rig.controller.waitForPendingWrites()
+    // Marked with no dim outstanding: the shape a crash leaves behind.
+    rig.prefs.temporaryDimEngaged = true
+    await rig.ddc.setReadResult((current: 40, max: 100))
+    await rig.controller.refreshFromHardware()
+    #expect(await rig.ddc.recordedReadCount() == 0)
+    #expect(rig.controller.brightness == 0.8)
+    #expect(rig.store.values[Self.storageKey] == 0.8)
+  }
+
+  /// The control: with the marker clear the same call reads and adopts, so the
+  /// guard above cannot be a permanent stop with every assertion still holding.
+  @Test func anUnmarkedDisplayStillReadsAndAdopts() async {
+    let rig = makeHardwareRig()
+    rig.controller.setBrightness(0.8)
+    await rig.controller.waitForPendingWrites()
+    await rig.ddc.setReadResult((current: 40, max: 100))
+    await rig.controller.refreshFromHardware()
+    #expect(await rig.ddc.recordedReadCount() == 1)
+    #expect(abs(rig.controller.brightness - 0.4) < 1e-9)
+    #expect(abs((rig.store.values[Self.storageKey] ?? 0) - 0.4) < 1e-9)
+  }
+
+  /// The stop is not permanent: the recovery clears the marker after it
+  /// re-asserts, so the next pass reads again. The reassert arm runs by hand
+  /// because `AppModel`'s walk builds prefs over the standard defaults domain and
+  /// needs a host; asserting the decision first keeps this from drifting.
+  @Test func theReadbackResumesOnceTheRecoveryHasClearedTheMarker() async {
+    let rig = makeHardwareRig()
+    rig.controller.setBrightness(0.8)
+    await rig.controller.waitForPendingWrites()
+    rig.prefs.temporaryDimEngaged = true
+    #expect(
+      InterruptedDimRecovery.action(
+        markerSurvived: rig.prefs.temporaryDimEngaged,
+        dimIsLive: rig.controller.temporaryDimFactor != nil,
+        hasStoredValue: rig.controller.hasStoredValue,
+        isSafeMode: false
+      ) == .reassert
+    )
+    rig.controller.resetWriteMemo()
+    rig.controller.reassertHardware()
+    rig.prefs.temporaryDimEngaged = false
+    await rig.controller.waitForPendingWrites()
+    #expect(await rig.ddc.recordedWrites().last?.value == 80)
+
+    await rig.ddc.setReadResult((current: 80, max: 100))
+    await rig.controller.refreshFromHardware()
+    #expect(await rig.ddc.recordedReadCount() == 1)
+    #expect(abs(rig.controller.brightness - 0.8) < 1e-9)
   }
 }
