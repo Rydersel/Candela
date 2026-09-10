@@ -52,18 +52,29 @@ what makes it useful on an issue where two displays interact.
 
 For a support request, reproduce the issue and then save or copy the report.
 There is no need to copy the raw capability description separately. Both
-buttons use the same report format and take a new snapshot when used.
+buttons use the same report format and take a new snapshot when used. The report
+names its own format version on the second line, currently 3. That number goes
+up when a heading changes name, so two pastes taken from different versions can
+be told apart.
 
 The report includes:
 
 - **System:** capture time, report format version, app and macOS versions, Mac
   model, Safe Mode, Accessibility and Screen Recording grants, launch-at-login
-  state, the media keys Candela is watching, and the selected sound output and
-  whether macOS can control its volume.
+  state, the media keys Candela is watching, the selected sound output and
+  whether macOS can control its volume, and how many displays macOS reports as
+  online, counting the built-in and any virtual display. Candela offers the
+  first 32 online displays for control, and the report says so when more than
+  that are online.
 - **Display setup:** the controlled displays, their names, connections,
-  manufacturers and modes, plus any other displays in the cached topology.
-  That sample can lag a connection change. If discovery did not record why a
-  display was excluded, the report says so rather than guessing.
+  manufacturers and modes, plus every display that is not controlled over DDC,
+  each with its reason. A display can be the built-in, whose brightness macOS
+  controls directly; a virtual display, either one Candela made or one from
+  AirPlay, Sidecar or another app; a dummy plug; or a display with no DDC
+  channel at all, which is normal for DisplayLink and also happens behind some
+  hubs. A display that is only in the cached topology, which no discovery pass
+  has seen, is listed as having no recorded reason. That sample can lag a
+  connection change.
 - **Reported capabilities:** the request state, parser result, MCCS version,
   advertised command codes and capability description for each external
   display. Not asked, still checking, no readable reply and a description that

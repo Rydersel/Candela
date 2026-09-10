@@ -90,7 +90,7 @@ public struct DiagnosticsReportSnapshot: Sendable {
 
 public enum DiagnosticsReport {
   public static func render(_ s: DiagnosticsReportSnapshot) -> String {
-    var lines = ["Candela diagnostics report", "report format: 2", ""]
+    var lines = ["Candela diagnostics report", "report format: 3", ""]
 
     lines += [
       "app: \(s.appVersion)",

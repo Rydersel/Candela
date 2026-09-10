@@ -10,13 +10,16 @@ import Sparkle
 /// than persisting anything of our own: the same one-source-of-truth shape as
 /// launch-at-login. `automaticallyChecksForUpdates` is a stored mirror
 /// ONLY because `@Observable` cannot invalidate a view from a computed property
-/// over foreign storage.
+/// over foreign storage. The user-driver delegate is wired here too, for the
+/// scheduled-update reminder the menu bar shows; it adds no preference either.
 @MainActor @Observable
 final class UpdaterModel {
   let completion = UpdateCompletionState()
+  let reminder = UpdateReminderState()
   @ObservationIgnored private let controller: SPUStandardUpdaterController
-  // Sparkle holds its delegate weakly, so the model owns it.
+  // Sparkle holds both delegates weakly, so the model owns them.
   @ObservationIgnored private let relaunchDelegate = UpdateRelaunchDelegate()
+  @ObservationIgnored private let reminderDelegate: UpdateReminderDelegate
 
   /// False while a check or install is in flight; drives the button's
   /// disabled state. Mirrored from Sparkle's KVO-compliant property.
@@ -33,8 +36,10 @@ final class UpdaterModel {
     // Sparkle's recommended shape; the scheduled check fires only if automatic
     // checks are enabled. The `--vd-engage` helper never reaches here: it exits
     // inside CandelaMain before any app machinery is built.
+    reminderDelegate = UpdateReminderDelegate(reminder: reminder)
     controller = SPUStandardUpdaterController(
-      startingUpdater: true, updaterDelegate: relaunchDelegate, userDriverDelegate: nil
+      startingUpdater: true, updaterDelegate: relaunchDelegate,
+      userDriverDelegate: reminderDelegate
     )
     automaticallyChecksForUpdates = controller.updater.automaticallyChecksForUpdates
     lastUpdateCheckDate = controller.updater.lastUpdateCheckDate
@@ -54,6 +59,13 @@ final class UpdaterModel {
   }
 
   func checkForUpdates() {
+    controller.checkForUpdates(nil)
+  }
+
+  /// Brings the already-prepared alert back into focus for the panel's reminder
+  /// row. Sparkle's route for that is this same call: the deferred session is
+  /// still open, so nothing starts a second check.
+  func bringUpdateForward() {
     controller.checkForUpdates(nil)
   }
 

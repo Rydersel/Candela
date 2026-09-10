@@ -162,6 +162,51 @@ public enum DiagnosticsCopy {
     return revealed == 0 ? "None for this display" : "\(revealed)"
   }
 
+  // MARK: - Display inventory
+
+  /// The answers that are not counts, each a different fact: nothing has looked
+  /// yet, macOS refused the count, macOS refused the list, and this build does not
+  /// enumerate at all. A zero would report any of them as an empty desk. The two
+  /// refusals stay separate sentences because they cost different things.
+  ///
+  /// Lower case, unlike the page's values: these are report fields only, printed
+  /// after `online displays: `.
+  public static func onlineDisplays(_ report: DisplayDiscoveryReport?) -> String {
+    guard let report else { return "not enumerated yet" }
+    switch report.onlineListRefusal {
+    case .count:
+      return "not reported: macOS did not answer the online display count; control is unaffected"
+    case .fill:
+      return "not reported: macOS did not answer the online display list; no displays are controlled this pass"
+    case nil:
+      break
+    }
+    guard let count = report.onlineCount else { return "not enumerated on this build" }
+    return String(count)
+  }
+
+  // MARK: - Displays not controlled
+
+  /// Why one display is not in the DDC control pool, in the words of whoever reads
+  /// the report. "My monitor does not show up" is the commonest report there is,
+  /// and each reason answers it differently: some mean nothing is wrong, one names
+  /// the hardware, one is the hub question.
+  public static func exclusionReason(_ reason: DisplayExclusionReason, app: String) -> String {
+    switch reason {
+    // No leading name: these sentences are printed after the display's own name.
+    case .builtIn:
+      "macOS controls its brightness directly, and it is listed with the controlled displays below."
+    case .ownedVirtual:
+      "Virtual display created by \(app); there is no hardware to control."
+    case .foreignVirtual:
+      "Virtual display created by another app or by macOS (AirPlay, Sidecar, a screen sharing session)."
+    case .dummy:
+      "Recognized as a dummy plug rather than a display."
+    case .noDDCService:
+      "No DDC channel: macOS reports no display service for it, which is normal for DisplayLink, AirPlay and Sidecar, and also happens behind some hubs."
+    }
+  }
+
   // MARK: - Brightness control
 
   /// The engine's own answer, put into the user's words. `BrightnessPath` gained

@@ -94,6 +94,9 @@ final class FakeAudio: AudioDeviceProviding, @unchecked Sendable {
 @MainActor
 final class ScriptedDiscovery {
   var topology: [(id: CGDirectDisplayID, key: String, name: String)] = []
+  /// What this pass says it dropped. Defaults to "not enumerated", so a test that
+  /// scripts no exclusions reports that rather than an authoritative-looking zero.
+  var report: DisplayDiscoveryReport = .notEnumerated
   /// One writer per persistence key, kept so a rebuild is not mistaken for a
   /// rebind: a fresh writer every pass would make every controller look new.
   private var writers: [String: FakeDDCWriter] = [:]
@@ -102,7 +105,11 @@ final class ScriptedDiscovery {
     self.topology = topology
   }
 
-  func discover(_: Set<CGDirectDisplayID>) -> AppModel.DiscoveredDisplays {
+  func discover(_ ownedVirtualIDs: Set<CGDirectDisplayID>) -> DisplayDiscoverySurvey {
+    DisplayDiscoverySurvey(controlled: controlled(ownedVirtualIDs), report: report)
+  }
+
+  private func controlled(_: Set<CGDirectDisplayID>) -> AppModel.DiscoveredDisplays {
     topology.map { entry in
       let writer = writers[entry.key] ?? {
         let fresh = FakeDDCWriter()
