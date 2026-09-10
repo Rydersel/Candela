@@ -419,6 +419,8 @@ private struct MeasurementControls: View {
   }
 
   var body: some View {
+    // This leaf owns the bindings; a parent refresh can skip its unchanged inputs.
+    let _ = model.prefsRevision
     // Spec §4's prompt copy, verbatim, so the reason is on screen BEFORE
     // macOS's own dialog, which can only say "record the contents of your
     // screen". The product name is interpolated: the working name is not final.
@@ -493,6 +495,7 @@ private struct MeasurementControls: View {
 private struct HoursToggle: View {
   let persistenceKey: String
 
+  @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
 
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: persistenceKey) }
@@ -501,6 +504,7 @@ private struct HoursToggle: View {
   }
 
   var body: some View {
+    let _ = model.prefsRevision
     SettingRow("Counted while the display is awake and not mirrored, and kept per display even when it is unplugged. A display switched off at the monitor itself can still be counted, because macOS reports a blanked display as awake.") {
       Toggle("Count hours of use", isOn: Binding(
         get: { prefs.oledHoursTracking },
