@@ -561,3 +561,87 @@ private func pacerOnAQuietBus(_ clock: FakeClock) -> DDCBusPacer {
       == .frame(current: 50, max: 100)
   )
 }
+
+// MARK: - The request checksum on the wire
+
+/// DDC/CI seals a host packet over both I2C addresses, and neither byte travels
+/// inside the packet.
+private let ddcDestinationAddress: UInt8 = 0x6E
+private let ddcSourceAddress: UInt8 = 0x51
+
+/// The read stub fails, so the ladder stops after one attempt.
+///
+/// `@unchecked Sendable`: `runTransaction` calls the closures synchronously and
+/// has returned before the test reads `packets`.
+private final class PacketRecorder: @unchecked Sendable {
+  private(set) var packets: [[UInt8]] = []
+
+  var transport: Arm64DDC.I2CTransport {
+    Arm64DDC.I2CTransport(
+      write: { _, bytes, count in
+        self.packets.append(Array(UnsafeRawBufferPointer(start: bytes, count: Int(count))))
+        return 0
+      },
+      read: { _, _, _ in -1 },
+      sleep: { _ in }
+    )
+  }
+}
+
+private func firstPacket(send: [UInt8], expectsReply: Bool) -> [UInt8]? {
+  let recorder = PacketRecorder()
+  var send = send
+  var reply = expectsReply ? [UInt8](repeating: 0, count: DDCReplyFrame.expectedLength) : []
+  _ = Arm64DDC.runTransaction(
+    service: nil, send: &send, reply: &reply, replyCommand: send.first,
+    writeSleepTime: 0, numOfWriteCycles: nil, readSleepTime: 0,
+    numOfRetryAttemps: 0, retrySleepTime: 0, pacer: nil, transport: recorder.transport
+  )
+  return recorder.packets.first
+}
+
+/// XOR of the whole packet, checksum byte included, which leaves the seed.
+private func recoveredSeed(_ packet: [UInt8]) -> UInt8 {
+  packet.reduce(0, ^)
+}
+
+/// Sealed without the source address, a read draws zeros from a panel that checks
+/// it. Expected byte comes from the spec by hand, not from `checksum`.
+@Test func aReadRequestIsSealedOverBothAddresses() {
+  // [0x80 | 2][data length 1, which for Get VCP is also the op code][VCP code][checksum]
+  let lengthByte: UInt8 = 0x82
+  let opCode: UInt8 = 0x01
+  let brightness: UInt8 = 0x10
+  let expected = ddcDestinationAddress ^ ddcSourceAddress ^ lengthByte ^ opCode ^ brightness
+  #expect(expected == 0xAC)
+  #expect(firstPacket(send: [brightness], expectsReply: true) == [0x82, 0x01, 0x10, expected])
+}
+
+@Test func aWriteRequestIsSealedOverBothAddresses() {
+  // [0x80 | 4][data length 3, which for Set VCP is also the op code][VCP code][hi][lo][checksum]
+  let lengthByte: UInt8 = 0x84
+  let opCode: UInt8 = 0x03
+  let brightness: UInt8 = 0x10
+  let high: UInt8 = 0x00
+  let low: UInt8 = 0x32
+  var expected = ddcDestinationAddress ^ ddcSourceAddress ^ lengthByte ^ opCode
+  expected ^= brightness ^ high ^ low
+  #expect(expected == 0x9A)
+  #expect(
+    firstPacket(send: [brightness, high, low], expectsReply: false)
+      == [0x84, 0x03, 0x10, 0x00, 0x32, expected]
+  )
+}
+
+/// Recovered from the bytes rather than the expression, so a divergence between
+/// the read and write seeds is caught whatever shape it takes.
+@Test func neitherRequestPathSealsWithASeedOfItsOwn() {
+  guard let read = firstPacket(send: [0x10], expectsReply: true),
+        let write = firstPacket(send: [0x10, 0x00, 0x32], expectsReply: false)
+  else {
+    Issue.record("no packet reached the bus")
+    return
+  }
+  #expect(recoveredSeed(read) == ddcDestinationAddress ^ ddcSourceAddress)
+  #expect(recoveredSeed(write) == recoveredSeed(read))
+}
