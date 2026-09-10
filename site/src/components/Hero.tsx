@@ -59,7 +59,7 @@ function BrewInstall() {
 
 // First screen: the premise, the one-liner, the two actions, and the capture
 // glowing out of the dark underneath them. The foss line rides with the CTA
-// cluster per SR8, never below the fold and never footer-weight.
+// cluster, never below the fold and never footer-weight.
 export function Hero() {
   return (
     <section id="top" className="hero">
