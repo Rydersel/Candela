@@ -192,6 +192,40 @@ public struct CheckupReport: Codable, Equatable, Sendable {
   }
 
   public var demonstratedSomething: Bool { summary.demonstratedSomething }
+
+  /// HDR stops DDC, so a run that began in it pre-grades the capability rows.
+  /// Derived from that reason rather than stored twice, which could disagree.
+  public var hdrEngagedAtRun: Bool {
+    claims.contains {
+      $0.family == .capabilities
+        && $0.verdict == .notObserved(CheckupPlan.hdrEngagedCapabilityText)
+    }
+  }
+
+  /// The release that ships the read-checksum fix. Earlier seals omitted the
+  /// source address, so displays that check it were graded write-only.
+  public static let correctedReadPathVersion = "1.0.4"
+
+  /// True when a write-only grade could be the pre-fix checksum, not the display.
+  /// The defect only silenced answering panels; an HDR run has its own line.
+  public var panelClassMayBeMisread: Bool {
+    guard panelClass == .writeOnlyDDC, !hdrEngagedAtRun else { return false }
+    return Self.precedesCorrectedReadPath(appBuild)
+  }
+
+  /// Compares the leading dotted-numeric run, so `1.0.0 (4)` reads as `1.0.0`.
+  /// An unreadable version counts as older and gets the note.
+  static func precedesCorrectedReadPath(_ version: String) -> Bool {
+    let numbers = Self.versionNumbers(version)
+    guard numbers.count >= 2 else { return true }
+    let corrected = Self.versionNumbers(correctedReadPathVersion)
+    for (n, c) in zip(numbers, corrected) where n != c { return n < c }
+    return numbers.count < corrected.count
+  }
+
+  static func versionNumbers(_ version: String) -> [Int] {
+    version.prefix { $0.isNumber || $0 == "." }.split(separator: ".").compactMap { Int($0) }
+  }
 }
 
 /// The exported file. The hash covers the canonical body, so a hand edit
