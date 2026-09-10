@@ -530,6 +530,9 @@ public final class BrightnessController: PendingWireDraining {
     guard !usesNative else { return }
     let tuning = prefs.tuning(for: .brightness)
     guard !tuning.unavailableDDC else { return }
+    // The software path writes no DDC brightness, so the register still holds the
+    // monitor's own value; adopting it would overwrite the saved software brightness.
+    guard !prefs.forceSoftware else { return }
     // Reads use only the first remap code; trailing codes affect writes alone.
     let readCode = tuning.remapCodes.first ?? VCP.brightness
     bindReadRegister(to: readCode)
