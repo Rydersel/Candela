@@ -193,6 +193,41 @@ struct CheckupDisplayPickPage: View {
           .accessibilityLabel(Text(verbatim: CheckupCopy.displayRowLabel(entry)))
           .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         }
+        if !model.excludedDisplays.isEmpty {
+          Text(CheckupCopy.excludedTitle)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(OnboardingStyle.bodyColor)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 8)
+            // Each row repeats this line, since a row read alone has to say it
+            // cannot be chosen. A header is skippable, so the repeat is free.
+            .accessibilityAddTraits(.isHeader)
+        }
+        ForEach(model.excludedDisplays) { display in
+          // Never a `Button`: a row that cannot be chosen must not publish
+          // `AXPress`.
+          OnboardingCard {
+            VStack(alignment: .leading, spacing: 4) {
+              Text(verbatim: display.name)  // a display's name, never a lookup key
+                .font(.callout.weight(.medium))
+                .foregroundStyle(OnboardingStyle.bodyColor)
+              Text(
+                verbatim: CheckupCopy.pixelSizeLine(
+                  width: display.pixelWidth, height: display.pixelHeight)
+              )
+              .font(.caption)
+              .foregroundStyle(OnboardingStyle.faintColor)
+              Text(CheckupCopy.excludedReason(display.reason))
+                .font(.caption)
+                .foregroundStyle(OnboardingStyle.faintColor)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+          }
+          // Safe to combine here: the rule against combining is about buttons,
+          // whose `AXPress` and `AXFocused` it eats.
+          .accessibilityElement(children: .combine)
+          .accessibilityLabel(Text(verbatim: CheckupCopy.excludedRowLabel(display)))
+        }
       }
     } actions: {
       CheckupAdvanceButton(

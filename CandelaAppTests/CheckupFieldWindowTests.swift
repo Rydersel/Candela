@@ -37,6 +37,9 @@ struct CheckupFieldWindowTests {
     // at all. This is the assertion that can fail.
     #expect(window.styleMask == OverlayWindow.styleMask)
     #expect(window.ignoresMouseEvents == false)
+    // Borderless, so it cannot take key status, which is why Escape arrives
+    // through an event monitor rather than through this window.
+    #expect(window.canBecomeKey == false)
     // The content view is what the dimming recipe's alpha lands on, and a field
     // at alpha 0 is an invisible field.
     #expect(window.contentView?.alphaValue == 1)
@@ -217,6 +220,38 @@ struct CheckupFieldWindowTests {
     let w = CheckupFieldWindow(orderFront: false, care: care)
     #expect(w.show(kind: .black, plant: nil, on: absent) == false)
     #expect(care.events.isEmpty)
+  }
+
+  /// A monitor that outlives its showing swallows Escape for the rest of the
+  /// session, and nothing left running takes it down.
+  @Test func theKeyMonitorIsGoneAfterHide() {
+    let w = CheckupFieldWindow(orderFront: false)
+    #expect(w.show(kind: .black, plant: nil, on: entry(only: false)))
+    #expect(w.keyMonitorForTest != nil)
+    w.hide()
+    #expect(w.keyMonitorForTest == nil)
+  }
+
+  /// The same double hide the care hold survives: `windowWillClose` hides on top
+  /// of the abandon that already did.
+  @Test func hidingTwiceRemovesTheMonitorExactlyOnce() {
+    let w = CheckupFieldWindow(orderFront: false)
+    w.hide()
+    #expect(w.keyMonitorForTest == nil)
+    #expect(w.show(kind: .black, plant: nil, on: entry(only: false)))
+    w.hide()
+    w.hide()
+    #expect(w.keyMonitorForTest == nil)
+  }
+
+  /// A monitor armed for a field that never reached the glass would consume
+  /// Escape with no showing to end.
+  @Test func aRefusedShowingInstallsNoMonitor() {
+    var absent = entry(only: false)
+    absent.id = 0xFFFF_FFFE
+    let w = CheckupFieldWindow(orderFront: false)
+    #expect(w.show(kind: .black, plant: nil, on: absent) == false)
+    #expect(w.keyMonitorForTest == nil)
   }
 
   /// A re-show without an intervening hide is how the confirmation field goes

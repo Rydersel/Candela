@@ -36,7 +36,7 @@ enum CheckupLiveEnvironment {
   /// so both drop here rather than at every surface. `isOnlyDisplay` counts what
   /// survives: a display the flow cannot target cannot host the window either.
   static func entries(from sources: [Source]) -> [CheckupDisplayEntry] {
-    let real = sources.filter { !$0.isVirtual && !$0.isMirroring }
+    let real = sources.filter { exclusion(for: $0) == nil }
     return real.map { source in
       CheckupDisplayEntry(
         id: source.id,
@@ -55,6 +55,26 @@ enum CheckupLiveEnvironment {
         pointHeight: source.pointHeight,
         isOnlyDisplay: real.count == 1)
     }
+  }
+
+  /// The complement of `entries(from:)` over the same sources, each row
+  /// carrying why it was dropped.
+  static func excluded(from sources: [Source]) -> [CheckupExcludedDisplay] {
+    sources.compactMap { source in
+      guard let reason = exclusion(for: source) else { return nil }
+      return CheckupExcludedDisplay(
+        id: source.id, name: source.name, pixelWidth: source.pixelWidth,
+        pixelHeight: source.pixelHeight, reason: reason)
+    }
+  }
+
+  /// The one predicate both lists derive from, so no display can be offered and
+  /// excluded at once. Virtual wins a tie: what the thing IS outranks how it is
+  /// wired.
+  private static func exclusion(for source: Source) -> CheckupExcludedDisplay.Reason? {
+    if source.isVirtual { return .virtual }
+    if source.isMirroring { return .mirroring }
+    return nil
   }
 
   /// Reads the live state the plan grades off, BEFORE it grades anything: HDR
@@ -117,6 +137,7 @@ enum CheckupLiveEnvironment {
 
     return CheckupEnvironment(
       displays: entries,
+      excluded: excluded(from: sources),
       macOSBuild: ProcessInfo.processInfo.operatingSystemVersionString,
       appBuild: AppInfo.version,
       runners: { [weak model] entry in

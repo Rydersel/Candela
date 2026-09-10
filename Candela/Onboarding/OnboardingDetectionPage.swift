@@ -7,6 +7,10 @@ struct OnboardingDetectionPage: View {
   @Bindable var model: OnboardingFlowModel
   let accent: Color
 
+  /// The grid's columns share this cap, so a row of one or two draws exactly
+  /// where it always has.
+  private static let cardMaxWidth: CGFloat = 300
+
   /// 0 = sweeping, then one step per display outline, then cards.
   @State private var phase = 0
   @State private var sweep: CGFloat = -0.2
@@ -20,30 +24,32 @@ struct OnboardingDetectionPage: View {
   private var cardsShown: Bool { phase > displays.count }
 
   var body: some View {
-    VStack(spacing: 0) {
-      Spacer(minLength: 18)
-      OnboardingHeading(
-        title: cardsShown ? foundTitle : "Looking at your displays",
-        subtitle: cardsShown
-          ? "Names can be edited here. Anything else that looks wrong can be adjusted later in Settings."
-          : nil
-      )
-      .animation(.easeInOut(duration: 0.4), value: cardsShown)
-      Spacer(minLength: 16)
-      glyphRow
-      Spacer(minLength: 16)
-      if cardsShown {
-        cards
-          .transition(.opacity.combined(with: .move(edge: .bottom)))
+    OnboardingScrollColumn {
+      VStack(spacing: 0) {
+        Spacer(minLength: 18)
+        OnboardingHeading(
+          title: cardsShown ? foundTitle : OnboardingTitles.detectionScanning,
+          subtitle: cardsShown
+            ? "Names can be edited here. Anything else that looks wrong can be adjusted later in Settings."
+            : nil
+        )
+        .animation(.easeInOut(duration: 0.4), value: cardsShown)
         Spacer(minLength: 16)
-        VStack(spacing: 10) {
-          Button("Continue") { model.advance() }
-            .buttonStyle(OnboardingPrimaryButtonStyle(accent: accent))
-            .keyboardShortcut(.defaultAction)
-          OnboardingSkipLink(model: model)
+        glyphRow
+        Spacer(minLength: 16)
+        if cardsShown {
+          cards
+            .transition(.opacity.combined(with: .move(edge: .bottom)))
+          Spacer(minLength: 16)
+          VStack(spacing: 10) {
+            Button("Continue") { model.advance() }
+              .buttonStyle(OnboardingPrimaryButtonStyle(accent: accent))
+              .keyboardShortcut(.defaultAction)
+            OnboardingSkipLink(model: model)
+          }
         }
+        Spacer(minLength: 22)
       }
-      Spacer(minLength: 22)
     }
     .contentShape(Rectangle())
     .onTapGesture { skipScan() }
@@ -52,38 +58,43 @@ struct OnboardingDetectionPage: View {
   }
 
   private var foundTitle: String {
-    displays.count == 1 ? "Found your display" : "Found \(displays.count) displays"
+    OnboardingTitles.detectionFound(count: displays.count)
   }
 
+  /// The row is full width so the sweep band travels all the way across, but the
+  /// panels fit the narrower content width, keeping the outermost one off the
+  /// window edge.
   private var glyphRow: some View {
-    ZStack {
-      HStack(alignment: .bottom, spacing: 34) {
-        ForEach(Array(displays.enumerated()), id: \.element.id) { pair in
-          DisplayGlyph(
-            aspect: pair.element.drawnAspect,
-            accent: accent,
-            trace: phase > pair.offset ? 1 : 0,
-            lit: cardsShown ? 1 : 0.35
-          )
-          .frame(height: cardsShown ? 110 : 150)
-          .frame(width: glyphWidth(for: pair.element, tall: !cardsShown))
+    GeometryReader { proxy in
+      let metrics = OnboardingCardGrid.glyphMetrics(
+        aspects: displays.map { CGFloat($0.drawnAspect) },
+        availableWidth: proxy.size.width - OnboardingCardGrid.rowInset * 2,
+        baseHeight: cardsShown ? 110 : 150)
+      ZStack {
+        HStack(alignment: .bottom, spacing: metrics.spacing) {
+          ForEach(Array(displays.enumerated()), id: \.element.id) { pair in
+            DisplayGlyph(
+              aspect: pair.element.drawnAspect,
+              accent: accent,
+              trace: phase > pair.offset ? 1 : 0,
+              lit: cardsShown ? 1 : 0.35
+            )
+            .frame(height: metrics.height)
+            .frame(
+              width: OnboardingCardGrid.glyphWidth(
+                aspect: CGFloat(pair.element.drawnAspect), height: metrics.height))
+          }
+        }
+        .animation(.spring(duration: 0.7), value: cardsShown)
+        .animation(.easeInOut(duration: 0.55), value: phase)
+        if !cardsShown, !reduceMotion {
+          sweepBand
         }
       }
-      .animation(.spring(duration: 0.7), value: cardsShown)
-      .animation(.easeInOut(duration: 0.55), value: phase)
-      if !cardsShown, !reduceMotion {
-        sweepBand
-      }
+      .frame(width: proxy.size.width, height: proxy.size.height)
     }
-    .frame(maxWidth: .infinity)
     .frame(height: cardsShown ? 120 : 170)
     .clipped()
-  }
-
-  private func glyphWidth(for display: OnboardingDisplayEntry, tall: Bool) -> CGFloat {
-    let height: CGFloat = tall ? 150 : 110
-    let faceHeight = height * 0.7
-    return max(70, faceHeight * display.drawnAspect + 20)
   }
 
   /// The traveling light pass over the dark rig.
@@ -102,12 +113,15 @@ struct OnboardingDetectionPage: View {
   }
 
   private var cards: some View {
-    HStack(alignment: .top, spacing: 14) {
+    LazyVGrid(
+      columns: OnboardingCardGrid.gridColumns(for: displays.count, maxCardWidth: Self.cardMaxWidth),
+      spacing: OnboardingCardGrid.cardSpacing
+    ) {
       ForEach(displays) { display in
         card(for: display)
       }
     }
-    .padding(.horizontal, 30)
+    .padding(.horizontal, OnboardingCardGrid.rowInset)
   }
 
   private func card(for display: OnboardingDisplayEntry) -> some View {
@@ -128,7 +142,7 @@ struct OnboardingDetectionPage: View {
         factRow(symbol: "slider.horizontal.3", text: controlLine(for: display))
       }
     }
-    .frame(maxWidth: 300)
+    .frame(maxWidth: Self.cardMaxWidth)
   }
 
   private func factRow(symbol: String, text: String) -> some View {

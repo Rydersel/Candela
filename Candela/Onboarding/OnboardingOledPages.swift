@@ -9,36 +9,46 @@ struct OnboardingOledSelectPage: View {
   @Bindable var model: OnboardingFlowModel
   let accent: Color
 
+  /// The grid's columns share this cap, so a row of one or two draws exactly
+  /// where it always has.
+  private static let cardMaxWidth: CGFloat = 280
+
   var body: some View {
-    VStack(spacing: 0) {
-      Spacer(minLength: 22)
-      OnboardingHeading(
-        title: "Any OLEDs here?",
-        subtitle: "OLED displays age where bright, static content sits. \(AppInfo.productName) can protect them from burn-in."
-      )
-      Spacer(minLength: 18)
-      HStack(alignment: .top, spacing: 14) {
-        ForEach(model.environment.displays) { display in
-          selectCard(for: display)
+    OnboardingScrollColumn {
+      VStack(spacing: 0) {
+        Spacer(minLength: 22)
+        OnboardingHeading(
+          title: OnboardingTitles.oledSelect,
+          subtitle: "OLED displays age where bright, static content sits. \(AppInfo.productName) can protect them from burn-in."
+        )
+        Spacer(minLength: 18)
+        LazyVGrid(
+          columns: OnboardingCardGrid.gridColumns(
+            for: model.environment.displays.count, maxCardWidth: Self.cardMaxWidth),
+          spacing: OnboardingCardGrid.cardSpacing
+        ) {
+          ForEach(model.environment.displays) { display in
+            selectCard(for: display)
+          }
         }
-      }
-      .padding(.horizontal, 30)
-      if hasNameGuess {
-        Text("Candela's OLED detection can make mistakes. Deselect a display if it got one wrong.")
-          .font(.caption)
-          .foregroundStyle(OnboardingStyle.faintColor)
-          .padding(.top, 12)
-      }
-      Spacer(minLength: 20)
-      VStack(spacing: 10) {
-        Button(model.designatedOleds.isEmpty ? "None of These Are OLEDs" : "Continue") {
-          model.advance()
+        .padding(.horizontal, OnboardingCardGrid.rowInset)
+        if hasNameGuess {
+          Text("Candela's OLED detection can make mistakes. Deselect a display if it got one wrong.")
+            .font(.caption)
+            .foregroundStyle(OnboardingStyle.faintColor)
+            .padding(.top, 12)
         }
-        .buttonStyle(OnboardingPrimaryButtonStyle(accent: accent))
-        .keyboardShortcut(.defaultAction)
-        OnboardingSkipLink(model: model)
+        Spacer(minLength: 20)
+        VStack(spacing: 10) {
+          Button(model.designatedOleds.isEmpty ? "None of These Are OLEDs" : "Continue") {
+            model.advance()
+          }
+          .buttonStyle(OnboardingPrimaryButtonStyle(accent: accent))
+          .keyboardShortcut(.defaultAction)
+          OnboardingSkipLink(model: model)
+        }
+        Spacer(minLength: 24)
       }
-      Spacer(minLength: 24)
     }
   }
 
@@ -88,7 +98,7 @@ struct OnboardingOledSelectPage: View {
           }
         }
       }
-      .frame(maxWidth: 280)
+      .frame(maxWidth: Self.cardMaxWidth)
     }
     .buttonStyle(.plain)
     .accessibilityLabel(
@@ -111,7 +121,7 @@ struct OnboardingOledCarePage: View {
     VStack(spacing: 0) {
       Spacer(minLength: 18)
       OnboardingHeading(
-        title: "Protect your OLED",
+        title: OnboardingTitles.oledCare,
         subtitle: "When you step away, \(AppInfo.productName) eases brightness down and shields the areas that never change, then puts everything back the moment you return."
       )
       Spacer(minLength: 14)

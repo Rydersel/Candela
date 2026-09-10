@@ -11,6 +11,10 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
   /// run this strip is the whole of the flow's controls.
   static let stripHeight: CGFloat = 104
 
+  /// Never key: borderless (`OverlayWindow.styleMask`), so Escape reaches its
+  /// owner through a local event monitor. It has to stay that way. A
+  /// shielding-level overlay that took key status would pull focus off another
+  /// display and put the flow window's Return shortcut out of reach.
   private var window: NSWindow?
   /// False in tests: ordering front is the one step with a visible consequence,
   /// and it is the step that puts the pointer away.
@@ -25,6 +29,7 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
   private var timerLabel: NSTextField?
   private var instructionLabel: NSTextField?
   private var answerTarget: AnswerTarget?
+  private var keyMonitor: Any?
 
   /// Written through to a strip already on screen: the confirmation re-show
   /// changes the question without taking the field down.
@@ -40,6 +45,10 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
   /// answer with `lastTap` before handing both to the flow.
   var onAnswer: ((CheckupFieldAnswer) -> Void)?
 
+  /// Escape while a field is up. The window cannot take key status, so this
+  /// arrives from a local event monitor, not the responder chain.
+  var onEscape: (() -> Void)?
+
   /// Cleared whenever a field goes up: a tap from the previous showing would be
   /// graded against a control that is no longer there.
   private(set) var lastTap: (x: Int, y: Int)?
@@ -53,6 +62,7 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
   }
 
   var windowForTest: NSWindow? { window }
+  var keyMonitorForTest: Any? { keyMonitor }
 
   /// False when the display has no `NSScreen`, which is how a mirroring display looks from here.
   func show(kind: CheckupFieldKind, plant: CheckupPlant?, on display: CheckupDisplayEntry) -> Bool {
@@ -103,6 +113,7 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
 
     self.window = window
     isShowing = true
+    installKeyMonitor()
     if orderFront {
       // Not `NSCursor.hide()`: the pointer must still reach the mark and the
       // strip. This needs no unhide, so an unexpected exit cannot strand it.
@@ -119,12 +130,14 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
   }
 
   func hide() {
-    // Ahead of the `isShowing` guard: exit paths call hide twice, and a hold
-    // left standing pauses the display's care for the rest of the session.
+    // Ahead of the `isShowing` guard: exit paths call hide twice. A hold left
+    // standing pauses the display's care for the session; a monitor left
+    // standing swallows Escape everywhere else in the app.
     if let heldKey {
       self.heldKey = nil
       care?.endCheckupField(identityKey: heldKey)
     }
+    removeKeyMonitor()
     guard isShowing else { return }
     window?.orderOut(nil)
     isShowing = false
@@ -137,6 +150,30 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
     if let heldKey { care?.endCheckupField(identityKey: heldKey) }
     heldKey = key
     care?.beginCheckupField(identityKey: key)
+  }
+
+  private static let escapeKeyCode: UInt16 = 53
+
+  /// A local monitor sees key events anywhere in this app, so one mechanism
+  /// covers both runs: the flow window is key behind the field on a one-display
+  /// run and key beside it on a multi-display one. Installed once per showing.
+  private func installKeyMonitor() {
+    guard keyMonitor == nil else { return }
+    keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+      // Only `hide()` removes this monitor, so one can outlive its window, and
+      // a released window consuming Escape would take it from the whole app.
+      guard let self, event.keyCode == Self.escapeKeyCode else { return event }
+      MainActor.assumeIsolated { self.onEscape?() }
+      // Consumed, so Escape does not also reach the flow window behind the field.
+      return nil
+    }
+  }
+
+  /// Idempotent: hide runs twice on the exit paths.
+  private func removeKeyMonitor() {
+    guard let keyMonitor else { return }
+    self.keyMonitor = nil
+    NSEvent.removeMonitor(keyMonitor)
   }
 
   /// Built by hand rather than hosted from SwiftUI so it stays a plain subview
