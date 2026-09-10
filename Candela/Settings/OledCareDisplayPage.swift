@@ -535,15 +535,10 @@ struct OledCareDisplayPage: View {
   /// this control as surely as a video does. The caption lists it; the note
   /// says when it is the live reason.
   ///
-  /// The caption promises exactly what the code delivers. "Full-screen video is
-  /// never dimmed" is the `fullScreenOwner` gate, read from the window list. It
-  /// does NOT promise a WINDOWED video is safe, because bounds stability is not
-  /// content staticness and a player holding a fixed rect passes both halves of
-  /// the conjunction. NOT claimed either: "eases off where you are pointing".
-  /// The pointer is not an input to `StaticRegionDetector` and the coordinator
-  /// supplies none, so that sentence goes in when the falloff exists.
+  /// Regional protection uses sampled persistence and window ownership. Focus
+  /// and the hovered window are exclusions, not an estimate of gaze.
   private var detectionControls: some View {
-    SettingRow("Areas that stay bright and unchanged, like a toolbar or a sidebar, are dimmed a little while you work. Full-screen video is never dimmed, and nothing is dimmed while anything is holding the screen awake, including Keep Display Awake. This needs both measurement settings on the Health pane: without them nothing is dimmed.") {
+    SettingRow("Bright regions that stay unchanged across several samples can dim, with extra protection for areas with higher recorded exposure. Your foreground app and the window under your pointer stay undimmed. After the pointer leaves, regional dimming returns gradually after a short pause. Full-screen content and anything holding the screen awake pause this protection. This needs both measurement settings on the Health pane. Sampling can miss motion; turn this off when judging colors or brightness.") {
       VStack(alignment: .leading, spacing: 6) {
         Toggle("Automatic static-region dimming", isOn: Binding(
           get: { prefs.oledDetectionDimming },
