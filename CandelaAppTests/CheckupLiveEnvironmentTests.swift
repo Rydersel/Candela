@@ -6,6 +6,23 @@ import Testing
 /// own objects and is covered by the hardware pass.
 @Suite("Checkup live environment")
 struct CheckupLiveEnvironmentTests {
+  @Test @MainActor func theLiveBuilderNamesAnExcludedDisplayWithoutABrightnessController() async {
+    let model = AppModel(safeMode: true)
+    model.mirrorTopology.update(MirrorTopology([
+      ConfiguredDisplay(
+        id: 900001,
+        identity: DisplayConfigIdentity(vendor: 1, model: 2, serial: 3, isBuiltIn: false),
+        name: "Mirrored display without DDC", isBuiltIn: false, mirrorsDisplay: 900002)
+    ]))
+    let environment = await CheckupLiveEnvironment.current(
+      model: model, presenter: CheckupFlowModelTests.FakePresenter(),
+      coordinator: OledCareCoordinator())
+    #expect(environment.displays.isEmpty)
+    #expect(environment.excluded.map(\.id) == [900001])
+    #expect(environment.excluded.map(\.reason) == [.mirroring])
+    #expect(environment.excluded.map(\.name) == ["Mirrored display without DDC"])
+  }
+
   @Test func entriesExcludeVirtualDisplaysAndMarkTheOnlyDisplay() {
     let sources = [
       source(id: 1, key: "a", name: "Built-in", isBuiltIn: true, pixelWidth: 3024, pixelHeight: 1964),

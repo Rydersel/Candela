@@ -129,6 +129,25 @@ enum CheckupLiveEnvironment {
       writers: writers,
       hdr: hdr)
     let entries = entries(from: sources)
+    // Virtual displays have no brightness controller. Use the online topology
+    // for exclusions only, so these rows never become field or DDC targets.
+    let controlledIDs = Set(sources.map(\.id))
+    let ownedVirtualIDs = model.virtualDisplays.ownedDisplayIDs
+    let uncontrolled = model.mirrorTopology.topology().displays
+      .filter { !controlledIDs.contains($0.id) }
+      .map { display in
+        let mode = CGDisplayCopyDisplayMode(display.id)
+        return Source(
+          id: display.id, identityKey: display.identity.key,
+          name: OverlayWindow.screen(for: display.id)?.localizedName ?? display.name,
+          isBuiltIn: display.isBuiltIn,
+          isVirtual: ownedVirtualIDs.contains(display.id)
+            || VirtualDisplayDetection.isVirtual(display.id) == true,
+          isMirroring: display.isMirrorSlave,
+          capabilities: nil, hasDDCService: false, hdrEngaged: false,
+          pixelWidth: mode?.pixelWidth ?? 0, pixelHeight: mode?.pixelHeight ?? 0,
+          pointHeight: Double(CGDisplayBounds(display.id).height))
+      }
     let capabilities = Dictionary(
       sources.map { ($0.identityKey, $0.capabilities) }, uniquingKeysWith: { first, _ in first })
     let pixels = Dictionary(
@@ -137,7 +156,7 @@ enum CheckupLiveEnvironment {
 
     return CheckupEnvironment(
       displays: entries,
-      excluded: excluded(from: sources),
+      excluded: excluded(from: sources + uncontrolled),
       macOSBuild: ProcessInfo.processInfo.operatingSystemVersionString,
       appBuild: AppInfo.version,
       runners: { [weak model] entry in
