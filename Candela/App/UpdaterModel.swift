@@ -45,15 +45,13 @@ final class UpdaterModel {
     lastUpdateCheckDate = controller.updater.lastUpdateCheckDate
     canCheckObservation = controller.updater.observe(
       \.canCheckForUpdates, options: [.initial, .new]
-    ) { [weak self] updater, _ in
-      // KVO delivers on the main thread here, but the closure is nonisolated;
-      // hop rather than assume. Re-reading the check date on every flip is what
-      // refreshes "Last checked".
-      let canCheck = updater.canCheckForUpdates
-      let lastCheck = updater.lastUpdateCheckDate
+    ) { [weak self] _, _ in
+      // KVO's closure is nonisolated. Read Sparkle's current state after the
+      // main-actor hop so both reads and the observed writes share its isolation.
       Task { @MainActor [weak self] in
-        self?.canCheckForUpdates = canCheck
-        self?.lastUpdateCheckDate = lastCheck
+        guard let self else { return }
+        self.canCheckForUpdates = self.controller.updater.canCheckForUpdates
+        self.lastUpdateCheckDate = self.controller.updater.lastUpdateCheckDate
       }
     }
   }
