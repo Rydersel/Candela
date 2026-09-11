@@ -202,7 +202,8 @@ struct SavedLayoutConfirmationTests {
     }
   }
 
-  @Test func savingDuringAnOutstandingPreviewSavesNothingAndSaysWhoBlockedIt() async throws {
+  @Test(arguments: [true, false])
+  func savingDuringAnOutstandingPreviewSavesNothingAndSaysWhoBlockedIt(keeping: Bool) async throws {
     try await withCoordinator { coordinator, store, rig, gate in
       coordinator.setRestoringLayout(true)
       await coordinator.restoreSavedArrangement()
@@ -223,14 +224,21 @@ struct SavedLayoutConfirmationTests {
       #expect(coordinator.blockedBy == nil)
       // Not merely "no new record": the stored layout is the one saved before.
       #expect(store.savedArrangement(for: TopologySignature(rig.currentArrangement())) == saved)
-      #expect(await rotation.revert(preview) == .reverted)
+      // Applying a rotation can notify before its confirmation is answered.
+      coordinator.displaysChanged()
+      await coordinator.restoreSavedArrangement()
+      #expect(coordinator.saveRefusedBy == .rotation)
+      let outcome = keeping ? await rotation.confirm(preview) : await rotation.revert(preview)
+      #expect(outcome == (keeping ? .committed : .reverted))
+      await expectSaveRefusalToClear(coordinator)
     }
   }
 
   /// The gate cannot cover this branch: a claim by the claimant already holding the
   /// gate is GRANTED, so an outstanding ARRANGEMENT preview gets past `gate.claim`
   /// and only the preview guard stops the save.
-  @Test func savingDuringAnOutstandingArrangementPreviewLeavesTheRecordAndThePreviewAlone() async throws {
+  @Test(arguments: [true, false])
+  func savingDuringAnOutstandingArrangementPreviewLeavesTheRecordAndThePreviewAlone(keeping: Bool) async throws {
     try await withCoordinator { coordinator, store, rig, gate in
       coordinator.setRestoringLayout(true)
       await coordinator.restoreSavedArrangement()
@@ -254,8 +262,39 @@ struct SavedLayoutConfirmationTests {
       // user nothing.
       #expect(coordinator.preview?.value == preview.value)
       #expect(await gate.holder == .arrangement)
-      #expect(await coordinator.revert(preview) == .reverted)
+      let outcome = keeping ? await coordinator.confirm(preview) : await coordinator.revert(preview)
+      #expect(outcome == (keeping ? .committed : .reverted))
+      await expectSaveRefusalToClear(coordinator)
     }
+  }
+
+  @Test(arguments: [ReconfigurationClaimant.rotation, .mirroring, .displayModes])
+  func endingTheBlockerClearsOnlyTheRefusalWithoutSaving(holder: ReconfigurationClaimant) async throws {
+    try await withCoordinator { coordinator, store, rig, gate in
+      coordinator.setRestoringLayout(true)
+      await coordinator.restoreSavedArrangement()
+      await reconnect(coordinator, rig, showing: Self.widening(rig.currentArrangement(), 2, by: 200))
+      let notice = try #require(coordinator.restoreNotice)
+      let saved = try #require(store.savedArrangement(for: TopologySignature(rig.currentArrangement())))
+      #expect(await gate.claim(holder) == .granted)
+      coordinator.saveCurrentLayout()
+      await coordinator.restoreSavedArrangement()
+      #expect(coordinator.saveRefusedBy == holder)
+
+      await gate.release(holder)
+      await expectSaveRefusalToClear(coordinator)
+      #expect(coordinator.restoreNotice == notice)
+      #expect(store.savedArrangement(for: TopologySignature(rig.currentArrangement())) == saved)
+    }
+  }
+
+  private func expectSaveRefusalToClear(_ coordinator: ArrangementCoordinator) async {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .seconds(1))
+    while coordinator.saveRefusedBy != nil, clock.now < deadline {
+      try? await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(coordinator.saveRefusedBy == nil)
   }
 
   /// A reconnect in the two steps the bookkeeping needs: a sample taken while the

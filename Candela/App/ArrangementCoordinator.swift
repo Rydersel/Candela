@@ -73,6 +73,7 @@ final class ArrangementCoordinator {
   /// notice and takes the save away with nothing saved. The refusal travels as a
   /// caption under the button instead.
   private(set) var saveRefusedBy: ReconfigurationClaimant?
+  @ObservationIgnored private var saveRefusalTask: Task<Void, Never>?
 
   @ObservationIgnored weak var confirmation: (any ArrangementConfirmationPresenting)?
   /// Called after a commit actually wrote `savedArrangements`, so the propagation
@@ -226,6 +227,7 @@ final class ArrangementCoordinator {
   deinit {
     countdown.stop()
     queue.cancel()
+    saveRefusalTask?.cancel()
   }
 
   // MARK: - Sampling
@@ -377,7 +379,20 @@ final class ArrangementCoordinator {
   /// notice's save button, so it has to leave with the notice.
   private func setRestoreNotice(_ notice: ArrangementReapplyNotice?) {
     restoreNotice = notice
-    if notice == nil { saveRefusedBy = nil }
+    if notice == nil { setSaveRefusal(nil) }
+  }
+
+  private func setSaveRefusal(_ holder: ReconfigurationClaimant?) {
+    saveRefusalTask?.cancel()
+    saveRefusalTask = nil
+    saveRefusedBy = holder
+    guard let holder else { return }
+    saveRefusalTask = Task { [weak self, gate] in
+      await gate.waitForRelease(of: holder)
+      // A new save or a dismissed notice supersedes this particular refusal.
+      guard !Task.isCancelled else { return }
+      self?.saveRefusedBy = nil
+    }
   }
 
   // MARK: - Operations (always inside the queue)
@@ -586,7 +601,7 @@ final class ArrangementCoordinator {
     let revision = rememberRequestRevision
     queue.enqueue {
       // Whatever refused the last save is stale once this one dequeues.
-      self.saveRefusedBy = nil
+      self.setSaveRefusal(nil)
       guard revision == self.rememberRequestRevision else { return }
       // Before the gate, so a save with the setting off is a clean no-op rather
       // than a report about work that would do nothing.
@@ -597,11 +612,11 @@ final class ArrangementCoordinator {
       // Both refusals publish `saveRefusedBy` and sync nothing, since the report
       // card's button would clear the notice this save exists to answer.
       guard await self.session.previewedArrangement == nil else {
-        self.saveRefusedBy = .arrangement
+        self.setSaveRefusal(.arrangement)
         return
       }
       if let holder = await self.gate.claim(.arrangement).refusedBy {
-        self.saveRefusedBy = holder
+        self.setSaveRefusal(holder)
         return
       }
       // Re-read, never whatever `arrangement` was holding: this saves what is on
