@@ -53,6 +53,21 @@ public enum ArrangementReapplyNotice: Sendable, Equatable {
     case .ambiguousIdentity, .setDiffers, .layoutNoLongerFits, .failed: true
     }
   }
+
+  /// Whether recording the layout that is on screen NOW ends this state.
+  ///
+  /// Saving over `failed` would record the un-restored layout the failure left on
+  /// screen, making the failure permanent. Over `ambiguousIdentity` it would record
+  /// a layout the next restore refuses for the same reason. `setDiffers` is about a
+  /// different display set, so there is no stale record here to replace, and
+  /// `layoutNoLongerFits` is hand-edited or corrupt data. Exhaustive on purpose: a
+  /// case added later has to decide.
+  public var isResolvedBySavingCurrentLayout: Bool {
+    switch self {
+    case .savedForDifferentGeometry: true
+    case .ambiguousIdentity, .setDiffers, .layoutNoLongerFits, .failed: false
+    }
+  }
 }
 
 /// One restore decision: what to put on screen, and what to say.

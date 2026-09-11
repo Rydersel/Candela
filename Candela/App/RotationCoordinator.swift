@@ -74,8 +74,13 @@ final class RotationCoordinator {
     self.topologyStore = topologyStore
     self.configurator = configurator
     session = RotationPreviewSession(configurator: configurator, timeoutSeconds: timeoutSeconds)
-    // A rotation fires this notification itself, so besides departures this is
-    // what re-reads the angle a picker is showing.
+    // Departures only, even though a rotation this app applies fires the
+    // notification too: the handler asks whether the display carrying an unanswered
+    // preview is still attached and writes nothing observable otherwise.
+    // `displayedRotation(of:)` re-reads the hardware only when `preview` changes.
+    //
+    // Nothing is sampled and carried, so `.main` is safe whatever the delivery
+    // timing: a block that runs late answers later, never wrongly.
     screenObserver = NotificationCenter.default.addObserver(
       forName: NSApplication.didChangeScreenParametersNotification,
       object: nil,

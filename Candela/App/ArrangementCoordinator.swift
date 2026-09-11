@@ -68,6 +68,12 @@ final class ArrangementCoordinator {
   /// set.
   private(set) var restoreNotice: ArrangementReapplyNotice?
 
+  /// The save offered on the stale-layout notice was refused, and by whom.
+  /// Not `blockedBy`: that raises the report card, whose one button clears the
+  /// notice and takes the save away with nothing saved. The refusal travels as a
+  /// caption under the button instead.
+  private(set) var saveRefusedBy: ReconfigurationClaimant?
+
   @ObservationIgnored weak var confirmation: (any ArrangementConfirmationPresenting)?
   /// Called after a commit actually wrote `savedArrangements`, so the propagation
   /// seam hears about it whichever surface answered. Owned here because a
@@ -128,7 +134,8 @@ final class ArrangementCoordinator {
     configurator: any DisplayArrangementConfiguring = CoreGraphicsArrangementConfigurator(),
     persistence: ArrangementPersistence = ArrangementPersistence(),
     rotationConfigurator: any DisplayRotationConfiguring = CoreGraphicsDisplayConfigurator(),
-    countdownSeconds: Int = 30
+    countdownSeconds: Int = 30,
+    notificationCenter: NotificationCenter = .default
   ) {
     self.gate = gate
     self.configurator = configurator
@@ -142,9 +149,18 @@ final class ArrangementCoordinator {
     // Observed here rather than in a pane: a display can depart while the canvas
     // is being dismissed for that very reason, and an outstanding preview over a
     // display set that no longer exists has to be dropped either way.
-    screenObserver = NotificationCenter.default.addObserver(
+    //
+    // Injected centre so a test can post to this coordinator alone: a post on
+    // `.default` reaches every coordinator alive in the process.
+    screenObserver = notificationCenter.addObserver(
       forName: NSApplication.didChangeScreenParametersNotification,
       object: nil,
+      // `.main` delivers INSIDE the post [MEASURED 2026-09-09]: `NotificationCenter`
+      // short-circuits when the target queue is already the current one, and AppKit
+      // posts on the main thread. `displaysChanged`'s arrival record needs that
+      // post-time sample, so the queue is not free to change;
+      // `ScreenParametersSampleTests` pins it. `.main` is the main thread either
+      // way, so `MainActor.assumeIsolated` below holds.
       queue: .main
     ) { [weak self] _ in
       MainActor.assumeIsolated { self?.displaysChanged() }
@@ -353,8 +369,15 @@ final class ArrangementCoordinator {
     lastFailure = nil
     blockedBy = nil
     recoverableLayout = nil
-    restoreNotice = nil
+    setRestoreNotice(nil)
     syncConfirmation()
+  }
+
+  /// The one writer of `restoreNotice`: the refusal caption sits under the
+  /// notice's save button, so it has to leave with the notice.
+  private func setRestoreNotice(_ notice: ArrangementReapplyNotice?) {
+    restoreNotice = notice
+    if notice == nil { saveRefusedBy = nil }
   }
 
   // MARK: - Operations (always inside the queue)
@@ -474,7 +497,7 @@ final class ArrangementCoordinator {
     } else {
       // The restore actor has already applied any accepted layout. Report its
       // outcome here without submitting the same configuration again.
-      restoreNotice = decision.notice
+      setRestoreNotice(decision.notice)
       if let restoreNotice {
         // Not every notice is a failure. A layout declined because the displays are
         // no longer the size it was recorded at is ordinary, and `.error` would put
@@ -545,6 +568,51 @@ final class ArrangementCoordinator {
       self.persistence.setRestoreEnabled(true)
       self.refreshArrangement()
       self.saveIfRestoring()
+      await self.gate.release(.arrangement)
+    }
+  }
+
+  /// Records the layout on screen NOW over whatever is stored for this display
+  /// set, the way out of a saved layout that has gone stale.
+  ///
+  /// Never automatic: a failed restore leaves a layout nobody chose on screen, and
+  /// rewriting the record from it would make that failure permanent.
+  ///
+  /// No post-gate revision recheck, unlike `setRestoringLayout`: `saveIfRestoring`
+  /// re-reads `isRestoreEnabled` for itself.
+  func saveCurrentLayout() {
+    // Captured without bumping: a remember toggle made after the click supersedes
+    // this save, never the other way round.
+    let revision = rememberRequestRevision
+    queue.enqueue {
+      // Whatever refused the last save is stale once this one dequeues.
+      self.saveRefusedBy = nil
+      guard revision == self.rememberRequestRevision else { return }
+      // Before the gate, so a save with the setting off is a clean no-op rather
+      // than a report about work that would do nothing.
+      guard self.persistence.isRestoreEnabled else { return }
+      // A layout captured while a preview stands is not one anybody approved. The
+      // gate cannot stand in for this guard: a claim by the claimant already
+      // holding it is granted, and this coordinator holds the arrangement preview.
+      // Both refusals publish `saveRefusedBy` and sync nothing, since the report
+      // card's button would clear the notice this save exists to answer.
+      guard await self.session.previewedArrangement == nil else {
+        self.saveRefusedBy = .arrangement
+        return
+      }
+      if let holder = await self.gate.claim(.arrangement).refusedBy {
+        self.saveRefusedBy = holder
+        return
+      }
+      // Re-read, never whatever `arrangement` was holding: this saves what is on
+      // screen.
+      self.refreshArrangement()
+      self.saveIfRestoring()
+      // The notice only. `dismissReport` would also drop `recoverableLayout`, a
+      // diverged apply's offer to put the displays back, which this says nothing
+      // about.
+      self.setRestoreNotice(nil)
+      self.syncConfirmation()
       await self.gate.release(.arrangement)
     }
   }
@@ -679,7 +747,9 @@ final class ArrangementCoordinator {
   /// Every write to `preview`, `lastInvalidLayout`, `lastFailure`, `blockedBy`,
   /// `recoverableLayout` or `restoreNotice` has to be followed by this call. An
   /// un-synced write leaves the window rendering a state that no longer exists,
-  /// which is an empty floating panel.
+  /// which is an empty floating panel. `saveRefusedBy` stays off that list:
+  /// nothing here renders it, and the card's button would clear the notice the
+  /// refused save was answering.
   private func syncConfirmation() {
     if let preview {
       // `confirmationDisplayID` is the display at the origin of the ACHIEVED

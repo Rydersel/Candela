@@ -395,6 +395,22 @@ struct ArrangementReapplyPolicyTests {
     }
   }
 
+  /// The remedy is "record what is on screen now", which only makes sense where a
+  /// stored layout has gone stale.
+  @Test func onlyAStaleFootprintIsFixedBySavingTheLayoutOnScreen() {
+    #expect(ArrangementReapplyNotice.savedForDifferentGeometry(["a"]).isResolvedBySavingCurrentLayout)
+
+    let unresolved: [ArrangementReapplyNotice] = [
+      .ambiguousIdentity(["a"]),
+      .setDiffers(missing: ["a"], extra: ["b"]),
+      .layoutNoLongerFits([.overlap(1, 2)]),
+      .failed(DisplayConfigError(cgErrorCode: 1000)),
+    ]
+    for notice in unresolved {
+      #expect(!notice.isResolvedBySavingCurrentLayout, "\(notice) is not a stale record a save replaces")
+    }
+  }
+
   /// The overlap-refusal rule stays the backstop, reachable only for stored data that does not tile at the
   /// sizes it recorded: hand-edited or corrupt, since a layout is only saved from one the
   /// machine achieved. It is also the case `expectsExactOrigins` turns the post-commit

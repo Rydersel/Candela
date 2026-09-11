@@ -70,9 +70,11 @@ final class MirrorTopologySampler {
     observer = NotificationCenter.default.addObserver(
       forName: NSApplication.didChangeScreenParametersNotification,
       object: nil,
-      // `nil`, not `.main`: the block runs synchronously at post time instead of
-      // queueing behind whatever the main run loop is doing. AppKit posts on the
-      // main thread either way, so the queueing is what is avoided, not the hop.
+      // `nil`, not `.main`: `nil` updates the store on the posting thread by
+      // documented contract. `.main` lands in the same place today [MEASURED
+      // 2026-09-09], but only through `NotificationCenter`'s short-circuit when the
+      // target queue is already the current one. The guarantee is what `nil` buys,
+      // not a saved hop.
       queue: nil
     ) { [store, configurator] _ in
       store.update(MirrorTopology(configurator.displays()))

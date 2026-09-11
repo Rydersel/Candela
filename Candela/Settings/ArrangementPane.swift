@@ -414,15 +414,42 @@ struct ArrangementPane: View {
       // OK click is not the only thing that ends this notice, so the transaction
       // belongs to the mirror write and not to the button.
       if let report = shownRestoreNotice {
+        // Both busy flags are read live: they rise and fall synchronously, so a
+        // mirrored copy would grey the button a frame late and free it a frame late.
+        let noticeActions = RestoreNoticeActions(
+          notice: report,
+          isRestoringLayout: coordinator.isRestoringLayout,
+          isBusy: coordinator.preview != nil || coordinator.isApplying,
+          refusedBy: coordinator.saveRefusedBy
+        )
         notice(symbol: "clock.arrow.circlepath") {
-          ArrangementCopy.restoreNotice(report, name: displayName)
+          ArrangementCopy.restoreNotice(report, name: displayName, offersSave: noticeActions.offersSave)
             .font(.callout)
             .foregroundStyle(SettingsTheme.titleColor)
             .fixedSize(horizontal: false, vertical: true)
-          Button("OK") { coordinator.dismissReport() }
-            .buttonStyle(SettingsSecondaryButtonStyle())
-            .accessibilityLabel("OK")
-            .padding(.top, 2)
+          HStack(spacing: 8) {
+            // Save before OK: left-aligned prose rather than a dialog, so the
+            // reader meets the way out before the dismissal.
+            if noticeActions.offersSave {
+              Button(ArrangementCopy.saveThisLayout) { coordinator.saveCurrentLayout() }
+                .buttonStyle(SettingsSecondaryButtonStyle())
+                .accessibilityLabel("Save This Layout")
+                // Always attached, empty when there is nothing to say: VoiceOver
+                // has to hear the reason on the control, not only in the caption
+                // below it.
+                .accessibilityHint(noticeActions.caption.map { Text($0) } ?? Text(verbatim: ""))
+                .disabled(noticeActions.isBusy)
+            }
+            Button("OK") { coordinator.dismissReport() }
+              .buttonStyle(SettingsSecondaryButtonStyle())
+              .accessibilityLabel("OK")
+          }
+          .padding(.top, 2)
+          // A dead control's reason travels in its own row, as the Main Display
+          // section above does.
+          if let caption = noticeActions.caption {
+            SettingsCaption(caption)
+          }
         }
         .transition(.opacity)
       }
