@@ -1,3 +1,4 @@
+import AppKit
 import CandelaKit
 import CoreGraphics
 import SwiftUI
@@ -138,6 +139,33 @@ struct RenderSmokeTests {
       populated.height > empty.height,
       "two display rows must make the panel taller than the same panel without them")
   }
+
+  /// The widest string the readout can hold has to fit the column it is framed
+  /// into. `SliderSnapTests.percentTextIsWholePercentAndClamped` is the other
+  /// half, pinning "100%" as that widest string.
+  ///
+  /// Medium weight because that is what the control draws; measuring a regular
+  /// font would report the column 0.9 pt roomier than it is.
+  @Test func theReadoutColumnStillFitsAHundredPercent() {
+    let font = NSFont.monospacedDigitSystemFont(
+      ofSize: CandelaSlider.readoutFontSize, weight: .medium)
+    let width = ("100%" as NSString).size(withAttributes: [.font: font]).width
+    #expect(
+      width <= CandelaSlider.readoutWidth,
+      "\"100%\" draws \(width) pt wide and the readout column is \(CandelaSlider.readoutWidth) pt")
+  }
+
+  // No render test pins "the panel does not grow with the system text size", and
+  // none can be written from this bundle [MEASURED 2026-09-10]: `.dynamicTypeSize`
+  // is inert under `ImageRenderer` on macOS, so a `Text` at `.caption2` renders
+  // 28x13 at both `.large` and `.accessibility3` and a two-render comparison
+  // passes over scaling code. Only a person at a large accessibility size can
+  // tell you.
+  //
+  // Anyone attempting one anyway: the FIRST `PanelView` render in a process
+  // differs from every later one by about 144 per channel at identical inputs, so
+  // two compared panel renders pass or fail on which ran first. Nothing above
+  // compares panel renders byte for byte.
 
   // MARK: - The settings window
 

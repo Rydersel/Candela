@@ -18,11 +18,20 @@ public protocol HDRToggling: Sendable {
   /// cache turns every achieved-state check built on this into one that cannot
   /// fail. Each conformance states its own read-through.
   func measuredHDREnabled(displayID: CGDirectDisplayID) async -> Bool
+  /// A fresh observation that preserves unavailable as unknown. Early gamma
+  /// recovery may act only on an affirmative SDR observation.
+  func observedHDREnabled(displayID: CGDirectDisplayID) async -> Bool?
   /// Reports whether the write was ISSUED, never whether the display switched.
   /// See the implementation's note.
   @discardableResult
   func setHDR(displayID: CGDirectDisplayID, enabled: Bool) async -> Bool
   func displaysReconfigured() async
+}
+
+public extension HDRToggling {
+  /// Existing providers that cannot distinguish unavailable from SDR are not
+  /// eligible for early recovery. Never forward to a false-defaulting read.
+  func observedHDREnabled(displayID: CGDirectDisplayID) async -> Bool? { nil }
 }
 
 /// Programmatic control of the System Settings HDR toggle through the private
@@ -79,6 +88,10 @@ public actor MonitorPanelService: HDRToggling {
     let value = self.mpDisplay(displayID)?.preferHDRModes ?? false
     self.hdrStateCache[displayID] = (value, .now)
     return value
+  }
+
+  public func observedHDREnabled(displayID: CGDirectDisplayID) -> Bool? {
+    self.mpDisplay(displayID)?.preferHDRModes
   }
 
   /// The display blanks and re-modes for ~2 s after this returns; the caller

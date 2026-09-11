@@ -1,0 +1,181 @@
+import AppKit
+import CandelaKit
+import os
+
+/// A burst of screen notifications shares one deadline and write allowance.
+/// The final pass and the first subsequent topology change each start a window.
+struct GammaRecoveryBudget {
+  private var deadline: TimeInterval?
+  private var writesRemaining = 8
+
+  mutating func begin(at now: TimeInterval) -> Bool {
+    if deadline == nil { deadline = now + 5 }
+    return now < deadline! && writesRemaining > 0
+  }
+
+  mutating func recordWrite() { writesRemaining = max(0, writesRemaining - 1) }
+  mutating func finish() { deadline = nil; writesRemaining = 8 }
+}
+
+/// WindowServer can reset gamma after the screen notification but before the
+/// topology debounce completes, or several seconds after the final pass.
+/// Follow a bounded settling interval, restoring
+/// only a cached baseline reset on the same directly drawn SDR display.
+@MainActor
+final class GammaReconfigurationRecovery {
+  private struct HDRObservation: Sendable { let enabled: Bool? }
+  private struct Replies: Sendable {
+    var generation: UInt64 = 0
+    var values: [CGDirectDisplayID: HDRObservation] = [:]
+  }
+
+  private let gamma: GammaController
+  private let targets: @MainActor () -> [CGDirectDisplayID]
+  private let readHDR: @Sendable (CGDirectDisplayID) async -> Bool?
+  private let epoch: @Sendable () -> UInt64
+  private let asleep: @Sendable () -> Bool
+  private let now: @MainActor () -> TimeInterval
+  private let interval: TimeInterval
+  private let replies = OSAllocatedUnfairLock(initialState: Replies())
+  private var hdrTask: Task<Void, Never>?
+  private var timer: Timer?
+  private var candidates: [CGDirectDisplayID: GammaController.RecoverySnapshot] = [:]
+  private var generation: UInt64 = 0
+  private var observedEpoch: UInt64 = 0
+  private var settledEpoch: UInt64?
+  private var budget = GammaRecoveryBudget()
+  private var inFinalPass = false
+  private var pendingNotification = false
+  private var stopped = false
+  private static let log = Logger(subsystem: "com.rydersel.Candela", category: "gamma")
+
+  init(
+    gamma: GammaController, targets: @escaping @MainActor () -> [CGDirectDisplayID],
+    readHDR: @escaping @Sendable (CGDirectDisplayID) async -> Bool?,
+    epoch: @escaping @Sendable () -> UInt64, asleep: @escaping @Sendable () -> Bool,
+    now: @escaping @MainActor () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+    interval: TimeInterval = 1.0 / 120.0
+  ) {
+    self.gamma = gamma; self.targets = targets; self.readHDR = readHDR
+    self.epoch = epoch; self.asleep = asleep; self.now = now; self.interval = interval
+    // A startup screen notification can precede the first actual reconfiguration.
+    self.settledEpoch = epoch()
+  }
+
+  @discardableResult
+  func begin() -> Task<Void, Never>? {
+    guard !stopped else { return nil }
+    guard !inFinalPass else { pendingNotification = true; return nil }
+    cancelPending()
+    guard !asleep() else { budget.finish(); return nil }
+    let currentEpoch = epoch()
+    if let settledEpoch, currentEpoch != settledEpoch {
+      // A departure's settling tail must not consume the next arrival's
+      // deadline. Renew once; further events share the new burst's budget.
+      self.settledEpoch = nil
+      budget.finish()
+    }
+    guard budget.begin(at: now()) else {
+      Self.log.debug("Gamma recovery notification declined: deadline or write allowance exhausted")
+      return nil
+    }
+    observedEpoch = currentEpoch
+    for id in targets() {
+      if let snapshot = gamma.recoverySnapshot(on: id) { candidates[id] = snapshot }
+    }
+    Self.log.debug("Gamma recovery prepared \(self.candidates.count, privacy: .public) candidates at epoch \(self.observedEpoch, privacy: .public)")
+    guard !candidates.isEmpty else { return nil }
+    let ids = Array(candidates.keys)
+    let generation = generation
+    let replies = replies
+    let readHDR = readHDR
+    let log = Self.log
+    // No return hop to the main actor: it may be inside menu tracking. A
+    // common-mode timer consumes this mailbox even while the menu is open.
+    hdrTask = Task.detached {
+      for id in ids {
+        guard !Task.isCancelled else { return }
+        let enabled = await readHDR(id)
+        log.debug("Gamma recovery HDR reply for display \(id, privacy: .public), generation \(generation, privacy: .public): \(String(describing: enabled), privacy: .public)")
+        replies.withLock { state in
+          guard state.generation == generation else { return }
+          state.values[id] = HDRObservation(enabled: enabled)
+        }
+      }
+    }
+    let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+      MainActor.assumeIsolated { self?.tick() }
+    }
+    self.timer = timer
+    RunLoop.main.add(timer, forMode: .common)
+    return hdrTask
+  }
+
+  func tick() {
+    guard !stopped, !inFinalPass else { return }
+    guard !asleep() else { cancelPending(); budget.finish(); return }
+    guard epoch() == observedEpoch else { begin(); return }
+    guard budget.begin(at: now()) else {
+      Self.log.debug("Gamma recovery timer stopped: deadline or write allowance exhausted")
+      cancelPending(); return
+    }
+    let observations = replies.withLock { $0.values }
+    for (id, snapshot) in Array(candidates) {
+      guard let observation = observations[id] else { continue }
+      // The raw CG callback bumps this synchronously, including on HDR changes.
+      guard epoch() == observedEpoch else { begin(); return }
+      guard !asleep(), budget.begin(at: now()) else {
+        cancelPending(); return
+      }
+      switch gamma.recoverBaselineIfReset(snapshot, hdrEnabled: observation.enabled) {
+      case .unchanged: break
+      case .written:
+        budget.recordWrite()
+        Self.log.info("Reconfiguration gamma table reasserted for display \(id, privacy: .public)")
+      case .superseded:
+        // Capture the newer successful owner and obtain fresh HDR observations.
+        // begin() preserves this burst's deadline and remaining write allowance.
+        begin()
+        return
+      case .stopped:
+        gamma.cancelRecovery(snapshot)
+        candidates.removeValue(forKey: id)
+      }
+    }
+    if candidates.isEmpty { cancelPending() }
+  }
+
+  func beginFinalPass() {
+    Self.log.debug("Gamma recovery paused for final topology pass")
+    inFinalPass = true
+    pendingNotification = false
+    cancelPending()
+    budget.finish()
+  }
+
+  @discardableResult
+  func endFinalPass() -> Task<Void, Never>? {
+    Self.log.debug("Gamma recovery final topology pass ended; pending notification: \(self.pendingNotification, privacy: .public)")
+    inFinalPass = false
+    pendingNotification = false
+    settledEpoch = epoch()
+    // WindowServer has been observed resetting gamma several seconds after
+    // this pass. Watch its fresh successful writes through that settling tail.
+    return begin()
+  }
+
+  func stop() {
+    stopped = true
+    cancelPending()
+    budget.finish()
+  }
+
+  private func cancelPending() {
+    generation &+= 1
+    let generation = generation
+    replies.withLock { $0 = Replies(generation: generation) }
+    hdrTask?.cancel(); hdrTask = nil
+    timer?.invalidate(); timer = nil
+    candidates.removeAll()
+  }
+}

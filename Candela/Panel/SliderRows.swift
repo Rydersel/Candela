@@ -138,7 +138,9 @@ private struct PanelHoverReason: ViewModifier {
         }
       if let reason {
         Text(verbatim: reason)
-          .font(.caption)
+          // What `.caption` resolved to at the default text size [MEASURED 2026-09-10],
+          // fixed for the reason spelled out on `CandelaSlider.readoutWidth`.
+          .font(.system(size: 10))
           .foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
           .opacity(hovering ? 1 : 0)

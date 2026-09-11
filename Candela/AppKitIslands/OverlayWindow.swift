@@ -97,6 +97,10 @@ enum OverlayWindow {
     window.level = config.level
     window.collectionBehavior = config.collectionBehavior
     window.hasShadow = config.hasShadow
+    // AppKit's automatic show/hide animation outlives close(), so replacing a
+    // shade briefly stacks two dims and restoring an OLED blackout fades out.
+    // Only the owner's intentional content-view entry fade may animate.
+    window.animationBehavior = .none
     window.setFrame(frame, display: true)
     window.contentView?.wantsLayer = true
     window.contentView?.alphaValue = config.initialContentAlpha

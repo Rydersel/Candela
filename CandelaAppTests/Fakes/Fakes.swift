@@ -139,14 +139,17 @@ enum TestFixtures {
     id: CGDirectDisplayID = 7,
     name: String = "Test Display",
     persistenceKey: String = "test-display",
-    capabilities: String? = nil
+    capabilities: String? = nil,
+    gamma: (any GammaApplying)? = nil,
+    shade: (any ShadeRendering)? = nil,
+    hdr: (any HDRToggling)? = nil
   ) -> AppModel.DisplayState {
     let writer = FakeDDCWriter(capabilities: capabilities)
     let display = ExternalDisplay(id: id, name: name, persistenceKey: persistenceKey)
     let prefs = prefs(persistenceKey: persistenceKey)
     let backends = BrightnessBackends(
       applierNative: FakeBrightnessApplier(),
-      hdr: nil, shade: nil, gamma: nil)
+      hdr: hdr, shade: shade, gamma: gamma)
     let controller = BrightnessController(
       writer: writer, backends: backends, prefs: prefs,
       displayID: id, wireSiblings: [])

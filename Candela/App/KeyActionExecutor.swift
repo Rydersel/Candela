@@ -6,11 +6,36 @@ import CandelaKit
 final class KeyActionExecutor {
   private let model: AppModel
   private let hud: (any BrightnessHUDPresenting)?
-  private let feedback = VolumeFeedbackSound()
+  private let feedback: any VolumeFeedbackPlaying
+  /// Injected so the deep-link cases can run without opening System Settings on
+  /// the machine running the suite.
+  private let openURL: (URL) -> Void
 
-  init(model: AppModel, hud: (any BrightnessHUDPresenting)?) {
+  /// Armed by a volume step, spent by the next release, and what decides whether
+  /// that release blips: Option plus a volume key opens Sound settings instead of
+  /// stepping, and the release still routes the feedback trigger.
+  ///
+  /// ONE latch, not one per key, because `.volumeKeyUp` carries no key identity.
+  /// The two differ only while volume up and volume down are held together, where
+  /// this blips for the first release and not the second. It lives on `execute`
+  /// because both key-down paths reach it, the media-key tap through `KeyRouter`
+  /// and `ShortcutManager` directly, so `ShortcutManager` must not grow a second.
+  ///
+  /// Known gap: `ShortcutManager` re-reads the volume key mode on the release, so
+  /// a mode change mid-press swallows that release and the next one spends the
+  /// latch on a step that never happened. The step after re-arms correctly.
+  private var feedbackArmedByStep = false
+
+  init(
+    model: AppModel,
+    hud: (any BrightnessHUDPresenting)?,
+    feedback: any VolumeFeedbackPlaying = VolumeFeedbackSound(),
+    openURL: @escaping (URL) -> Void = { NSWorkspace.shared.open($0) }
+  ) {
     self.model = model
     self.hud = hud
+    self.feedback = feedback
+    self.openURL = openURL
   }
 
   /// `isFresh` separates a fresh press from key-repeat: mute toggling and the
@@ -80,7 +105,8 @@ final class KeyActionExecutor {
       }
     case let .stepVolume(isUp, isFine):
       // No feedback sound here: it plays on key RELEASE (.volumeKeyUp), fork
-      // parity.
+      // parity. Armed before targets resolve; the release re-asks availability.
+      feedbackArmedByStep = true
       var stepped: [(state: AppModel.DisplayState, value: Double)] = []
       for state in resolveVolumeTargets() {
         guard let newValue = state.volume.step(isUp: isUp, isFine: isFine) else { continue }
@@ -110,8 +136,12 @@ final class KeyActionExecutor {
       showVolumeHUDs(toggled)
     case .volumeKeyUp:
       // Fork rule: volume steps play feedback on key release, once per event,
-      // only when some affected display has volume enabled.
-      if resolveVolumeTargets().contains(where: { $0.volume.isAvailable }) {
+      // only when some affected display has volume enabled. The latch is spent
+      // whether or not the sound played, so an unavailable display cannot leave
+      // a later release armed.
+      let wasStep = feedbackArmedByStep
+      feedbackArmedByStep = false
+      if wasStep, resolveVolumeTargets().contains(where: { $0.volume.isAvailable }) {
         feedback.play()
       }
     case let .stepContrast(isUp, isFine):
@@ -130,13 +160,13 @@ final class KeyActionExecutor {
       // by the brightness keys, and only volume and mute get their own place.
       showStateHUDs(stepped, position: appPrefs.hudPositionBrightness) { _ in .contrast }
     case .openSoundSettings:
-      NSWorkspace.shared.open(
-        URL(string: "x-apple.systempreferences:com.apple.Sound-Settings.extension")!
-      )
+      // This key-down was a deep link, not a step. Option plus MUTE lands here
+      // too, harmlessly: a mute release routes nothing, so nothing spends the
+      // disarm and the next volume step re-arms.
+      feedbackArmedByStep = false
+      openURL(URL(string: "x-apple.systempreferences:com.apple.Sound-Settings.extension")!)
     case .openDisplaysSettings:
-      NSWorkspace.shared.open(
-        URL(string: "x-apple.systempreferences:com.apple.Displays-Settings.extension")!
-      )
+      openURL(URL(string: "x-apple.systempreferences:com.apple.Displays-Settings.extension")!)
     case .none:
       break
     }
