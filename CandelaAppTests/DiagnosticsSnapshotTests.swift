@@ -1,9 +1,10 @@
 import CandelaKit
 import CoreGraphics
 import Foundation
+import Observation
 import Testing
 
-@Suite("Diagnostics audio snapshot")
+@Suite("Diagnostics audio snapshot", .timeLimit(.minutes(1)))
 @MainActor
 struct DiagnosticsSnapshotTests {
   private func model(audio: FakeAudio, capabilities: String? = nil) async -> AppModel {
@@ -20,6 +21,23 @@ struct DiagnosticsSnapshotTests {
       })
     _ = await model.refresh()
     return model
+  }
+
+  /// Wait for the model to publish every requested verdict. A completed probe
+  /// with no readable answer is stored as .unknown, distinct from a pending nil.
+  private func waitForCapabilities(_ model: AppModel) async {
+    let keys = Set(model.displays.map { $0.display.persistenceKey })
+    let (changes, continuation) = AsyncStream<Void>.makeStream()
+    defer { continuation.finish() }
+    var iterator = changes.makeAsyncIterator()
+    while !keys.isSubset(of: Set(model.volumeSupport.keys)) {
+      withObservationTracking {
+        _ = model.volumeSupport
+      } onChange: {
+        continuation.yield(())
+      }
+      guard await iterator.next() != nil else { return }
+    }
   }
 
   /// The same two scripted displays with a scripted discovery report behind them.
@@ -47,8 +65,10 @@ struct DiagnosticsSnapshotTests {
 
   @Test func reportIncludesVolumeReasonWithoutTreatingAnUnansweredDisplayAsUnsupported() async {
     let model = await model(audio: FakeAudio())
+    await waitForCapabilities(model)
     let report = DiagnosticsReport.render(model.diagnosticsSnapshot())
-    #expect(report.contains("  volume: Available: Candela"))
+    #expect(report.contains(
+      "  volume: Available: this display sent no answer Candela could read, so the control stays on"))
     #expect(report.contains("so the control stays on"))
     #expect(!report.contains("volume: Unavailable"))
   }
@@ -88,7 +108,7 @@ struct DiagnosticsSnapshotTests {
     let model = await model(audio: FakeAudio(), capabilities: capabilities)
     let display = try #require(model.displays.first)
     let key = display.display.persistenceKey
-    for _ in 0..<200 where model.volumeSupport[key] == nil { await Task.yield() }
+    await waitForCapabilities(model)
     _ = try #require(model.volumeSupport[key])
     let report = DiagnosticsReport.render(model.diagnosticsSnapshot())
     #expect(report.contains("  volume: \(reason)\n"))
@@ -97,7 +117,7 @@ struct DiagnosticsSnapshotTests {
   @Test func reportIncludesTheCapabilityInputAndParsedCommandsForEveryDisplay() async throws {
     let raw = "(prot(monitor)type(lcd)model(P32U)cmds(01 03 F3)vcp(10 12 60(0F 11))mccs_ver(2.2))"
     let model = await model(audio: FakeAudio(), capabilities: raw)
-    for _ in 0..<200 where model.volumeSupport.count < 2 { await Task.yield() }
+    await waitForCapabilities(model)
     #expect(model.volumeSupport.count == 2)
     let report = DiagnosticsReport.render(model.diagnosticsSnapshot())
     let sections = report.components(separatedBy: "\ndisplay: ")
@@ -114,9 +134,8 @@ struct DiagnosticsSnapshotTests {
   @Test func reportDistinguishesMalformedCapabilitiesFromAnUnansweredRequest() async throws {
     let malformed = await model(audio: FakeAudio(), capabilities: "(vcp(10 ZZ))")
     let unanswered = await model(audio: FakeAudio())
-    for _ in 0..<200 where malformed.volumeSupport.count < 2 || unanswered.volumeSupport.count < 2 {
-      await Task.yield()
-    }
+    await waitForCapabilities(malformed)
+    await waitForCapabilities(unanswered)
     #expect(malformed.volumeSupport.count == 2)
     #expect(unanswered.volumeSupport.count == 2)
     let badReport = DiagnosticsReport.render(malformed.diagnosticsSnapshot())
@@ -130,7 +149,7 @@ struct DiagnosticsSnapshotTests {
   @Test func reportDoesNotPublishIdentifierOrVendorPayloadsFromCapabilities() async throws {
     let raw = "(prot(monitor)model(P32U PRIVATE-SERIAL-123)serial(PRIVATE-SERIAL-123)vendor_data(PRIVATE-VENDOR-456)vcp(10 12))"
     let model = await model(audio: FakeAudio(), capabilities: raw)
-    for _ in 0..<200 where model.volumeSupport.count < 2 { await Task.yield() }
+    await waitForCapabilities(model)
     #expect(model.volumeSupport.count == 2)
     let report = DiagnosticsReport.render(model.diagnosticsSnapshot())
     #expect(report.contains("vcp(10 12)"))
@@ -154,7 +173,7 @@ struct DiagnosticsSnapshotTests {
         return survey
       })
     _ = await model.refresh()
-    for _ in 0..<200 where model.volumeSupport[key] == nil { await Task.yield() }
+    await waitForCapabilities(model)
     _ = try #require(model.volumeSupport[key])
     let before = DiagnosticsReport.render(model.diagnosticsSnapshot())
     #expect(!before.contains("PRIVATE123"))
@@ -392,8 +411,11 @@ struct DiagnosticsSnapshotTests {
     let pending = DiagnosticsReport.render(model.diagnosticsSnapshot())
     await writer.resolve()
     #expect(pending.contains("capability request: in progress"))
+    #expect(pending.contains(
+      "  volume: Available: Candela has not asked this display yet, so the control stays on"))
+    #expect(!pending.contains("volume: Unavailable"))
     #expect(pending.contains("HDR availability: Not checked yet"))
-    for _ in 0..<200 where model.volumeSupport[key] == nil { await Task.yield() }
+    await waitForCapabilities(model)
     _ = try #require(model.volumeSupport[key])
     #expect(DiagnosticsReport.render(model.diagnosticsSnapshot()).contains("capability request: no readable reply"))
   }
@@ -424,7 +446,7 @@ struct DiagnosticsSnapshotTests {
           report: .notEnumerated)
       })
     _ = await model.refresh()
-    for _ in 0..<200 where model.volumeSupport[key] == nil { await Task.yield() }
+    await waitForCapabilities(model)
     _ = try #require(model.volumeSupport[key])
     let state = try #require(model.displays.first)
     let beforeCalls = await writer.calls
@@ -443,7 +465,7 @@ struct DiagnosticsSnapshotTests {
 
   @Test func reportKeepsParserFailureWhenRawPayloadsAreRedacted() async {
     let model = await model(audio: FakeAudio(), capabilities: "(vcp(10 PRIVATE-SERIAL))")
-    for _ in 0..<200 where model.volumeSupport.count < 2 { await Task.yield() }
+    await waitForCapabilities(model)
     #expect(model.volumeSupport.count == 2)
     let report = DiagnosticsReport.render(model.diagnosticsSnapshot())
     #expect(report.contains("capability parsing: could not parse"))
