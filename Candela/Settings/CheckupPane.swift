@@ -41,6 +41,7 @@ enum CheckupPaneCopy {
   static let deleteTitle = "Delete this checkup?"
   static let deleteConfirm = "Delete"
   static let deleteCancel = "Cancel"
+  static let deleteFailed = "The checkup could not be deleted."
   static let deleteConsequences =
     "This run's file is removed from this Mac. Other runs on this display are kept, and a report "
     + "you already exported somewhere else is untouched.\n\nA provenance record bundles every checkup "
@@ -86,7 +87,7 @@ enum CheckupPaneCopy {
   static var allStringsForTest: [String] {
     [title, subtitle, runTitle, run, runNote, restoreNotAchieved, historyTitle, emptyHistory,
      historyNote, export, copySummary, copied, showDetails, hideDetails, exportFailed,
-     acknowledge, deleteRun, deleteTitle, deleteConfirm, deleteCancel, deleteConsequences,
+     acknowledge, deleteRun, deleteTitle, deleteConfirm, deleteCancel, deleteFailed, deleteConsequences,
      verifyTitle, verify, verifyNote, valid, invalid, unreadable,
      deleteRunLabel(for: sampleReport)]
   }
@@ -132,6 +133,7 @@ struct CheckupPane: View {
   /// while the pane is open moves the history to its display.
   @State private var chosenByHand = false
   @State private var runs: [CheckupStoredRun] = []
+  @State private var deleteError: String?
   @State private var verification: String?
   /// Held apart from the summary: the verdict is a sentence, the summary a document.
   @State private var provenanceVerdict: String?
@@ -153,6 +155,14 @@ struct CheckupPane: View {
       verifySection
     }
     .onAppear { refresh() }
+    .alert(
+      CheckupPaneCopy.deleteFailed,
+      isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })
+    ) {
+      Button(CheckupPaneCopy.acknowledge) { deleteError = nil }
+    } message: {
+      Text(verbatim: deleteError ?? "")
+    }
     // Keyed on the RESOLVED display, so a departure and a picker change hit one
     // observer. The verification line goes too: it answered under another display.
     .onChange(of: scoped?.display.persistenceKey) {
@@ -270,8 +280,17 @@ struct CheckupPane: View {
   /// Re-reading through `reload()` keeps one code path for what the history
   /// shows: a delete that did not happen leaves its row standing.
   private func delete(_ run: CheckupStoredRun) {
-    try? store.delete(url: run.url)
+    deleteError = Self.delete(run, from: store)
     reload()
+  }
+
+  static func delete(_ run: CheckupStoredRun, from store: CheckupStore) -> String? {
+    do {
+      try store.delete(url: run.url)
+      return nil
+    } catch {
+      return error.localizedDescription
+    }
   }
 
   // MARK: - History

@@ -183,6 +183,31 @@ struct CheckupPaneTests {
     #expect(CheckupPaneCopy.deleteRunLabel(for: subject) != CheckupPaneCopy.deleteRun)
   }
 
+  @Test @MainActor func aRefusedDeleteReportsItsErrorAndCanBeRetried() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("checkup-delete-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = CheckupStore(directory: directory)
+    let envelope = try CheckupReportEnvelope(report: report(identityVerdict: .observed("EDID parsed")))
+    let url = try store.save(envelope)
+    let run = try #require(store.list(identityKey: "k").first)
+    let folder = url.deletingLastPathComponent()
+    try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder.path)
+    defer {
+      try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path)
+    }
+
+    let message = CheckupPane.delete(run, from: store)
+    #expect(message?.isEmpty == false)
+    #expect(try store.load(url: url) == envelope)
+    #expect(try store.list(identityKey: "k").map(\.url) == [url])
+
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path)
+    #expect(CheckupPane.delete(run, from: store) == nil)
+    #expect(!FileManager.default.fileExists(atPath: url.path))
+    #expect(try store.list(identityKey: "k").isEmpty)
+  }
+
   /// No "this app" in user copy: the product has a name, and each display has a
   /// page under it.
   @Test func theRestoreNoticeNamesTheProductAndTheDisplaysOwnPage() {
