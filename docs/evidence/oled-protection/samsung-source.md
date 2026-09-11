@@ -2,7 +2,7 @@
 
 [Evidence index](README.md) · Published source analysis · September 11, 2026
 
-These notes identify the public source behind the [guide](https://candela.fyi/guides/reverse-engineered-oled-monitor/) and simulator. PontusM is a Samsung Electronics TV and smart-monitor platform. These archives do not contain the executable running inside the MSI MAG 341CQP's Samsung Display panel controller.
+This report identifies the public source used in the article and simulator. PontusM is a Samsung Electronics TV and smart-monitor platform. These archives do not contain the executable running inside the MSI MAG 341CQP's Samsung Display panel controller.
 
 ## Obtain and identify the releases
 

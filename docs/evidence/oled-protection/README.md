@@ -2,7 +2,7 @@
 
 **Research evidence · MSI MAG 341CQP · September 2026**
 
-This appendix supports [I built an OLED protection app, then reverse-engineered my monitor](https://candela.fyi/guides/reverse-engineered-oled-monitor/). It presents the firmware findings, source comparison and physical measurements separately so that each claim can be checked against the evidence that supports it.
+This appendix supports *I built an OLED protection app, then reverse-engineered my monitor*. It presents the firmware findings, source comparison and physical measurements separately so that each claim can be checked against the evidence that supports it.
 
 The investigation found a boundary between the MSI scaler and the Samsung panel controller, reconstructed published protection logic from three Samsung releases, and measured 43 successive image positions on the real monitor. The measured route does not execute the published Samsung normal orbit, although parts of the paths coincide.
 
