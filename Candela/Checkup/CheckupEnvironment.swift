@@ -26,6 +26,21 @@ struct CheckupDisplayEntry: Equatable, Sendable, Identifiable {
   var isOnlyDisplay: Bool
 }
 
+/// A display no checkup can run on, with the reason, so the pick page can show
+/// it rather than leave a person hunting for a display that vanished.
+///
+/// A list of its own, not a flag on `CheckupDisplayEntry`: `isOnlyDisplay`
+/// counts entries, so an excluded display among them would tell the field
+/// window there is somewhere else to put the instructions.
+struct CheckupExcludedDisplay: Equatable, Sendable, Identifiable {
+  enum Reason: Equatable, Sendable { case mirroring, virtual }
+  var id: CGDirectDisplayID
+  var name: String
+  var pixelWidth: Int
+  var pixelHeight: Int
+  var reason: Reason
+}
+
 /// Presents one field on one display and reports when it is down. MainActor
 /// because the live implementation is an AppKit window on the target panel.
 @MainActor
@@ -47,6 +62,9 @@ protocol CheckupCareHolding: AnyObject {
 /// the suite. The model never touches a display, a clock or a store directly.
 struct CheckupEnvironment {
   var displays: [CheckupDisplayEntry]
+  /// What `displays` left out, with reasons. Defaulted so a fake environment
+  /// states only what its own test is about.
+  var excluded: [CheckupExcludedDisplay] = []
   var macOSBuild: String
   var appBuild: String
   var runners: (CheckupDisplayEntry) -> CheckupRunnerSet

@@ -11,6 +11,9 @@ import SwiftUI
 final class CheckupWindowController: NSObject, NSWindowDelegate {
   private let environment: () async -> CheckupEnvironment
   private let onSaved: (CheckupReportEnvelope) -> Void
+  /// Where a failed restore is published. The run's window is closing by the
+  /// time the restore answers.
+  private let actions: SettingsActions
   private var window: NSWindow?
   private var model: CheckupFlowModel?
   /// Held while an environment is being built, so a second click during the
@@ -23,10 +26,12 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
   init(
     environment: @escaping () async -> CheckupEnvironment,
     onSaved: @escaping (CheckupReportEnvelope) -> Void,
+    actions: SettingsActions,
     care: (any CheckupCareHolding)? = nil
   ) {
     self.environment = environment
     self.onSaved = onSaved
+    self.actions = actions
     // The window takes the hold, not this controller: `windowWillClose` hides
     // it directly, so a hold owned a layer up would outlive a close mid-field.
     self.fieldWindow = CheckupFieldWindow(care: care)
@@ -79,6 +84,7 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
     // `windowShouldClose` does not abandon on the summary, so the saved report
     // is untouched.
     model.onClose = { [weak window] in window?.performClose(nil) }
+    Self.publishRestoreOutcome(of: model, to: actions)
     self.model = model
 
     fieldWindow.onAnswer = { [weak self] answer in
@@ -90,6 +96,10 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
       // asking a new question the moment this returns.
       self.syncFieldWindow()
     }
+
+    // Ends the showing without answering it, so nothing is recorded about the
+    // field.
+    fieldWindow.onEscape = { [weak self] in self?.model?.escapeShowing() }
 
     window.contentView = NSHostingView(
       rootView: CheckupFlowView(
@@ -180,11 +190,31 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
     return true
   }
 
+  /// The flow model is released with its window, so a failed restore publishes
+  /// on an object that outlives both and the Checkup pane renders it. Named
+  /// rather than inline so the suite drives the wiring the app installs.
+  static func publishRestoreOutcome(of model: CheckupFlowModel, to actions: SettingsActions) {
+    // A new run supersedes whatever the last one left standing. The token comes
+    // back from the same call, so a restore still in flight from an earlier run
+    // cannot publish over the run that followed it.
+    let generation = actions.beginCheckupRun()
+    model.onRestoreSettled = { needsNotice, identityKey in
+      guard needsNotice, let identityKey else { return }
+      actions.publishCheckupRestoreFailure(
+        CheckupRestoreNotice(text: CheckupPaneCopy.restoreNotAchieved, identityKey: identityKey),
+        generation: generation)
+    }
+  }
+
   /// The quit-time `windowShouldClose`: `NSApplication.terminate` closes no
   /// windows, so a run in flight at quit would otherwise save no report and
   /// book no field time.
   func abandonForTermination() {
     if model?.page != .summary {
+      // A notice published while quitting would greet the next launch
+      // describing a run nobody remembers. The `.error` log line is the whole
+      // record this route leaves.
+      model?.onRestoreSettled = { _, _ in }
       model?.abandon(reason: CheckupCopy.closedReason)
     }
     // `abandon` hides through the presenter; this covers a run that already
@@ -199,6 +229,7 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
     // field is left on a panel with no window left to take it down.
     fieldWindow.hide()
     fieldWindow.onAnswer = nil
+    fieldWindow.onEscape = nil
     model = nil
   }
 

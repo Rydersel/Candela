@@ -2,6 +2,7 @@ import CandelaKit
 import Foundation
 import CoreGraphics
 import Testing
+import os
 
 /// The checkup state machine over fakes: no panel, no window, no wire.
 @MainActor
@@ -51,6 +52,7 @@ struct CheckupFlowModelTests {
     func runNativeMode() async -> [CheckupClaim] { [CheckupClaim(family: .nativeMode, id: CheckupCheckID.nativeMode, verdict: .observed("achieved"))] }
     func runRefreshSweep() async -> [CheckupClaim] { [CheckupClaim(family: .refresh, id: "refresh.60", verdict: .observed("60 Hz achieved, as macOS reports it"))] }
     func restore() async -> Bool { true }
+    func cancel() {}
   }
   struct FakeHDR: CheckupHDRRunning {
     func run() async -> [CheckupClaim] { [CheckupClaim(family: .hdr, id: CheckupCheckID.hdrFlags, verdict: .observed("no flags"))] }
@@ -70,11 +72,11 @@ struct CheckupFlowModelTests {
                            supportsPQEOTF: false, supportsHDRGammaEOTF: false, productName: "DELL")
   }
 
-  private func environment(presenter: FakePresenter, entry: CheckupDisplayEntry, booked: @escaping (CheckupFieldKind, TimeInterval) -> Void = { _, _ in }, capabilities: any CheckupCapabilitiesRunning = FakeCaps()) -> CheckupEnvironment {
+  private func environment(presenter: FakePresenter, entry: CheckupDisplayEntry, booked: @escaping (CheckupFieldKind, TimeInterval) -> Void = { _, _ in }, capabilities: any CheckupCapabilitiesRunning = FakeCaps(), mode: any CheckupModeRunning = FakeMode(), excluded: [CheckupExcludedDisplay] = []) -> CheckupEnvironment {
     let identity = identity()
     return CheckupEnvironment(
-      displays: [entry], macOSBuild: "b", appBuild: "3",
-      runners: { _ in CheckupRunnerSet(identity: { identity }, capabilities: capabilities, mode: FakeMode(), hdr: FakeHDR()) },
+      displays: [entry], excluded: excluded, macOSBuild: "b", appBuild: "3",
+      runners: { _ in CheckupRunnerSet(identity: { identity }, capabilities: capabilities, mode: mode, hdr: FakeHDR()) },
       presenter: presenter, bookShowing: { _, kind, s in booked(kind, s) },
       now: { Date(timeIntervalSinceReferenceDate: 800_000_000) },
       makeRNG: { SeededGenerator(seed: 1) })
@@ -233,6 +235,63 @@ struct CheckupFlowModelTests {
     #expect(flow.claims.contains { $0.id == "field.black" && $0.verdict.text.contains("defect reported at") })
   }
 
+  /// Escape ends the showing the way the cap does, without answering it: the
+  /// field stays unanswered and the run is back on the page offering it again.
+  @Test func escapingAShowingRecordsNoObservationAndReturnsToTheInstructionPage() async {
+    let presenter = FakePresenter()
+    let flow = CheckupFlowModel(environment: environment(presenter: presenter, entry: entry()))
+    await toFirstField(flow); flow.startShowing(); flow.answer(.roundAndUncut, tappedRegion: nil); await flow.advance()
+    flow.startShowing()
+    flow.escapeShowing()
+    #expect(flow.page == .fieldInstruction(.black))
+    #expect(flow.claims.contains { $0.id == CheckupCheckID.field(.black) } == false)
+    #expect(presenter.hides == presenter.shown.count)
+  }
+
+  /// Light that reached the panel is booked whatever ended the showing, and only
+  /// the seconds it was actually up.
+  @Test func escapingBooksTheSecondsTheFieldWasActuallyUp() async {
+    var booked: [(CheckupFieldKind, TimeInterval)] = []
+    let flow = CheckupFlowModel(environment: environment(
+      presenter: FakePresenter(), entry: entry(), booked: { booked.append(($0, $1)) }))
+    await toFirstField(flow); flow.startShowing(); flow.answer(.roundAndUncut, tappedRegion: nil); await flow.advance()
+    flow.startShowing()
+    for _ in 0..<5 { flow.timeoutTick() }
+    flow.escapeShowing()
+    #expect(booked.filter { $0.0 == .black }.map(\.1) == [5])
+
+    // A field escaped the moment it went up still emitted light, so it books a
+    // second and never zero.
+    flow.showAgain()
+    flow.escapeShowing()
+    #expect(booked.filter { $0.0 == .black }.map(\.1) == [5, 1])
+  }
+
+  /// The confirmation re-show has recorded nothing yet, so escaping it must not
+  /// leave a verdict behind either.
+  @Test func escapingTheConfirmationReShowRecordsNothing() async {
+    let flow = CheckupFlowModel(environment: environment(presenter: FakePresenter(), entry: entry()))
+    await toFirstField(flow); flow.startShowing(); flow.answer(.roundAndUncut, tappedRegion: nil); await flow.advance()
+    flow.startShowing()
+    flow.answer(.moreThanOne, tappedRegion: flow.plantRegionForTest)
+    #expect(flow.page == .fieldConfirmSecondDot(.black))
+    flow.escapeShowing()
+    #expect(flow.page == .fieldInstruction(.black))
+    #expect(flow.claims.contains { $0.id == CheckupCheckID.field(.black) } == false)
+  }
+
+  /// The control for the three above: a suite where escaping records nothing
+  /// because nothing ever records is not a suite.
+  @Test func answeringStillRecordsAfterAnEscape() async {
+    let flow = CheckupFlowModel(environment: environment(presenter: FakePresenter(), entry: entry()))
+    await toFirstField(flow); flow.startShowing(); flow.answer(.roundAndUncut, tappedRegion: nil); await flow.advance()
+    flow.startShowing()
+    flow.escapeShowing()
+    flow.startShowing()
+    flow.answer(.oneMark, tappedRegion: flow.plantRegionForTest)
+    #expect(flow.claims.contains { $0.id == CheckupCheckID.field(.black) })
+  }
+
   @Test func showAgainIsCappedAndEveryShowingIsBooked() async {
     var booked: [(CheckupFieldKind, TimeInterval)] = []
     let flow = CheckupFlowModel(environment: environment(presenter: FakePresenter(), entry: entry(), booked: { booked.append(($0, $1)) }))
@@ -285,6 +344,137 @@ struct CheckupFlowModelTests {
     #expect(unpicked.report?.identity.identityKey == "")
   }
 
+  /// The restore is queued on the runner, so it lands a hop after the abandon.
+  /// Bounded, so a condition that never comes true fails instead of hanging.
+  private func settle(until done: () -> Bool) async {
+    var spins = 0
+    while !done(), spins < 200 {
+      await Task.yield()
+      spins += 1
+    }
+  }
+
+  private func pickedFlow(mode: any CheckupModeRunning) async -> CheckupFlowModel {
+    let flow = CheckupFlowModel(environment: environment(
+      presenter: FakePresenter(), entry: entry(), mode: mode))
+    await flow.advance()
+    flow.selectedDisplay = flow.environment.displays[0]
+    await flow.advance()                      // displayPick -> plan, which builds the runners
+    return flow
+  }
+
+  /// A restore queued behind a running sweep is serviced only after the sweep
+  /// returns, so the cancel has to come first. Order is the mechanism, so order
+  /// is what the test reads.
+  @Test func abandoningCancelsTheSweepBeforeItAsksForARestore() async {
+    let mode = CancelRecordingMode(restores: true)
+    let flow = await pickedFlow(mode: mode)
+    flow.abandon(reason: "closed")
+    await settle(until: { mode.events.count == 2 })
+    #expect(mode.events == ["cancel", "restore"])
+  }
+
+  /// The barrier an event count cannot give: `restore()` records off the main
+  /// actor, so a count of two can retire before the decision that follows it.
+  /// Wraps the app's own wiring, so this drives what the controller installs.
+  private func barrier(on flow: CheckupFlowModel) -> OSAllocatedUnfairLock<Bool> {
+    let settled = OSAllocatedUnfairLock<Bool>(initialState: false)
+    let published = flow.onRestoreSettled
+    flow.onRestoreSettled = { needsNotice, identityKey in
+      published(needsNotice, identityKey)
+      settled.withLock { $0 = true }
+    }
+    return settled
+  }
+
+  /// Both routes that end a run early take the run's window with them and the
+  /// restore answers after that, so the notice needs a surface that outlives the
+  /// run. The model is released here the way `windowWillClose` releases it.
+  @Test func aFailedRestoreReachesThePaneEvenOnceTheFlowModelIsGone() async {
+    let failing = CancelRecordingMode(restores: false)
+    var flow: CheckupFlowModel? = await pickedFlow(mode: failing)
+    let actions = SettingsActions(model: TestFixtures.appModel())
+    CheckupWindowController.publishRestoreOutcome(of: flow!, to: actions)
+    let settled = barrier(on: flow!)
+    flow?.abandon(reason: "closed")
+    // The close, in the order the window controller does it: abandon, then drop
+    // the model. The restore is still out on the runner at this point.
+    flow = nil
+    await settle(until: { settled.withLock { $0 } })
+    #expect(actions.checkupRestoreFailure?.text == CheckupPaneCopy.restoreNotAchieved)
+    // The display it happened to travels with it: the pane is scoped to one
+    // display and the sentence names none.
+    #expect(actions.checkupRestoreFailure?.identityKey == entry().identityKey)
+
+    // The control: the same abandon over a restore that achieved the mode
+    // leaves the pane with nothing to say.
+    let achieving = CancelRecordingMode(restores: true)
+    let clean = await pickedFlow(mode: achieving)
+    let cleanActions = SettingsActions(model: TestFixtures.appModel())
+    CheckupWindowController.publishRestoreOutcome(of: clean, to: cleanActions)
+    let cleanSettled = barrier(on: clean)
+    clean.abandon(reason: "closed")
+    await settle(until: { cleanSettled.withLock { $0 } })
+    #expect(cleanActions.checkupRestoreFailure == nil)
+  }
+
+  /// A display that has left cannot be put back, and a notice there would blame
+  /// the app for an unplug. The restore is still attempted.
+  @Test func aDisconnectDoesNotBlameTheAppForAnUnpluggedDisplay() async {
+    let failing = CancelRecordingMode(restores: false)
+    let flow = await pickedFlow(mode: failing)
+    let actions = SettingsActions(model: TestFixtures.appModel())
+    CheckupWindowController.publishRestoreOutcome(of: flow, to: actions)
+    let settled = barrier(on: flow)
+    flow.displayDisconnected(7)
+    await settle(until: { settled.withLock { $0 } })
+    #expect(failing.events == ["cancel", "restore"])
+    #expect(actions.checkupRestoreFailure == nil)
+  }
+
+  /// A standing notice describes a run that is over, and the run being wired now
+  /// reports its own outcome. No display is picked yet, so this is not about the
+  /// same display twice.
+  @Test func startingAnotherCheckupClearsTheLastRunsNotice() async {
+    let actions = SettingsActions(model: TestFixtures.appModel())
+    actions.checkupRestoreFailure = CheckupRestoreNotice(
+      text: CheckupPaneCopy.restoreNotAchieved, identityKey: entry().identityKey)
+    let next = await pickedFlow(mode: CancelRecordingMode(restores: true))
+    CheckupWindowController.publishRestoreOutcome(of: next, to: actions)
+    #expect(actions.checkupRestoreFailure == nil)
+  }
+
+  /// The stale-completion sequence: run 1's restore answers after run 2 has put
+  /// its own display back cleanly. Without a generation on the publish, that
+  /// late answer posts a notice over a run that never failed.
+  @Test func aRestoreFromAnEarlierRunCannotPublishOverTheRunThatFollowedIt() async {
+    let actions = SettingsActions(model: TestFixtures.appModel())
+    let stale = await pickedFlow(mode: CancelRecordingMode(restores: false))
+    CheckupWindowController.publishRestoreOutcome(of: stale, to: actions)
+    // The seam run 1's own task captured, before run 2 replaces the wiring.
+    let staleSettled = stale.onRestoreSettled
+
+    let next = await pickedFlow(mode: CancelRecordingMode(restores: true))
+    CheckupWindowController.publishRestoreOutcome(of: next, to: actions)
+    let nextSettled = barrier(on: next)
+    next.abandon(reason: "closed")
+    await settle(until: { nextSettled.withLock { $0 } })
+    #expect(actions.checkupRestoreFailure == nil)
+
+    // Run 1 answering late, with the failure it really had.
+    staleSettled(true, entry().identityKey)
+    #expect(actions.checkupRestoreFailure == nil)
+
+    // The control: the newest run's own answer still publishes, so the token
+    // silences the stale completion rather than the mechanism.
+    let third = await pickedFlow(mode: CancelRecordingMode(restores: false))
+    CheckupWindowController.publishRestoreOutcome(of: third, to: actions)
+    let thirdSettled = barrier(on: third)
+    third.abandon(reason: "closed")
+    await settle(until: { thirdSettled.withLock { $0 } })
+    #expect(actions.checkupRestoreFailure?.text == CheckupPaneCopy.restoreNotAchieved)
+  }
+
   /// Left to the panel class, a Dell whose cached string never arrived would be
   /// pre-graded write-only: false about the panel, and it lands in a saved report.
   @Test func anHDREngagedRunPregradesTheCapabilityRowsAndNeverRunsTheLeg() async {
@@ -335,12 +525,15 @@ struct CheckupFlowModelTests {
     #expect(flow.showFailureReason == nil)
   }
 
-  @Test func theDisplayPickNeverOffersAMirroringDisplay() {
-    var mirroring = entry()
-    mirroring.isMirroring = true
+  /// The pick offers exactly what the environment handed it. The exclusion rule
+  /// lives one layer up and is asserted there over live sources; a copy here
+  /// would drop a display excluded for a reason this model never heard of.
+  @Test func theDisplayPickOffersWhatTheEnvironmentHandedIt() {
+    let target = entry()
     let flow = CheckupFlowModel(
-      environment: environment(presenter: FakePresenter(), entry: mirroring))
-    #expect(flow.selectableDisplays.isEmpty)
+      environment: environment(presenter: FakePresenter(), entry: target))
+    #expect(flow.selectableDisplays.map(\.id) == [target.id])
+    #expect(flow.selectableDisplays.map(\.id) == flow.environment.displays.map(\.id))
   }
 
   /// The strip is 104 pt of the field's own lower edge on a one-display run, so
@@ -418,10 +611,18 @@ struct CheckupFlowModelTests {
     #expect(elsewhere.partiallyOccludedFields.isEmpty)
   }
 
-  @Test func theSelectedDisplayNeverIncludesVirtualOnes() {
-    var v = entry(); v.isVirtual = true
-    let flow = CheckupFlowModel(environment: environment(presenter: FakePresenter(), entry: v))
-    #expect(flow.selectableDisplays.isEmpty)
+  /// A display the flow cannot target is on the page with its reason rather
+  /// than silently absent, and is not among the ones that can be chosen.
+  @Test func anExcludedDisplayIsVisibleButNotSelectable() {
+    let target = entry()
+    let flow = CheckupFlowModel(environment: environment(
+      presenter: FakePresenter(), entry: target,
+      excluded: [CheckupExcludedDisplay(
+        id: 9, name: "MIRROR", pixelWidth: 1920, pixelHeight: 1080, reason: .mirroring)]))
+    #expect(flow.selectableDisplays.map(\.id) == [target.id])
+    #expect(flow.excludedDisplays.count == 1)
+    #expect(flow.excludedDisplays[0].reason == .mirroring)
+    #expect(!flow.selectableDisplays.contains { $0.id == flow.excludedDisplays[0].id })
   }
 
   /// A leg in flight when the cable goes is the one way a saved report could be
@@ -615,6 +816,29 @@ actor CheckupLegGate {
     for continuation in waiting { continuation.resume() }
     waiting.removeAll()
   }
+}
+
+/// Records the order the flow drives it in. `restore()` is nonisolated and can
+/// run off the main actor, so the events go behind a lock. A class, because a
+/// struct would lose the recording.
+final class CancelRecordingMode: CheckupModeRunning {
+  private let recorded = OSAllocatedUnfairLock<[String]>(initialState: [])
+  /// Whether the display comes back on its pre-run mode.
+  let restores: Bool
+
+  init(restores: Bool) { self.restores = restores }
+
+  var events: [String] { recorded.withLock { $0 } }
+
+  func runNativeMode() async -> [CheckupClaim] { [] }
+  func runRefreshSweep() async -> [CheckupClaim] { [] }
+
+  func restore() async -> Bool {
+    recorded.withLock { $0.append("restore") }
+    return restores
+  }
+
+  func cancel() { recorded.withLock { $0.append("cancel") } }
 }
 
 /// So "the leg never ran" is an assertion, not an absence.

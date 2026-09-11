@@ -805,6 +805,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
             "checkup report could not be saved: \(String(describing: error), privacy: .public)")
         }
       },
+      actions: settingsActions,
       care: model.oledCare)
     checkupWindow = controller
     return controller

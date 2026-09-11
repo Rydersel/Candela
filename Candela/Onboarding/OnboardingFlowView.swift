@@ -20,8 +20,28 @@ struct OnboardingFlowView: View {
       chrome
     }
     .animation(reduceMotion ? .easeInOut(duration: 0.3) : .spring(duration: 0.55), value: model.currentPage)
+    // Default priority: a page change must not cut off a sentence VoiceOver is
+    // part-way through, and the listener cannot ask for it back. `onChange`
+    // skips the first render, which keeps the opening page silent while the
+    // window becoming key speaks its own title.
+    .onChange(of: model.currentPage) { _, page in
+      GuidedFlowAnnouncement.queued(
+        OnboardingAnnouncements.pageAnnouncement(
+          page, step: model.index + 1, of: model.pages.count,
+          displayName: sizePageDisplayName(page)))
+    }
     .frame(minWidth: 760, minHeight: 560)
     .preferredColorScheme(.dark)
+  }
+
+  /// Nil for every page but a size page, and for a size page whose display has
+  /// gone: `displayName(forKey:)` falls back to the key itself, and a key is
+  /// storage, never something to read out.
+  private func sizePageDisplayName(_ page: OnboardingPage) -> String? {
+    guard case let .size(displayKey) = page, model.display(forKey: displayKey) != nil else {
+      return nil
+    }
+    return model.displayName(forKey: displayKey)
   }
 
   private var pageTransition: AnyTransition {

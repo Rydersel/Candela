@@ -19,6 +19,12 @@ enum CheckupPaneCopy {
     + "its native mode, its refresh rates and its HDR support, then a set of color fields you "
     + "look at yourself. The run opens in its own window, and you can stop it at any point."
 
+  /// Shown when a run ended before the display was put back. No verdict on the
+  /// panel, since nothing here was measured about it, and both ways back are
+  /// named rather than leaving a stranger on a changed screen.
+  static let restoreNotAchieved =
+    "The run ended before the display was put back, and it is not on the resolution and refresh rate it started in. Set it back in System Settings, or on this display's own page in \(AppInfo.productName)."
+
   static let historyTitle = "Past checkups"
   static let emptyHistory = "No checkups recorded for this display yet."
   static let historyNote =
@@ -31,6 +37,28 @@ enum CheckupPaneCopy {
   static let hideDetails = "Hide details"
   static let exportFailed = "The report could not be saved."
   static let acknowledge = "OK"
+  static let deleteRun = "Delete…"
+  static let deleteTitle = "Delete this checkup?"
+  static let deleteConfirm = "Delete"
+  static let deleteCancel = "Cancel"
+  static let deleteConsequences =
+    "This run's file is removed from this Mac. Other runs on this display are kept, and a report "
+    + "you already exported somewhere else is untouched.\n\nA provenance record bundles every checkup "
+    + "stored for the display, so a record exported after this delete leaves this run out and carries "
+    + "a different hash from one exported before it. If you want to keep a record that includes "
+    + "this run, export it first."
+
+  /// The title cannot name the run and a display can have several, so the
+  /// message opens with the row's own subject line.
+  static func deleteMessage(for report: CheckupReport) -> String {
+    "\(CheckupCopy.subjectLine(for: report))\n\n\(deleteConsequences)"
+  }
+
+  /// Every row's button reads "Delete…", so the spoken label is the only thing
+  /// that can say which run is about to go.
+  static func deleteRunLabel(for report: CheckupReport) -> String {
+    "Delete the run from \(CheckupCopy.subjectLine(for: report))"
+  }
 
   static let verifyTitle = "A report from somebody else"
   static let verify = "Verify a report"
@@ -41,12 +69,26 @@ enum CheckupPaneCopy {
     "This report does not validate: its contents have changed since it was written."
   static let unreadable = "That file could not be read as a checkup report."
 
-  /// The fixed strings, so the copy rules can be asserted over the surface
-  /// rather than over a reviewer's memory.
+  /// A run for the sweep to render the strings that name one. Fixed, so the
+  /// sweep reads the same sentence every time.
+  private static let sampleReport = CheckupReport(
+    scenario: .newMonitor,
+    identity: CheckupDisplayIdentity(
+      identityKey: "sample", vendorID: 0, modelID: 0, serial: nil, manufactureWeek: nil,
+      manufactureYear: nil, nativePixelWidth: 3840, nativePixelHeight: 2160, maxRefreshHz: nil,
+      supportsPQEOTF: false, supportsHDRGammaEOTF: false, productName: "Display"),
+    panelClass: .readsDDC, macOSBuild: "26.0", appBuild: "1",
+    startedAt: Date(timeIntervalSinceReferenceDate: 800_000_000), endedAt: nil,
+    completion: .complete, claims: [], plant: nil, showings: [:], exposureBookingID: nil)
+
+  /// The fixed strings plus one sample of each parameterised one, so the copy
+  /// rules can be asserted over the surface rather than over a reviewer's memory.
   static var allStringsForTest: [String] {
-    [title, subtitle, runTitle, run, runNote, historyTitle, emptyHistory, historyNote, export,
-     copySummary, copied, showDetails, hideDetails, exportFailed, acknowledge, verifyTitle,
-     verify, verifyNote, valid, invalid, unreadable]
+    [title, subtitle, runTitle, run, runNote, restoreNotAchieved, historyTitle, emptyHistory,
+     historyNote, export, copySummary, copied, showDetails, hideDetails, exportFailed,
+     acknowledge, deleteRun, deleteTitle, deleteConfirm, deleteCancel, deleteConsequences,
+     verifyTitle, verify, verifyNote, valid, invalid, unreadable,
+     deleteRunLabel(for: sampleReport)]
   }
 }
 
@@ -106,6 +148,7 @@ struct CheckupPane: View {
     SettingsPageScaffold {
       SettingsPageHeader(title: CheckupPaneCopy.title, subtitle: CheckupPaneCopy.subtitle)
       runSection
+      restoreNotice
       historySection
       verifySection
     }
@@ -144,6 +187,39 @@ struct CheckupPane: View {
       }
       .padding(.vertical, 2)
     }
+  }
+
+  /// The only place a failed restore can be read: the run's window is gone by
+  /// the time it answers. Scoped to the display the run moved, dismissed by
+  /// hand, superseded when the next run starts.
+  @ViewBuilder private var restoreNotice: some View {
+    if let notice = actions.checkupRestoreFailure,
+      CheckupPane.showsRestoreNotice(notice, scopedKey: scoped?.display.persistenceKey) {
+      SettingsNotice {
+        Text(verbatim: notice.text)
+          .font(.callout.weight(.medium))
+          .fixedSize(horizontal: false, vertical: true)
+        Button(CheckupPaneCopy.acknowledge) { CheckupPane.dismissRestoreNotice(actions) }
+          .buttonStyle(SettingsSecondaryButtonStyle())
+          .accessibilityLabel(Text(verbatim: CheckupPaneCopy.acknowledge))
+      }
+      // Queued, not interrupting: the pane can already be open behind the run,
+      // so nothing on screen has moved the cursor.
+      .onAppear { GuidedFlowAnnouncement.queued(notice.text) }
+    }
+  }
+
+  /// The notice is app-global and its sentence names no display, so it belongs
+  /// only under the scope of the display the run moved.
+  static func showsRestoreNotice(_ notice: CheckupRestoreNotice?, scopedKey: String?) -> Bool {
+    guard let notice, let scopedKey else { return false }
+    return notice.identityKey == scopedKey
+  }
+
+  /// The OK's whole job. Named rather than inline because an accessibility press
+  /// runs no SwiftUI action, so this is the only seam the suite can drive.
+  static func dismissRestoreNotice(_ actions: SettingsActions) {
+    actions.checkupRestoreFailure = nil
   }
 
   // MARK: - Scope
@@ -191,6 +267,13 @@ struct CheckupPane: View {
     runs = (try? store.list(identityKey: key)) ?? []
   }
 
+  /// Re-reading through `reload()` keeps one code path for what the history
+  /// shows: a delete that did not happen leaves its row standing.
+  private func delete(_ run: CheckupStoredRun) {
+    try? store.delete(url: run.url)
+    reload()
+  }
+
   // MARK: - History
 
   private var historySection: some View {
@@ -229,7 +312,7 @@ struct CheckupPane: View {
             // on the same day still has its own row.
             ForEach(Array(runs.enumerated()), id: \.element.url) { pair in
               if pair.offset > 0 { SettingsCardDivider() }
-              CheckupHistoryRow(run: pair.element)
+              CheckupHistoryRow(run: pair.element, onDelete: { delete(pair.element) })
             }
           }
         }
@@ -321,8 +404,10 @@ struct CheckupPane: View {
 @MainActor
 private struct CheckupHistoryRow: View {
   let run: CheckupStoredRun
+  let onDelete: () -> Void
 
   @State private var showingDetails = false
+  @State private var confirmingDelete = false
   @State private var justCopied = false
   /// Cancelled and replaced on every copy, so a second click restarts the two
   /// seconds instead of letting the first click's timer clear the label early.
@@ -358,6 +443,14 @@ private struct CheckupHistoryRow: View {
         Button(detailsTitle) { showingDetails.toggle() }
           .buttonStyle(SettingsSecondaryButtonStyle())
           .accessibilityLabel(Text(verbatim: detailsTitle))
+        // Trailing ellipsis: the click opens the confirmation, and `.destructive`
+        // belongs on the button that removes the file. Ahead of the copied label
+        // so it never slides sideways under the pointer.
+        Button(CheckupPaneCopy.deleteRun, role: .destructive) { confirmingDelete = true }
+          .buttonStyle(SettingsDangerButtonStyle())
+          // The visible label is the same on every row, so the spoken one names
+          // the run this button would delete.
+          .accessibilityLabel(Text(verbatim: CheckupPaneCopy.deleteRunLabel(for: report)))
         if justCopied {
           Text(verbatim: CheckupPaneCopy.copied)
             .font(.caption)
@@ -385,6 +478,21 @@ private struct CheckupHistoryRow: View {
       Button(CheckupPaneCopy.acknowledge) { saveError = nil }
     } message: {
       Text(verbatim: saveError ?? "")
+    }
+    .confirmationDialog(
+      CheckupPaneCopy.deleteTitle, isPresented: $confirmingDelete, titleVisibility: .visible
+    ) {
+      Button(CheckupPaneCopy.deleteConfirm, role: .destructive) { onDelete() }
+      // The shortcut puts the default action on Cancel, so Return cannot delete
+      // a run. What the dialog would do without it is a rig check nobody has
+      // run; the heat map's own delete dialog leaves it alone.
+      Button(CheckupPaneCopy.deleteCancel, role: .cancel) {}
+        .keyboardShortcut(.defaultAction)
+    } message: {
+      // The run this is about, then the provenance consequence: the record is
+      // assembled at export time out of whatever is stored then, so this is the
+      // last moment to keep one that includes this run.
+      Text(verbatim: CheckupPaneCopy.deleteMessage(for: report))
     }
   }
 

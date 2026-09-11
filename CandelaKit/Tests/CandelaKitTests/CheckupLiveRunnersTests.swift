@@ -228,6 +228,96 @@ struct CheckupLiveRunnersTests {
     #expect(claims[0].family == .refresh)
   }
 
+  private func nativeSizeModes(_ rates: [Double]) -> [DisplayMode] {
+    rates.enumerated().map { index, hz in
+      mode(Int32(index + 1), w: 3840, h: 2160, hz: hz, native: index == 0)
+    }
+  }
+
+  /// The cancel is checked at the top of each rate, so the apply already in
+  /// flight when it lands still finishes: one apply, never zero.
+  @Test func aCancelledSweepStopsWithinOneRateStep() async {
+    let modes = nativeSizeModes([60, 100, 120, 144])
+    // The control. Without it a count of one says only that the fake is broken.
+    let uncancelled = SweepConfigurator(modeList: modes, capAt: 240)
+    _ = await CheckupLiveModeRunner(configurator: uncancelled, displayID: 1).runRefreshSweep()
+    #expect(uncancelled.applies.count == 4)
+
+    let configurator = SweepConfigurator(modeList: modes, capAt: 240)
+    let runner = CheckupLiveModeRunner(configurator: configurator, displayID: 1)
+    configurator.onApply = { _ in runner.cancel() }
+    let claims = await runner.runRefreshSweep()
+    #expect(configurator.applies.count == 1)
+    // The rate that did complete is still graded: it was measured.
+    #expect(claims.count == 1)
+  }
+
+  /// The guard sits above `rememberCurrentMode`, so a sweep that never ran
+  /// latches nothing to put back and the restore below applies nothing.
+  @Test func aCancelBeforeTheSweepAppliesNothingAndLatchesNothingToPutBack() async {
+    let configurator = SweepConfigurator(modeList: nativeSizeModes([60, 120]), capAt: 240)
+    let runner = CheckupLiveModeRunner(configurator: configurator, displayID: 1)
+    runner.cancel()
+    let claims = await runner.runRefreshSweep()
+    #expect(configurator.applies.isEmpty)
+    #expect(claims.isEmpty)
+    #expect(await runner.restore())
+    #expect(configurator.applies.isEmpty)
+
+    // The control: a sweep that DID run remembers a mode and its restore is a
+    // real apply. Without it, an empty apply list proves nothing.
+    let ran = SweepConfigurator(modeList: nativeSizeModes([60, 120]), capAt: 240)
+    let ranRunner = CheckupLiveModeRunner(configurator: ran, displayID: 1)
+    _ = await ranRunner.runRefreshSweep()
+    let swept = ran.applies.count
+    #expect(swept == 2)
+    #expect(await ranRunner.restore())
+    #expect(ran.applies.count == swept + 1)
+  }
+
+  /// The restore is ungated by the cancel, and it still grades on the mode the
+  /// display is achieved on rather than on the apply's return.
+  @Test func restoreStillRunsAfterACancelAndReportsTheAchievedMode() async {
+    let modes = nativeSizeModes([60, 120, 144])
+    let willing = SweepConfigurator(modeList: modes, capAt: 240)
+    let runner = CheckupLiveModeRunner(configurator: willing, displayID: 1)
+    // Cancelled on the SECOND rate, so the sweep leaves the display somewhere
+    // other than where it started. On the first, the sweep's only apply IS the
+    // pre-run mode and the assertion below could not fail.
+    willing.onApply = { count in if count == 2 { runner.cancel() } }
+    _ = await runner.runRefreshSweep()
+    #expect(willing.applies.last == modes[1])
+    #expect(await runner.restore())
+    #expect(willing.applies.last == modes[0])
+
+    // A panel that ACKs the restore and does not move: the achieved-state read
+    // is the only thing that can catch it, cancelled or not.
+    let stubborn = StuckConfigurator(modeList: modes)
+    let stuckRunner = CheckupLiveModeRunner(configurator: stubborn, displayID: 1)
+    _ = await stuckRunner.runRefreshSweep()
+    stuckRunner.cancel()
+    stubborn.stuckOn = modes[1]
+    #expect(await stuckRunner.restore() == false)
+  }
+
+  /// The native-mode check is at the top of the leg, so a cancel that lands
+  /// during its one apply must not throw away the claim that apply earned.
+  @Test func cancellingDoesNotGateTheNativeModeLegAfterItHasApplied() async {
+    let native = mode(1, w: 3840, h: 2160, hz: 60, native: true)
+    let configurator = SweepConfigurator(modeList: [native], capAt: 240)
+    let runner = CheckupLiveModeRunner(configurator: configurator, displayID: 1)
+    configurator.onApply = { _ in runner.cancel() }
+    let claims = await runner.runNativeMode()
+    #expect(claims.first?.verdict.kind == "observed")
+
+    // The control: cancelled before the leg, the same runner claims nothing.
+    let early = SweepConfigurator(modeList: [native], capAt: 240)
+    let earlyRunner = CheckupLiveModeRunner(configurator: early, displayID: 1)
+    earlyRunner.cancel()
+    #expect(await earlyRunner.runNativeMode().isEmpty)
+    #expect(early.applies.isEmpty)
+  }
+
   @Test func restoreReportsWhetherTheDisplayIsActuallyBackOnItsOriginalMode() async {
     let m60 = mode(1, w: 3840, h: 2160, hz: 60, native: true)
     let m120 = mode(2, w: 3840, h: 2160, hz: 120)
@@ -256,6 +346,12 @@ struct CheckupLiveRunnersTests {
     let modeList: [DisplayMode]
     let capAt: Double
     var applied: DisplayMode?
+    /// Every apply in order. A cancelled sweep is graded on how many applies
+    /// actually reached the display, which one `applied` cannot answer.
+    var applies: [DisplayMode] = []
+    /// Called with the number of applies so far. `cancel()` is synchronous, so
+    /// inside an apply is the only place a test can land one mid-sweep.
+    var onApply: ((Int) -> Void)?
 
     init(modeList: [DisplayMode], capAt: Double) {
       self.modeList = modeList
@@ -273,6 +369,8 @@ struct CheckupLiveRunnersTests {
     }
     func apply(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope) throws {
       applied = mode
+      applies.append(mode)
+      onApply?(applies.count)
     }
     func applyMirroring(_ changes: [MirrorChange], scope: DisplayConfigScope) throws {}
     var revealsHiddenModes: Bool { true }
