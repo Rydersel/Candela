@@ -58,9 +58,9 @@ struct ProtectionPane: View {
   }
 
   /// Both values from one read, so the sighted and the spoken form cannot
-  /// answer different enrollment counts.
+  /// answer different care states.
   private var dimmingRowValues: (value: String, spokenValue: String) {
-    Self.dimmingRow(enrolledCount: enrolledExternalCount(), isSafeMode: model.isSafeMode)
+    Self.dimmingRow(enrolledStates: enrolledExternalStates(), isSafeMode: model.isSafeMode)
   }
 
   /// Verbatim rather than a key: the test bundle reads this string directly.
@@ -69,10 +69,8 @@ struct ProtectionPane: View {
     + "dimming, fading idle screens and static regions so they are not left lit at full "
     + "brightness for hours."
 
-  /// The count half only. Safe mode outranks it and that branch lives in
-  /// `dimmingRow`, so a view calling this one directly would claim dimming in a
-  /// session where the care loop is not running. "Off" is the Remembered Sizes
-  /// summary's word for the same shape of answer, so the two sections agree.
+  /// The enabled count when care is running. Pauses are reported separately by
+  /// `dimmingRow`, so suspended displays are never included in this count.
   static func dimmingRowValue(enrolledCount: Int) -> String {
     switch enrolledCount {
     case 0: "Off"
@@ -81,26 +79,33 @@ struct ProtectionPane: View {
     }
   }
 
-  /// What the row draws and what VoiceOver reads. Enrollment answers first, so
-  /// nothing enrolled reads "Off" in either kind of session. Safe mode then
-  /// outranks the count, since the care loop is not running: the display hub's
-  /// preview already says Paused for the same state, in these words.
+  /// Enrollment answers first, then Safe Mode, then the care coordinator's
+  /// published states. A partial pause keeps the active display count visible.
   static func dimmingRow(
-    enrolledCount: Int, isSafeMode: Bool
+    enrolledStates: [OledDimState?], isSafeMode: Bool
   ) -> (value: String, spokenValue: String) {
+    let enrolledCount = enrolledStates.count
     let counted = dimmingRowValue(enrolledCount: enrolledCount)
-    guard enrolledCount > 0, isSafeMode else { return (counted, counted) }
-    return ("Paused", "Paused for this session, Safe Mode")
+    guard enrolledCount > 0 else { return (counted, counted) }
+    if isSafeMode { return ("Paused", "Paused for this session, Safe Mode") }
+    let paused = enrolledStates.filter { $0 == .suspended }.count
+    guard paused > 0 else { return (counted, counted) }
+    if paused == enrolledCount {
+      let displays = paused == 1 ? "1 display" : "\(paused) displays"
+      return ("Paused", "Paused for \(displays)")
+    }
+    let mixed = "\(dimmingRowValue(enrolledCount: enrolledCount - paused)), \(paused) paused"
+    return (mixed, mixed)
   }
 
   /// Nothing publishes enrollment, so this is a live read per display. The
   /// `prefsRevision` read at the top of `body` is what refreshes the row when
   /// enrollment changes elsewhere in the window. `model.displays` is externals
   /// only, which is all OLED care enrolls.
-  private func enrolledExternalCount() -> Int {
+  private func enrolledExternalStates() -> [OledDimState?] {
     model.displays.filter {
       DisplayPrefs(persistenceKey: $0.display.persistenceKey).oledCareEnrolled
-    }.count
+    }.map { model.oledCare.dimStates[$0.display.persistenceKey] }
   }
 
   // MARK: - Startup
