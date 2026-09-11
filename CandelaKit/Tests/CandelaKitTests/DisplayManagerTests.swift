@@ -217,3 +217,20 @@ private actor GatedDDC: DDCWriting {
   let landed = await writer.recordedWrites()
   #expect(landed.map(\.value) == [30]) // the post-sleep-stale write never hit hardware
 }
+
+@Test func rawReconfigurationSignalSeesTheAlreadySuspendedEpoch() {
+  let state = OSAllocatedUnfairLock(initialState: DisplayManager.EpochState())
+  let (_, events) = AsyncStream.makeStream(of: Void.self)
+  let observed = OSAllocatedUnfairLock(initialState: [(UInt64, Bool, UInt32)]())
+  let intake = DisplayManager.IntakeBox(state: state, rawEvents: events) { flags in
+    let snapshot = state.withLock { ($0.epoch, $0.suspended, flags.rawValue) }
+    observed.withLock { $0.append(snapshot) }
+  }
+  intake.reconfigureEvent(displayID: 2, flags: .beginConfigurationFlag)
+  intake.reconfigureEvent(displayID: 2, flags: .addFlag)
+  let snapshots = observed.withLock { $0 }
+  #expect(snapshots.map { $0.0 } == [1, 2])
+  #expect(snapshots.map { $0.1 } == [true, true])
+  #expect(snapshots.map { $0.2 } == [CGDisplayChangeSummaryFlags.beginConfigurationFlag.rawValue,
+                                   CGDisplayChangeSummaryFlags.addFlag.rawValue])
+}

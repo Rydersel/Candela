@@ -60,6 +60,44 @@ private final class StubGammaDriver: GammaTableDriving {
 @Suite("Gamma controller baselines")
 @MainActor
 struct GammaControllerTests {
+  @Test(arguments: [4.9, 6.0, 120.0])
+  func aNewReconfigurationAfterTheFinalPassHasItsOwnBoundedWindow(start: Double) async throws {
+    let driver = StubGammaDriver()
+    driver.screens = [2]; driver.identities[2] = "panel-A"
+    let baseline = Self.profileTable()
+    driver.tables[2] = baseline
+    let gamma = GammaController(driver: driver)
+    gamma.applyGammaScale(0.5, on: 2, enforcerOn: 2)
+    let clock = OSAllocatedUnfairLock(initialState: 0.0)
+    let epoch = OSAllocatedUnfairLock(initialState: UInt64(0))
+    let recovery = GammaReconfigurationRecovery(
+      gamma: gamma, targets: { [2] }, readHDR: { _ in false },
+      epoch: { epoch.withLock { $0 } }, asleep: { false },
+      now: { clock.withLock { $0 } }, interval: 3600)
+    defer { recovery.stop() }
+    recovery.beginFinalPass()
+    let settling = try #require(recovery.endFinalPass())
+    await settling.value
+    // The reconnect may begin just before, just after, or long after the
+    // departure's post-pass watch expires. All are separate bursts.
+    clock.withLock { $0 = start }
+    epoch.withLock { $0 = 1 }
+    let reconnect = try #require(recovery.begin())
+    await reconnect.value
+    clock.withLock { $0 = start + 0.2 }
+    recovery.tick()
+    #expect(driver.writes.count == 2)
+    // Further CG events in this burst must not renew its allowance.
+    clock.withLock { $0 = start + 4.9 }
+    epoch.withLock { $0 = 2 }
+    let repeated = try #require(recovery.begin())
+    await repeated.value
+    clock.withLock { $0 = start + 5 }
+    recovery.tick()
+    #expect(driver.writes.count == 2)
+    #expect(recovery.begin() == nil)
+  }
+
   @Test func aLateResetAfterTheFinalPassDoesNotWaitForAnotherNotification() async throws {
     let driver = StubGammaDriver()
     driver.screens = [2]; driver.identities[2] = "panel-A"

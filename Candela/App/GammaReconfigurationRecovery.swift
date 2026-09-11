@@ -3,7 +3,7 @@ import CandelaKit
 import os
 
 /// A burst of screen notifications shares one deadline and write allowance.
-/// Only the final topology pass, or sleep, starts a new recovery window.
+/// The final pass and the first subsequent topology change each start a window.
 struct GammaRecoveryBudget {
   private var deadline: TimeInterval?
   private var writesRemaining = 8
@@ -42,6 +42,7 @@ final class GammaReconfigurationRecovery {
   private var candidates: [CGDirectDisplayID: GammaController.RecoverySnapshot] = [:]
   private var generation: UInt64 = 0
   private var observedEpoch: UInt64 = 0
+  private var settledEpoch: UInt64?
   private var budget = GammaRecoveryBudget()
   private var inFinalPass = false
   private var pendingNotification = false
@@ -65,11 +66,18 @@ final class GammaReconfigurationRecovery {
     guard !inFinalPass else { pendingNotification = true; return nil }
     cancelPending()
     guard !asleep() else { budget.finish(); return nil }
+    let currentEpoch = epoch()
+    if let settledEpoch, currentEpoch != settledEpoch {
+      // A departure's settling tail must not consume the next arrival's
+      // deadline. Renew once; further events share the new burst's budget.
+      self.settledEpoch = nil
+      budget.finish()
+    }
     guard budget.begin(at: now()) else {
       Self.log.debug("Gamma recovery notification declined: deadline or write allowance exhausted")
       return nil
     }
-    observedEpoch = epoch()
+    observedEpoch = currentEpoch
     for id in targets() {
       if let snapshot = gamma.recoverySnapshot(on: id) { candidates[id] = snapshot }
     }
@@ -104,11 +112,11 @@ final class GammaReconfigurationRecovery {
   func tick() {
     guard !stopped, !inFinalPass else { return }
     guard !asleep() else { cancelPending(); budget.finish(); return }
+    guard epoch() == observedEpoch else { begin(); return }
     guard budget.begin(at: now()) else {
       Self.log.debug("Gamma recovery timer stopped: deadline or write allowance exhausted")
       cancelPending(); return
     }
-    guard epoch() == observedEpoch else { begin(); return }
     let observations = replies.withLock { $0.values }
     for (id, snapshot) in Array(candidates) {
       guard let observation = observations[id] else { continue }
@@ -143,6 +151,7 @@ final class GammaReconfigurationRecovery {
     Self.log.debug("Gamma recovery final topology pass ended; pending notification: \(self.pendingNotification, privacy: .public)")
     inFinalPass = false
     pendingNotification = false
+    settledEpoch = epoch()
     // WindowServer has been observed resetting gamma several seconds after
     // this pass. Watch its fresh successful writes through that settling tail.
     return begin()

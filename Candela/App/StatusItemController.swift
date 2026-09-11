@@ -273,7 +273,17 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // Reconfiguration intake: synchronous registration on the main thread is
     // load-bearing, since CG delivers the callback on the registering thread's
     // run loop and only the main thread has one that lives forever.
-    model.displayManager.activate()
+    model.displayManager.activate { [weak self] flags in
+      guard !flags.contains(.beginConfigurationFlag) else { return }
+      // AppKit's screen notification can lag the reset. Queue only a signal
+      // here; inspect displays after the CG callback returns, even in a menu.
+      RunLoop.main.perform(inModes: [.common]) { [weak self] in
+        MainActor.assumeIsolated {
+          guard let self, !self.isSafeMode else { return }
+          self.gammaRecovery.begin()
+        }
+      }
+    }
 
     // Starts the OLED care driver loop (Safe Mode still builds the chrome
     // controller) and wires its lock and sleep/wake observers. Display membership
