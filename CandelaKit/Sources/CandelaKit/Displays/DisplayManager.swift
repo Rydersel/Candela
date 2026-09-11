@@ -118,6 +118,10 @@ public actor DisplayManager {
     state.withLock { $0.epoch }
   }
 
+  /// Software-only recovery must stop during sleep too, while leaving the
+  /// stricter reconfiguration suspension on every DDC write untouched.
+  public nonisolated var isAsleep: Bool { state.withLock { $0.asleep } }
+
   /// Sleep intake (NSWorkspace notifications stay app-side and forward here):
   /// synchronous bump and suspend, NO topology element, because sleep is a write
   /// gate rather than a topology change. The arm-token bump invalidates any

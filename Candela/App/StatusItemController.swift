@@ -135,6 +135,15 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// owns a block-based notification registration, and dropping it freezes the
   /// store at the launch sample with nothing saying so.
   private lazy var mirrorSampler = MirrorTopologySampler(store: model.mirrorTopology)
+  private var gammaRecoveryObserver: (any NSObjectProtocol)?
+  private lazy var gammaRecovery: GammaReconfigurationRecovery = {
+    let manager = model.displayManager
+    let hdr = model.hdrToggling
+    return GammaReconfigurationRecovery(
+      gamma: gammaController, targets: { [weak model = model] in model?.displays.map(\.id) ?? [] },
+      readHDR: { await hdr.observedHDREnabled(displayID: $0) },
+      epoch: { manager.currentEpoch() }, asleep: { manager.isAsleep })
+  }()
   private let log = Logger(subsystem: "com.rydersel.Candela", category: "keys")
   private let checkupLog = Logger(subsystem: "com.rydersel.Candela", category: "checkup")
 
@@ -247,6 +256,19 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // the identity function. Launching into an already-engaged mirror set is an
     // ordinary way to start.
     mirrorSampler.start()
+    if !isSafeMode {
+      gammaRecoveryObserver = NotificationCenter.default.addObserver(
+        forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: nil
+      ) { [weak self] _ in
+        // AppKit delivers this on main; a queued actor hop may wait until an
+        // open menu stops tracking, leaving the reset visible the whole time.
+        MainActor.assumeIsolated {
+          guard let self else { return }
+          self.mirrorSampler.refresh()
+          self.gammaRecovery.begin()
+        }
+      }
+    }
 
     // Reconfiguration intake: synchronous registration on the main thread is
     // load-bearing, since CG delivers the callback on the registering thread's
@@ -513,11 +535,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         // The counter zeroes on every configure so unrelated events across a long
         // session never add up to an offer. `suspendedForSession` survives.
         self.interferenceMonitor.resetCounter()
+        self.gammaRecovery.beginFinalPass()
         await ReconfigureDimming.run(
           displays: self.model.displays,
           hdrToggling: self.model.hdrToggling,
           gamma: self.gammaController,
           shade: self.shadeOverlay)
+        self.gammaRecovery.endFinalPass()
         #if DEBUG
           // Panel row model, last in the pass: the HDR state above and the
           // re-applied dimming are what a dump taken here can report.
@@ -955,6 +979,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// equivalent of the published brightness, so the monitor is not left at a
   /// combined-mode DDC floor.
   func applicationWillTerminate(_: Notification) {
+    gammaRecovery.stop()
     gammaController.resetAllGamma() // not DDC, always runs
     shadeOverlay.removeAllShades() // not DDC, always runs
     // Above the safe-mode guard: this writes a report, not DDC, and a run

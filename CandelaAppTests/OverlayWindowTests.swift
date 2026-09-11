@@ -10,6 +10,20 @@ import Testing
 // UI. Every assertion below is on a property whose failure is silent.
 @Suite("Overlay window") @MainActor
 struct OverlayWindowTests {
+  /// A closing shade must disappear immediately instead of fading over its
+  /// replacement. The owner animates content only when dim entry calls for it.
+  @Test func dimmingWindowsDoNotUseAppKitShowOrHideAnimations() {
+    let window = NSWindow(
+      contentRect: OverlayWindow.seedRect, styleMask: OverlayWindow.styleMask,
+      backing: .buffered, defer: false)
+    window.animationBehavior = .documentWindow
+    OverlayWindow.configure(
+      window, title: "Overlay animation test",
+      covering: NSRect(x: 120, y: 60, width: 400, height: 300))
+    defer { window.close() }
+    #expect(window.animationBehavior == .none)
+  }
+
   // MARK: - The recipe, as a value
 
   /// The recipe is checkable without opening a window, which is the reason it
