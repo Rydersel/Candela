@@ -535,12 +535,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         // The counter zeroes on every configure so unrelated events across a long
         // session never add up to an offer. `suspendedForSession` survives.
         self.interferenceMonitor.resetCounter()
-        self.gammaRecovery.beginFinalPass()
         await ReconfigureDimming.run(
           displays: self.model.displays,
           hdrToggling: self.model.hdrToggling,
           gamma: self.gammaController,
-          shade: self.shadeOverlay)
+          shade: self.shadeOverlay,
+          beforeReset: { self.gammaRecovery.beginFinalPass() })
         self.gammaRecovery.endFinalPass()
         #if DEBUG
           // Panel row model, last in the pass: the HDR state above and the
@@ -1631,7 +1631,8 @@ enum ReconfigureDimming {
     displays: [AppModel.DisplayState],
     hdrToggling: any HDRToggling,
     gamma: any GammaApplying,
-    shade: any ShadeRendering
+    shade: any ShadeRendering,
+    beforeReset: @MainActor () -> Void = {}
   ) async {
     // HDR state may have changed under the 2 s cache, since a mode switch is
     // itself a reconfiguration. Dropped BEFORE the per-display re-evaluation
@@ -1658,6 +1659,9 @@ enum ReconfigureDimming {
     // above its native guard, and this reset runs first in the same pass, so a
     // baseline with our curve baked in is replaced before anything scales against
     // it. Moving either half breaks that.
+    // Early recovery stays active through the HDR awaits above. Pause only
+    // across the reset, baseline capture and immediate reapply below.
+    beforeReset()
     gamma.resetAllGamma()
     // Shades reset the same way, for a reason the gamma line does not have: a
     // shade is keyed by the DRAWABLE id, so a topology change MOVES ITS KEY.

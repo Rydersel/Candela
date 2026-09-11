@@ -9,7 +9,7 @@ struct GammaRecoveryBudget {
   private var writesRemaining = 8
 
   mutating func begin(at now: TimeInterval) -> Bool {
-    if deadline == nil { deadline = now + 2 }
+    if deadline == nil { deadline = now + 5 }
     return now < deadline! && writesRemaining > 0
   }
 
@@ -18,7 +18,8 @@ struct GammaRecoveryBudget {
 }
 
 /// WindowServer can reset gamma after the screen notification but before the
-/// one-second topology debounce completes. Follow just that interval, restoring
+/// topology debounce completes, or several seconds after the final pass.
+/// Follow a bounded settling interval, restoring
 /// only a cached baseline reset on the same directly drawn SDR display.
 @MainActor
 final class GammaReconfigurationRecovery {
@@ -64,22 +65,28 @@ final class GammaReconfigurationRecovery {
     guard !inFinalPass else { pendingNotification = true; return nil }
     cancelPending()
     guard !asleep() else { budget.finish(); return nil }
-    guard budget.begin(at: now()) else { return nil }
+    guard budget.begin(at: now()) else {
+      Self.log.debug("Gamma recovery notification declined: deadline or write allowance exhausted")
+      return nil
+    }
     observedEpoch = epoch()
     for id in targets() {
       if let snapshot = gamma.recoverySnapshot(on: id) { candidates[id] = snapshot }
     }
+    Self.log.debug("Gamma recovery prepared \(self.candidates.count, privacy: .public) candidates at epoch \(self.observedEpoch, privacy: .public)")
     guard !candidates.isEmpty else { return nil }
     let ids = Array(candidates.keys)
     let generation = generation
     let replies = replies
     let readHDR = readHDR
+    let log = Self.log
     // No return hop to the main actor: it may be inside menu tracking. A
     // common-mode timer consumes this mailbox even while the menu is open.
     hdrTask = Task.detached {
       for id in ids {
         guard !Task.isCancelled else { return }
         let enabled = await readHDR(id)
+        log.debug("Gamma recovery HDR reply for display \(id, privacy: .public), generation \(generation, privacy: .public): \(String(describing: enabled), privacy: .public)")
         replies.withLock { state in
           guard state.generation == generation else { return }
           state.values[id] = HDRObservation(enabled: enabled)
@@ -97,7 +104,10 @@ final class GammaReconfigurationRecovery {
   func tick() {
     guard !stopped, !inFinalPass else { return }
     guard !asleep() else { cancelPending(); budget.finish(); return }
-    guard budget.begin(at: now()) else { cancelPending(); return }
+    guard budget.begin(at: now()) else {
+      Self.log.debug("Gamma recovery timer stopped: deadline or write allowance exhausted")
+      cancelPending(); return
+    }
     guard epoch() == observedEpoch else { begin(); return }
     let observations = replies.withLock { $0.values }
     for (id, snapshot) in Array(candidates) {
@@ -121,15 +131,21 @@ final class GammaReconfigurationRecovery {
   }
 
   func beginFinalPass() {
+    Self.log.debug("Gamma recovery paused for final topology pass")
     inFinalPass = true
     pendingNotification = false
     cancelPending()
     budget.finish()
   }
 
-  func endFinalPass() {
+  @discardableResult
+  func endFinalPass() -> Task<Void, Never>? {
+    Self.log.debug("Gamma recovery final topology pass ended; pending notification: \(self.pendingNotification, privacy: .public)")
     inFinalPass = false
-    if pendingNotification { pendingNotification = false; begin() }
+    pendingNotification = false
+    // WindowServer has been observed resetting gamma several seconds after
+    // this pass. Watch its fresh successful writes through that settling tail.
+    return begin()
   }
 
   func stop() {

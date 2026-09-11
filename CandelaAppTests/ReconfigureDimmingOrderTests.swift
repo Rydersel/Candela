@@ -9,6 +9,7 @@ import Testing
 private enum ReconfigureEvent: Equatable {
   case hdrCacheDropped
   case hdrRead(CGDirectDisplayID)
+  case recoveryPaused
   case gammaReset
   case shadeRemoveAll
   case gammaRecapture(CGDirectDisplayID)
@@ -30,7 +31,7 @@ private enum ReconfigureEvent: Equatable {
   var isReapply: Bool {
     switch self {
     case .gammaRecapture, .gammaApply, .shadeAlpha: return true
-    case .hdrCacheDropped, .hdrRead, .gammaReset, .shadeRemoveAll: return false
+    case .hdrCacheDropped, .hdrRead, .recoveryPaused, .gammaReset, .shadeRemoveAll: return false
     }
   }
 }
@@ -44,6 +45,7 @@ private enum ReconfigureEvent: Equatable {
 @MainActor
 private final class ReconfigureRecorder: GammaApplying, ShadeRendering, HDRToggling {
   private(set) var events: [ReconfigureEvent] = []
+  func pauseRecovery() { events.append(.recoveryPaused) }
 
   // MARK: - HDRToggling
 
@@ -129,8 +131,16 @@ struct ReconfigureDimmingOrderTests {
         gamma: recorder, shade: recorder, hdr: recorder),
     ]
     await ReconfigureDimming.run(
-      displays: displays, hdrToggling: recorder, gamma: recorder, shade: recorder)
+      displays: displays, hdrToggling: recorder, gamma: recorder, shade: recorder,
+      beforeReset: { recorder.pauseRecovery() })
     return recorder.events
+  }
+
+  @Test("early recovery remains active through HDR preparation")
+  func recoveryPausesOnlyAtTheResetBoundary() async {
+    let events = await run()
+    #expect(events.lastIndex(where: \.isHDRRead)! < events.firstIndex(of: .recoveryPaused)!)
+    #expect(events.firstIndex(of: .recoveryPaused)! + 1 == events.firstIndex(of: .gammaReset)!)
   }
 
   @Test("nothing at all sits between the shade removal and the re-apply")

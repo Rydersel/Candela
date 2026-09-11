@@ -116,6 +116,7 @@ final class GammaController: GammaApplying {
   func recoverySnapshot(on displayID: CGDirectDisplayID) -> RecoverySnapshot? {
     guard let owner = recoveryOwners[displayID] else { return nil }
     guard driver.recoveryIdentity(on: displayID) == owner.identity else {
+      Self.log.debug("Gamma recovery identity unavailable or changed for display \(displayID, privacy: .public)")
       recoveryOwners[displayID] = nil
       return nil
     }
@@ -138,15 +139,31 @@ final class GammaController: GammaApplying {
   /// another app installed. The owner bounds retries to the reconfiguration.
   func recoverBaselineIfReset(_ snapshot: RecoverySnapshot, hdrEnabled: Bool?) -> RecoveryResult {
     let id = snapshot.displayID
-    guard hdrEnabled == false,
-      recoveryOwners[id]?.generation == snapshot.generation,
-      driver.recoveryIdentity(on: id) == snapshot.identity,
-      case let .table(table) = driver.readTable(id, capacity: Self.sampleCapacity)
-    else { return .stopped }
+    guard hdrEnabled == false else {
+      Self.log.debug("Gamma recovery stopped: HDR or unknown HDR state, display \(id, privacy: .public)")
+      return .stopped
+    }
+    guard recoveryOwners[id]?.generation == snapshot.generation else {
+      Self.log.debug("Gamma recovery stopped: superseded owner, display \(id, privacy: .public)")
+      return .stopped
+    }
+    guard driver.recoveryIdentity(on: id) == snapshot.identity else {
+      Self.log.debug("Gamma recovery stopped: identity unavailable or changed, display \(id, privacy: .public)")
+      return .stopped
+    }
+    guard case let .table(table) = driver.readTable(id, capacity: Self.sampleCapacity) else {
+      Self.log.debug("Gamma recovery stopped: table read failed, display \(id, privacy: .public)")
+      return .stopped
+    }
     if Self.matches(table, snapshot.expected) { return .unchanged }
-    guard Self.matches(table, snapshot.baseline), driver.moveEnforcer(to: id),
-      driver.writeTable(id, snapshot.expected) == .success
-    else { return .stopped }
+    guard Self.matches(table, snapshot.baseline) else {
+      Self.log.debug("Gamma recovery stopped: unfamiliar curve, display \(id, privacy: .public)")
+      return .stopped
+    }
+    guard driver.moveEnforcer(to: id), driver.writeTable(id, snapshot.expected) == .success else {
+      Self.log.debug("Gamma recovery stopped: enforcer or table write failed, display \(id, privacy: .public)")
+      return .stopped
+    }
     driver.enforceActivity()
     return .written
   }

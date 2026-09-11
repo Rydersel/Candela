@@ -60,6 +60,36 @@ private final class StubGammaDriver: GammaTableDriving {
 @Suite("Gamma controller baselines")
 @MainActor
 struct GammaControllerTests {
+  @Test func aLateResetAfterTheFinalPassDoesNotWaitForAnotherNotification() async throws {
+    let driver = StubGammaDriver()
+    driver.screens = [2]; driver.identities[2] = "panel-A"
+    let baseline = Self.profileTable()
+    driver.tables[2] = baseline
+    let gamma = GammaController(driver: driver)
+    gamma.applyGammaScale(0.5, on: 2, enforcerOn: 2)
+    let clock = OSAllocatedUnfairLock(initialState: 0.0)
+    let recovery = GammaReconfigurationRecovery(
+      gamma: gamma, targets: { [2] }, readHDR: { _ in false },
+      epoch: { 0 }, asleep: { false }, now: { clock.withLock { $0 } }, interval: 3600)
+    defer { recovery.stop() }
+    recovery.beginFinalPass()
+    gamma.resetAllGamma()
+    gamma.recaptureDefaultTable(on: 2)
+    gamma.applyGammaScale(0.5, on: 2, enforcerOn: 2)
+    driver.tables[2] = baseline.scaled(by: 0.5)
+    let settling = try #require(recovery.endFinalPass())
+    await settling.value
+    recovery.tick()
+    #expect(driver.writes.count == 2)
+    // Measured on hardware: the system reset arrives 3.6 seconds after
+    // the completed pass, before its delayed AppKit notification.
+    clock.withLock { $0 = 3.6 }
+    driver.tables[2] = baseline
+    recovery.tick()
+    #expect(driver.writes.count == 3)
+    #expect(driver.writes.last?.samples == baseline.scaled(by: 0.5))
+  }
+
   @Test func aStaleHDRReplyCannotAuthorizeRecoveryForANewerEpoch() async throws {
     let driver = StubGammaDriver()
     driver.screens = [2]; driver.identities[2] = "panel-A"
@@ -271,9 +301,9 @@ struct GammaControllerTests {
     var budget = GammaRecoveryBudget()
     let allowed0 = budget.begin(at: 10)
     #expect(allowed0)
-    let allowed1 = budget.begin(at: 11.99)
+    let allowed1 = budget.begin(at: 14.99)
     #expect(allowed1)
-    let allowed2 = budget.begin(at: 12)
+    let allowed2 = budget.begin(at: 15)
     #expect(!allowed2)
     budget.finish()
     let allowed3 = budget.begin(at: 20)
