@@ -6,6 +6,7 @@
 
 import AppKit
 import CandelaKit
+import ColorSync
 import os
 
 /// One display's three transfer-table channels, however they were obtained.
@@ -56,6 +57,9 @@ protocol GammaTableDriving: AnyObject {
   /// Park the 1×1 activity window on `displayID`. False when it has no screen.
   func moveEnforcer(to displayID: CGDirectDisplayID) -> Bool
   func enforceActivity()
+  /// A unique, live, unmirrored drawable display. Nil is ineligible for early
+  /// recovery; a CG display number alone can be reassigned during a replug.
+  func recoveryIdentity(on displayID: CGDirectDisplayID) -> String?
 }
 
 /// Software dimming by gamma-table scaling: the display's captured default
@@ -89,6 +93,96 @@ final class GammaController: GammaApplying {
   /// preserved and repeated scales do not compound.
   private var defaultTables: [CGDirectDisplayID: GammaSamples] = [:]
   private var lastAppliedScale: [CGDirectDisplayID: Double] = [:]
+  private var writeGeneration: UInt64 = 0
+  private var recoveryOwners: [CGDirectDisplayID: RecoveryOwner] = [:]
+
+  private struct RecoveryOwner {
+    let identity: String
+    let generation: UInt64
+  }
+
+  struct RecoverySnapshot {
+    let displayID: CGDirectDisplayID
+    fileprivate let identity: String
+    fileprivate let generation: UInt64
+    fileprivate let baseline: GammaSamples
+    fileprivate let expected: GammaSamples
+  }
+
+  enum RecoveryResult { case unchanged, written, superseded, stopped }
+
+  /// Only a previous successful, directly drawn gamma write can authorize
+  /// recovery. Never capture a new baseline while the display is settling.
+  func recoverySnapshot(on displayID: CGDirectDisplayID) -> RecoverySnapshot? {
+    guard let owner = recoveryOwners[displayID] else { return nil }
+    guard driver.recoveryIdentity(on: displayID) == owner.identity else {
+      Self.log.debug("Gamma recovery identity unavailable or changed for display \(displayID, privacy: .public)")
+      recoveryOwners[displayID] = nil
+      return nil
+    }
+    guard let baseline = defaultTables[displayID],
+      let scale = lastAppliedScale[displayID], scale < 1
+    else { return nil }
+    return RecoverySnapshot(
+      displayID: displayID, identity: owner.identity, generation: owner.generation,
+      baseline: baseline, expected: baseline.scaled(by: CGGammaValue(scale)))
+  }
+
+  /// A failed recovery must stay stopped across repeated notifications. An old
+  /// snapshot cannot revoke ownership established by a newer brightness write.
+  func cancelRecovery(_ snapshot: RecoverySnapshot) {
+    guard recoveryOwners[snapshot.displayID]?.generation == snapshot.generation else { return }
+    recoveryOwners[snapshot.displayID] = nil
+  }
+
+  /// Reassert only a recognizable ColorSync reset, never an arbitrary curve
+  /// another app installed. The owner bounds retries to the reconfiguration.
+  func recoverBaselineIfReset(_ snapshot: RecoverySnapshot, hdrEnabled: Bool?) -> RecoveryResult {
+    let id = snapshot.displayID
+    guard hdrEnabled == false else {
+      Self.log.debug("Gamma recovery stopped: HDR or unknown HDR state, display \(id, privacy: .public)")
+      return .stopped
+    }
+    guard driver.recoveryIdentity(on: id) == snapshot.identity else {
+      Self.log.debug("Gamma recovery stopped: identity unavailable or changed, display \(id, privacy: .public)")
+      return .stopped
+    }
+    guard let owner = recoveryOwners[id], owner.identity == snapshot.identity else { return .stopped }
+    guard owner.generation == snapshot.generation else {
+      // The topology rebuild can write after recovery captured its snapshot.
+      // Report the handoff without writing from the stale snapshot or HDR read.
+      Self.log.debug("Gamma recovery owner superseded for display \(id, privacy: .public)")
+      return .superseded
+    }
+    guard case let .table(table) = driver.readTable(id, capacity: Self.sampleCapacity) else {
+      Self.log.debug("Gamma recovery stopped: table read failed, display \(id, privacy: .public)")
+      return .stopped
+    }
+    if Self.matches(table, snapshot.expected) { return .unchanged }
+    guard Self.matches(table, snapshot.baseline) else {
+      Self.log.debug("Gamma recovery stopped: unfamiliar curve, display \(id, privacy: .public)")
+      return .stopped
+    }
+    guard driver.moveEnforcer(to: id), driver.writeTable(id, snapshot.expected) == .success else {
+      Self.log.debug("Gamma recovery stopped: enforcer or table write failed, display \(id, privacy: .public)")
+      return .stopped
+    }
+    driver.enforceActivity()
+    return .written
+  }
+
+  private static func matches(_ lhs: GammaSamples, _ rhs: GammaSamples) -> Bool {
+    // Full RGB shape, not just the peak used by the interference warning.
+    // Allow the transfer table's small quantization error on readback.
+    let tolerance: CGGammaValue = 1.0 / 1024.0
+    for (a, b) in zip([lhs.red, lhs.green, lhs.blue], [rhs.red, rhs.green, rhs.blue]) {
+      guard !a.isEmpty, a.count == b.count else { return false }
+      for (x, y) in zip(a, b) {
+        guard x.isFinite, y.isFinite, abs(x - y) <= tolerance else { return false }
+      }
+    }
+    return true
+  }
 
   /// Displays whose baseline capture already failed and was already logged.
   ///
@@ -130,6 +224,8 @@ final class GammaController: GammaApplying {
     _ scale: Double, baseline: GammaSamples, on displayID: CGDirectDisplayID,
     enforcerOn drawableDisplayID: CGDirectDisplayID
   ) -> Bool {
+    writeGeneration &+= 1
+    recoveryOwners[displayID] = nil
     // Scales above 1 would push table entries out of the API's 0…1 range (and
     // gamma cannot brighten a panel past its own output anyway).
     let clamped = min(max(scale, 0), 1)
@@ -164,6 +260,9 @@ final class GammaController: GammaApplying {
     }
     self.driver.enforceActivity()
     self.lastAppliedScale[displayID] = clamped
+    if displayID == drawableDisplayID, let identity = driver.recoveryIdentity(on: displayID) {
+      recoveryOwners[displayID] = RecoveryOwner(identity: identity, generation: writeGeneration)
+    }
     return true
   }
 
@@ -189,6 +288,7 @@ final class GammaController: GammaApplying {
   /// is installed). Capturing while dimmed bakes the dimming into the baseline
   /// and the display can never get back to full brightness.
   func recaptureDefaultTable(on displayID: CGDirectDisplayID) {
+    recoveryOwners[displayID] = nil
     self.defaultTables.removeValue(forKey: displayID)
     // The previous scale was measured against the previous baseline; keeping it
     // would make `verifyTableIntact` compare against a stale reference.
@@ -200,6 +300,9 @@ final class GammaController: GammaApplying {
   }
 
   func resetAllGamma() {
+    // Invalidate before touching the system table. A recovery tick must never
+    // re-dim the table the final pass is about to capture as its baseline.
+    recoveryOwners.removeAll()
     self.driver.restoreColorSyncSettings()
     // Baselines stay valid (they were captured from the OS-owned table), but
     // nothing of ours is installed anymore.
@@ -252,6 +355,24 @@ final class GammaController: GammaApplying {
 @MainActor
 final class CoreGraphicsGammaDriver: GammaTableDriving {
   private static let log = Logger(subsystem: "com.rydersel.Candela", category: "gamma")
+
+  func recoveryIdentity(on displayID: CGDirectDisplayID) -> String? {
+    guard CGDisplayIsOnline(displayID) != 0, CGDisplayIsInMirrorSet(displayID) == 0,
+      NSScreen.screens.contains(where: { $0.displayID == displayID }),
+      let uuid = CGDisplayCreateUUIDFromDisplayID(displayID)?.takeRetainedValue()
+    else { return nil }
+    var ids = [CGDirectDisplayID](repeating: 0, count: 32)
+    var count: UInt32 = 0
+    guard CGGetOnlineDisplayList(UInt32(ids.count), &ids, &count) == .success,
+      count < ids.count
+    else { return nil }
+    let matches = ids.prefix(Int(count)).filter { id in
+      guard let other = CGDisplayCreateUUIDFromDisplayID(id)?.takeRetainedValue() else { return false }
+      return CFEqual(uuid, other)
+    }
+    guard matches == [displayID] else { return nil }
+    return CFUUIDCreateString(nil, uuid) as String
+  }
 
   func readTable(_ displayID: CGDirectDisplayID, capacity: UInt32) -> GammaReadOutcome {
     var red = [CGGammaValue](repeating: 0, count: Int(capacity))
