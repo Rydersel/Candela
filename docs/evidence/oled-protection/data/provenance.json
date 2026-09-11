@@ -1,0 +1,36 @@
+{
+  "publication": "OLED protection evidence appendix",
+  "date": "2026-09-11",
+  "original_recording": {
+    "filename": "IMG_0275.MOV",
+    "bytes": 4590168396,
+    "sha256": "1601dd1f2d69fe17d6783bcd953294a8e10652a6407a58b22808ba4a5c284976",
+    "included": false
+  },
+  "original_capture_manifest_sha256": "5668bbf439cf044a8176402ee78058e46d28bfa706e0c85e0045994854c6a583",
+  "editorial_changes": [
+    "Public capture and hypothesis manifests have new explanatory notes. Measurement records and copied CSV values are unchanged.",
+    "positions.csv is a readable projection of display.offset_px records, preserving order and integer coordinates.",
+    "Image and SVG assets are copied without modification."
+  ],
+  "files": {
+    "assets/calibration.png": "4b7707ef3c0c7c39ad7693c83db995dd23f731be7e1f9394e822c977cd39efeb",
+    "assets/camera-method.svg": "e3ebfc085c56ad95d9257c38d22749106a6ab53fdf212dacc3cc27c8472c0d32",
+    "assets/firmware-boundary.svg": "6a74c2f1e250be74cd765e36fe39de2d704c356086381cab8c1fe66fe8cdfd9c",
+    "assets/samsung-pipeline.svg": "484f6174f577f80fdc3c3b92dedc2d1abc3ceed79a93e0589e60dcc4ab295289",
+    "assets/simulator-comparison.svg": "019114749e74c8a3af62a9e4e68151c27d80d3629f11bceb20e9fa79dd2ddf8e",
+    "data/capture.json": "f112af0f33683595a43a3880478f9a531df5be85897c1e89fdb5bfbd77d2a018",
+    "data/capture.svg": "d16b56420af9092de58575e9634d18dd5ca644f3cfb0b4fbf34884f48e003e37",
+    "data/hypotheses.json": "ca1eb5cd21e2453992b8e336765208ca5d8c6e15440eece492c53ba7786e72db",
+    "data/observations.jsonl": "15de21441ef0873cd404120db6f48bb3d49833439b3c665494e9106c0cdaceb2",
+    "data/positions.csv": "38c642aebbced79a8082871069191dbcfb52fcb0c0b38cff1a0f4ce24596d699",
+    "data/reference-transition-windows.csv": "ebbd50768ba6ada818a51a361f01215802189148ccc3f13a7485f70ee269c3dd",
+    "data/setup-calibration.csv": "d3d005cab66f24925e2ec46f22a7d98f7098f2ce6a2d3ad8c5c2b717b1c5470b",
+    "data/setup.svg": "5976427bbc34aecc4c6b5064f808c3f89507347f08d8f69172ac42e2ecfe76b2",
+    "data/simulator-v20.csv": "be20d6a50108d8d3956c95e509ac58d9bdfbfba27ae455cf7a1149783fa89a4e",
+    "data/simulator-v22.csv": "082c56d9f42ee6c32acc39a612c7b61fdd0b2c233126bed05411330b581d297d",
+    "data/table-diagnostics.json": "f57b0e0c5e9c9334589b522f6794e78db07fafd4bae2c6b86e908aae6949acfd",
+    "data/transition-measurements.csv": "923819feacb8a8025dbb4d5e482c8f1bc672c6ccf1b9c1e42d9e3dfded1ccc09",
+    "data/.gitattributes": "63f2f60a395f6408f508dc41a254fe401f640936bebdbc6924d9248225f43550"
+  }
+}

@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 800" width="1400" height="800" role="img" aria-label="A camera tracks display motion and a stationary bezel reference independently. Subtract reference motion and apply same-clip calibration to measure panel shift in source pixels.">
+<rect x="0" y="0" width="1400" height="800" fill="#09090b"/>
+<g font-family="system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">
+<text x="64" y="72" font-size="38" font-weight="500" fill="#f4efe7">Measuring motion after the frame leaves the Mac</text>
+<text x="64" y="114" font-size="23" font-weight="400" fill="#a7a29a">Track the active image and a stationary physical reference in the same clip.</text>
+<line x1="64" y1="148" x2="1336" y2="148" stroke="#343238" stroke-width="1"/>
+<rect x="64" y="208" width="246" height="370" fill="#101014" stroke="#56535a"/>
+<rect x="80" y="252" width="214" height="260" fill="#18171c"/>
+<text x="187" y="237" font-size="23" font-weight="400" fill="#f4efe7" text-anchor="middle">iPhone camera</text>
+<rect x="108" y="294" width="158" height="170" fill="#09090b" stroke="#5e5954"/>
+<rect x="206" y="407" width="28" height="12" fill="#e8a13a"/>
+<line x1="121" y1="477" x2="251" y2="477" stroke="#72e0b5" stroke-width="3"/>
+<text x="64" y="625" font-size="25" font-weight="400" fill="#a7a29a">4K / 60 fps</text>
+<line x1="330" y1="280" x2="488" y2="222" stroke="#56535a" stroke-width="1" stroke-dasharray="5 7"/>
+<line x1="330" y1="520" x2="488" y2="568" stroke="#56535a" stroke-width="1" stroke-dasharray="5 7"/>
+<rect x="508" y="202" width="828" height="392" fill="#101014" stroke="#56535a"/>
+<rect x="536" y="228" width="716" height="304" fill="#19191d"/>
+<rect x="1252" y="228" width="56" height="304" fill="#242426"/>
+<line x1="1269" y1="252" x2="1294" y2="252" stroke="#65615c" stroke-width="3"/>
+<line x1="1269" y1="294" x2="1294" y2="294" stroke="#65615c" stroke-width="3"/>
+<line x1="1269" y1="336" x2="1294" y2="336" stroke="#65615c" stroke-width="3"/>
+<line x1="1269" y1="378" x2="1294" y2="378" stroke="#65615c" stroke-width="3"/>
+<line x1="1269" y1="420" x2="1294" y2="420" stroke="#65615c" stroke-width="3"/>
+<line x1="1269" y1="462" x2="1294" y2="462" stroke="#65615c" stroke-width="3"/>
+<line x1="1269" y1="504" x2="1294" y2="504" stroke="#65615c" stroke-width="3"/>
+<rect x="976" y="402" width="196" height="92" fill="none" stroke="#e8a13a"/>
+<rect x="1044" y="442" width="64" height="16" fill="#e8a13a"/>
+<line x1="1058" y1="450" x2="1094" y2="450" stroke="#09090b" stroke-width="3"/>
+<rect x="1262" y="246" width="40" height="264" fill="none" stroke="#72e0b5"/>
+<text x="552" y="274" font-size="26" font-weight="400" fill="#f4efe7">Active image</text>
+<text x="952" y="342" font-size="24" font-weight="400" fill="#e8a13a">Display tracking region</text>
+<line x1="1074" y1="355" x2="1074" y2="392" stroke="#e8a13a" stroke-width="1"/>
+<text x="536" y="571" font-size="22" font-weight="400" fill="#a7a29a">Bottom-right monitor crop</text>
+<line x1="1282" y1="602" x2="1282" y2="630" stroke="#72e0b5" stroke-width="1"/>
+<line x1="1282" y1="630" x2="952" y2="630" stroke="#72e0b5" stroke-width="1"/>
+<text x="928" y="638" font-size="24" font-weight="400" fill="#72e0b5" text-anchor="end">Stationary reference</text>
+<line x1="64" y1="682" x2="1336" y2="682" stroke="#343238" stroke-width="1"/>
+<text x="64" y="735" font-size="27" font-weight="400" fill="#e8a13a">Display motion</text>
+<text x="289" y="735" font-size="27" font-weight="400" fill="#a7a29a">−</text>
+<text x="334" y="735" font-size="27" font-weight="400" fill="#72e0b5">Reference motion</text>
+<text x="606" y="735" font-size="27" font-weight="400" fill="#a7a29a">=</text>
+<text x="656" y="735" font-size="27" font-weight="500" fill="#f4efe7">Panel shift</text>
+<line x1="836" y1="726" x2="916" y2="726" stroke="#e8a13a" stroke-width="2"/>
+<path d="M906 720L916 726L906 732" fill="none" stroke="#e8a13a" stroke-width="2"/>
+<text x="948" y="719" font-size="24" font-weight="400" fill="#a7a29a">Same-clip calibration</text>
+<text x="948" y="755" font-size="24" font-weight="400" fill="#a7a29a">converts to source pixels</text>
+</g>
+</svg>

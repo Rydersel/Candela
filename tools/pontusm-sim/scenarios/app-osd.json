@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "name": "app-osd",
+  "description": "Concurrent app and OSD presence drives the source 0..512 uniform-duty limiter, then releases it.",
+  "record_every": 64,
+  "phases": [
+    {
+      "name": "app-visible",
+      "ticks": 520,
+      "inputs": {
+        "app_area": 1,
+        "osd_area": 1,
+        "mean_rows": {"fill": 100},
+        "max_rows": {"fill": 200}
+      },
+      "snapshots": {"1": "attack-start", "512": "counter-cap"}
+    },
+    {
+      "name": "app-hidden",
+      "ticks": 520,
+      "inputs": {
+        "mean_rows": {"fill": 100},
+        "max_rows": {"fill": 200}
+      },
+      "snapshots": {"512": "released"}
+    }
+  ]
+}

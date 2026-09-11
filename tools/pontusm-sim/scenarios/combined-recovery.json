@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "name": "combined-recovery",
+  "description": "Overlapping local, app/OSD, and banner state followed by moving and full-black recovery.",
+  "record_every": 100,
+  "phases": [
+    {
+      "name": "combined-static",
+      "ticks": 900,
+      "inputs": {
+        "max_columns": {"fill": 821},
+        "mean_rows": {"fill": 300},
+        "max_rows": {"fill": 901},
+        "banner_rgb": {"fill": [500, 500, 500]},
+        "region_gains": {"fill": 110},
+        "app_area": 1,
+        "osd_area": 1,
+        "image_mean": 512,
+        "motion": false
+      },
+      "snapshots": {"1": "combined-start", "512": "app-cap", "900": "combined-end"}
+    },
+    {
+      "name": "moving-recovery",
+      "ticks": 600,
+      "inputs": {
+        "mean_rows": {"fill": 200},
+        "max_rows": {"fill": 500},
+        "motion": true,
+        "image_mean": 512
+      },
+      "snapshots": {"600": "moving-end"}
+    },
+    {
+      "name": "black-clear",
+      "ticks": 25,
+      "inputs": {"black_probability": 1023, "movie_mode": true, "motion": false},
+      "snapshots": {"25": "all-clear"}
+    }
+  ]
+}

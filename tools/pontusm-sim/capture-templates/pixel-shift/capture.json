@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "capture_id": "synthetic-template-mag341cqp-pixel-shift",
+  "device": {
+    "model": "MSI MAG 341CQP",
+    "firmware": "FW.041",
+    "panel": "QMC340CC01-D01"
+  },
+  "timebase": {
+    "unit": "us",
+    "uncertainty_us": 1000
+  },
+  "observations": {
+    "path": "observations.jsonl",
+    "sha256": "1d052cd52d9e736662eba77bfc76c319f043d82553bff382716414183b1dd3e0"
+  },
+  "calibration": {
+    "x_sign": 1,
+    "y_sign": 1,
+    "swap_axes": false
+  },
+  "notes": "synthetic-template: all identities, controls, timestamps, quality labels and 33 positions are illustrative placeholders, not MSI hardware observations. The repeated square and one-second cadence do not claim a PontusM orbit or MSI speed mapping. Replace the complete stream and metadata with recorded evidence, then calculate its exact-byte SHA-256."
+}

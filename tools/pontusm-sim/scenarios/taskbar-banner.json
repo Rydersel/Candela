@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "name": "taskbar-banner",
+  "description": "Stable lower-screen statistics exercise the version-20 banner probability and 180-slot history.",
+  "record_every": 100,
+  "phases": [
+    {
+      "name": "banner-static",
+      "ticks": 1000,
+      "inputs": {
+        "max_columns": {"fill": 821},
+        "max_rows": {"fill": 901},
+        "banner_rgb": {"fill": [500, 500, 500]},
+        "motion": false
+      },
+      "snapshots": {"1": "banner-start", "402": "first-history-hit", "1000": "banner-end"}
+    },
+    {
+      "name": "banner-gone",
+      "ticks": 500,
+      "inputs": {"motion": true},
+      "snapshots": {"500": "banner-recovery"}
+    }
+  ]
+}

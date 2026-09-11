@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 758" width="1400" height="758" role="img" aria-label="Two plots of the same simulation input: v20 local strength settles at 512 and minimum duty 127; v22 reaches 1020 and duty 1.">
+<rect x="0" y="0" width="1400" height="758" fill="#09090b"/>
+<g font-family="system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">
+<text x="64" y="72" font-size="38" font-weight="500" fill="#f4efe7">The same candidate map, two source generations</text>
+<text x="64" y="114" font-size="23" font-weight="400" fill="#a7a29a">Source-translated simulation over 1,100 ticks. This does not predict the MSI panel.</text>
+<line x1="64" y1="148" x2="1336" y2="148" stroke="#343238" stroke-width="1"/>
+<text x="154" y="194" font-size="26" font-weight="500" fill="#f4efe7">Local strength</text>
+<line x1="154" y1="222" x2="154" y2="412" stroke="#65615c" stroke-width="1"/>
+<line x1="154" y1="412" x2="1134" y2="412" stroke="#65615c" stroke-width="1"/>
+<text x="130" y="230.0" font-size="22" font-weight="400" fill="#a7a29a" text-anchor="end">1,024</text>
+<line x1="154" y1="222.0" x2="1134" y2="222.0" stroke="#343238" stroke-width="1"/>
+<text x="130" y="325.0" font-size="22" font-weight="400" fill="#a7a29a" text-anchor="end">512</text>
+<line x1="154" y1="317.0" x2="1134" y2="317.0" stroke="#343238" stroke-width="1"/>
+<text x="130" y="420.0" font-size="22" font-weight="400" fill="#a7a29a" text-anchor="end">0</text>
+<line x1="154" y1="412.0" x2="1134" y2="412.0" stroke="#343238" stroke-width="1"/>
+<polyline points="154.89,411.80 243.09,393.40 332.18,374.90 421.27,356.30 510.36,337.80 599.45,319.20 688.55,317.00 777.64,317.00 866.73,317.00 955.82,317.00 1044.91,317.00 1134.00,317.00" fill="none" stroke="#a7a29a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="154.89,411.80 243.09,393.40 332.18,374.90 421.27,356.30 510.36,337.80 599.45,319.20 688.55,300.70 777.64,282.10 866.73,263.60 955.82,245.00 1044.91,226.50 1134.00,222.70" fill="none" stroke="#e8a13a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="1134" cy="222.7" r="5" fill="#e8a13a"/>
+<text x="1160" y="230.7" font-size="24" font-weight="400" fill="#e8a13a">v22 · 1,020</text>
+<circle cx="1134" cy="317" r="5" fill="#a7a29a"/>
+<text x="1160" y="325" font-size="24" font-weight="400" fill="#a7a29a">v20 · 512</text>
+<line x1="154.0" y1="412" x2="154.0" y2="419" stroke="#65615c" stroke-width="1"/>
+<line x1="599.4545454545455" y1="412" x2="599.4545454545455" y2="419" stroke="#65615c" stroke-width="1"/>
+<line x1="1134.0" y1="412" x2="1134.0" y2="419" stroke="#65615c" stroke-width="1"/>
+<text x="154" y="478" font-size="26" font-weight="500" fill="#f4efe7">Minimum regional duty</text>
+<line x1="154" y1="506" x2="154" y2="676" stroke="#65615c" stroke-width="1"/>
+<line x1="154" y1="676" x2="1134" y2="676" stroke="#65615c" stroke-width="1"/>
+<text x="130" y="514.0" font-size="22" font-weight="400" fill="#a7a29a" text-anchor="end">255</text>
+<line x1="154" y1="506.0" x2="1134" y2="506.0" stroke="#343238" stroke-width="1"/>
+<text x="130" y="599.0" font-size="22" font-weight="400" fill="#a7a29a" text-anchor="end">127</text>
+<line x1="154" y1="591.0" x2="1134" y2="591.0" stroke="#343238" stroke-width="1"/>
+<text x="130" y="684.0" font-size="22" font-weight="400" fill="#a7a29a" text-anchor="end">0</text>
+<line x1="154" y1="676.0" x2="1134" y2="676.0" stroke="#343238" stroke-width="1"/>
+<polyline points="154.89,506.70 243.09,522.70 332.18,539.30 421.27,556.00 510.36,572.70 599.45,589.30 688.55,591.30 777.64,591.30 866.73,591.30 955.82,591.30 1044.91,591.30 1134.00,591.30" fill="none" stroke="#a7a29a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="154.89,506.00 243.09,522.70 332.18,539.30 421.27,556.00 510.36,572.70 599.45,589.30 688.55,605.30 777.64,622.00 866.73,638.70 955.82,655.30 1044.91,672.00 1134.00,675.30" fill="none" stroke="#e8a13a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="1134" cy="591.3" r="5" fill="#a7a29a"/>
+<text x="1160" y="599.3" font-size="24" font-weight="400" fill="#a7a29a">v20 · 127</text>
+<circle cx="1134" cy="675.3" r="5" fill="#e8a13a"/>
+<text x="1160" y="683.3" font-size="24" font-weight="400" fill="#e8a13a">v22 · 1</text>
+<line x1="154.0" y1="676" x2="154.0" y2="683" stroke="#65615c" stroke-width="1"/>
+<text x="154.0" y="713" font-size="22" font-weight="400" fill="#a7a29a" text-anchor="middle">0</text>
+<line x1="599.4545454545455" y1="676" x2="599.4545454545455" y2="683" stroke="#65615c" stroke-width="1"/>
+<text x="599.4545454545455" y="713" font-size="22" font-weight="400" fill="#a7a29a" text-anchor="middle">500</text>
+<line x1="1134.0" y1="676" x2="1134.0" y2="683" stroke="#65615c" stroke-width="1"/>
+<text x="1134.0" y="713" font-size="22" font-weight="400" fill="#a7a29a" text-anchor="middle">1,100</text>
+<text x="1336" y="714" font-size="22" font-weight="400" fill="#a7a29a" text-anchor="end">ticks</text>
+</g>
+</svg>

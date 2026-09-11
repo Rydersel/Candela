@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "name": "v22-local-delta",
+  "description": "Exercises source-visible v22 local protection changes: the 768 pattern knee, dark-image target reduction, High-menu LPC shaping, and factory exclusion.",
+  "record_every": 100,
+  "phases": [
+    {
+      "name": "pattern-knee",
+      "ticks": 1100,
+      "inputs": {
+        "mean_rows": {"fill": 100},
+        "max_rows": {"fill": 150},
+        "mean_columns": {"fill": 100},
+        "max_columns": {"fill": 150},
+        "region_gains": {"fill": 0},
+        "pattern_probability": 769,
+        "image_mean": 256,
+        "motion": false,
+        "logo_brightness": "low"
+      },
+      "snapshots": {"1100": "pattern-knee-steady-state"}
+    },
+    {
+      "name": "dark-image",
+      "ticks": 10,
+      "inputs": {
+        "mean_rows": {"fill": 100},
+        "max_rows": {"fill": 150},
+        "mean_columns": {"fill": 100},
+        "max_columns": {"fill": 150},
+        "region_gains": {"fill": 100},
+        "image_mean": 0,
+        "motion": true,
+        "logo_brightness": "low"
+      },
+      "snapshots": {"10": "dark-target"}
+    },
+    {
+      "name": "high-menu-lpc",
+      "ticks": 40,
+      "inputs": {
+        "mean_rows": {"fill": 100},
+        "max_rows": {"fill": 150},
+        "mean_columns": {"fill": 100},
+        "max_columns": {"fill": 150},
+        "region_gains": {"fill": 100},
+        "image_mean": 256,
+        "motion": true,
+        "logo_brightness": "high",
+        "lpc_shape1_gain": 16,
+        "lpc_shape2_gain": 16
+      },
+      "snapshots": {"40": "high-menu-lpc-map"}
+    },
+    {
+      "name": "factory-exclusion",
+      "ticks": 70,
+      "inputs": {
+        "mean_rows": {"fill": 100},
+        "max_rows": {"fill": 150},
+        "mean_columns": {"fill": 100},
+        "max_columns": {"fill": 150},
+        "region_gains": {"fill": 100},
+        "image_mean": 256,
+        "motion": true,
+        "factory_mode": true,
+        "logo_brightness": "low"
+      },
+      "snapshots": {"70": "factory-release"}
+    }
+  ]
+}

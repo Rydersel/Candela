@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "notes": "synthetic-template only; this invented square path is not an MSI capture or an official PontusM orbit. These examples predeclare comparisons, not hardware claims. Authenticate official tables separately before orbit comparison. Normal orbit equality cannot distinguish v18 from v20.",
+  "hypotheses": [
+    {
+      "id": "synthetic-normal-v18",
+      "type": "orbit_sequence",
+      "trial": "synthetic-template-pixel-shift",
+      "accepted_qualities": ["measured"],
+      "version": 18,
+      "orbit": "normal",
+      "coordinates": "absolute",
+      "sequences": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35]
+    },
+    {
+      "id": "synthetic-normal-v20",
+      "type": "orbit_sequence",
+      "trial": "synthetic-template-pixel-shift",
+      "accepted_qualities": ["measured"],
+      "version": 20,
+      "orbit": "normal",
+      "coordinates": "absolute",
+      "sequences": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35]
+    },
+    {
+      "id": "synthetic-one-second-cadence",
+      "type": "cadence_interval",
+      "trial": "synthetic-template-pixel-shift",
+      "accepted_qualities": ["measured"],
+      "channel": "display.offset_px",
+      "sequences": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35],
+      "minimum_us": 998000,
+      "maximum_us": 1002000
+    }
+  ]
+}

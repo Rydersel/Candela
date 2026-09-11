@@ -102,6 +102,18 @@ Every release is tested on as many different displays, connections and Macs as w
 - [Tested hardware](docs/HARDWARE.md): the monitors, connections and Macs Candela has been used on, one row per report.
 - [Contributing](CONTRIBUTING.md): building from source, running the suites, and what a change is expected to state about its own verification.
 
+## OLED protection research
+
+I reverse-engineered my MSI MAG 341CQP to understand which protection jobs its firmware already handles and what desktop software can add. The [research appendix](docs/evidence/oled-protection/README.md) presents the evidence as five reports:
+
+- [MSI firmware boundary](docs/evidence/oled-protection/firmware-boundary.md): recovered panel-care controls and the limits of the public update.
+- [Samsung source provenance](docs/evidence/oled-protection/samsung-source.md): the three official releases, source excerpts and verification hashes.
+- [Simulator comparison](docs/evidence/oled-protection/simulator-comparison.md): how two generations respond differently to the same controlled input.
+- [Camera measurement](docs/evidence/oled-protection/camera-measurement.md): the setup, calibration, uncertainty and 43 decoded positions.
+- [Orbit comparison](docs/evidence/oled-protection/orbit-comparison.md): why the measured route rejects exact execution of the published table, despite local matches.
+
+The reports distinguish physical observations, source analysis and model predictions. They explain complementary roles for desktop software and the monitor; they do not establish a measured improvement in panel life. The [simulator and tests](tools/pontusm-sim/README.md) and documented data supplements are available for checking the results.
+
 ## Credits
 
 - [MonitorControl](https://github.com/MonitorControl/MonitorControl): parts of the display-control engine, adapted under the MIT license. Details in [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).

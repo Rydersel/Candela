@@ -1,0 +1,610 @@
+{
+  "normal_calibrated_forward_detail": {
+    "second_coordinate": [
+      0,
+      0
+    ],
+    "start_coordinate": [
+      0,
+      -1
+    ],
+    "third_coordinate": [
+      1,
+      -1
+    ],
+    "third_relative_expected": [
+      1,
+      0
+    ],
+    "third_relative_observed": [
+      -1,
+      1
+    ],
+    "two_position_surviving_starts": [
+      1955
+    ]
+  },
+  "qualification": "Post-hoc sensitivity diagnostic. Only the predeclared forward calibrated normal-table comparison is primary. Reverse traversal is not used by the authenticated published runtime.",
+  "tables": {
+    "orbit_table": {
+      "directions": {
+        "forward": {
+          "-x,-y": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              1956,
+              1,
+              0
+            ]
+          },
+          "-x,y": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              1956,
+              1,
+              0
+            ]
+          },
+          "-y,-x": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              1956,
+              0
+            ]
+          },
+          "-y,x": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              1956,
+              0
+            ]
+          },
+          "x,-y": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              1956,
+              1,
+              0
+            ]
+          },
+          "x,y": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              1956,
+              1,
+              0
+            ]
+          },
+          "y,-x": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              1956,
+              0
+            ]
+          },
+          "y,x": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              1956,
+              0
+            ]
+          }
+        },
+        "reverse": {
+          "-x,-y": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              1956,
+              1,
+              0
+            ]
+          },
+          "-x,y": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              1956,
+              1,
+              0
+            ]
+          },
+          "-y,-x": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              1956,
+              0
+            ]
+          },
+          "-y,x": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              1956,
+              0
+            ]
+          },
+          "x,-y": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              1956,
+              1,
+              0
+            ]
+          },
+          "x,y": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              1956,
+              1,
+              0
+            ]
+          },
+          "y,-x": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              1956,
+              0
+            ]
+          },
+          "y,x": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              1956,
+              0
+            ]
+          }
+        }
+      },
+      "position_count": 1956
+    },
+    "orbit_table_24x16": {
+      "directions": {
+        "forward": {
+          "-x,-y": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              2980,
+              0
+            ]
+          },
+          "-x,y": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              2980,
+              0
+            ]
+          },
+          "-y,-x": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              2980,
+              1,
+              0
+            ]
+          },
+          "-y,x": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              2980,
+              1,
+              0
+            ]
+          },
+          "x,-y": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              2980,
+              0
+            ]
+          },
+          "x,y": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              2980,
+              0
+            ]
+          },
+          "y,-x": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              2980,
+              3,
+              0
+            ]
+          },
+          "y,x": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              2980,
+              3,
+              0
+            ]
+          }
+        },
+        "reverse": {
+          "-x,-y": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              2980,
+              0
+            ]
+          },
+          "-x,y": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              2980,
+              0
+            ]
+          },
+          "-y,-x": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              2980,
+              3,
+              0
+            ]
+          },
+          "-y,x": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              2980,
+              3,
+              0
+            ]
+          },
+          "x,-y": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              2980,
+              0
+            ]
+          },
+          "x,y": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              2980,
+              0
+            ]
+          },
+          "y,-x": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              2980,
+              1,
+              0
+            ]
+          },
+          "y,x": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              2980,
+              1,
+              0
+            ]
+          }
+        }
+      },
+      "position_count": 2980
+    },
+    "orbit_table_32x16": {
+      "directions": {
+        "forward": {
+          "-x,-y": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              4102,
+              32,
+              0
+            ]
+          },
+          "-x,y": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              4102,
+              32,
+              0
+            ]
+          },
+          "-y,-x": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              4102,
+              1,
+              0
+            ]
+          },
+          "-y,x": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              4102,
+              1,
+              0
+            ]
+          },
+          "x,-y": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              4102,
+              32,
+              0
+            ]
+          },
+          "x,y": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              4102,
+              32,
+              0
+            ]
+          },
+          "y,-x": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              4102,
+              1,
+              0
+            ]
+          },
+          "y,x": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              4102,
+              1,
+              0
+            ]
+          }
+        },
+        "reverse": {
+          "-x,-y": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              4102,
+              32,
+              0
+            ]
+          },
+          "-x,y": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              4102,
+              32,
+              0
+            ]
+          },
+          "-y,-x": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              4102,
+              1,
+              0
+            ]
+          },
+          "-y,x": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              4102,
+              1,
+              0
+            ]
+          },
+          "x,-y": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              4102,
+              32,
+              0
+            ]
+          },
+          "x,y": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              4102,
+              32,
+              0
+            ]
+          },
+          "y,-x": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              4102,
+              1,
+              0
+            ]
+          },
+          "y,x": {
+            "first_zero_position_one_based": 3,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              4102,
+              1,
+              0
+            ]
+          }
+        }
+      },
+      "position_count": 4102
+    },
+    "orbit_table_ew": {
+      "directions": {
+        "forward": {
+          "-x,-y": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              13,
+              0
+            ]
+          },
+          "-x,y": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              13,
+              0
+            ]
+          },
+          "-y,-x": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              13,
+              0
+            ]
+          },
+          "-y,x": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              13,
+              0
+            ]
+          },
+          "x,-y": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              13,
+              0
+            ]
+          },
+          "x,y": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              13,
+              0
+            ]
+          },
+          "y,-x": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              13,
+              0
+            ]
+          },
+          "y,x": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              13,
+              0
+            ]
+          }
+        },
+        "reverse": {
+          "-x,-y": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              13,
+              0
+            ]
+          },
+          "-x,y": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              13,
+              0
+            ]
+          },
+          "-y,-x": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              13,
+              0
+            ]
+          },
+          "-y,x": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              13,
+              0
+            ]
+          },
+          "x,-y": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              13,
+              0
+            ]
+          },
+          "x,y": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              13,
+              0
+            ]
+          },
+          "y,-x": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              13,
+              0
+            ]
+          },
+          "y,x": {
+            "first_zero_position_one_based": 2,
+            "full_survivors": 0,
+            "survivors_by_positions_consumed_through_elimination": [
+              13,
+              0
+            ]
+          }
+        }
+      },
+      "position_count": 13
+    }
+  }
+}

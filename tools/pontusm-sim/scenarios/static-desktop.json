@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "name": "static-desktop",
+  "description": "A persistent bright desktop region followed by moving-content recovery.",
+  "record_every": 100,
+  "phases": [
+    {
+      "name": "static",
+      "ticks": 1100,
+      "inputs": {
+        "mean_columns": {"fill": 300},
+        "max_columns": {"fill": 500},
+        "mean_rows": {"fill": 300},
+        "max_rows": {"fill": 500},
+        "region_gains": {"fill": 210, "set": {"112": 80, "113": 80, "127": 80, "128": 80}},
+        "image_mean": 512,
+        "motion": false,
+        "logo_brightness": "low"
+      },
+      "snapshots": {"1": "static-start", "1024": "full-strength", "1100": "static-end"}
+    },
+    {
+      "name": "recovery",
+      "ticks": 100,
+      "inputs": {
+        "mean_columns": {"fill": 200},
+        "max_columns": {"fill": 500},
+        "mean_rows": {"fill": 200},
+        "max_rows": {"fill": 500},
+        "region_gains": {"fill": 255},
+        "image_mean": 512,
+        "motion": true
+      },
+      "snapshots": {"100": "recovered"}
+    }
+  ]
+}
