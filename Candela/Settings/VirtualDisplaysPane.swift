@@ -503,9 +503,7 @@ struct VirtualDisplaysPane: View {
             .keyboardShortcut(.defaultAction)
           Button("Remove", role: .destructive) { remove(slot: slot) }
         } message: {
-          // A later Create mints a fresh identity, so macOS meets a display it has
-          // not seen; the message says so.
-          Text("The display stops and this slot goes back to its defaults: the name, the size, Retina and Come Back at Launch. Any windows on it move to your other displays. A virtual display created here afterwards counts as a new one, so macOS does not restore this display's place in your arrangement.")
+          Text("The display stops and this slot goes back to its defaults: the name, the size, Retina and Come Back at Launch. Any windows on it move to your other displays.")
         }
     }
     .padding(.vertical, 8)
