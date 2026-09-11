@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "name": "retention",
+  "description": "A source-valid RTINGS-style retained image arms the 3500-count FCN curve before black recovery.",
+  "record_every": 250,
+  "phases": [
+    {
+      "name": "retained-pattern",
+      "ticks": 4000,
+      "inputs": {
+        "mean_columns": {"fill": 200, "set": {"6": 400, "7": 400, "8": 400, "9": 400, "10": 400, "11": 400, "12": 400}},
+        "max_columns": {"fill": 600},
+        "mean_rows": {"fill": 400},
+        "max_rows": {"fill": 600},
+        "histogram": {"fill": 0, "set": {"0": 30000, "1": 19000}},
+        "hue": {"fill": 0, "set": {"0": 60, "1": 60, "2": 60}},
+        "pattern_probability": 701,
+        "movie_mode": true,
+        "motion": false,
+        "image_mean": 512,
+        "region_gains": {"fill": 120}
+      },
+      "snapshots": {"1": "candidate-start", "3520": "fcn-armed", "4000": "retained-end"}
+    },
+    {
+      "name": "black-clear",
+      "ticks": 25,
+      "inputs": {
+        "black_probability": 1023,
+        "movie_mode": true,
+        "motion": false
+      },
+      "snapshots": {"25": "cleared"}
+    }
+  ]
+}

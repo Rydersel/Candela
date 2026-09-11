@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "name": "rotation-orbit",
+  "description": "Rotation gating companion scenario; the CLI adds official BIP orbit progression when a verified v20 archive is supplied.",
+  "record_every": 25,
+  "phases": [
+    {
+      "name": "landscape",
+      "ticks": 50,
+      "inputs": {"mean_rows": {"fill": 100}, "max_rows": {"fill": 200}},
+      "snapshots": {"50": "landscape-end"}
+    },
+    {
+      "name": "portrait",
+      "ticks": 50,
+      "inputs": {"portrait": true, "mean_rows": {"fill": 100}, "max_rows": {"fill": 200}},
+      "snapshots": {"1": "rotation-reset", "50": "portrait-end"}
+    }
+  ]
+}

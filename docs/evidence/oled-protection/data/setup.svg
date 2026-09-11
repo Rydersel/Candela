@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="3440" height="1440" viewBox="0 0 3440 1440">
+  <rect width="3440" height="1440" fill="#000"/>
+  <g fill="none" stroke="#666" stroke-width="1" shape-rendering="crispEdges">
+    <rect x="3279.5" y="1279.5" width="65" height="65"/>
+    <path d="M3264 1312.5h40m16 0h40M3312.5 1264v40m0 16v40"/>
+  </g>
+  <rect x="3312" y="1312" width="1" height="1" fill="#fff" shape-rendering="crispEdges"/>
+  <text x="3408" y="1408" fill="#999" font-family="monospace" font-size="18" text-anchor="end">SETUP TARGET — 3440×1440 — CENTER PIXEL AT 3312,1312</text>
+</svg>

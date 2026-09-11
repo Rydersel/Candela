@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "name": "factory-color-bars",
+  "description": "HDR color-bar statistics cross the version-specific pattern threshold and exclude local mitigation.",
+  "record_every": 5,
+  "phases": [
+    {
+      "name": "hdr-bars",
+      "ticks": 40,
+      "inputs": {
+        "max_columns": {"fill": 0, "set": {"4": 851, "5": 851, "6": 851, "15": 851, "16": 851, "25": 851, "26": 851, "27": 851}},
+        "max_rows": {"fill": 0, "set": {"2": 851, "13": 851}},
+        "region_gains": {"fill": 80},
+        "image_mean": 512,
+        "logo_brightness": "high",
+        "movie_mode": true,
+        "hdr": true,
+        "black_probability": 451,
+        "pattern_probability": 701,
+        "motion": false
+      },
+      "snapshots": {"1": "bars-start", "20": "detected", "40": "bars-end"}
+    }
+  ]
+}

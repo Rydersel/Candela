@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "name": "full-black",
+  "description": "All-black movie input exercises immediate local reset and retention clear behavior.",
+  "record_every": 10,
+  "phases": [
+    {
+      "name": "black",
+      "ticks": 50,
+      "inputs": {
+        "black_probability": 1023,
+        "movie_mode": true,
+        "motion": false,
+        "region_gains": {"fill": 0}
+      },
+      "snapshots": {"1": "black-start", "50": "black-end"}
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "name": "motion",
+  "description": "Continuously moving non-flat material; local strength can attack while no-still policy remains active.",
+  "record_every": 50,
+  "phases": [
+    {
+      "name": "moving",
+      "ticks": 300,
+      "inputs": {
+        "mean_columns": {"fill": 240},
+        "max_columns": {"fill": 500},
+        "mean_rows": {"fill": 240},
+        "max_rows": {"fill": 500},
+        "region_gains": {"fill": 180},
+        "image_mean": 400,
+        "motion": true
+      },
+      "snapshots": {"1": "start", "300": "end"}
+    }
+  ]
+}

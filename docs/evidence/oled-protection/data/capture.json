@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "capture_id": "reference-mag341cqp-fast-full-2026-09-10",
+  "device": {
+    "model": "MSI MAG 341CQP",
+    "firmware": "FW.041",
+    "panel": "QMC340CC01-D01"
+  },
+  "timebase": {
+    "unit": "us",
+    "uncertainty_us": 33334
+  },
+  "observations": {
+    "path": "observations.jsonl",
+    "sha256": "15de21441ef0873cd404120db6f48bb3d49833439b3c665494e9106c0cdaceb2"
+  },
+  "calibration": {
+    "x_sign": 1,
+    "y_sign": 1,
+    "swap_axes": false
+  },
+  "notes": "MSI MAG 341CQP Fast pixel-shift recording, 2026-09-10. See ../camera-measurement.md for acquisition, calibration, uncertainty and source-footage limitations. Coordinates and observation bytes are preserved from the original analysis. This public manifest replaces the working acquisition notes; it does not change the measurements."
+}

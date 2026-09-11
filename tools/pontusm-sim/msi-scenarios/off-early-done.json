@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "name": "off-early-done",
+  "firmware": "041",
+  "initial": {
+    "settings": {
+      "pixel_shift_enabled": true,
+      "pixel_shift_speed": 2,
+      "static_enabled": true,
+      "static_start_seconds": 50,
+      "static_required_seconds": 240,
+      "static_level": 7,
+      "boundary_level": 3,
+      "taskbar_level": 2,
+      "logo_level": 1
+    },
+    "inputs": {
+      "temperature_raw": 735,
+      "done_pin": true,
+      "panel_enabled": true,
+      "vrr_active": false
+    }
+  },
+  "actions": [
+    {
+      "at_ms": 0,
+      "action": "start-off",
+      "destination": "power-save"
+    },
+    {
+      "at_ms": 190000,
+      "action": "advance"
+    }
+  ]
+}
