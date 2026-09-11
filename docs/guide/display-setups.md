@@ -1,7 +1,8 @@
 # Remembering a display setup
 
 Candela can remember the positions and rotations of a set of displays and
-restore them when that set reconnects or Candela starts.
+restore them when that set reconnects or Candela starts. For moving displays on
+the map or choosing the main display, see [Arrangement](arrangement.md).
 
 When you first arrange displays in Candela and choose **Keep**, **Remember this
 display setup** is selected in the confirmation. Uncheck it if you only want to
