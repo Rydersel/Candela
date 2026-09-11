@@ -1,22 +1,26 @@
 import Foundation
+import IOKit
 
-/// Machine-scoped evidence that the Accessibility grant has been observed present
-/// on THIS Mac, so a machine that was asked and declined is told apart from one
-/// that was never asked.
-///
-/// A file and not a preference key: Migration Assistant carries the preferences
-/// domain to a new Mac while Accessibility grants stay behind, so a key would
-/// arrive already claiming the grant was observed there. Nothing shows it and
-/// nothing chooses it, so a settings reset leaves it alone too.
+/// Evidence that Accessibility was granted on this Mac. Application Support can
+/// migrate with the user account, so the record must match the current machine.
 public struct MediaKeyGrantMarker: Sendable {
   public let directory: URL
+  private let machineIdentifier: String?
 
-  public init(directory: URL = MediaKeyGrantMarker.defaultDirectory()) {
-    self.directory = directory
+  private struct Record: Codable {
+    let machineIdentifier: String
+    let observedAt: Date
   }
 
-  /// The app's own folder under Application Support, where its machine-scoped
-  /// state lives.
+  public init(directory: URL = MediaKeyGrantMarker.defaultDirectory()) {
+    self.init(directory: directory, machineIdentifier: Self.currentMachineIdentifier())
+  }
+
+  init(directory: URL, machineIdentifier: String?) {
+    self.directory = directory
+    self.machineIdentifier = machineIdentifier.flatMap { $0.isEmpty ? nil : $0 }
+  }
+
   public static func defaultDirectory() -> URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("Candela", isDirectory: true)
@@ -24,23 +28,35 @@ public struct MediaKeyGrantMarker: Sendable {
 
   var fileURL: URL { directory.appendingPathComponent("media-key-grant-observed") }
 
-  public var exists: Bool { FileManager.default.fileExists(atPath: fileURL.path) }
-
-  /// A no-op once the file is there, so the first observation's date survives.
-  /// Errors are swallowed: an unwritable marker leaves the launch prompt
-  /// suppressed, which is the safe direction, and the banner still offers the
-  /// grant.
-  public func record() {
-    guard !exists else { return }
-    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    // A timestamp and nothing else: presence is all anything reads, and no
-    // identifier of any kind goes in here.
-    try? Self.stamp().string(from: Date()).write(to: fileURL, atomically: true, encoding: .utf8)
+  public var exists: Bool {
+    guard let machineIdentifier,
+      let data = try? Data(contentsOf: fileURL),
+      let record = try? JSONDecoder().decode(Record.self, from: data)
+    else { return false }
+    return record.machineIdentifier == machineIdentifier
   }
 
-  private static func stamp() -> ISO8601DateFormatter {
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime]
-    return formatter
+  /// Called only after observing the actual grant. A migrated or legacy record
+  /// becomes evidence for this machine then, never merely because it was read.
+  /// An unavailable identity or unwritable file leaves the launch prompt quiet.
+  public func record() {
+    guard let machineIdentifier, !exists else { return }
+    let record = Record(machineIdentifier: machineIdentifier, observedAt: Date())
+    guard let data = try? JSONEncoder().encode(record) else { return }
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try? data.write(to: fileURL, options: .atomic)
+  }
+
+  /// This identifier stays in the local marker; it is never logged or exported.
+  private static func currentMachineIdentifier() -> String? {
+    let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
+    guard service != 0 else { return nil }
+    defer { IOObjectRelease(service) }
+    guard let property = IORegistryEntryCreateCFProperty(
+      service, kIOPlatformUUIDKey as CFString, kCFAllocatorDefault, 0),
+      let identifier = property.takeRetainedValue() as? String,
+      let uuid = UUID(uuidString: identifier)
+    else { return nil }
+    return uuid.uuidString
   }
 }

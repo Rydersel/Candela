@@ -4,58 +4,95 @@ import Testing
 
 @Suite("Media-key grant marker")
 struct MediaKeyGrantMarkerTests {
-  private func temporaryDirectory() -> URL {
-    FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+  private func withDirectory(_ body: (URL) throws -> Void) rethrows {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try body(directory)
+  }
+
+  private func marker(_ directory: URL, machine: String? = "mac-a") -> MediaKeyGrantMarker {
+    MediaKeyGrantMarker(directory: directory, machineIdentifier: machine)
   }
 
   @Test func aFreshMachineHasNoMarker() {
-    #expect(!MediaKeyGrantMarker(directory: temporaryDirectory()).exists)
+    withDirectory { #expect(!marker($0).exists) }
   }
 
-  @Test func recordingMakesTheMarkerPresent() {
-    let marker = MediaKeyGrantMarker(directory: temporaryDirectory())
-    marker.record()
-    #expect(marker.exists)
+  @Test func recordingPersistsAGrantAcrossInstancesOnTheSameMachine() {
+    withDirectory { directory in
+      marker(directory).record()
+      #expect(marker(directory).exists)
+    }
   }
 
-  /// The launch path records on every launch that sees the grant, so a rewrite
-  /// would cost a disk write each time and lose the first date. A sentinel stands
-  /// in for the first body: two real stamps taken this close together are equal
-  /// whether or not the second call wrote.
-  @Test func recordingTwiceIsHarmlessAndKeepsTheFirstStamp() throws {
-    let marker = MediaKeyGrantMarker(directory: temporaryDirectory())
-    marker.record()
-    try "sentinel".write(to: marker.fileURL, atomically: true, encoding: .utf8)
-    let first = try String(contentsOf: marker.fileURL, encoding: .utf8)
-    marker.record()
-    let second = try String(contentsOf: marker.fileURL, encoding: .utf8)
-    #expect(first == second)
+  @Test func aMigratedMarkerDoesNotProveAGrantOnTheDestinationMachine() {
+    withDirectory { directory in
+      marker(directory, machine: "mac-a").record()
+      #expect(marker(directory, machine: "mac-a").exists)
+      #expect(!marker(directory, machine: "mac-b").exists)
+    }
   }
 
-  /// A marker that cannot be written leaves the launch prompt suppressed, which
-  /// is the safe direction, so the failure must be silent rather than fatal.
-  @Test func recordingIntoAnUnwritableDirectoryDoesNotThrow() {
-    let marker = MediaKeyGrantMarker(directory: URL(fileURLWithPath: "/dev/null/candela", isDirectory: true))
-    marker.record()
-    #expect(!marker.exists)
+  @Test func aGrantObservedOnTheDestinationReplacesTheMigratedMarker() {
+    withDirectory { directory in
+      marker(directory, machine: "mac-a").record()
+      marker(directory, machine: "mac-b").record()
+      #expect(marker(directory, machine: "mac-b").exists)
+      #expect(!marker(directory, machine: "mac-a").exists)
+    }
   }
 
-  /// The only enforcement of the rule the file's own comment states: a timestamp
-  /// and nothing else. Round-tripped rather than only parsed, so trailing content
-  /// a lenient parser would skip past fails this too.
-  @Test func theMarkerBodyIsATimestampAndNothingElse() throws {
-    let marker = MediaKeyGrantMarker(directory: temporaryDirectory())
-    marker.record()
-    let body = try String(contentsOf: marker.fileURL, encoding: .utf8)
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime]
-    let parsed = try #require(formatter.date(from: body))
-    #expect(formatter.string(from: parsed) == body)
+  @Test func aLegacyTimestampRequiresANewGrantObservation() throws {
+    try withDirectory { directory in
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      let value = marker(directory)
+      try "2026-09-10T12:00:00Z".write(to: value.fileURL, atomically: true, encoding: .utf8)
+      #expect(!value.exists)
+      value.record()
+      #expect(marker(directory).exists)
+    }
   }
 
-  /// Pinned so a later move of either one cannot silently move the other: both
-  /// are machine-scoped state under the app's own Application Support folder.
-  @Test func theMarkerLivesBesideTheCheckupStore() {
-    #expect(MediaKeyGrantMarker.defaultDirectory() == CheckupStore.defaultDirectory().deletingLastPathComponent())
+  @Test(arguments: [nil, ""] as [String?])
+  func anUnavailableMachineIdentityCannotAcceptOrRecordAGrant(machine: String?) throws {
+    try withDirectory { directory in
+      let unavailable = marker(directory, machine: machine)
+      unavailable.record()
+      #expect(!FileManager.default.fileExists(atPath: unavailable.fileURL.path))
+      marker(directory).record()
+      let before = try Data(contentsOf: unavailable.fileURL)
+      #expect(!unavailable.exists)
+      unavailable.record()
+      #expect(try Data(contentsOf: unavailable.fileURL) == before)
+    }
+  }
+
+  @Test func recordingAgainKeepsTheFirstObservation() throws {
+    try withDirectory { directory in
+      let value = marker(directory)
+      value.record()
+      let before = try Data(contentsOf: value.fileURL)
+      value.record()
+      #expect(try Data(contentsOf: value.fileURL) == before)
+    }
+  }
+
+  @Test func anUnreadableOrCorruptMarkerDoesNotProveAGrant() throws {
+    try withDirectory { directory in
+      let value = marker(directory)
+      try FileManager.default.createDirectory(at: value.fileURL, withIntermediateDirectories: true)
+      #expect(!value.exists)
+      value.record()
+      #expect(!value.exists)
+      try FileManager.default.removeItem(at: value.fileURL)
+      try "corrupt".write(to: value.fileURL, atomically: true, encoding: .utf8)
+      #expect(!value.exists)
+    }
+  }
+
+  @Test func recordingIntoAnUnwritableDirectoryLeavesThePromptSuppressed() {
+    let value = marker(URL(fileURLWithPath: "/dev/null/candela", isDirectory: true))
+    value.record()
+    #expect(!value.exists)
   }
 }

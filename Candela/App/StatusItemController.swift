@@ -83,9 +83,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   // properties: the tap's thread and the executor must outlive launch.
   private var keyActionExecutor: KeyActionExecutor?
   private var mediaKeyTap: MediaKeyEventTap?
-  /// Whether anyone on THIS Mac has ever been seen holding the Accessibility
-  /// grant. A file rather than a pref: preferences migrate between Macs, grants
-  /// do not.
+  /// Whether the Accessibility grant was observed on this Mac. The file can
+  /// migrate with the account, so its contents must match the current machine.
   private let grantMarker = MediaKeyGrantMarker()
   /// Custom-shortcut dispatch. Held for the app's lifetime: the handlers it
   /// registers capture it weakly, so dropping it kills every custom shortcut.
@@ -615,10 +614,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // The marker is the third term because the stored schema version is not
     // evidence that anyone on THIS machine was ever asked: preferences migrate
     // between Macs and Accessibility grants do not, so a migrated Mac arrives with
-    // a long-settled install's domain and a grant nobody has ever seen. No marker
-    // suppresses the prompt; a marker keeps it, including after a revoke, which is
-    // when a nudge is wanted. An install that never granted loses the prompt once
-    // and gets it back the first time the grant is observed present, however it
+    // a long-settled install's domain and a grant nobody has ever seen. A missing
+    // or mismatched marker suppresses the prompt; a matching marker keeps it,
+    // including after a revoke, when a nudge is wanted. An install that never
+    // granted loses the prompt once and gets it back the first time the grant
+    // is observed present, however it
     // was made: the lifetime monitor below records a grant switched on in System
     // Settings too.
     if !isFirstRun, permission.isWarningWarranted, grantMarker.exists {
