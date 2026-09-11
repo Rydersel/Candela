@@ -2,6 +2,15 @@ import CandelaKit
 import Foundation
 import Observation
 
+/// A checkup's failed restore, with the display it happened to. The sentence
+/// says "the display" and names none, and the pane is scoped to one display at
+/// a time, so the key travels with the text.
+struct CheckupRestoreNotice: Equatable {
+  let text: String
+  /// The persistence key of the display the run moved.
+  let identityKey: String
+}
+
 /// App-side fan-out for the propagation seam. `StatusItemController`
 /// wires the closures; the Settings scene environment carries it so every pane
 /// writes through ONE door.
@@ -42,10 +51,35 @@ final class SettingsActions {
   /// another pane's cross-link, so Health is never on screen when it is set and
   /// a fresh appearance always reads it.
   @ObservationIgnored var pendingHealthScope: String?
+  /// A checkup ended early and left its display off the mode it started in.
+  /// Published here, not on the run's flow model: both early-exit routes close
+  /// the run's window before the restore answers, and this object outlives it.
+  ///
+  /// Observed, unlike `pendingHealthScope`: the settings window can already be
+  /// open behind the run, so the pane has to redraw when this lands.
+  var checkupRestoreFailure: CheckupRestoreNotice?
+  /// Which run the standing notice belongs to. A restore answers after its own
+  /// window has gone, so an earlier run's answer can arrive during a later one.
+  @ObservationIgnored private var checkupRunGeneration = 0
   @ObservationIgnored private weak var model: AppModel?
 
   init(model: AppModel) {
     self.model = model
+  }
+
+  /// Clears whatever the last run left and hands back the token this run's
+  /// restore has to present. Called as a run is wired.
+  func beginCheckupRun() -> Int {
+    checkupRunGeneration += 1
+    checkupRestoreFailure = nil
+    return checkupRunGeneration
+  }
+
+  /// Ignores an answer from a superseded run: a late one would put a notice back
+  /// on a display the newer run has since restored cleanly.
+  func publishCheckupRestoreFailure(_ notice: CheckupRestoreNotice, generation: Int) {
+    guard generation == checkupRunGeneration else { return }
+    checkupRestoreFailure = notice
   }
 
   /// Call after EVERY pref write. `persistenceKey` scopes the dimming re-apply

@@ -13,6 +13,9 @@ public protocol CheckupModeRunning: Sendable {
   /// Puts the display back on its pre-run mode and reports whether it is
   /// ACTUALLY on it afterwards; the apply's own return only says the request was accepted.
   func restore() async -> Bool
+  /// Stops a sweep in progress. Synchronous on purpose: the caller is ending a
+  /// run, and a mode leg that has the runner busy cannot service an await.
+  func cancel()
 }
 
 public protocol CheckupHDRRunning: Sendable {

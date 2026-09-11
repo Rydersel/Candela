@@ -97,6 +97,35 @@ struct CheckupCopyTests {
     #expect(CheckupCopy.planModeSweep.contains("put back"))
   }
 
+  /// A reason a stranger cannot act on is not a reason: each names what the
+  /// exclusion costs the checkup, and the one with a way out names it.
+  @Test func everyExclusionReasonNamesTheConsequenceForTheCheckup() {
+    #expect(CheckupCopy.excludedReason(.mirroring).contains("no test field can be shown"))
+    #expect(CheckupCopy.excludedReason(.virtual).contains("software"))
+    #expect(CheckupCopy.excludedReason(.mirroring).contains("Stop mirroring"))
+    // The em-dash and verdict sweep below reads `allStringsForTest`, so copy
+    // left out of it is copy nothing checks.
+    for text in [
+      CheckupCopy.excludedTitle, CheckupCopy.excludedReason(.mirroring),
+      CheckupCopy.excludedReason(.virtual),
+    ] {
+      #expect(CheckupCopy.allStringsForTest.contains(text))
+    }
+  }
+
+  /// The row is not a button, so its one combined element is everything
+  /// VoiceOver gets: it has to carry every line the row draws.
+  @Test func theExcludedRowLabelSpeaksTheNameTheSizeAndTheReason() {
+    let display = CheckupExcludedDisplay(
+      id: 2, name: "MAG 341C", pixelWidth: 3440, pixelHeight: 1440, reason: .mirroring)
+    let label = CheckupCopy.excludedRowLabel(display)
+    #expect(
+      label.contains("MAG") && label.contains("Not available")
+        && label.contains(CheckupCopy.excludedReason(.mirroring)))
+    // Grouped, so VoiceOver reads a number rather than four digits in a row.
+    #expect(label.contains("3,440 by 1,440 pixels"))
+  }
+
   @Test func noCopyCarriesAnEmDashOrAVerdictOnTheDisplay() {
     for s in CheckupCopy.allStringsForTest {
       #expect(!s.contains("—"))

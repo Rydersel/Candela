@@ -380,10 +380,10 @@ struct RenderSmokeTests {
     renderFlow(.welcome)
   }
 
-  /// The detection page, which starts a scripted scan on appear. The render is
-  /// whatever frame the scan is on when the renderer runs, and either end of
-  /// that walk is a real state the page has to draw, so nothing here waits for
-  /// or pins a phase.
+  /// The detection page starts a scripted scan on appear and scrolls, so the
+  /// renderer draws it blank: this is evidence about no pixels. It holds that
+  /// the flow builds the page and runs a body without trapping, whichever frame
+  /// of the scan the renderer catches.
   @Test func theOnboardingDetectionPageRenders() {
     renderFlow(.detection)
   }
@@ -398,8 +398,10 @@ struct RenderSmokeTests {
     renderFlow(.accessibility)
   }
 
-  /// The OLED designation page, rendered with both fixture displays selectable
-  /// and the ultrawide designated.
+  /// The OLED designation page, both fixture displays selectable and the
+  /// ultrawide designated. It scrolls too, so the render is blank and this says
+  /// only that the body ran. The cards are a person's check, and the grid's
+  /// arithmetic is the layout suite's.
   @Test func theOnboardingDesignationPageRenders() {
     renderFlow(.oledSelect, designating: ["fixture-mag"])
   }
@@ -420,5 +422,39 @@ struct RenderSmokeTests {
     let empty = OnboardingEnvironment(
       accessibilityGranted: false, loginItemEnabled: false, isFirstRun: true, displays: [])
     renderFlow(.noDisplays, environment: empty)
+  }
+
+  // MARK: - The guided setup flow on a wide rig
+
+  // No desk here has three or four externals, so these run on stand-in
+  // fixtures, and what they prove is narrow. `ImageRenderer` draws a
+  // `ScrollView`'s content as nothing [MEASURED 2026-09-10] and both pages
+  // scroll, so each render is blank and only the size floor survives.
+  //
+  // The page's own body still runs, which is where the wide-rig branches are.
+  // That much was measured the same day, on a probe inside the scroll view;
+  // whether each cell of a grid inside one is evaluated was NOT measured, so a
+  // trap in a card is not covered. Neither is a clipped panel: the fit is
+  // arithmetic in the layout suite, and how it looks needs a person at a
+  // four-display desk.
+
+  @Test func theOnboardingDetectionPageRendersWithThreeExternals() {
+    renderFlow(.detection, environment: OnboardingFixtures.threeExternals)
+  }
+
+  @Test func theOnboardingDetectionPageRendersWithFourExternals() {
+    renderFlow(.detection, environment: OnboardingFixtures.fourExternals)
+  }
+
+  @Test func theOnboardingDesignationPageRendersWithThreeExternals() {
+    renderFlow(
+      .oledSelect, environment: OnboardingFixtures.threeExternals,
+      designating: ["fixture-mag"])
+  }
+
+  @Test func theOnboardingDesignationPageRendersWithFourExternals() {
+    renderFlow(
+      .oledSelect, environment: OnboardingFixtures.fourExternals,
+      designating: ["fixture-mag"])
   }
 }
