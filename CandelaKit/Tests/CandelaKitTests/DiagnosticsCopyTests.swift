@@ -800,6 +800,49 @@ struct DiagnosticsCopyTests {
         == "restoring the saved resolution failed")
   }
 
+  // MARK: - Displays not controlled
+
+  /// One sentence per drop point, and the distinctions are the whole value: a
+  /// virtual display is working as intended, no DDC channel is the hub question, a
+  /// dummy plug is neither. The two virtual cases are the pair most likely to
+  /// collapse into one, and only one of them is Candela's doing.
+  @Test func everyExclusionReasonNamesItsOwnDropPoint() {
+    let sentences = DisplayExclusionReason.allCases.map {
+      DiagnosticsCopy.exclusionReason($0, app: Self.app)
+    }
+    #expect(Set(sentences).count == DisplayExclusionReason.allCases.count)
+    #expect(DiagnosticsCopy.exclusionReason(.noDDCService, app: Self.app).hasPrefix("No DDC channel"))
+    #expect(DiagnosticsCopy.exclusionReason(.ownedVirtual, app: Self.app).contains(Self.app))
+    let foreign = DiagnosticsCopy.exclusionReason(.foreignVirtual, app: Self.app)
+    #expect(foreign.contains("AirPlay"))
+    #expect(!foreign.contains(Self.app))
+  }
+
+  // MARK: - Display inventory
+
+  /// The answers that are not counts, and a zero is none of them: nothing has
+  /// looked yet, macOS refused the count, macOS refused the list, this build does
+  /// not enumerate at all. The two refusals stay separate because they cost
+  /// different things.
+  @Test func theOnlineDisplayCountKeepsItsFourNonCountAnswers() {
+    #expect(DiagnosticsCopy.onlineDisplays(nil) == "not enumerated yet")
+    #expect(
+      DiagnosticsCopy.onlineDisplays(.counted(excluded: [], onlineTotal: nil, slotCapacity: 32))
+        == "not reported: macOS did not answer the online display count; control is unaffected")
+    #expect(
+      DiagnosticsCopy.onlineDisplays(.listFailed)
+        == "not reported: macOS did not answer the online display list; no displays are controlled this pass")
+    #expect(DiagnosticsCopy.onlineDisplays(.notEnumerated) == "not enumerated on this build")
+    #expect(
+      DiagnosticsCopy.onlineDisplays(.counted(excluded: [], onlineTotal: 3, slotCapacity: 32)) == "3")
+
+    // A duplicate here is a collapsed state.
+    let all = [DisplayDiscoveryReport?.none, .notEnumerated, .listFailed,
+               .counted(excluded: [], onlineTotal: nil, slotCapacity: 32)]
+      .map { DiagnosticsCopy.onlineDisplays($0) }
+    #expect(Set(all).count == 4)
+  }
+
   // MARK: - House rules
 
   /// The product name lives in `AppInfo` so a rename is one line; nothing here may
@@ -808,6 +851,7 @@ struct DiagnosticsCopyTests {
     let renamed = DiagnosticsCopy.readEvidence(.notAttempted, app: "Lumen")
     #expect(renamed == "Lumen has not recorded an answer from this display yet")
     #expect(!renamed.contains("Candela"))
+    #expect(!DiagnosticsCopy.exclusionReason(.ownedVirtual, app: "Lumen").contains("Candela"))
 
     #expect(
       DiagnosticsCopy.brightnessScale(
@@ -915,6 +959,13 @@ struct DiagnosticsCopyTests {
       DiagnosticsCopy.additionalResolutions(revealed: 0, revealsHiddenModes: true),
       DiagnosticsCopy.additionalResolutions(revealed: 7, revealsHiddenModes: true),
     ]
+    out += DisplayExclusionReason.allCases.map { DiagnosticsCopy.exclusionReason($0, app: app) }
+    let discoveryReports: [DisplayDiscoveryReport?] = [
+      nil, .notEnumerated, .listFailed,
+      .counted(excluded: [], onlineTotal: nil, slotCapacity: 32),
+      .counted(excluded: [], onlineTotal: 3, slotCapacity: 32),
+    ]
+    out += discoveryReports.map { DiagnosticsCopy.onlineDisplays($0) }
     out += notices.map { DiagnosticsCopy.reapplyProblem($0, app: app) }
     out += notices.map { DiagnosticsCopy.reapplyEvent($0) }
     out += DiagnosticsCopy.watchedKeyFamilies(brightness: true, volume: true, mute: true)

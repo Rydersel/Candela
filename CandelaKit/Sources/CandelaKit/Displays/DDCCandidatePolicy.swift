@@ -33,13 +33,40 @@ public enum DDCCandidatePolicy {
     ownedVirtualIDs: Set<CGDirectDisplayID>,
     isForeignVirtual: (CGDirectDisplayID) -> Bool?
   ) -> [CGDirectDisplayID] {
-    // `filter`, not Set arithmetic: within one score bucket the matcher
-    // breaks ties by ENUMERATION ORDER, so the online list's order is part
-    // of the answer and must survive.
-    online.filter { id in
-      guard !isBuiltIn(id) else { return false }
-      guard !ownedVirtualIDs.contains(id) else { return false }
-      return isForeignVirtual(id) != true
+    classify(
+      online: online, isBuiltIn: isBuiltIn, ownedVirtualIDs: ownedVirtualIDs,
+      isForeignVirtual: isForeignVirtual
+    ).candidates
+  }
+
+  /// `candidates`, plus which guard took each display the pool does not carry.
+  /// The reasons feed the diagnostics report: the commonest bug report is about a
+  /// display that is NOT in the pool, and the pool alone cannot answer it.
+  ///
+  /// Guard order is the one `candidates` always applied, so a display tripping two
+  /// guards is named by the first and the survivors cannot shift.
+  public static func classify(
+    online: [CGDirectDisplayID],
+    isBuiltIn: (CGDirectDisplayID) -> Bool,
+    ownedVirtualIDs: Set<CGDirectDisplayID>,
+    isForeignVirtual: (CGDirectDisplayID) -> Bool?
+  ) -> (candidates: [CGDirectDisplayID], excluded: [(CGDirectDisplayID, DisplayExclusionReason)]) {
+    var candidates: [CGDirectDisplayID] = []
+    var excluded: [(CGDirectDisplayID, DisplayExclusionReason)] = []
+    // A loop over the online list, not Set arithmetic: within one score bucket the
+    // matcher breaks ties by ENUMERATION ORDER, so the online list's order is part
+    // of the answer and must survive into both lists.
+    for id in online {
+      if isBuiltIn(id) {
+        excluded.append((id, .builtIn))
+      } else if ownedVirtualIDs.contains(id) {
+        excluded.append((id, .ownedVirtual))
+      } else if isForeignVirtual(id) == true {
+        excluded.append((id, .foreignVirtual))
+      } else {
+        candidates.append(id)
+      }
     }
+    return (candidates, excluded)
   }
 }

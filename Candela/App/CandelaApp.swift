@@ -1,13 +1,16 @@
 import CandelaKit
 import SwiftUI
 
-/// Handles the `--vd-engage` helper contract BEFORE any app machinery runs: the
-/// virtual display host re-executes this binary to enumerate display modes,
-/// which the creating process cannot do. That call never returns.
+/// Two gates that run BEFORE any app machinery. First the `--vd-engage` helper
+/// contract: the virtual display host re-executes this binary to enumerate
+/// display modes, which the creating process cannot do, and that call never
+/// returns. Then the single-instance guard, so a copy that quits here never
+/// builds an `AppModel`, starts the updater or touches gamma.
 @main
 enum CandelaMain {
   static func main() {
     VirtualDisplayHost.handleEngageHelperInvocation()
+    SingleInstanceGuard.terminateIfAlreadyRunning()
     CandelaApp.main()
   }
 }

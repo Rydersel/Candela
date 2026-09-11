@@ -160,8 +160,7 @@ final class AppModel {
       // `performRefresh` clears the memo, which is the event that can change the
       // answer.
       return discoveredPersistenceKeys.value(for: displayID) {
-        discoverDisplays(virtualDisplays.ownedDisplayIDs)
-          .first { $0.display.id == displayID }?.display.persistenceKey
+        runDiscoveryPass().first { $0.display.id == displayID }?.display.persistenceKey
       }
     }
     // The achieved state first, and the stored intent as well: at launch the
@@ -677,7 +676,13 @@ final class AppModel {
   /// splits into a departure pass and an arrival pass, and the reconciliation
   /// branch that matters is never entered. Verified on the rig 2026-08-17 by the
   /// event ring's ordering.
-  @ObservationIgnored private let discoverDisplays: (Set<CGDirectDisplayID>) -> DiscoveredDisplays
+  @ObservationIgnored private let discoverDisplays: (Set<CGDirectDisplayID>) -> DisplayDiscoverySurvey
+
+  /// What the last discovery pass dropped, and why. Nil until a pass has run, so
+  /// the report says "not enumerated yet" rather than a meaningless zero. The
+  /// report alone, not the survey: a survey's live `DDCWriting` per display must
+  /// not outlive the pass that made it.
+  @ObservationIgnored private(set) var lastDiscoveryReport: DisplayDiscoveryReport?
 
   /// What the persistence-key fallback's discovery walk answered, per display id,
   /// for this display configuration. A reference type so the escaping closure can
@@ -685,14 +690,22 @@ final class AppModel {
   /// one event that can change what discovery would say.
   @ObservationIgnored private let discoveredPersistenceKeys = DiscoveredKeyMemo()
 
+  /// The ONE place a discovery pass runs, so the stored report always describes
+  /// the most recent pass rather than whichever caller remembered to store one.
+  private func runDiscoveryPass() -> DiscoveredDisplays {
+    let survey = discoverDisplays(virtualDisplays.ownedDisplayIDs)
+    lastDiscoveryReport = survey.report
+    return survey.controlled
+  }
+
   init(
     shade: (any ShadeRendering)? = nil,
     gamma: (any GammaApplying)? = nil,
     hdrToggling: (any HDRToggling)? = nil,
     audioDevices: (any AudioDeviceProviding)? = nil,
     safeMode: Bool = false,
-    discoverDisplays: @escaping (Set<CGDirectDisplayID>) -> DiscoveredDisplays = {
-      DisplayDiscovery.discover(excluding: $0)
+    discoverDisplays: @escaping (Set<CGDirectDisplayID>) -> DisplayDiscoverySurvey = {
+      DisplayDiscovery.survey(excluding: $0)
     }
   ) {
     self.shade = shade
@@ -1487,7 +1500,7 @@ final class AppModel {
     let existing = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0) })
     var appeared: [DisplayState] = []
     var kept: [DisplayState] = []
-    let entries = discoverDisplays(virtualDisplays.ownedDisplayIDs)
+    let entries = runDiscoveryPass()
     // Reconciled on PANEL identity, not on the display ID. A display ID is a slot:
     // macOS reassigns them across a replug, so an ID that is still present can be a
     // different monitor, and reusing its controllers would persist the new panel's

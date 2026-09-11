@@ -548,18 +548,21 @@ struct SynthesisPersistenceKeyTests {
     private var _calls = 0
     var calls: Int { lock.withLock { _calls } }
 
-    func discover(_: Set<CGDirectDisplayID>) -> AppModel.DiscoveredDisplays {
+    func discover(_: Set<CGDirectDisplayID>) -> DisplayDiscoverySurvey {
       lock.withLock { _calls += 1 }
-      return [(
-        display: ExternalDisplay(id: 2, name: "MAG341C", persistenceKey: "3669-key"),
-        writer: FakeDDCWriter(),
-        // Nothing here reads the facts: the join under test is the key alone.
-        facts: DisplayHardwareFacts(
-          transportUpstream: nil, transportDownstream: nil, manufacturerID: nil,
-          alphanumericSerialNumber: nil, numericSerialNumber: nil,
-          physicalWidthCm: nil, physicalHeightCm: nil, ioDisplayLocation: nil,
-          ioregMatchScore: 0)
-      )]
+      return DisplayDiscoverySurvey(
+        controlled: [(
+          display: ExternalDisplay(id: 2, name: "MAG341C", persistenceKey: "3669-key"),
+          writer: FakeDDCWriter(),
+          // Nothing here reads the facts: the join under test is the key alone.
+          facts: DisplayHardwareFacts(
+            transportUpstream: nil, transportDownstream: nil, manufacturerID: nil,
+            alphanumericSerialNumber: nil, numericSerialNumber: nil,
+            physicalWidthCm: nil, physicalHeightCm: nil, ioDisplayLocation: nil,
+            ioregMatchScore: 0)
+        )],
+        // The join under test is the key: nothing here reads the drop list.
+        report: .notEnumerated)
     }
   }
 

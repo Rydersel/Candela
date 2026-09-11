@@ -22,6 +22,20 @@ struct DDCCandidatePolicyTests {
     )
   }
 
+  private func classify(
+    _ online: [CGDirectDisplayID],
+    builtIn: Set<CGDirectDisplayID> = [1],
+    owned: Set<CGDirectDisplayID> = [],
+    virtual virtualVerdicts: [CGDirectDisplayID: Bool?] = [:]
+  ) -> (candidates: [CGDirectDisplayID], excluded: [(CGDirectDisplayID, DisplayExclusionReason)]) {
+    DDCCandidatePolicy.classify(
+      online: online,
+      isBuiltIn: { builtIn.contains($0) },
+      ownedVirtualIDs: owned,
+      isForeignVirtual: { virtualVerdicts[$0] ?? nil }
+    )
+  }
+
   /// `getServiceMatches` accepts any score >= 1, so a display we created could be handed
   /// a physical panel's IOAVService, leaving the real monitor with no DDC control.
   @Test func aDisplayCandelaCreatedNeverEntersThePool() {
@@ -54,5 +68,40 @@ struct DDCCandidatePolicyTests {
   /// created is excluded even when the private key says nothing about it.
   @Test func ownershipDoesNotDependOnThePrivatePredicateAnswering() {
     #expect(candidates([1, 133], owned: [133], virtual: [133: nil]) == [])
+  }
+
+  /// Every guard has to name the drop it made, in the order the displays were
+  /// enumerated.
+  @Test func everyDropRecordsWhyItHappened() {
+    let dropped = classify([1, 133, 21, 2], owned: [133], virtual: [21: true]).excluded
+    #expect(dropped.map(\.1) == [.builtIn, .ownedVirtual, .foreignVirtual])
+    #expect(dropped.map(\.0) == [1, 133, 21])
+  }
+
+  /// A display can trip more than one guard. The reason is whichever guard
+  /// `candidates` already reached first, so recording it cannot move the survivors.
+  @Test func theFirstMatchingGuardNamesTheReason() {
+    #expect(classify([1], builtIn: [1], owned: [1]).excluded.map(\.1) == [.builtIn])
+  }
+
+  /// `candidates` is `classify().candidates`, and this is what holds it there: the
+  /// two answers cannot drift, and no display lands in neither list.
+  @Test func classifyAndCandidatesCannotDisagree() {
+    let fixtures: [(
+      online: [CGDirectDisplayID], owned: Set<CGDirectDisplayID>, virtual: [CGDirectDisplayID: Bool?]
+    )] = [
+      ([1, 2, 133], [133], [:]),
+      ([1, 2, 21], [], [21: true]),
+      ([1, 2], [], [2: nil]),
+      ([1], [], [:]),
+      ([1, 9, 4, 7], [4], [:]),
+      ([1, 133], [133], [133: nil]),
+    ]
+    for fixture in fixtures {
+      let both = classify(fixture.online, owned: fixture.owned, virtual: fixture.virtual)
+      #expect(both.candidates == candidates(fixture.online, owned: fixture.owned, virtual: fixture.virtual))
+      #expect(both.candidates.count + both.excluded.count == fixture.online.count)
+      #expect(Set(both.candidates + both.excluded.map(\.0)) == Set(fixture.online))
+    }
   }
 }

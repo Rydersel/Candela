@@ -61,11 +61,22 @@ extension AppModel {
   func diagnosticsSystemSections(audioOutput: AudioOutputDevice?, capturedAt: Date) -> [ReportSection] {
     let topology = mirrorTopology.topology()
     let controlledIDs = Set(allControlledStates.map(\.id))
-    let uncontrolled = topology.displays.filter { !controlledIDs.contains($0.id) }
     let identifiers = diagnosticsPrivateIdentifiers
     func scrub(_ value: String) -> String {
       DiagnosticsCapabilityText.redactingIdentifiers(in: value, identifiers: identifiers)
     }
+    var inventory: [ReportField] = [
+      .init("online displays", DiagnosticsCopy.onlineDisplays(lastDiscoveryReport)),
+    ]
+    if lastDiscoveryReport?.slotCapReached == true {
+      inventory.append(.init(
+        "list limit", "More than 32 displays are online; only the first 32 were offered for control."))
+    }
+    inventory += [
+      .init("controlled displays", String(allControlledStates.count)),
+      .init("displays in cached topology", topology.displays.isEmpty ? "no topology sample available" : String(topology.displays.count)),
+      .init("scope", "Controlled displays are detailed below. Other displays come from the last discovery pass, falling back to the cached topology; both are snapshots and either can lag a connection change. Online counts every display macOS reports, the built-in and any virtual display included."),
+    ]
     var sections: [ReportSection] = [
       .init("system", [
         .init("captured at", capturedAt.formatted(.iso8601)),
@@ -76,26 +87,70 @@ extension AppModel {
         .init("output has macOS volume control", audioOutput.map { $0.canSetOwnVolume ? "yes" : "no" }
           ?? "not applicable (no output device)"),
       ]),
-      .init("display inventory", [
-        .init("controlled displays", String(allControlledStates.count)),
-        .init("displays in cached topology", topology.displays.isEmpty ? "no topology sample available" : String(topology.displays.count)),
-        .init("scope", "Controlled displays are detailed below. Other displays use the cached topology; it may lag a connection change."),
-      ]),
+      .init("display inventory", inventory),
       .init("reading this report", [
         .init("collection", "Uses recorded state. Export does not test commands or change display settings."),
         .init("values", "App values may be requested or stored. Command acceptance does not confirm a physical change."),
         .init("privacy", "Serial fields, known device identifiers and unrecognized capability payloads are redacted. Review custom device names before sharing."),
       ]),
     ]
-    if !uncontrolled.isEmpty {
-      sections.append(.init("other displays in cached topology", uncontrolled.map { display in
-        let reason = virtualDisplays.ownedDisplayIDs.contains(display.id)
-          ? "Virtual display created by Candela; no hardware control"
-          : "Not in the current control pool; exclusion reason was not recorded"
-        return .init(scrub(display.name), reason)
-      }))
+    let notControlled = diagnosticsNotControlled(
+      topology: topology, controlledIDs: controlledIDs,
+      ownedVirtualIDs: virtualDisplays.ownedDisplayIDs, scrub: scrub)
+    if !notControlled.isEmpty {
+      sections.append(.init("displays not controlled over DDC", notControlled))
     }
     return sections
+  }
+
+
+  /// Two sources unioned on display id so no display is listed twice: what the
+  /// last pass dropped, then whatever the cached topology holds that no pass has
+  /// seen. Only that second half can say "reason was not recorded".
+  ///
+  /// `ownedVirtualIDs` keeps the host's own displays out of that fallback in the
+  /// window before the next pass reports them. Not private because a test cannot
+  /// create a virtual display without permanently leaking a colour profile.
+  func diagnosticsNotControlled(
+    topology: MirrorTopology, controlledIDs: Set<CGDirectDisplayID>,
+    ownedVirtualIDs: Set<CGDirectDisplayID>, scrub: (String) -> String
+  ) -> [ReportField] {
+    let excluded = lastDiscoveryReport?.excluded ?? []
+    let excludedIDs = Set(excluded.map(\.displayID))
+    return excluded.map { entry in
+      ReportField(
+        scrub(diagnosticsExcludedName(entry, topology: topology)),
+        scrub(DiagnosticsCopy.exclusionReason(entry.reason, app: AppInfo.productName)))
+    } + topology.displays
+      .filter { !controlledIDs.contains($0.id) && !excludedIDs.contains($0.id) }
+      .map { display in
+        ReportField(
+          scrub(display.name),
+          ownedVirtualIDs.contains(display.id)
+            ? DiagnosticsCopy.exclusionReason(.ownedVirtual, app: AppInfo.productName)
+            : "Not in the current control pool; exclusion reason was not recorded")
+      }
+  }
+
+  /// The IOReg strings where the drop happened late enough to have them, the
+  /// numbers otherwise. Never a serial or a storage key: this names a display to a
+  /// stranger reading a pasted report.
+  ///
+  /// The built-in takes a topology name instead, since a hex vendor and model name
+  /// nothing a laptop owner recognizes. No other reason does: the topology calls
+  /// everything else "Display <id>", which says less than the numbers.
+  private func diagnosticsExcludedName(
+    _ entry: DisplayDiscoveryReport.Excluded, topology: MirrorTopology
+  ) -> String {
+    if let manufacturer = entry.manufacturerID, let product = entry.productName {
+      return "\(manufacturer) \(product)"
+    }
+    if entry.reason == .builtIn {
+      let name = topology.displays.first { $0.id == entry.displayID }?.name ?? ""
+      let isPlaceholder = name.isEmpty || name == "Display \(entry.displayID)"
+      return isPlaceholder ? "Built-in display" : name
+    }
+    return String(format: "vendor %x, model %x", entry.vendorNumber, entry.modelNumber)
   }
 
   func diagnosticsDisplaySections(_ state: DisplayState, capabilityRequest: String) -> [ReportSection] {

@@ -7,6 +7,10 @@ import SwiftUI
 struct PanelView: View {
   @Environment(AppModel.self) private var model
 
+  /// Optional so the render tests can lay the panel out with the app model
+  /// alone; the app itself always injects it from `PanelRoot`.
+  @Environment(UpdaterModel.self) private var updater: UpdaterModel?
+
   /// One disclosure open at a time across the whole panel; more would push the
   /// footer off screen. Keyed by (display, section): keyed by display alone,
   /// opening one of a display's sections opens the other underneath it.
@@ -32,6 +36,12 @@ struct PanelView: View {
       // `!isGranted`: an all-custom-shortcut rig needs no grant.
       if model.accessibility.isWarningWarranted {
         accessibilityBanner
+        Divider()
+      }
+      // The frozen marker, never the live one: the freeze runs in `menuWillOpen`,
+      // before the menu lays out, so this row's height is fixed for the open.
+      if let marker = updater?.reminder.markerAtOpen {
+        updateReminderBanner(version: marker.version)
         Divider()
       }
       VStack(alignment: .leading, spacing: 14) {
@@ -333,6 +343,39 @@ struct PanelView: View {
         // session to end, and a synchronous open still runs inside it.
         PanelMenu.endTracking()
         Task { @MainActor in model.accessibility.openSystemSettings() }
+      }
+      .buttonStyle(.link)
+      .font(.system(size: 12))
+      .fixedSize()
+    }
+    .padding(.horizontal, 14)
+    .padding(.vertical, 10)
+  }
+
+  /// A scheduled update never takes the screen, so this row is how it announces
+  /// itself. Words rather than a badge, like the mirroring row: the state has to
+  /// survive a screenshot in a bug report.
+  ///
+  /// Rendered from the marker frozen in `menuWillOpen`, so nothing about the row
+  /// changes for one open, which keeps it out of the grows-while-open failure
+  /// `keepAwakeRow` records.
+  private func updateReminderBanner(version: String) -> some View {
+    HStack(spacing: 8) {
+      Image(systemName: "arrow.down.circle")
+        .font(.system(size: 12))
+        .foregroundStyle(.secondary)
+      Text("Update available: \(version)")
+        .font(.system(size: 13))
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+      Spacer(minLength: 8)
+      // No ellipsis: this brings forward a dialog the app already prepared rather
+      // than opening another app.
+      Button("Show Update") {
+        // No window can take focus during menu tracking, and `endTracking` only
+        // asks the session to end, so a synchronous call would still run inside it.
+        PanelMenu.endTracking()
+        Task { @MainActor in updater?.bringUpdateForward() }
       }
       .buttonStyle(.link)
       .font(.system(size: 12))

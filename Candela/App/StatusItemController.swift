@@ -83,6 +83,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   // properties: the tap's thread and the executor must outlive launch.
   private var keyActionExecutor: KeyActionExecutor?
   private var mediaKeyTap: MediaKeyEventTap?
+  /// Whether the Accessibility grant was observed on this Mac. The file can
+  /// migrate with the account, so its contents must match the current machine.
+  private let grantMarker = MediaKeyGrantMarker()
   /// Custom-shortcut dispatch. Held for the app's lifetime: the handlers it
   /// registers capture it weakly, so dropping it kills every custom shortcut.
   private var shortcutManager: ShortcutManager?
@@ -187,7 +190,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // launch/reconfigure/wake call site is unconditional.
     restoreCoordinator.restorePass = { [weak model] in model?.performRestorePass() }
 
-    let hostingView = PanelHostingView(rootView: PanelRoot(model: model))
+    let hostingView = PanelHostingView(rootView: PanelRoot(model: model, updater: updaterModel))
     hostingView.frame.size = hostingView.fittingSize
 
     let panelItem = NSMenuItem()
@@ -610,10 +613,21 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // Fork bug 2: gated on the SAME predicate as every other surface, never on
     // the bare grant. Custom shortcuts are Carbon hotkeys and need no grant, so
     // an all-custom rig must not be shown a TCC prompt it can only refuse.
-    if !isFirstRun, permission.isWarningWarranted {
+    // The marker is the third term because the stored schema version is not
+    // evidence that anyone on THIS machine was ever asked: preferences migrate
+    // between Macs and Accessibility grants do not, so a migrated Mac arrives with
+    // a long-settled install's domain and a grant nobody has ever seen. A missing
+    // or mismatched marker suppresses the prompt; a matching marker keeps it,
+    // including after a revoke, when a nudge is wanted. An install that never
+    // granted loses the prompt once and gets it back the first time the grant
+    // is observed present, however it
+    // was made: the lifetime monitor below records a grant switched on in System
+    // Settings too.
+    if !isFirstRun, permission.isWarningWarranted, grantMarker.exists {
       permission.promptIfNeeded()
     }
     if permission.isGranted {
+      noteAccessibilityGrantObserved()
       startMediaKeyTap()
     }
     // Monitoring runs for the app's lifetime and reports both directions, not
@@ -623,6 +637,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     permission.startMonitoring { [weak self] granted in
       guard let self else { return }
       if granted {
+        self.noteAccessibilityGrantObserved()
         // Re-grant (or first grant): the old tap port is dead after a TCC
         // round-trip, so the tap is rebuilt rather than reused. `start` tears
         // down any existing tap before creating the new one, so no explicit
@@ -1061,6 +1076,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   func menuWillOpen(_: NSMenu) {
     model.surfaceVisibility.setPanelOpen(true)
     model.refreshNativeBrightnessForSurface()
+    // Content appearing inside an already-open menu grows it and clips the footer
+    // off the bottom. AppKit posts this before the menu is displayed, so the row
+    // is one value for the whole open and can neither arrive nor leave
+    // mid-tracking. Nothing here orders the SwiftUI update ahead of the menu
+    // sizing the item view, so whether the first open after a marker arrives lays
+    // out at the new size is a rig check.
+    updaterModel.reminder.freezeForMenuOpen()
   }
 
   func menuDidClose(_: NSMenu) {
@@ -1464,6 +1486,14 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     }
   }
 
+  /// Called wherever the grant is observed PRESENT, deliberately wider than the
+  /// tap arming. No call inside `startMediaKeyTap`: it returns early on an empty
+  /// watched-key set, which would leave an all-custom rig that was asked and
+  /// answered unmarked.
+  private func noteAccessibilityGrantObserved() {
+    grantMarker.record()
+  }
+
   private func startMediaKeyTap() {
     guard let mediaKeyTap else { return }
     // Every start route stops here rather than failing and logging again.
@@ -1611,10 +1641,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
 /// Concrete root view so NSHostingView can be subclassed without AnyView.
 private struct PanelRoot: View {
   let model: AppModel
+  let updater: UpdaterModel
 
   var body: some View {
     PanelView()
       .environment(model)
+      .environment(updater)
   }
 }
 
