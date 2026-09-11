@@ -68,6 +68,11 @@ enum CheckupCopy {
     }
   }
 
+  /// Saved reports are never rewritten, so a grade the app would now give
+  /// differently is explained where the report is read.
+  static let panelClassMayBeMisreadNote =
+    "\(AppInfo.productName) before \(CheckupReport.correctedReadPathVersion) sealed its DDC read requests with a checksum that some displays refuse, and recorded a display that refused as write-only. This report comes from an earlier version, so the line above may describe that defect rather than this display. A checkup run on a current version says how it classifies now."
+
   /// DDC is dead in HDR, so the line also says how to get the readback rows to run.
   static let hdrEngagedLine =
     "This display is in HDR mode, which stops DDC: readback checks will be recorded as not observed. Turn HDR off and run the checkup again to have them run."
@@ -364,7 +369,8 @@ enum CheckupCopy {
      completionLine(.complete), completionLine(.incomplete(reason: closedReason)),
      headerSentence, plantMissed(size: 4), planWorstCase(seconds: 600), secondsLeft(1),
      secondsLeft(20), summaryIncomplete(reason: closedReason), closedReason, fieldWindowTitle,
-     detectedAt(pixels: 4), hdrEngagedLine, noScreenReason, fieldNotShown,
+     detectedAt(pixels: 4), hdrEngagedLine, panelClassMayBeMisreadNote, noScreenReason,
+     fieldNotShown,
      pixelSizeLine(width: 3840, height: 2160),
      occlusionLine(fieldIDs: [CheckupCheckID.field(.black), CheckupCheckID.field(.gray7)]) ?? "",
      CheckupScenario.allCases.map(scenarioWords).joined(separator: " ")]

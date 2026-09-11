@@ -2,8 +2,7 @@ import CandelaPrivateAPIs
 import CoreGraphics
 import os
 
-/// One line per DDC read. Nothing else reports which of the two silent verdicts
-/// a panel earned, and that is the whole of a write-only panel's signature.
+/// One line per DDC read: nothing else reports which silent verdict a panel earned.
 let ddcReadLog = Logger(subsystem: "com.rydersel.Candela", category: "ddcread")
 
 /// Serializes DDC I/O for one display's IOAVService (spec §5: serial per-display actor).

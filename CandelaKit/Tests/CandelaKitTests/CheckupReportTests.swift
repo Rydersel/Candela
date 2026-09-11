@@ -191,4 +191,44 @@ struct CheckupReportTests {
     #expect(!text.lowercased().contains("hostname"))
     #expect(!text.contains(NSUserName()))
   }
+
+  private func report(
+    panelClass: CheckupPanelClass, appBuild: String, claims: [CheckupClaim]? = nil
+  ) -> CheckupReport {
+    var report = sample()
+    report.panelClass = panelClass
+    report.appBuild = appBuild
+    if let claims { report.claims = claims }
+    return report
+  }
+
+  @Test func aWriteOnlyGradeFromBeforeTheReadPathFixCarriesItsExplanation() {
+    #expect(report(panelClass: .writeOnlyDDC, appBuild: "1.0.0 (4)").panelClassMayBeMisread)
+    #expect(!report(panelClass: .writeOnlyDDC, appBuild: CheckupReport.correctedReadPathVersion)
+      .panelClassMayBeMisread)
+  }
+
+  @Test func theGradesTheDefectCouldNotProduceAreLeftAlone() {
+    #expect(!report(panelClass: .readsDDC, appBuild: "1.0.0 (4)").panelClassMayBeMisread)
+    #expect(!report(panelClass: .noDDC, appBuild: "1.0.0 (4)").panelClassMayBeMisread)
+  }
+
+  /// HDR stops DDC, so write-only here is not evidence of an unanswered read.
+  @Test func aRunThatStartedInHDRIsNotSecondGuessed() {
+    let hdr = [CheckupClaim(family: .capabilities, id: CheckupCheckID.capabilityBrightness,
+                            verdict: .notObserved(CheckupPlan.hdrEngagedCapabilityText))]
+    let inHDR = report(panelClass: .writeOnlyDDC, appBuild: "1.0.0 (4)", claims: hdr)
+    #expect(inHDR.hdrEngagedAtRun)
+    #expect(!inHDR.panelClassMayBeMisread)
+  }
+
+  /// Reports on disk carry both the retired `1.0.0 (4)` form and a bare version.
+  @Test func versionOrderingReadsEveryBuildStringThisAppHasWritten() {
+    for older in ["0.1.0 (3)", "1.0.0 (4)", "1.0.0", "1.0.3", "1.0", "3", "", "?"] {
+      #expect(CheckupReport.precedesCorrectedReadPath(older), "\(older) should read as older")
+    }
+    for newer in ["1.0.4", "1.0.4 (9)", "1.0.10", "1.1.0", "2.0"] {
+      #expect(!CheckupReport.precedesCorrectedReadPath(newer), "\(newer) should read as current")
+    }
+  }
 }
