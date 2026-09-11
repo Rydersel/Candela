@@ -84,6 +84,31 @@ enum CheckupCopy {
   static let fieldNotShown =
     "This field could not be shown: \(noScreenReason). The usual cause is mirroring, since a mirrored display has no screen of its own to draw on. Nothing was recorded for it."
 
+  // MARK: - Displays no checkup can run on
+
+  static let excludedTitle = "Not available for a checkup"
+
+  /// Neither reason is a verdict on the panel. Each says what the exclusion
+  /// costs the checkup, and the one with a way out names it.
+  static let excludedMirroring =
+    "This display is mirroring another one, so macOS gives it no screen of its own and no test field can be shown on it. Stop mirroring it to check it here."
+  static let excludedVirtual =
+    "This is a virtual display made in software rather than a panel, so there is no glass to look at and nothing to check."
+
+  static func excludedReason(_ reason: CheckupExcludedDisplay.Reason) -> String {
+    switch reason {
+    case .mirroring: excludedMirroring
+    case .virtual: excludedVirtual
+    }
+  }
+
+  /// The row is not a button, so this one element is all VoiceOver gets: every
+  /// line the row draws, refusal before reason.
+  static func excludedRowLabel(_ display: CheckupExcludedDisplay) -> String {
+    "\(display.name), \(pixelSizeLine(width: display.pixelWidth, height: display.pixelHeight)). "
+      + "\(excludedTitle). " + excludedReason(display.reason)
+  }
+
   // MARK: - Plan
 
   static let planTitle = "What will run"
@@ -107,6 +132,8 @@ enum CheckupCopy {
   static let refreshTitle = "The refresh sweep"
   static let hdrTitle = "HDR"
   static let running = "Running this check on the display."
+  static let modeChangeWarning =
+    "The next test may make your display flicker or go dark briefly. Your original resolution and refresh rate will be restored after the refresh test."
   static let refusalNote =
     "A refusal is recorded with its reason and the run carries on. Nothing here ends a checkup except you."
 
@@ -176,6 +203,18 @@ enum CheckupCopy {
     "The \(fieldName(kind))"
   }
 
+  /// The field as the thing on the glass. Not `fieldTitle`, which is a page
+  /// heading the cursor lands on a moment after the announcement is spoken.
+  static func fieldSubject(_ kind: CheckupFieldKind) -> String {
+    switch kind {
+    // Ramp and witness are not flat fills. Every kind is listed rather than
+    // defaulted, so a new non-flat field cannot inherit "solid".
+    case .ramp, .witness: "a \(shortFieldName(kind))"
+    case .black, .red, .green, .blue, .gray7, .gray50, .white:
+      "solid \(shortFieldName(kind))"
+    }
+  }
+
   static let answerNothing = "Nothing"
   static let answerOne = "One mark"
   static let answerMore = "More than one"
@@ -200,6 +239,67 @@ enum CheckupCopy {
 
   static func secondsLeft(_ seconds: Int) -> String {
     seconds == 1 ? "1 second left" : "\(seconds) seconds left"
+  }
+
+  /// Returns `secondsLeft` itself, so the strip, the page and VoiceOver cannot
+  /// say three different numbers. Nil where the cadence rule says nothing.
+  static func secondsLeftAnnouncement(seconds: Int, cap: Int) -> String? {
+    guard AnnouncementThresholds.speaks(at: seconds, cap: cap) else { return nil }
+    return secondsLeft(seconds)
+  }
+
+  /// What VoiceOver says when the checkup lands on a new page.
+  ///
+  /// Not `CheckupPage.name`, which gives a field's three pages one name. No arm
+  /// contains its page's heading: the cursor lands there a moment later, and a
+  /// test pairs every page with the title its view draws.
+  static func pageAnnouncement(_ page: CheckupPage) -> String {
+    switch page {
+    case .scenario:
+      "Choose why you are running this checkup: \(scenarioChoiceWords)."
+    case .displayPick:
+      "Pick the display this run will cover, from the ones a test field can be drawn on."
+    case .plan:
+      "The list of checks, and how long they take."
+    case .identity:
+      "The display's EDID: the serial number, the manufacture date, and the native size "
+        + "and refresh it claims."
+    case .capabilities:
+      "Brightness, contrast and volume, asked for over DDC and read back."
+    case .nativeMode:
+      "Setting the display to the size it was manufactured at, then reading back what it "
+        + "is showing."
+    case .refresh:
+      "Every refresh rate at the native size, one at a time. The display goes dark for a "
+        + "moment at each."
+    case .witness:
+      // `.witness` IS the witness card's instruction page, so it routes to the
+      // same arm rather than getting a second wording.
+      pageAnnouncement(.fieldInstruction(.witness))
+    case .plantDisclosure:
+      "Why a mark is put on the screen on purpose, before the color fields begin."
+    case .fieldInstruction(let kind):
+      "What to look for on \(fieldSubject(kind)), and how to put it on the display when "
+        + "you are ready."
+    case .fieldShowing(let kind):
+      "The display is showing \(fieldSubject(kind)) now, with the answers below it."
+    case .fieldConfirmSecondDot(let kind):
+      "Showing \(fieldSubject(kind)) again, with nothing planted on it this time."
+    case .hdr:
+      "What the panel advertises for high dynamic range, and whether switching it on and "
+        + "back off settles."
+    case .summary:
+      "The run is over. Its report is on this page, and it can be exported or copied."
+    }
+  }
+
+  /// Built from the cases so a fourth cannot ship unspoken. The short subject
+  /// words, not the rows' full-sentence labels.
+  private static var scenarioChoiceWords: String {
+    let words = CheckupScenario.allCases.map(scenarioWords)
+    guard let last = words.last else { return "" }
+    guard words.count > 1 else { return last }
+    return words.dropLast().joined(separator: ", ") + " or " + last
   }
 
   static let tapHint = "Tap the mark on the field itself before answering, so the report can record where it was."
@@ -358,7 +458,7 @@ enum CheckupCopy {
     [preparingTitle, preparingBody,
      scenarioTitle, scenarioSubtitle, scenarioNew, scenarioUsed, scenarioRecheck, pickTitle,
      pickSubtitle, pickEmpty, planTitle, planSubtitle, planModeSweep, identityTitle, capabilitiesTitle,
-     nativeModeTitle, refreshTitle, hdrTitle, running, refusalNote, plantDisclosureTitle,
+     nativeModeTitle, refreshTitle, hdrTitle, running, modeChangeWarning, refusalNote, plantDisclosureTitle,
      plantDisclosure, plantMissedTwice, showAgain, showAgainCap, start, continueLabel, back,
      answerPrompt, recordedPrefix, answerNothing, answerOne, answerMore, answerRound,
      answerNotRound, tapHint, secondDotTitle, secondDotPrompt, onlyDisplayStrip, summaryTitle,
@@ -370,7 +470,9 @@ enum CheckupCopy {
      headerSentence, plantMissed(size: 4), planWorstCase(seconds: 600), secondsLeft(1),
      secondsLeft(20), summaryIncomplete(reason: closedReason), closedReason, fieldWindowTitle,
      detectedAt(pixels: 4), hdrEngagedLine, panelClassMayBeMisreadNote, noScreenReason,
-     fieldNotShown,
+     fieldNotShown, excludedTitle, excludedMirroring, excludedVirtual,
+     excludedRowLabel(CheckupExcludedDisplay(
+       id: 1, name: "Display", pixelWidth: 3440, pixelHeight: 1440, reason: .mirroring)),
      pixelSizeLine(width: 3840, height: 2160),
      occlusionLine(fieldIDs: [CheckupCheckID.field(.black), CheckupCheckID.field(.gray7)]) ?? "",
      CheckupScenario.allCases.map(scenarioWords).joined(separator: " ")]
@@ -386,5 +488,13 @@ enum CheckupCopy {
          CheckupCheckID.capabilityContrast, CheckupCheckID.capabilityVolume,
          CheckupCheckID.nativeMode, CheckupCheckID.refreshSweep, CheckupCheckID.hdrFlags,
          CheckupCheckID.hdrSettle, CheckupCheckID.refresh(hz: 120)].map { claimLabel(id: $0) }
+      // An announcement is the one string nobody can proofread on screen, so
+      // the em-dash and no-verdict sweep has to reach it too.
+      + [CheckupPage.scenario, .displayPick, .plan, .identity, .capabilities, .nativeMode,
+         .refresh, .witness, .plantDisclosure, .hdr, .summary].map(pageAnnouncement)
+      + CheckupFieldKind.allCases.flatMap {
+        [pageAnnouncement(.fieldInstruction($0)), pageAnnouncement(.fieldShowing($0)),
+         pageAnnouncement(.fieldConfirmSecondDot($0))]
+      }
   }
 }

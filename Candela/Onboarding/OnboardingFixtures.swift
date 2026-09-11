@@ -4,6 +4,10 @@
   /// The real rig as a committed snapshot, so the mock flow is clickable end to
   /// end with no pref writes and no display changes. Update it when the
   /// rig changes, or the mock stops matching what a run actually shows.
+  ///
+  /// The wider rigs below are stand-ins, not snapshots: no desk here has three
+  /// or four externals, and the per-display pages need that count from
+  /// somewhere.
   enum OnboardingFixtures {
     static var rig: OnboardingEnvironment {
       OnboardingEnvironment(
@@ -57,5 +61,53 @@
         ]
       )
     }
+
+    /// Three externals: the card row still fits across, and the page is the
+    /// part that outgrows the window.
+    static var threeExternals: OnboardingEnvironment {
+      var environment = rig
+      environment.displays.append(sixteenByNine)
+      return environment
+    }
+
+    /// Four cards, which wrap two by two, and the widest glyph row the flow can
+    /// be asked to draw.
+    static var fourExternals: OnboardingEnvironment {
+      var environment = threeExternals
+      environment.displays.append(superUltrawide)
+      return environment
+    }
+
+    private static let sixteenByNine = OnboardingDisplayEntry(
+      persistenceKey: "fixture-16x9",
+      name: "Test Panel 27",
+      productName: "Test Panel 27",
+      nativePixelWidth: 2560,
+      nativePixelHeight: 1440,
+      rotationDegrees: 0,
+      diagonalInches: 27,
+      currentLooksLikeWidth: 2560,
+      currentLooksLikeHeight: 1440,
+      refreshHz: 144,
+      volume: .works,
+      sizeSuggestion: nil,
+      enrolledInCare: false
+    )
+
+    private static let superUltrawide = OnboardingDisplayEntry(
+      persistenceKey: "fixture-superwide",
+      name: "Test Panel 49",
+      productName: "Test Panel 49",
+      nativePixelWidth: 5120,
+      nativePixelHeight: 1440,
+      rotationDegrees: 0,
+      diagonalInches: 49,
+      currentLooksLikeWidth: 5120,
+      currentLooksLikeHeight: 1440,
+      refreshHz: 120,
+      volume: .unknown,
+      sizeSuggestion: nil,
+      enrolledInCare: false
+    )
   }
 #endif

@@ -230,6 +230,12 @@ final class OnboardingFlowModel {
     installFixtureSizeApplier()
   }
 
+  /// False until the flow first moves off the page it opened on. The welcome
+  /// heading gives up its VoiceOver focus landing only then: on the opening
+  /// frame the window becoming key is already speaking its own title. Coming
+  /// back to welcome later lands like any other page.
+  private(set) var hasNavigated = false
+
   var currentPage: OnboardingPage { pages[min(index, pages.count - 1)] }
   var canGoBack: Bool { index > 0 }
   var isLastPage: Bool { index >= pages.count - 1 }
@@ -262,6 +268,7 @@ final class OnboardingFlowModel {
       onClose()
     } else {
       index += 1
+      hasNavigated = true
       resetApplyState()
     }
   }
@@ -270,6 +277,7 @@ final class OnboardingFlowModel {
     guard canGoBack else { return }
     if case .counting = applyState { revertSize() }
     index -= 1
+    hasNavigated = true
     resetApplyState()
   }
 

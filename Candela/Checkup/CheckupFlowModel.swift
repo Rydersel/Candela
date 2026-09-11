@@ -2,6 +2,7 @@ import CandelaKit
 import CoreGraphics
 import Foundation
 import Observation
+import os
 
 /// The checkup state machine: owns the report under construction and
 /// every verdict in it, including the planted control's grading. Only the
@@ -11,6 +12,8 @@ import Observation
 @MainActor
 @Observable
 final class CheckupFlowModel {
+  private static let log = Logger(subsystem: "com.rydersel.Candela", category: "checkup")
+
   private(set) var page: CheckupPage = .scenario
   /// Recorded on the report and shown in the flow; no check branches on it.
   var scenario: CheckupScenario = .newMonitor
@@ -37,6 +40,14 @@ final class CheckupFlowModel {
   /// The close seam: the window is the AppKit island, so Done asks rather than
   /// performs.
   var onClose: () -> Void = {}
+  /// Called once the mode restore has answered: whether to tell a person the
+  /// display was left off its starting mode, and which display. Fires on every
+  /// outcome.
+  ///
+  /// A seam, not a property: both routes that end a run release this model
+  /// before the restore answers. The key rides along because the surface that
+  /// shows the notice is scoped to one display.
+  var onRestoreSettled: (_ needsNotice: Bool, _ identityKey: String?) -> Void = { _, _ in }
 
   /// The one field the control is planted on. Optional only because `first(where:)` is.
   static let plantedField = CheckupFieldKind.protocolOrder.first { $0.carriesPlant }
@@ -72,11 +83,14 @@ final class CheckupFlowModel {
     self.environment = environment
   }
 
-  /// A virtual display is never a checkup target, and neither is one
-  /// mirroring another, which has no screen of its own to draw a field on.
-  var selectableDisplays: [CheckupDisplayEntry] {
-    environment.displays.filter { !$0.isVirtual && !$0.isMirroring }
-  }
+  /// Everything the environment offers, unfiltered. The exclusion rule lives
+  /// one layer up, where every reason is visible; a copy here would silently
+  /// drop a display excluded for a reason this list has never heard of.
+  var selectableDisplays: [CheckupDisplayEntry] { environment.displays }
+
+  /// The displays the pick page shows but cannot offer, so the page decides
+  /// nothing.
+  var excludedDisplays: [CheckupExcludedDisplay] { environment.excluded }
 
   var canShowAgain: Bool {
     guard let kind = currentFieldKind else { return false }
@@ -110,7 +124,11 @@ final class CheckupFlowModel {
       page = .displayPick
 
     case .displayPick:
-      guard let display = selectedDisplay, !display.isVirtual, !display.isMirroring else { return }
+      // Selectable is whatever the environment offered, never a re-test of the
+      // reasons this file happens to know.
+      guard let display = selectedDisplay,
+        selectableDisplays.contains(where: { $0.id == display.id })
+      else { return }
       begin(with: display)
       page = .plan
 
@@ -302,6 +320,16 @@ final class CheckupFlowModel {
     // A cap that ran out is a full showing of light, so it books the full cap;
     // the field itself stays unanswered until the user says something.
     endShowing(kind: kind, elapsed: kind.capSeconds)
+    page = instructionPage(for: kind)
+  }
+
+  /// The timeout's pair, booking the seconds the field was really up rather
+  /// than the cap. Never the answer path: an escaped field attested to nothing.
+  func escapeShowing() {
+    // Same derivation the end-of-run path books light with; two copies could
+    // disagree about which pages have a field up.
+    guard let kind = showingFieldKind else { return }
+    endShowing(kind: kind, elapsed: elapsedSeconds(of: kind))
     page = instructionPage(for: kind)
   }
 
@@ -567,15 +595,19 @@ final class CheckupFlowModel {
   // MARK: - Exits
 
   func abandon(reason: String) {
-    endRun(reason: reason)
+    endRun(reason: reason, displayGone: false)
   }
 
   func displayDisconnected(_ id: CGDirectDisplayID) {
     guard let display = selectedDisplay, display.id == id else { return }
-    endRun(reason: "the display disconnected during \((legInFlight ?? page).name)")
+    endRun(
+      reason: "the display disconnected during \((legInFlight ?? page).name)",
+      displayGone: true)
   }
 
-  private func endRun(reason: String) {
+  /// `displayGone` is passed rather than read back out of `reason`: a reason is
+  /// prose, and a string match on it breaks the first time somebody rewords it.
+  private func endRun(reason: String, displayGone: Bool) {
     guard !finished else { return }
     // A field on the panel is light that was emitted, so it books on the way
     // out exactly once; anything else just makes sure nothing is left up.
@@ -587,11 +619,36 @@ final class CheckupFlowModel {
     }
     running = false
     if let mode = runners?.mode {
+      // Cancel before queueing the restore: it serializes behind whatever the
+      // runner is doing, so a sweep still running would put the display back
+      // and then keep moving it.
+      mode.cancel()
+      // Read out and captured strongly: this model is released the moment the
+      // window closes, and a weak capture would drop the restore's answer.
+      let settled = onRestoreSettled
+      // Read out for the same reason. The notice names one display, and
+      // runners exist only after a target was picked, so there is one here.
+      let target = selectedDisplay?.identityKey
+      // A display that has left cannot be put back, and saying so would blame
+      // the app for an unplug.
+      let notify = !displayGone
       // The mode goes back on every exit path. Its outcome cannot change
       // a completion the user or the cable already decided, so it is not awaited.
-      Task { _ = await mode.restore() }
+      Task {
+        let restored = await mode.restore()
+        if !restored { Self.logRestoreNotAchieved() }
+        settled(!restored && notify, target)
+      }
     }
     finish(.incomplete(reason: reason))
+  }
+
+  /// `.error` and not `.debug`: macOS does not persist debug records, and this
+  /// is the only record the quit route leaves.
+  private static func logRestoreNotAchieved() {
+    log.error(
+      "checkup run ended early and the display is not on the resolution and refresh rate it started in"
+    )
   }
 
   private func finish(_ completion: CheckupCompletion) {

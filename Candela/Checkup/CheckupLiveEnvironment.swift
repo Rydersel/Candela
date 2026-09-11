@@ -36,7 +36,7 @@ enum CheckupLiveEnvironment {
   /// so both drop here rather than at every surface. `isOnlyDisplay` counts what
   /// survives: a display the flow cannot target cannot host the window either.
   static func entries(from sources: [Source]) -> [CheckupDisplayEntry] {
-    let real = sources.filter { !$0.isVirtual && !$0.isMirroring }
+    let real = sources.filter { exclusion(for: $0) == nil }
     return real.map { source in
       CheckupDisplayEntry(
         id: source.id,
@@ -55,6 +55,26 @@ enum CheckupLiveEnvironment {
         pointHeight: source.pointHeight,
         isOnlyDisplay: real.count == 1)
     }
+  }
+
+  /// The complement of `entries(from:)` over the same sources, each row
+  /// carrying why it was dropped.
+  static func excluded(from sources: [Source]) -> [CheckupExcludedDisplay] {
+    sources.compactMap { source in
+      guard let reason = exclusion(for: source) else { return nil }
+      return CheckupExcludedDisplay(
+        id: source.id, name: source.name, pixelWidth: source.pixelWidth,
+        pixelHeight: source.pixelHeight, reason: reason)
+    }
+  }
+
+  /// The one predicate both lists derive from, so no display can be offered and
+  /// excluded at once. Virtual wins a tie: what the thing IS outranks how it is
+  /// wired.
+  private static func exclusion(for source: Source) -> CheckupExcludedDisplay.Reason? {
+    if source.isVirtual { return .virtual }
+    if source.isMirroring { return .mirroring }
+    return nil
   }
 
   /// Reads the live state the plan grades off, BEFORE it grades anything: HDR
@@ -109,6 +129,25 @@ enum CheckupLiveEnvironment {
       writers: writers,
       hdr: hdr)
     let entries = entries(from: sources)
+    // Virtual displays have no brightness controller. Use the online topology
+    // for exclusions only, so these rows never become field or DDC targets.
+    let controlledIDs = Set(sources.map(\.id))
+    let ownedVirtualIDs = model.virtualDisplays.ownedDisplayIDs
+    let uncontrolled = model.mirrorTopology.topology().displays
+      .filter { !controlledIDs.contains($0.id) }
+      .map { display in
+        let mode = CGDisplayCopyDisplayMode(display.id)
+        return Source(
+          id: display.id, identityKey: display.identity.key,
+          name: OverlayWindow.screen(for: display.id)?.localizedName ?? display.name,
+          isBuiltIn: display.isBuiltIn,
+          isVirtual: ownedVirtualIDs.contains(display.id)
+            || VirtualDisplayDetection.isVirtual(display.id) == true,
+          isMirroring: display.isMirrorSlave,
+          capabilities: nil, hasDDCService: false, hdrEngaged: false,
+          pixelWidth: mode?.pixelWidth ?? 0, pixelHeight: mode?.pixelHeight ?? 0,
+          pointHeight: Double(CGDisplayBounds(display.id).height))
+      }
     let capabilities = Dictionary(
       sources.map { ($0.identityKey, $0.capabilities) }, uniquingKeysWith: { first, _ in first })
     let pixels = Dictionary(
@@ -117,6 +156,7 @@ enum CheckupLiveEnvironment {
 
     return CheckupEnvironment(
       displays: entries,
+      excluded: excluded(from: sources + uncontrolled),
       macOSBuild: ProcessInfo.processInfo.operatingSystemVersionString,
       appBuild: AppInfo.version,
       runners: { [weak model] entry in

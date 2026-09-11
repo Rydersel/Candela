@@ -6,14 +6,35 @@ import Testing
 /// own objects and is covered by the hardware pass.
 @Suite("Checkup live environment")
 struct CheckupLiveEnvironmentTests {
+  @Test @MainActor func theLiveBuilderNamesAnExcludedDisplayWithoutABrightnessController() async {
+    let model = AppModel(safeMode: true)
+    model.mirrorTopology.update(MirrorTopology([
+      ConfiguredDisplay(
+        id: 900001,
+        identity: DisplayConfigIdentity(vendor: 1, model: 2, serial: 3, isBuiltIn: false),
+        name: "Mirrored display without DDC", isBuiltIn: false, mirrorsDisplay: 900002)
+    ]))
+    let environment = await CheckupLiveEnvironment.current(
+      model: model, presenter: CheckupFlowModelTests.FakePresenter(),
+      coordinator: OledCareCoordinator())
+    #expect(environment.displays.isEmpty)
+    #expect(environment.excluded.map(\.id) == [900001])
+    #expect(environment.excluded.map(\.reason) == [.mirroring])
+    #expect(environment.excluded.map(\.name) == ["Mirrored display without DDC"])
+  }
+
   @Test func entriesExcludeVirtualDisplaysAndMarkTheOnlyDisplay() {
-    let entries = CheckupLiveEnvironment.entries(from: [
+    let sources = [
       source(id: 1, key: "a", name: "Built-in", isBuiltIn: true, pixelWidth: 3024, pixelHeight: 1964),
       source(id: 2, key: "v", name: "Virtual", isVirtual: true, pixelWidth: 1920, pixelHeight: 1080),
-    ])
+    ]
+    let entries = CheckupLiveEnvironment.entries(from: sources)
     #expect(entries.map(\.id) == [1])
     #expect(entries[0].isOnlyDisplay)
     #expect(entries[0].panelClass == .noDDC)
+    // Still out of entries, and now on the pick page carrying its reason.
+    #expect(CheckupLiveEnvironment.excluded(from: sources).map(\.id) == [2])
+    #expect(CheckupLiveEnvironment.excluded(from: sources).map(\.reason) == [.virtual])
   }
 
   @Test func twoRealDisplaysAreNeitherTheOnlyOne() {
@@ -67,14 +88,68 @@ struct CheckupLiveEnvironmentTests {
   /// A display mirroring another has no `NSScreen`, so no field can be drawn on
   /// it: a run there books emission and grades attestations for a blank panel.
   @Test func entriesExcludeAMirroringDisplay() {
-    let entries = CheckupLiveEnvironment.entries(from: [
+    let sources = [
       source(id: 1, key: "a", name: "Built-in", isBuiltIn: true, pixelWidth: 1, pixelHeight: 1),
       source(id: 2, key: "m", name: "MAG", isMirroring: true, pixelWidth: 1, pixelHeight: 1),
-    ])
+    ]
+    let entries = CheckupLiveEnvironment.entries(from: sources)
     #expect(entries.map(\.id) == [1])
     // The survivor is the only display, which is what the strip and the plant's
     // exclusion band both key on.
     #expect(entries[0].isOnlyDisplay)
+    // Still out of entries, and now on the pick page carrying its reason.
+    #expect(CheckupLiveEnvironment.excluded(from: sources).map(\.id) == [2])
+    #expect(CheckupLiveEnvironment.excluded(from: sources).map(\.reason) == [.mirroring])
+  }
+
+  // MARK: - The excluded list
+
+  /// The two lists partition the input, so a display can never be both hidden
+  /// and offered, nor silently dropped from both.
+  @Test func everySourceLandsInExactlyOneOfTheTwoLists() {
+    let sources = [
+      source(id: 1, key: "a", name: "Built-in", isBuiltIn: true, pixelWidth: 3024, pixelHeight: 1964),
+      source(id: 2, key: "m", name: "MAG", isMirroring: true, pixelWidth: 3440, pixelHeight: 1440),
+      source(id: 3, key: "v", name: "Virtual", isVirtual: true, pixelWidth: 1920, pixelHeight: 1080),
+    ]
+    let entries = CheckupLiveEnvironment.entries(from: sources)
+    let excluded = CheckupLiveEnvironment.excluded(from: sources)
+    #expect(Set(entries.map(\.id)).union(excluded.map(\.id)) == Set(sources.map(\.id)))
+    #expect(Set(entries.map(\.id)).isDisjoint(with: excluded.map(\.id)))
+  }
+
+  @Test func aMirroringDisplayIsExcludedWithTheMirroringReason() {
+    let sources = [
+      source(id: 1, key: "a", name: "Built-in", isBuiltIn: true, pixelWidth: 1, pixelHeight: 1),
+      source(id: 2, key: "m", name: "MAG", isMirroring: true, pixelWidth: 3440, pixelHeight: 1440),
+    ]
+    #expect(CheckupLiveEnvironment.excluded(from: sources).map(\.reason) == [.mirroring])
+  }
+
+  @Test func aVirtualDisplayIsExcludedWithTheVirtualReason() {
+    let sources = [
+      source(id: 1, key: "a", name: "Built-in", isBuiltIn: true, pixelWidth: 1, pixelHeight: 1),
+      source(id: 2, key: "v", name: "Virtual", isVirtual: true, pixelWidth: 1920, pixelHeight: 1080),
+    ]
+    #expect(CheckupLiveEnvironment.excluded(from: sources).map(\.reason) == [.virtual])
+
+    // No rig here can be both at once, so the tie-break is pinned rather than
+    // left to the order of two ifs: what the thing IS outranks how it is wired.
+    var both = sources[1]
+    both.isMirroring = true
+    #expect(CheckupLiveEnvironment.excluded(from: [both]).map(\.reason) == [.virtual])
+  }
+
+  /// The row has to name the display a person is looking at, not just say that
+  /// something was left out.
+  @Test func exclusionCarriesTheDisplaysOwnNameAndPixelSize() throws {
+    let excluded = try #require(
+      CheckupLiveEnvironment.excluded(from: [
+        source(id: 2, key: "m", name: "MAG", isMirroring: true, pixelWidth: 3440, pixelHeight: 1440)
+      ]).first)
+    #expect(excluded.name == "MAG" && excluded.pixelWidth == 3440)
+    #expect(excluded.pixelHeight == 1440)
+    #expect(excluded.id == 2)
   }
 
   /// The plan and the pick page both read this off the entry.
