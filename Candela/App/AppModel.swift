@@ -1300,11 +1300,16 @@ final class AppModel {
   func recoverInterruptedDims() {
     let evaluated = displays.count
     var reasserted = 0
+    // Twins share a marker, but each has its own wire. Snapshot before any
+    // clearing so discovery order cannot decide which one gets recovered.
+    let markedKeys = Set(displays.map(\.display.persistenceKey)).filter {
+      DisplayPrefs(persistenceKey: $0, safeMode: safeMode).temporaryDimEngaged
+    }
+    var keysToClear: Set<String> = []
     for state in displays {
       let key = state.display.persistenceKey
-      let prefs = DisplayPrefs(persistenceKey: key, safeMode: safeMode)
       switch InterruptedDimRecovery.action(
-        markerSurvived: prefs.temporaryDimEngaged,
+        markerSurvived: markedKeys.contains(key),
         dimIsLive: state.controller.temporaryDimFactor != nil,
         hasStoredValue: state.controller.hasStoredValue,
         isSafeMode: safeMode
@@ -1312,13 +1317,13 @@ final class AppModel {
       case .leave:
         continue
       case .clearOnly:
-        prefs.temporaryDimEngaged = false
+        keysToClear.insert(key)
       case .reassert:
         // Without the memo reset the re-assert is duplicate-skipped and never
         // reaches the wire.
         state.controller.resetWriteMemo()
         state.controller.reassertHardware()
-        prefs.temporaryDimEngaged = false
+        keysToClear.insert(key)
         reasserted += 1
         // The tag, never the persistence key: a key without an EDID UUID embeds
         // the panel's serial number.
@@ -1327,6 +1332,13 @@ final class AppModel {
           \(DisplayLogging.tag(for: key), privacy: .public)
           """)
       }
+    }
+    // A recovered twin cannot consume the signal a still-live dim needs if
+    // this process crashes next. The whole pass is synchronous on the main actor.
+    let liveDimKeys = Set(displays.filter { $0.controller.temporaryDimFactor != nil }
+      .map(\.display.persistenceKey))
+    for key in keysToClear.subtracting(liveDimKeys) {
+      DisplayPrefs(persistenceKey: key, safeMode: safeMode).temporaryDimEngaged = false
     }
     // `.info`, not `.debug`: macOS does not persist debug records. This line is
     // what separates "nothing needed recovering" from "the pass never ran".
