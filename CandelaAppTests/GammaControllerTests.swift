@@ -97,8 +97,8 @@ struct GammaControllerTests {
     #expect(recovery.begin() == nil)
   }
 
-  @Test(arguments: [4.9, 6.0, 120.0])
-  func aNewReconfigurationAfterTheFinalPassHasItsOwnBoundedWindow(start: Double) async throws {
+  @Test(arguments: [4.9, 6.0, 120.0], [false, true])
+  func aNewReconfigurationHasItsOwnWindowAfterStartupOrAFinalPass(start: Double, afterFinalPass: Bool) async throws {
     let driver = StubGammaDriver()
     driver.screens = [2]; driver.identities[2] = "panel-A"
     let baseline = Self.profileTable()
@@ -112,8 +112,13 @@ struct GammaControllerTests {
       epoch: { epoch.withLock { $0 } }, asleep: { false },
       now: { clock.withLock { $0 } }, interval: 3600)
     defer { recovery.stop() }
-    recovery.beginFinalPass()
-    let settling = try #require(recovery.endFinalPass())
+    let settling: Task<Void, Never>
+    if afterFinalPass {
+      recovery.beginFinalPass()
+      settling = try #require(recovery.endFinalPass())
+    } else {
+      settling = try #require(recovery.begin())
+    }
     await settling.value
     // The reconnect may begin just before, just after, or long after the
     // departure's post-pass watch expires. All are separate bursts.

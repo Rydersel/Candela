@@ -58,6 +58,8 @@ final class GammaReconfigurationRecovery {
   ) {
     self.gamma = gamma; self.targets = targets; self.readHDR = readHDR
     self.epoch = epoch; self.asleep = asleep; self.now = now; self.interval = interval
+    // A startup screen notification can precede the first actual reconfiguration.
+    self.settledEpoch = epoch()
   }
 
   @discardableResult
