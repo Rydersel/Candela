@@ -130,6 +130,9 @@ page only — Candela has never written them and has no accessor for them.
   **only** record of the display's state, because nothing can be read back.
   Deleting them is a real loss, not a cache invalidation.
 - `muted.<pk>` is engine state, not a preference.
+- `temporaryDimEngaged.<pk>` records that a temporary dim was engaged on that
+  display, so a launch after a crash can put the brightness back. It is engine
+  state, not a preference.
 
 ## Resetting
 

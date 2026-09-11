@@ -75,6 +75,27 @@ final class OledOverlay {
 
   private var lastApplied: [CGDirectDisplayID: AppliedState] = [:]
 
+  /// An entry fade still running on a display's overlay. Kept out of
+  /// `AppliedState` on purpose: folding it in would make an unchanged state
+  /// compare unequal while the fade arrives, putting the 10 Hz loop straight
+  /// back on the window server.
+  private struct InFlightFade {
+    let target: AppliedState
+    let startedAt: ContinuousClock.Instant
+  }
+
+  private var fadingTo: [CGDirectDisplayID: InFlightFade] = [:]
+
+  /// Supersession counter: a superseded fade's completion handler arrives with
+  /// a stale generation and must not clear a newer fade's entry.
+  private var fadeGeneration: [CGDirectDisplayID: UInt64] = [:]
+
+  /// How long a declined nudge stays declined: twice the fade. Past the bound
+  /// the entry is dropped and the nudge proceeds, because the completion handler
+  /// can fail to arrive at all (window torn down mid-animation, display departs
+  /// while it fades), and a reconcile parked forever fails silently.
+  static let fadeDeclineWindow: Duration = .seconds(2 * OverlayFade.entrySeconds)
+
   /// Displays already warned about for a missing `NSScreen`. The overlay is
   /// re-driven on every state tick, so an unrated warning floods the log for as
   /// long as the display stays gone.
@@ -96,9 +117,12 @@ final class OledOverlay {
   /// what keeps the steady-state cadence off the window server.
   ///
   /// `mask` is already in DISPLAY orientation; nil keeps the scalar behaviour.
+  ///
+  /// `mayFadeIn` only permits a fade; `fadeSeconds` still requires a darkening
+  /// transition, so a lift stays instant even in a state that fades in.
   @discardableResult
   func apply(
-    alpha: Double?, mask: OverlayMask.Oriented? = nil, blackout: Bool,
+    alpha: Double?, mask: OverlayMask.Oriented? = nil, blackout: Bool, mayFadeIn: Bool,
     on displayID: CGDirectDisplayID
   ) -> Bool {
     guard let alpha else {
@@ -129,9 +153,25 @@ final class OledOverlay {
     guard !existed || self.lastApplied[displayID] != state else {
       return true
     }
+    // Read before `lastApplied` moves: the gate compares the current alpha with
+    // the one this state asks for.
+    let fade = Self.fadeSeconds(
+      mayFadeIn: mayFadeIn, from: self.lastApplied[displayID]?.alpha, to: state.alpha)
     self.lastApplied[displayID] = state
-    self.write(state, to: window)
+    self.write(state, to: window, on: displayID, fadingOver: fade)
     return true
+  }
+
+  /// How long this transition fades for, or nil to land immediately. A lift
+  /// never animates whatever state asked for it, so every restore lands in one
+  /// write. A nil `current` means no overlay on screen and behaves as 0.
+  ///
+  /// One transition this cannot see: with a mask the caller passes alpha 1.0 and
+  /// the per-cell opacity lives in the layer's contents, so a masked idle dim
+  /// escalating to blackout goes 1.0 to 1.0 and lands instantly.
+  static func fadeSeconds(mayFadeIn: Bool, from current: Double?, to target: Double) -> Double? {
+    guard mayFadeIn, target > (current ?? 0) else { return nil }
+    return OverlayFade.entrySeconds
   }
 
   /// Re-asserts the overlay's last applied state: the recovery lever for an
@@ -141,23 +181,84 @@ final class OledOverlay {
   ///
   /// A no-op when the display has no overlay: creating one here would invent a
   /// dim level this class does not own.
-  func reassert(on displayID: CGDirectDisplayID) {
+  ///
+  /// Returns false only where a fade toward this exact state is in flight and
+  /// the nudge was declined, so the caller can tell that from a nudge that did
+  /// not take. A display with no overlay answers true: no fade to wait for, and
+  /// a decline would park the caller on one that never ends.
+  ///
+  /// `now` is a parameter so the bound can be tested without waiting it out.
+  @discardableResult
+  func reassert(on displayID: CGDirectDisplayID, at now: ContinuousClock.Instant = .now) -> Bool {
     guard let window = self.windows[displayID], let state = self.lastApplied[displayID] else {
-      return
+      return true
     }
-    self.write(state, to: window)
+    if let fade = self.fadingTo[displayID], fade.target == state,
+      now - fade.startedAt < Self.fadeDeclineWindow {
+      return false
+    }
+    // A nudge lands on target without animating, and drops an entry that
+    // outlived the bound so a missing completion cannot decline forever.
+    self.write(state, to: window, on: displayID, fadingOver: nil)
+    return true
   }
 
-  private func write(_ state: AppliedState, to window: NSPanel) {
+  private func write(
+    _ state: AppliedState, to window: NSPanel, on displayID: CGDirectDisplayID,
+    fadingOver seconds: Double?
+  ) {
     // Blackout swallows mouse input (at full black a click-through click
     // is a blind click on live UI); every other level stays click-through.
+    //
+    // The swallow leads the pixels: set while the alpha is still fading in, so
+    // an early click in a blackout is swallowed before the screen is black.
+    // Delaying it to match the pixels would let that click land on live UI.
     window.ignoresMouseEvents = !state.blackout
     // Mask first, since it decides the alpha: 1.0 over a failed mask's flat
     // black layer blacks out the panel.
     let masked = Self.writeMask(state.mask, to: window)
     let alpha = masked ? state.alpha : Self.fallbackAlpha(forUnrendered: state.mask)
-    window.contentView?.alphaValue = CGFloat(alpha)
+    guard let seconds else {
+      self.endFade(on: displayID, view: window.contentView)
+      window.contentView?.alphaValue = CGFloat(alpha)
+      window.orderFrontRegardless()
+      return
+    }
+    // Front first: a window that is not on screen cannot fade onto it.
     window.orderFrontRegardless()
+    let generation = (self.fadeGeneration[displayID] ?? 0) &+ 1
+    self.fadeGeneration[displayID] = generation
+    self.fadingTo[displayID] = InFlightFade(target: state, startedAt: .now)
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = seconds
+      context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+      window.contentView?.animator().alphaValue = CGFloat(alpha)
+    } completionHandler: {
+      // AppKit calls this on the main thread, so the clear lands on the turn
+      // the animation ends.
+      MainActor.assumeIsolated { self.fadeDidFinish(generation, on: displayID) }
+    }
+  }
+
+  /// Clears the in-flight entry only for the fade the display is still waiting
+  /// on; a superseded handler carries a stale generation and leaves it alone.
+  private func fadeDidFinish(_ generation: UInt64, on displayID: CGDirectDisplayID) {
+    guard self.fadeGeneration[displayID] == generation else { return }
+    self.fadingTo.removeValue(forKey: displayID)
+  }
+
+  /// Drops the fade state and stops an animation still running. Assignment
+  /// alone would not: the animation keeps driving the presentation layer toward
+  /// its own target and only then snaps, so a lift issued mid-fade would keep
+  /// darkening first.
+  ///
+  /// `removeAllAnimations` is safe because ours is the only animation this layer
+  /// carries: the mask goes straight to `contents`, and a layer-backed view runs
+  /// no implicit animations outside an animation context.
+  private func endFade(on displayID: CGDirectDisplayID, view: NSView?) {
+    guard self.fadingTo.removeValue(forKey: displayID) != nil else { return }
+    self.fadeGeneration[displayID] = (self.fadeGeneration[displayID] ?? 0) &+ 1
+    view?.layer?.removeAllAnimations()
   }
 
   /// Alpha for a mask that did not reach the layer. The caller's 1.0 (the mask
@@ -238,6 +339,9 @@ final class OledOverlay {
       return
     }
     self.lastApplied.removeValue(forKey: displayID)
+    // The window is going and its fade goes with it: the completion handler
+    // may never arrive to say so.
+    self.endFade(on: displayID, view: window.contentView)
     // Retained for the stranded-overlay check and its recovery; cleared once
     // the server confirms the window is gone, or when a new overlay supersedes
     // it. A window that never reached the screen has no number to watch (0 is

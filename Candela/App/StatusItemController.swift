@@ -669,6 +669,16 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       refreshTapConfig()
       updateStatusItemVisibility()
       wireInterferenceHooks()
+      // Crash-while-dimmed recovery, the wire companion to the gamma reset
+      // above. Ahead of the restore pass so the two never queue writes for one
+      // display out of order. Safe mode sends no unattended DDC and must not
+      // consume the marker: the next normal launch still needs it.
+      //
+      // LAUNCH ONLY, never on reconfigure. The topology loop above calls
+      // `oledCare.displaysReconfigured()` first, which drops the lock dim for at
+      // least one care tick; a recovery in that window would see no live dim,
+      // write the undimmed value to a locked screen, and spend the marker.
+      if !isSafeMode { model.recoverInterruptedDims() }
       restoreCoordinator.noteLaunchOrReconfigure()
       // Before the first open, for the same reason the display list is warmed
       // here: nothing the panel starts can be relied on to run while the menu
