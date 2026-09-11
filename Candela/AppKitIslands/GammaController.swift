@@ -109,7 +109,7 @@ final class GammaController: GammaApplying {
     fileprivate let expected: GammaSamples
   }
 
-  enum RecoveryResult { case unchanged, written, stopped }
+  enum RecoveryResult { case unchanged, written, superseded, stopped }
 
   /// Only a previous successful, directly drawn gamma write can authorize
   /// recovery. Never capture a new baseline while the display is settling.
@@ -143,13 +143,16 @@ final class GammaController: GammaApplying {
       Self.log.debug("Gamma recovery stopped: HDR or unknown HDR state, display \(id, privacy: .public)")
       return .stopped
     }
-    guard recoveryOwners[id]?.generation == snapshot.generation else {
-      Self.log.debug("Gamma recovery stopped: superseded owner, display \(id, privacy: .public)")
-      return .stopped
-    }
     guard driver.recoveryIdentity(on: id) == snapshot.identity else {
       Self.log.debug("Gamma recovery stopped: identity unavailable or changed, display \(id, privacy: .public)")
       return .stopped
+    }
+    guard let owner = recoveryOwners[id], owner.identity == snapshot.identity else { return .stopped }
+    guard owner.generation == snapshot.generation else {
+      // The topology rebuild can write after recovery captured its snapshot.
+      // Report the handoff without writing from the stale snapshot or HDR read.
+      Self.log.debug("Gamma recovery owner superseded for display \(id, privacy: .public)")
+      return .superseded
     }
     guard case let .table(table) = driver.readTable(id, capacity: Self.sampleCapacity) else {
       Self.log.debug("Gamma recovery stopped: table read failed, display \(id, privacy: .public)")

@@ -60,6 +60,43 @@ private final class StubGammaDriver: GammaTableDriving {
 @Suite("Gamma controller baselines")
 @MainActor
 struct GammaControllerTests {
+  @Test func recoveryFollowsANewerSuccessfulWriteWithoutRenewingItsBudget() async throws {
+    let driver = StubGammaDriver()
+    driver.screens = [2]; driver.identities[2] = "panel-A"
+    driver.tables[2] = Self.profileTable()
+    let gamma = GammaController(driver: driver)
+    gamma.applyGammaScale(0.5, on: 2, enforcerOn: 2)
+    let hdr = HeldRecoveryHDR()
+    let clock = OSAllocatedUnfairLock(initialState: 0.0)
+    let recovery = GammaReconfigurationRecovery(
+      gamma: gamma, targets: { [2] }, readHDR: { _ in await hdr.read() },
+      epoch: { 0 }, asleep: { false }, now: { clock.withLock { $0 } }, interval: 3600)
+    defer { recovery.stop() }
+    let first = try #require(recovery.begin())
+    try #require(await hdr.waitForRequests(1))
+    await hdr.answer(0, false)
+    await first.value
+    // The normal topology rebuild writes after recovery captured its owner.
+    clock.withLock { $0 = 4.8 }
+    gamma.applyGammaScale(0.6, on: 2, enforcerOn: 2)
+    recovery.tick()
+    try #require(await hdr.waitForRequests(2))
+    recovery.tick()
+    #expect(driver.writes.count == 2) // the old HDR reply cannot authorize it
+    await hdr.answer(1, false)
+    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+    while driver.writes.count == 2 && ContinuousClock.now < deadline {
+      recovery.tick()
+      try await Task.sleep(for: .milliseconds(1))
+    }
+    #expect(driver.writes.count == 3)
+    #expect(driver.writes.last?.samples == Self.profileTable().scaled(by: 0.6))
+    clock.withLock { $0 = 5 }
+    recovery.tick()
+    #expect(driver.writes.count == 3)
+    #expect(recovery.begin() == nil)
+  }
+
   @Test(arguments: [4.9, 6.0, 120.0])
   func aNewReconfigurationAfterTheFinalPassHasItsOwnBoundedWindow(start: Double) async throws {
     let driver = StubGammaDriver()
@@ -263,7 +300,7 @@ struct GammaControllerTests {
     #expect(driver.writes.count == 1)
   }
 
-  @Test func recoveryRejectsIDReuseMissingScreensAndSupersededBrightness() throws {
+  @Test func recoveryRejectsIDReuseAndMissingScreensButDistinguishesNewBrightness() throws {
     let driver = StubGammaDriver()
     driver.screens = [2]
     driver.identities[2] = "panel-A"
@@ -278,8 +315,12 @@ struct GammaControllerTests {
     #expect(controller.recoverBaselineIfReset(snapshot, hdrEnabled: false) == .stopped)
     driver.screens = [2]
     controller.applyGammaScale(0.7, on: 2, enforcerOn: 2)
-    #expect(controller.recoverBaselineIfReset(snapshot, hdrEnabled: false) == .stopped)
+    #expect(controller.recoverBaselineIfReset(snapshot, hdrEnabled: false) == .superseded)
     #expect(driver.writes.count == 2)
+    driver.identities[2] = "panel-B"
+    controller.applyGammaScale(0.8, on: 2, enforcerOn: 2)
+    #expect(controller.recoverBaselineIfReset(snapshot, hdrEnabled: false) == .stopped)
+    #expect(driver.writes.count == 3)
   }
 
   @Test func cancellingAnOldSnapshotPreservesANewerBrightnessOwner() throws {

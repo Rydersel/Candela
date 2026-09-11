@@ -130,6 +130,11 @@ final class GammaReconfigurationRecovery {
       case .written:
         budget.recordWrite()
         Self.log.info("Reconfiguration gamma table reasserted for display \(id, privacy: .public)")
+      case .superseded:
+        // Capture the newer successful owner and obtain fresh HDR observations.
+        // begin() preserves this burst's deadline and remaining write allowance.
+        begin()
+        return
       case .stopped:
         gamma.cancelRecovery(snapshot)
         candidates.removeValue(forKey: id)
