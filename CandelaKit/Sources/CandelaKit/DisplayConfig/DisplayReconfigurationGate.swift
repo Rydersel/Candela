@@ -80,12 +80,26 @@ public enum ReconfigurationClaimOutcome: Sendable, Equatable {
 /// reconciles from is not main-actor-confined in the first place.
 public actor DisplayReconfigurationGate {
   private var claimant: ReconfigurationClaimant?
+  private var releaseWaiters: [UUID: AsyncStream<Void>.Continuation] = [:]
 
   public init() {}
 
   /// Who holds the gate. Exists for test assertions; the app names a holder from
   /// `ReconfigurationClaimOutcome.refusedBy` instead.
   public var holder: ReconfigurationClaimant? { claimant }
+
+  /// Waits until this holder releases the gate, or the waiting task is cancelled.
+  /// Returns immediately if the named holder has already finished. Display-change
+  /// notifications are not a substitute: they can arrive while a preview still
+  /// holds the gate, and keeping a preview need not post another notification.
+  public func waitForRelease(of claimant: ReconfigurationClaimant) async {
+    guard self.claimant == claimant, !Task.isCancelled else { return }
+    let id = UUID()
+    let (stream, continuation) = AsyncStream<Void>.makeStream()
+    releaseWaiters[id] = continuation
+    defer { releaseWaiters[id] = nil }
+    for await _ in stream {}
+  }
 
   /// Takes the gate for `claimant`, or refuses and names the holder.
   ///
@@ -106,5 +120,8 @@ public actor DisplayReconfigurationGate {
   public func release(_ claimant: ReconfigurationClaimant) {
     guard self.claimant == claimant else { return }
     self.claimant = nil
+    let waiters = releaseWaiters.values
+    releaseWaiters.removeAll()
+    for waiter in waiters { waiter.finish() }
   }
 }
