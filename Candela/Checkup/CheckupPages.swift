@@ -301,6 +301,13 @@ struct CheckupLegPage: View {
             .foregroundStyle(OnboardingStyle.faintColor)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.top, 4)
+          if family == .capabilities || family == .nativeMode {
+            Label(CheckupCopy.modeChangeWarning, systemImage: "exclamationmark.triangle")
+              .font(.callout)
+              .foregroundStyle(OnboardingStyle.bodyColor)
+              .fixedSize(horizontal: false, vertical: true)
+              .padding(.top, 8)
+          }
         }
       }
     } actions: {

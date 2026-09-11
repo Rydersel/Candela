@@ -132,6 +132,8 @@ enum CheckupCopy {
   static let refreshTitle = "The refresh sweep"
   static let hdrTitle = "HDR"
   static let running = "Running this check on the display."
+  static let modeChangeWarning =
+    "The next test may make your display flicker or go dark briefly. Your original resolution and refresh rate will be restored after the refresh test."
   static let refusalNote =
     "A refusal is recorded with its reason and the run carries on. Nothing here ends a checkup except you."
 
@@ -456,7 +458,7 @@ enum CheckupCopy {
     [preparingTitle, preparingBody,
      scenarioTitle, scenarioSubtitle, scenarioNew, scenarioUsed, scenarioRecheck, pickTitle,
      pickSubtitle, pickEmpty, planTitle, planSubtitle, planModeSweep, identityTitle, capabilitiesTitle,
-     nativeModeTitle, refreshTitle, hdrTitle, running, refusalNote, plantDisclosureTitle,
+     nativeModeTitle, refreshTitle, hdrTitle, running, modeChangeWarning, refusalNote, plantDisclosureTitle,
      plantDisclosure, plantMissedTwice, showAgain, showAgainCap, start, continueLabel, back,
      answerPrompt, recordedPrefix, answerNothing, answerOne, answerMore, answerRound,
      answerNotRound, tapHint, secondDotTitle, secondDotPrompt, onlyDisplayStrip, summaryTitle,
