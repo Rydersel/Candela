@@ -127,6 +127,19 @@ struct CheckupPaneTests {
       plant: nil, showings: [:], exposureBookingID: nil)
   }
 
+  @Test func aWriteOnlyGradeFromAnOlderVersionIsExplainedInTheDocument() {
+    var stale = report(identityVerdict: .observed("EDID parsed"))
+    stale.appBuild = "1.0.0 (4)"
+    let text = CheckupSummaryText.render(stale)
+    #expect(text.contains(CheckupCopy.panelClassLine(.writeOnlyDDC, hdrEngaged: false)))
+    #expect(text.contains(CheckupCopy.panelClassMayBeMisreadNote))
+    #expect(!text.contains("—"))
+
+    var current = stale
+    current.appBuild = CheckupReport.correctedReadPathVersion
+    #expect(!CheckupSummaryText.render(current).contains(CheckupCopy.panelClassMayBeMisreadNote))
+  }
+
   @Test func thePaneNamesTheRunButtonAndNeverAVerdict() {
     #expect(CheckupPaneCopy.run == "Run a checkup")
     #expect(CheckupPaneCopy.verify == "Verify a report")

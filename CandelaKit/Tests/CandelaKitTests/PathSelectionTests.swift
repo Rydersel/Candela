@@ -1383,6 +1383,24 @@ struct PathSelectionTests {
     #expect(approx(h.controller.brightness, 0.5))
   }
 
+  @Test func refreshLeavesAForcedSoftwareDisplayAlone() async {
+    let h = Harness(ddcRead: (current: 50, max: 100)) { prefs, _ in prefs.forceSoftware = true }
+    h.controller.setBrightness(0.3)
+
+    await h.controller.refreshFromHardware()
+
+    // Forced software writes no DDC brightness, so 50/100 is stale: keep the saved 0.3.
+    #expect(approx(h.controller.brightness, 0.3))
+    #expect(approx(h.store.values[Harness.storageKey] ?? -1, 0.3))
+    #expect(await h.ddc.recordedReadCount() == 0, "and the wire is never asked")
+
+    // Same frame without the opt-out adopts, so the guard is what held 0.3 above.
+    let control = Harness(ddcRead: (current: 50, max: 100))
+    control.controller.setBrightness(0.3)
+    await control.controller.refreshFromHardware()
+    #expect(approx(control.controller.brightness, 0.75))
+  }
+
   // MARK: Reconfigure
 
   @Test func reconfigureRecapturesAndReappliesSoftwareLeg() async {
