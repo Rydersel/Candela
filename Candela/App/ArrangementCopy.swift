@@ -100,6 +100,17 @@ enum ArrangementCopy {
 
   static var restore: LocalizedStringKey { "Put Them Back" }
 
+  /// Records what is on screen now, so the next reconnect restores this instead
+  /// of the layout that no longer fits.
+  static var saveThisLayout: LocalizedStringKey { "Save This Layout" }
+
+  /// Why the save is greyed. One sentence for both busy states (an unanswered
+  /// preview, an apply in flight): the user cannot tell them apart and the remedy
+  /// is the same.
+  static var saveThisLayoutBusy: LocalizedStringKey {
+    "A display change is still on screen. Answer it or wait for it to finish, then save this layout."
+  }
+
   /// Why a saved layout did not come back.
   ///
   /// Restore runs with nobody watching, so this is the only account the user
@@ -108,8 +119,13 @@ enum ArrangementCopy {
   /// `Text` rather than `LocalizedStringKey` for `invalidLayout`'s reason: a
   /// runtime value routed through a lookup key would translate the user's
   /// hardware.
+  ///
+  /// `offersSave` is keyed on whether the button sits under this sentence, not on
+  /// which surface is asking, so nothing tells a reader to rearrange their
+  /// displays directly above a button that does it in one click.
   static func restoreNotice(
-    _ notice: ArrangementReapplyNotice, name: (CGDirectDisplayID) -> String
+    _ notice: ArrangementReapplyNotice, name: (CGDirectDisplayID) -> String,
+    offersSave: Bool = false
   ) -> Text {
     switch notice {
     case .ambiguousIdentity:
@@ -123,7 +139,12 @@ enum ArrangementCopy {
       // A display that resized since the layout was saved is the ordinary cause,
       // and origins recorded for the old size cannot go back on the new one.
       // Deliberately unnamed: naming one screen reads as an accusation about it.
-      Text("Your displays are not the size they were when this arrangement was saved, so it was not restored. Arrange them again to save a new one.")
+      //
+      // Rearranging stays first even where the button exists: the button records
+      // what is on screen, which is not always the layout the reader wants back.
+      offersSave
+        ? Text("Your displays are not the size they were when this arrangement was saved, so it was not restored. Arrange them again, or save the layout you have now.")
+        : Text("Your displays are not the size they were when this arrangement was saved, so it was not restored. Arrange them again to save a new one.")
     case let .layoutNoLongerFits(problems):
       // The same sentence the interactive refusal uses, for the same fact:
       // origins that do not tile at the sizes they were recorded at.
