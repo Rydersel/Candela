@@ -78,7 +78,7 @@ struct SharedDimRecoveryTests {
     if reversed { entries.reverse() }
     let model = AppModel(
       shade: FakeShade(), gamma: FakeGamma(), hdrToggling: FakeHDR(), audioDevices: FakeAudio(),
-      discoverDisplays: { _ in entries })
+      discoverDisplays: { _ in .init(controlled: entries, report: .notEnumerated) })
     await model.refresh()
     for state in model.displays { await state.controller.waitForPendingWrites() }
     return Rig(model: model, key: key, prefs: prefs, writers: writers)
