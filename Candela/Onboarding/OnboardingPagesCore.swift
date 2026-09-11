@@ -19,8 +19,12 @@ struct OnboardingWelcomePage: View {
         .opacity(appeared ? 1 : 0)
       Spacer(minLength: 18)
       OnboardingHeading(
-        title: "Welcome to \(AppInfo.productName)",
-        subtitle: "\(AppInfo.productName) looks after your external displays: health, burn-in protection, and the everyday controls, done carefully."
+        title: OnboardingTitles.welcome,
+        subtitle: "\(AppInfo.productName) looks after your external displays: health, burn-in protection, and the everyday controls, done carefully.",
+        // Only the flow's opening frame gives the landing up, because the
+        // window becoming key is speaking its own title there. Navigating back
+        // to welcome lands on the heading like every other page.
+        landsAccessibilityFocus: model.hasNavigated
       )
       .opacity(appeared ? 1 : 0)
       .offset(y: appeared ? 0 : 10)
@@ -62,7 +66,7 @@ struct OnboardingAccessibilityPage: View {
       VStack(spacing: 18) {
         keycaps
         OnboardingHeading(
-          title: "Your keyboard, everywhere",
+          title: OnboardingTitles.accessibility,
           subtitle: "macOS delivers the brightness, volume and mute keys through Accessibility. \(AppInfo.productName) needs that access to see those key presses, and it reads nothing else."
         )
       }
@@ -155,7 +159,7 @@ struct OnboardingNoDisplaysPage: View {
         .frame(width: 240, height: 170)
       Spacer(minLength: 20)
       OnboardingHeading(
-        title: "No external displays yet",
+        title: OnboardingTitles.noDisplays,
         subtitle: "Plug one in anytime. \(AppInfo.productName) picks it up automatically and offers the right size for it in Settings."
       )
       Spacer(minLength: 24)
@@ -187,7 +191,7 @@ struct OnboardingFinishPage: View {
       VStack(spacing: 14) {
         AnimatedCheckmark(accent: accent)
           .frame(width: 68, height: 68)
-        OnboardingHeading(title: "You're all set")
+        OnboardingHeading(title: OnboardingTitles.finish)
       }
       Spacer(minLength: 18)
       VStack(alignment: .leading, spacing: 10) {

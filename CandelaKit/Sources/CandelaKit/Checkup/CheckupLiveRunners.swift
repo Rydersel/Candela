@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import os
 
 /// Per advertised control: read, write the same value back, read again,
 /// quote the round trip. The write's return is discarded; a DDC ACK is evidence
@@ -85,6 +86,11 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
   let configurator: any DisplayConfiguring
   let displayID: CGDirectDisplayID
   private var before: DisplayMode?
+  /// Outside the actor's isolation on purpose: a sweep holds the actor for its
+  /// whole run with no suspension point, so an isolated `cancel()` would queue
+  /// behind the loop it is meant to stop. Letting the sweep suspend instead
+  /// would let a queued `restore()` land between two rates.
+  private let cancelled = OSAllocatedUnfairLock<Bool>(initialState: false)
 
   /// `.preview` (`kCGConfigureForAppOnly`) reverts on process exit, crash
   /// included, so a run that dies mid-sweep never parks the panel on the last
@@ -138,7 +144,15 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
     if before == nil { before = configurator.currentMode(for: displayID) }
   }
 
+  public nonisolated func cancel() { cancelled.withLock { $0 = true } }
+
+  private nonisolated var isCancelled: Bool { cancelled.withLock { $0 } }
+
   public func runNativeMode() -> [CheckupClaim] {
+    // Before anything is remembered or applied: a leg that never ran has earned
+    // no claim and left nothing to put back. Past here the apply is committed,
+    // so a cancel during it keeps the claim.
+    guard !isCancelled else { return [] }
     rememberCurrentMode()
     let modes = configurator.modes(for: displayID)
     guard let native = modes.first(where: \.isNative) else {
@@ -177,6 +191,10 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
   }
 
   public func runRefreshSweep() -> [CheckupClaim] {
+    // Ahead of `rememberCurrentMode`: a sweep that never ran must not latch a
+    // mode to put back, or a later `restore()` becomes a real apply of the mode
+    // the display is already sitting on.
+    guard !isCancelled else { return [] }
     rememberCurrentMode()
     let modes = configurator.modes(for: displayID)
     guard let native = modes.first(where: \.isNative) else {
@@ -197,6 +215,10 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
     }
     var claims: [CheckupClaim] = []
     for rate in DisplayModeCatalog.distinctRates(atNative).sorted() {
+      // Checked at the top of each rate, so the guarantee is "stops within one
+      // rate step": a CGCompleteDisplayConfiguration already in flight cannot be
+      // interrupted. Rates already measured keep their claims.
+      guard !isCancelled else { return claims }
       guard
         let mode = atNative.first(where: { DisplayMode.quantizedRefresh($0.refreshHz) == rate })
       else { continue }
