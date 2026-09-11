@@ -20,7 +20,7 @@ the arrow keys to move it.
 You need at least two independent desktop tiles to arrange them. Mirrored
 displays share one tile, so two physical displays showing the same desktop do
 not provide two tiles to arrange. With one tile, the map asks you to connect
-another display. An extended virtual display also counts.
+another display. An extended [virtual display](virtual-displays.md) also counts.
 
 ## Main Display
 

@@ -17,6 +17,8 @@ hatches for hardware that misbehaves.
   confirming changes, and finding saved-setup controls.
 - [Saved display setups](display-setups.md). Remembering rotations and positions,
   what happens on reconnect, and when a saved setup cannot be restored.
+- [Virtual Displays](virtual-displays.md). Creating another desktop, changing its
+  size, recreating it at launch, and removing it.
 - [Diagnostics](diagnostics.md). What the per-display Diagnostics page reports
   and how to export it for an issue.
 - [Advanced settings](advanced-settings.md). The knobs that are set with
