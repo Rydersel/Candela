@@ -1,3 +1,4 @@
+import AppKit
 import CandelaKit
 import SwiftUI
 import Testing
@@ -76,14 +77,67 @@ struct ProtectionPaneTests {
   /// enrollment as if it were running. The words are the display hub preview's.
   /// Enrollment still answers first: nothing enrolled reads "Off" either way.
   @Test func theDimmingRowSaysPausedInASafeModeSession() {
-    let paused = ProtectionPane.dimmingRow(enrolledCount: 2, isSafeMode: true)
+    let paused = ProtectionPane.dimmingRow(enrolledStates: [.active, .active], isSafeMode: true)
     #expect(paused.value == "Paused")
     #expect(paused.spokenValue == "Paused for this session, Safe Mode")
-    #expect(ProtectionPane.dimmingRow(enrolledCount: 0, isSafeMode: true).value == "Off")
+    #expect(ProtectionPane.dimmingRow(enrolledStates: [], isSafeMode: true).value == "Off")
 
-    let running = ProtectionPane.dimmingRow(enrolledCount: 2, isSafeMode: false)
+    let running = ProtectionPane.dimmingRow(enrolledStates: [.active, .active], isSafeMode: false)
     #expect(running.value == "On for 2 displays")
     #expect(running.spokenValue == running.value)
+  }
+
+  @Test func theDimmingRowTracksSuspensionAndResumption() {
+    let paused = ProtectionPane.dimmingRow(enrolledStates: [.suspended], isSafeMode: false)
+    #expect(paused.value == "Paused")
+    #expect(paused.spokenValue == "Paused for 1 display")
+    let resumed = ProtectionPane.dimmingRow(enrolledStates: [.active], isSafeMode: false)
+    #expect(resumed.value == "On for 1 display")
+  }
+
+  @Test func aPartialPauseDoesNotHideTheDisplaysStillBeingProtected() {
+    let mixed = ProtectionPane.dimmingRow(enrolledStates: [.idleDim, .suspended, .suspended], isSafeMode: false)
+    #expect(mixed.value == "On for 1 display, 2 paused")
+    #expect(mixed.spokenValue == mixed.value)
+    let all = ProtectionPane.dimmingRow(enrolledStates: [.suspended, .suspended], isSafeMode: false)
+    #expect(all.value == "Paused")
+    #expect(all.spokenValue == "Paused for 2 displays")
+  }
+
+  @Test func ordinaryCareStatesAndStartupStillCountAsEnabled() {
+    let states: [OledDimState?] = [.active, .idleDim, .blackout, .lockDim, .unfocusedDim, nil]
+    for state in states {
+      #expect(ProtectionPane.dimmingRow(enrolledStates: [state], isSafeMode: false).value == "On for 1 display")
+    }
+  }
+
+  @Test func pausedRowsPublishTheirSpokenValue() {
+    _ = NSApplication.shared
+    (NSApp as NSObject).accessibilitySetValue(
+      true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+    for states: [OledDimState?] in [[.suspended], [.active, .suspended, .suspended]] {
+      let row = ProtectionPane.dimmingRow(enrolledStates: states, isSafeMode: false)
+      let host = NSHostingView(rootView: NavigationRow(
+        title: "OLED Care", value: row.value, spokenValue: row.spokenValue, action: {})
+        .frame(width: 480, height: 80))
+      host.frame = NSRect(x: 0, y: 0, width: 480, height: 80)
+      host.layoutSubtreeIfNeeded()
+      var values: [String] = []
+      func collect(_ element: Any, depth: Int = 0) {
+        guard depth < 24 else { return }
+        let object = element as AnyObject
+        if (object.accessibilityRole?() ?? nil) == .button,
+           let accessible = object as? NSObject,
+           let value = accessible.perform(NSSelectorFromString("accessibilityValue"))?.takeUnretainedValue() as? String {
+          values.append(value)
+        }
+        for child in (object.accessibilityChildren?() ?? nil) ?? [] {
+          collect(child, depth: depth + 1)
+        }
+      }
+      collect(host)
+      #expect(values == [row.spokenValue])
+    }
   }
 
   // MARK: - The startup caption
