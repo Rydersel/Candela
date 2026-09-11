@@ -30,11 +30,13 @@ enum SingleInstanceGuard {
       .filter { !$0.isTerminated }
       .map {
         SingleInstancePolicy.Instance(
-          processIdentifier: $0.processIdentifier, bundlePath: $0.bundleURL?.path
+          processIdentifier: $0.processIdentifier, bundlePath: $0.bundleURL?.path,
+          launchDate: $0.launchDate
         )
       }
     let decision = SingleInstancePolicy.decide(
-      running: running, ownProcessIdentifier: NSRunningApplication.current.processIdentifier
+      running: running, ownProcessIdentifier: NSRunningApplication.current.processIdentifier,
+      ownLaunchDate: NSRunningApplication.current.launchDate
     )
     guard case let .terminate(runningBundlePath) = decision else { return }
 

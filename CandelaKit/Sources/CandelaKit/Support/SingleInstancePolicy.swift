@@ -14,10 +14,12 @@ public enum SingleInstancePolicy {
     /// Nil when the location cannot be read. That is not evidence of anything:
     /// it is still a running copy.
     public let bundlePath: String?
+    public let launchDate: Date?
 
-    public init(processIdentifier: Int32, bundlePath: String?) {
+    public init(processIdentifier: Int32, bundlePath: String?, launchDate: Date? = nil) {
       self.processIdentifier = processIdentifier
       self.bundlePath = bundlePath
+      self.launchDate = launchDate
     }
   }
 
@@ -31,9 +33,27 @@ public enum SingleInstancePolicy {
   /// An empty list proceeds, which is also what a failed enumeration looks like: a
   /// missed second copy costs interleaved DDC writes, while a false positive locks
   /// someone out of the app with no route back from the UI.
-  public static func decide(running: [Instance], ownProcessIdentifier: Int32) -> Decision {
+  public static func decide(
+    running: [Instance], ownProcessIdentifier: Int32, ownLaunchDate: Date? = nil
+  ) -> Decision {
     let others = running.filter { $0.processIdentifier != ownProcessIdentifier }
-    guard let first = others.first else { return .proceed }
-    return .terminate(runningBundlePath: first.bundlePath)
+    guard !others.isEmpty else { return .proceed }
+    // Include this process even if Launch Services has not listed it yet.
+    // Preserve a listed entry even when its date is nil: filling it in only for
+    // ourselves could make two copies choose different orderings for one snapshot.
+    let own = running.first { $0.processIdentifier == ownProcessIdentifier }
+      ?? Instance(processIdentifier: ownProcessIdentifier, bundlePath: nil, launchDate: ownLaunchDate)
+    let candidates = others + [own]
+    // Choose one ordering for the whole set. Mixing date and PID comparisons
+    // pair by pair when a date is missing can make the comparison non-transitive.
+    let datesAvailable = candidates.allSatisfy { $0.launchDate != nil }
+    let winner = candidates.min {
+      if datesAvailable, let lhs = $0.launchDate, let rhs = $1.launchDate, lhs != rhs {
+        return lhs < rhs
+      }
+      return $0.processIdentifier < $1.processIdentifier
+    }!
+    return winner.processIdentifier == ownProcessIdentifier
+      ? .proceed : .terminate(runningBundlePath: winner.bundlePath)
   }
 }
