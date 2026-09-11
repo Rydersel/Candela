@@ -7,6 +7,14 @@ public struct CheckupStoredRun: Equatable, Sendable {
   public let envelope: CheckupReportEnvelope
 }
 
+public enum CheckupStoreError: Error, Equatable {
+  /// The URL did not sit inside the store's own directory, so nothing was removed.
+  case outsideStore
+  /// Inside the store but not one stored run: an identity folder, a deeper
+  /// path, or a name the store never wrote. Nothing was removed.
+  case notAStoredRun
+}
+
 /// One file per run, keyed by identity, under Application Support. The
 /// identity key is the display's EDID-derived key, never a display id.
 public struct CheckupStore: Sendable {
@@ -72,6 +80,31 @@ public struct CheckupStore: Sendable {
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
     return try decoder.decode(CheckupReportEnvelope.self, from: Data(contentsOf: url))
+  }
+
+  /// Removes exactly one stored run: a `json` file exactly one level under an
+  /// identity folder in this store, which is the shape `save` returns and `list`
+  /// hands back. Anything else throws rather than returning as if it deleted.
+  /// This is the one call that removes a person's measured data, and
+  /// `removeItem` on an identity folder would take a display's whole history.
+  public func delete(url: URL) throws {
+    // Canonicalized on both sides, as `save` and `list` are: an unresolved
+    // `directory` would refuse the store's own files wherever the path runs
+    // through a symlink, which every temp directory does.
+    let target = url.resolvingSymlinksInPath()
+    let root = directory.resolvingSymlinksInPath().pathComponents
+    let components = target.pathComponents
+    // Whole components, never a string prefix, which would admit a sibling
+    // directory whose name merely starts with the store's.
+    guard components.count > root.count, Array(components.prefix(root.count)) == root else {
+      throw CheckupStoreError.outsideStore
+    }
+    // The extension alone would admit a directory named like a run file.
+    let isFolder = (try? target.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+    guard components.count == root.count + 2, target.pathExtension == "json", !isFolder else {
+      throw CheckupStoreError.notAStoredRun
+    }
+    try FileManager.default.removeItem(at: target)
   }
 
   public func list(identityKey: String) throws -> [CheckupStoredRun] {

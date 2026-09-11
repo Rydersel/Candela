@@ -21,8 +21,38 @@ struct CheckupFlowView: View {
       chrome
     }
     .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: model.page)
+    // Default priority: a page change must not cut off a sentence VoiceOver is
+    // part-way through, and the listener cannot ask for it back. `onChange`
+    // skips the first render, which keeps the opening page silent while the
+    // window becoming key speaks its own title.
+    .onChange(of: model.page) { _, page in
+      GuidedFlowAnnouncement.queued(CheckupCopy.pageAnnouncement(page))
+    }
+    // High priority: a deadline is the one case where interrupting is the
+    // point. Posted from here, not the field window, because this view is what
+    // stays alive through the showing.
+    .onChange(of: model.secondsRemaining) { _, seconds in
+      guard let kind = countdownFieldKind,
+        let text = CheckupCopy.secondsLeftAnnouncement(seconds: seconds, cap: kind.capSeconds)
+      else { return }
+      GuidedFlowAnnouncement.interrupting(text)
+    }
     .frame(minWidth: 720, minHeight: 560)
     .preferredColorScheme(.dark)
+  }
+
+  /// The field the seconds are counting down from, nil when nothing is on the
+  /// glass. The cap matters: the white field's is 10, so its opening value must
+  /// not be read as the 10-second threshold.
+  private var countdownFieldKind: CheckupFieldKind? {
+    switch model.page {
+    case .fieldShowing(let kind), .fieldConfirmSecondDot(let kind): kind
+    // Written out rather than defaulted: a later page with a field on it would
+    // take the default and count down in silence.
+    case .scenario, .displayPick, .plan, .identity, .capabilities, .nativeMode, .refresh,
+      .witness, .plantDisclosure, .fieldInstruction, .hdr, .summary:
+      nil
+    }
   }
 
   @ViewBuilder

@@ -7,6 +7,11 @@ import Testing
 
 /// Reads the accessibility tree SwiftUI publishes, not the source, so a label
 /// on the wrong view or swallowed by a parent element fails here.
+///
+/// Announcements are not in this tree and cannot be: they are posted
+/// notifications, not elements. Their decision surface is
+/// `GuidedFlowAnnouncementTests`; whether VoiceOver speaks them is a person's
+/// check with VoiceOver on.
 @MainActor
 @Suite("Checkup accessibility labels")
 struct CheckupAXLabelTests {
@@ -225,6 +230,7 @@ enum CheckupFixture {
     func runNativeMode() async -> [CheckupClaim] { [] }
     func runRefreshSweep() async -> [CheckupClaim] { [] }
     func restore() async -> Bool { true }
+    func cancel() {}
   }
 
   struct StubHDR: CheckupHDRRunning {

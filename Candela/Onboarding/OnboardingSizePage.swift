@@ -1,3 +1,4 @@
+import CandelaKit
 import SwiftUI
 
 /// The recommended size for one display. The copy rule: renders at a higher
@@ -11,6 +12,10 @@ struct OnboardingSizePage: View {
 
   @State private var showsAlternatives = false
   @State private var showsFullList = false
+  /// The bar is a timed decision, so it lands the cursor on its answer the way
+  /// the settings mode banner does. Everywhere else the heading takes it.
+  @AccessibilityFocusState private var keepFocused: Bool
+  @AccessibilityFocusState private var revertFocused: Bool
 
   private var display: OnboardingDisplayEntry? { model.display(forKey: displayKey) }
 
@@ -29,7 +34,7 @@ struct OnboardingSizePage: View {
     VStack(spacing: 0) {
       Spacer(minLength: 20)
       OnboardingHeading(
-        title: "A better size for \(model.displayName(forKey: displayKey))",
+        title: OnboardingTitles.size(displayName: model.displayName(forKey: displayKey)),
         subtitle: "Everything stays sharp: the display renders at a higher resolution and scales the result. Text and controls get the size this display was made for."
       )
       Spacer(minLength: 14)
@@ -61,6 +66,12 @@ struct OnboardingSizePage: View {
     // Keyed to the seam state so ticks, the choices/countdown swap and the
     // revert's return all animate; a plain VStack animates both directions.
     .animation(.spring(duration: 0.45), value: model.applyState)
+    // The tick this page already re-renders on, never a timer of its own. The
+    // applier publishes the seconds and the achieved size in one update, so
+    // both halves are observed together.
+    .onChange(of: countdownTick) { previous, current in
+      speakCountdown(divergedThisTick: previous.achieved == nil && current.achieved != nil)
+    }
     .onDisappear {
       // An unanswered countdown must not outlive its page (the commit-on-advance
       // rule keeps only
@@ -219,6 +230,53 @@ struct OnboardingSizePage: View {
       : "Reverting to the previous size in \(seconds)s"
   }
 
+  /// Returns `countdownCaption` itself, so a listener and a reader get the same
+  /// sentence. Nil where the cadence rule says nothing.
+  ///
+  /// Also nil on `divergedThisTick`: the seconds and a divergence arrive in one
+  /// update, and this announcement interrupts, so it would cut off the recovery
+  /// text that is the only route back out of a diverged commit. The deadline
+  /// stays on the bar as a caption.
+  static func countdownAnnouncement(
+    seconds: Int, canKeep: Bool, cap: Int, divergedThisTick: Bool = false
+  ) -> String? {
+    guard !divergedThisTick else { return nil }
+    guard AnnouncementThresholds.speaks(at: seconds, cap: cap) else { return nil }
+    return countdownCaption(seconds: seconds, canKeep: canKeep)
+  }
+
+  /// The bar's own title when a commit diverged. Drawn and spoken from one
+  /// place: a listener whose cursor is on Revert hears it only here.
+  static let divergedTitle = "Size preview could not be verified"
+
+  /// The achieved size said out loud. Not `achievedCaption`, which is display
+  /// text down to the times sign and shortened Hz; both are read inconsistently.
+  static func spokenAchievedSize(_ achieved: OnboardingAchievedSize) -> String {
+    switch achieved {
+    case let .size(width, height, refreshHz):
+      "The display is showing "
+        + ModeSpeech.spoken(logicalWidth: width, logicalHeight: height, refreshHz: refreshHz) + "."
+    case .unreadable:
+      DisplayModeCopy.unreadableAchievedGeometry(dialect: .size)
+    }
+  }
+
+  /// What happened, the way out, and what the display is showing instead. The
+  /// cursor is on Revert, so the sentences above the buttons reach a listener
+  /// nowhere else.
+  static func divergenceAnnouncement(_ achieved: OnboardingAchievedSize) -> String {
+    "\(divergedTitle). \(DisplayModeCopy.recoveryInstruction(dialect: .size)) "
+      + spokenAchievedSize(achieved)
+  }
+
+  /// The deadline the caption gives a reader, plus the recovery text when the
+  /// commit had already diverged before the bar appeared.
+  static func barAnnouncement(seconds: Int, achieved: OnboardingAchievedSize?) -> String {
+    let caption = countdownCaption(seconds: seconds, canKeep: achieved == nil)
+    guard let achieved else { return caption }
+    return "\(divergenceAnnouncement(achieved)) \(caption)"
+  }
+
   private func countdownBar(seconds: Int) -> some View {
     VStack(spacing: 12) {
       Text(verbatim: Self.countdownCaption(
@@ -228,7 +286,7 @@ struct OnboardingSizePage: View {
         .monospacedDigit()
         .contentTransition(.numericText())
       if let achieved = model.pendingAchievedSize(forKey: displayKey) {
-        Text("Size preview could not be verified")
+        Text(verbatim: Self.divergedTitle)
           .font(.callout.weight(.semibold))
           .foregroundStyle(OnboardingStyle.bodyColor)
         Text(verbatim: DisplayModeCopy.recoveryInstruction(dialect: .size))
@@ -247,11 +305,61 @@ struct OnboardingSizePage: View {
           Button("Keep") { model.keepSize() }
             .buttonStyle(OnboardingPrimaryButtonStyle(accent: accent))
             .keyboardShortcut(.defaultAction)
+            .accessibilityFocused($keepFocused)
         }
         Button("Revert") { model.revertSize() }
           .buttonStyle(OnboardingSecondaryButtonStyle())
           .keyboardShortcut(.cancelAction)
+          .accessibilityFocused($revertFocused)
       }
     }
+    // Revert takes the cursor when Keep is gone: a recovery control is never the
+    // one the cursor cannot find. The caption goes with the landing, since a
+    // deadline nobody speaks is a deadline nobody hears.
+    .onAppear {
+      landFocus()
+      GuidedFlowAnnouncement.queued(
+        Self.barAnnouncement(
+          seconds: seconds, achieved: model.pendingAchievedSize(forKey: displayKey)))
+    }
+    // Divergence can land after the bar is up, taking Keep out from under the
+    // cursor. The recovery text moves with it, since those sentences are on
+    // screen only.
+    .onChange(of: model.pendingAchievedSize(forKey: displayKey)) { _, achieved in
+      landFocus()
+      guard let achieved else { return }
+      GuidedFlowAnnouncement.queued(Self.divergenceAnnouncement(achieved))
+    }
+  }
+
+  /// Observed as a pair, so the divergence and the seconds it arrived with
+  /// cannot be read from different updates.
+  private struct CountdownTick: Equatable {
+    var state: OnboardingApplyState
+    var achieved: OnboardingAchievedSize?
+  }
+
+  private var countdownTick: CountdownTick {
+    CountdownTick(
+      state: model.applyState, achieved: model.pendingAchievedSize(forKey: displayKey))
+  }
+
+  private func landFocus() {
+    let canKeep = model.pendingAchievedSize(forKey: displayKey) == nil
+    keepFocused = canKeep
+    revertFocused = !canKeep
+  }
+
+  /// High priority, so it interrupts: a deadline heard after it expired is not
+  /// a deadline.
+  private func speakCountdown(divergedThisTick: Bool) {
+    guard let seconds = model.applyCountdownSecondsRemaining(forKey: displayKey) else { return }
+    guard let text = Self.countdownAnnouncement(
+      seconds: seconds,
+      canKeep: model.pendingAchievedSize(forKey: displayKey) == nil,
+      cap: model.applierCountdownSeconds,
+      divergedThisTick: divergedThisTick
+    ) else { return }
+    GuidedFlowAnnouncement.interrupting(text)
   }
 }
