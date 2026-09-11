@@ -144,8 +144,15 @@ struct KeyRouterTests {
   }
 
   // The cells a future edit would most plausibly break: key-up routes whatever
-  // the modifiers are (the fork plays the sound on an Option-only release too),
-  // only EXACT Option is the deep link, and brightness chords mean nothing to volume.
+  // the modifiers are, only EXACT Option is the deep link, and brightness chords
+  // mean nothing to volume.
+  //
+  // The release routes under any modifier on purpose: a router decides what an
+  // event is, never whether it makes a sound. The executor answers the blip, from
+  // whether the preceding key-down was a step, so an Option-only release (which
+  // opened Sound settings) is silent. The fork blips there; no written rule
+  // covers it, since Appendix A of the v1 design spec asks only that the sound
+  // honor the system "play feedback" setting.
   @Test func modifiedVolumeKeyUpStillRoutesTheRelease() {
     #expect(routeVol(.volumeUp, pressed: false, [.option]) == .volumeKeyUp)
   }

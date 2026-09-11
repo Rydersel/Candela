@@ -1699,8 +1699,14 @@ public final class BrightnessController: PendingWireDraining {
 
   /// Reconfigure re-apply: the WindowServer rebuilt display state, so re-capture the
   /// gamma baseline, re-pin shade frames, and re-run the software leg for the current
-  /// value. Skipped under the native path per the restore-latch clearing. Ordering contract: the app-side loop
-  /// calls `resetAllGamma()` once per event BEFORE this, so the table is OS-owned.
+  /// value. Skipped under the native path per the restore-latch clearing. Ordering contract:
+  /// `ReconfigureDimming.run` on the app side calls `resetAllGamma()` once per event BEFORE
+  /// this, so the table is OS-owned, and has already re-evaluated HDR for EVERY surviving
+  /// display.
+  ///
+  /// The half this owes back: NO suspension point anywhere on this path. That caller removes
+  /// every shade immediately before the loop that calls this, so an `await` here is a
+  /// visibly undimmed display until it resumes.
   public func handleReconfigure(recapture: Bool = true) async {
     // recapture: false is the interference-accept path: at accept time the
     // interfering app may own the table, and capturing that as the baseline bakes its

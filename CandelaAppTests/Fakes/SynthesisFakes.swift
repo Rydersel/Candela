@@ -37,6 +37,7 @@ final class FakeDisplayWorld: @unchecked Sendable {
   private(set) var mirrorChanges: [[MirrorChange]] = []
   private var _applies: [(mode: DisplayMode, displayID: CGDirectDisplayID)] = []
   private var _enumerations: [EnumerationCall] = []
+  private var _onlineListReads = 0
 
   /// Each of these is one full CoreGraphics enumeration on the real configurator.
   /// A fake answers from a dictionary, so this count is the only place a
@@ -80,6 +81,15 @@ final class FakeDisplayWorld: @unchecked Sendable {
 
   func recordApply(_ mode: DisplayMode, to displayID: CGDirectDisplayID) {
     lock.withLock { _applies.append((mode, displayID)) }
+  }
+
+  /// How many times the configurator was asked for the online list. Its own
+  /// counter rather than an `EnumerationCall`: asking who is attached is not an
+  /// enumeration, and several suites assert on `enumerations` exactly.
+  var onlineListReads: Int { lock.withLock { _onlineListReads } }
+
+  func recordOnlineListRead() {
+    lock.withLock { _onlineListReads += 1 }
   }
 
   func attach(
@@ -216,7 +226,14 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
   /// on the engage tail reads it off the object it configured.
   var applies: [(mode: DisplayMode, displayID: CGDirectDisplayID)] { world.applies }
 
-  func displays() -> [ConfiguredDisplay] { world.displays() }
+  /// One count per `displays()` call on THIS configurator. The world's own
+  /// internal reads, about a single display, do not move it.
+  var onlineListReads: Int { world.onlineListReads }
+
+  func displays() -> [ConfiguredDisplay] {
+    world.recordOnlineListRead()
+    return world.displays()
+  }
 
   func modes(for displayID: CGDirectDisplayID) -> [DisplayMode] {
     world.recordEnumeration(.modes)

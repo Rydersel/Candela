@@ -49,14 +49,19 @@ public actor DisplayManager {
 
   /// Shared with the `@convention(c)` reconfiguration callback through the
   /// `userInfo` pointer. Sendable: it holds only the state lock and the raw
-  /// intake continuation (both Sendable), and its one method is synchronous.
+  /// intake continuation and signal callback (all Sendable).
   final class IntakeBox: Sendable {
     let state: OSAllocatedUnfairLock<EpochState>
     let rawEvents: AsyncStream<Void>.Continuation
+    let onReconfigure: @Sendable (CGDisplayChangeSummaryFlags) -> Void
 
-    init(state: OSAllocatedUnfairLock<EpochState>, rawEvents: AsyncStream<Void>.Continuation) {
+    init(
+      state: OSAllocatedUnfairLock<EpochState>, rawEvents: AsyncStream<Void>.Continuation,
+      onReconfigure: @escaping @Sendable (CGDisplayChangeSummaryFlags) -> Void = { _ in }
+    ) {
       self.state = state
       self.rawEvents = rawEvents
+      self.onReconfigure = onReconfigure
     }
 
     /// The entire intake for one raw CG event, run synchronously in the
@@ -71,6 +76,7 @@ public actor DisplayManager {
       }
       topologyLog.log("reconfigure intake: display=\(displayID) flags=0x\(String(flags.rawValue, radix: 16), privacy: .public) epoch=\(epoch)")
       rawEvents.yield(())
+      onReconfigure(flags)
     }
   }
 
@@ -118,6 +124,10 @@ public actor DisplayManager {
     state.withLock { $0.epoch }
   }
 
+  /// Software-only recovery must stop during sleep too, while leaving the
+  /// stricter reconfiguration suspension on every DDC write untouched.
+  public nonisolated var isAsleep: Bool { state.withLock { $0.asleep } }
+
   /// Sleep intake (NSWorkspace notifications stay app-side and forward here):
   /// synchronous bump and suspend, NO topology element, because sleep is a write
   /// gate rather than a topology change. The arm-token bump invalidates any
@@ -153,8 +163,14 @@ public actor DisplayManager {
   /// the main thread in `applicationDidFinishLaunching`. Call once: the
   /// registration lives for the process, so the box handed to CG is
   /// intentionally immortal (`passRetained`, never balanced).
-  public nonisolated func activate() {
-    let userInfo = Unmanaged.passRetained(intake).toOpaque()
+  /// `onReconfigure` runs after the synchronous epoch bump. It must only
+  /// signal deferred work, without display inspection or writes in the callback.
+  public nonisolated func activate(
+    onReconfigure: @escaping @Sendable (CGDisplayChangeSummaryFlags) -> Void = { _ in }
+  ) {
+    let callbackIntake = IntakeBox(
+      state: state, rawEvents: intake.rawEvents, onReconfigure: onReconfigure)
+    let userInfo = Unmanaged.passRetained(callbackIntake).toOpaque()
     let result = CGDisplayRegisterReconfigurationCallback({ displayID, flags, userInfo in
       guard let userInfo else { return }
       Unmanaged<DisplayManager.IntakeBox>.fromOpaque(userInfo).takeUnretainedValue()

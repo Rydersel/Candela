@@ -165,6 +165,127 @@ struct SavedLayoutConfirmationTests {
     }
   }
 
+  @Test func savingFromTheStaleNoticeRecordsTheLayoutOnScreenAndClearsTheNotice() async throws {
+    try await withCoordinator { coordinator, store, rig, _ in
+      coordinator.setRestoringLayout(true)
+      await coordinator.restoreSavedArrangement()
+      #expect(store.savedArrangement(for: TopologySignature(rig.currentArrangement())) != nil)
+
+      let resized = try #require(rig.currentArrangement().tile(2)?.identity.key)
+      await reconnect(coordinator, rig, showing: Self.widening(rig.currentArrangement(), 2, by: 200))
+      #expect(coordinator.restoreNotice == .savedForDifferentGeometry([resized]))
+
+      coordinator.saveCurrentLayout()
+      // The queue is what the click hands the work to, so drain it before reading.
+      await coordinator.restoreSavedArrangement()
+      #expect(coordinator.restoreNotice == nil)
+      let saved = try #require(store.savedArrangement(for: TopologySignature(rig.currentArrangement())))
+      #expect(saved.entries.count == 2)
+      #expect(saved.entries.first { $0.identity == resized }?.width == 1000)
+
+      // The point of the save: the next reconnect restores this layout instead of
+      // raising the same notice again.
+      await reconnect(coordinator, rig, showing: rig.currentArrangement())
+      #expect(coordinator.restoreNotice == nil)
+    }
+  }
+
+  @Test func savingDoesNothingWhileTheRememberSettingIsOff() async throws {
+    try await withCoordinator { coordinator, store, rig, _ in
+      coordinator.saveCurrentLayout()
+      await coordinator.restoreSavedArrangement()
+      #expect(store.savedArrangement(for: TopologySignature(rig.currentArrangement())) == nil)
+      // A save must not turn the setting on as a side effect.
+      #expect(!store.isRestoreEnabled)
+      // A no-op reports nothing, so no card is raised over work that would do nothing.
+      #expect(coordinator.blockedBy == nil)
+    }
+  }
+
+  @Test func savingDuringAnOutstandingPreviewSavesNothingAndSaysWhoBlockedIt() async throws {
+    try await withCoordinator { coordinator, store, rig, gate in
+      coordinator.setRestoringLayout(true)
+      await coordinator.restoreSavedArrangement()
+      let saved = try #require(store.savedArrangement(for: TopologySignature(rig.currentArrangement())))
+
+      let rotation = RotationCoordinator(gate: gate, topologyStore: MirrorTopologyStore(), configurator: rig)
+      let presenter = RotationReadyPresenter()
+      rotation.confirmation = presenter
+      rotation.rotate(2, to: .ninety)
+      for await _ in presenter.ready { break }
+      let preview = try #require(rotation.preview)
+
+      coordinator.saveCurrentLayout()
+      await coordinator.restoreSavedArrangement()
+      #expect(coordinator.saveRefusedBy == .rotation)
+      // Off the report card, whose one button would clear the notice the save
+      // exists to answer.
+      #expect(coordinator.blockedBy == nil)
+      // Not merely "no new record": the stored layout is the one saved before.
+      #expect(store.savedArrangement(for: TopologySignature(rig.currentArrangement())) == saved)
+      #expect(await rotation.revert(preview) == .reverted)
+    }
+  }
+
+  /// The gate cannot cover this branch: a claim by the claimant already holding the
+  /// gate is GRANTED, so an outstanding ARRANGEMENT preview gets past `gate.claim`
+  /// and only the preview guard stops the save.
+  @Test func savingDuringAnOutstandingArrangementPreviewLeavesTheRecordAndThePreviewAlone() async throws {
+    try await withCoordinator { coordinator, store, rig, gate in
+      coordinator.setRestoringLayout(true)
+      await coordinator.restoreSavedArrangement()
+      let saved = try #require(store.savedArrangement(for: TopologySignature(rig.currentArrangement())))
+
+      coordinator.apply(rig.currentArrangement().makingMain(2))
+      await coordinator.restoreSavedArrangement()
+      let preview = try #require(coordinator.preview)
+
+      coordinator.saveCurrentLayout()
+      await coordinator.restoreSavedArrangement()
+
+      #expect(coordinator.saveRefusedBy == .arrangement)
+      // Not the report card: its one button would clear the notice with nothing
+      // saved.
+      #expect(coordinator.blockedBy == nil)
+      // Equal, not merely present: the mid-preview layout did not overwrite the
+      // one the user approved.
+      #expect(store.savedArrangement(for: TopologySignature(rig.currentArrangement())) == saved)
+      // The preview still stands and still holds the gate: the refusal cost the
+      // user nothing.
+      #expect(coordinator.preview?.value == preview.value)
+      #expect(await gate.holder == .arrangement)
+      #expect(await coordinator.revert(preview) == .reverted)
+    }
+  }
+
+  /// A reconnect in the two steps the bookkeeping needs: a sample taken while the
+  /// display is gone makes its return an arrival, and the restore pass acts on it.
+  private func reconnect(
+    _ coordinator: ArrangementCoordinator, _ rig: ConfirmationLayoutRig,
+    showing layout: DisplayArrangement
+  ) async {
+    let present = rig.currentArrangement()
+    rig.layout = DisplayArrangement(tiles: present.tiles.filter { $0.id != 2 })
+    coordinator.displaysChanged()
+    rig.layout = layout
+    await coordinator.restoreSavedArrangement()
+  }
+
+  /// The same display set at a different size, which the saved origins no longer
+  /// describe.
+  private static func widening(
+    _ layout: DisplayArrangement, _ displayID: CGDirectDisplayID, by extra: Int
+  ) -> DisplayArrangement {
+    DisplayArrangement(tiles: layout.tiles.map { tile in
+      guard tile.id == displayID else { return tile }
+      return ArrangementTile(
+        id: tile.id, identity: tile.identity, name: tile.name,
+        rect: DisplayRect(x: tile.rect.x, y: tile.rect.y,
+                          width: tile.rect.width + extra, height: tile.rect.height),
+        mirroredIDs: tile.mirroredIDs)
+    })
+  }
+
   private func withCoordinator(
     _ body: (ArrangementCoordinator, ArrangementPersistence, ConfirmationLayoutRig, DisplayReconfigurationGate) async throws -> Void
   ) async throws {
@@ -186,10 +307,14 @@ private final class ConfirmationLayoutRig: DisplayArrangementConfiguring,
   private let lock = NSLock()
   // Installed before an operation starts; the test never mutates it in flight.
   var beforeCommit: (@Sendable () -> Void)?
-  private var layout = DisplayArrangement(tiles: [
+  private var storedLayout = DisplayArrangement(tiles: [
     tile(1, .init(x: 0, y: 0, width: 1000, height: 800)),
     tile(2, .init(x: 1000, y: 0, width: 800, height: 1200)),
   ])
+  var layout: DisplayArrangement {
+    get { lock.withLock { storedLayout } }
+    set { lock.withLock { storedLayout = newValue } }
+  }
   private var storedAngle: DisplayRotation = .twoSeventy
   var angle: DisplayRotation {
     get { lock.withLock { storedAngle } }
@@ -215,7 +340,7 @@ private final class ConfirmationLayoutRig: DisplayArrangementConfiguring,
   var revealsHiddenModes: Bool { false }
   var guardsWireTiming: Bool { true }
   func modesWithheldByWireTimingGuard(for displayID: CGDirectDisplayID) -> Int { 0 }
-  func currentArrangement() -> DisplayArrangement { lock.withLock { layout } }
+  func currentArrangement() -> DisplayArrangement { layout }
   func currentTopology() -> (displays: [ConfiguredDisplay], arrangement: DisplayArrangement) {
     let layout = currentArrangement()
     return (layout.tiles.map {
@@ -224,7 +349,7 @@ private final class ConfirmationLayoutRig: DisplayArrangementConfiguring,
   }
   func apply(_ plan: ArrangementPlan, scope: DisplayConfigScope) throws -> DisplayArrangement {
     if scope == .permanent { beforeCommit?() }
-    return lock.withLock { layout = plan.arrangement; return layout }
+    return lock.withLock { storedLayout = plan.arrangement; return storedLayout }
   }
   private static func tile(_ id: CGDirectDisplayID, _ rect: DisplayRect) -> ArrangementTile {
     .init(id: id, identity: .init(vendor: id, model: id, serial: id, isBuiltIn: false),

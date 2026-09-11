@@ -124,6 +124,7 @@ private final class TopologyCounter: Sendable {
 
   manager.noteSleep()
   #expect(manager.currentEpoch() == 1) // synchronous bump
+  #expect(manager.isAsleep)
   #expect(manager.isEpochCurrent(1) == false) // suspended
 
   // Absence cannot be polled, so this stays a real elapsed wait. A machine slow
@@ -144,6 +145,7 @@ private final class TopologyCounter: Sendable {
 
   manager.noteSleep()
   manager.noteWake()
+  #expect(manager.isAsleep) // Remains asleep until the wake quiet window.
   // Immediately after wake: still suspended, no bump yet.
   #expect(manager.currentEpoch() == 1)
   #expect(manager.isEpochCurrent(manager.currentEpoch()) == false)
@@ -156,6 +158,7 @@ private final class TopologyCounter: Sendable {
   #expect(counter.elements == 1) // one element once sober
   #expect(manager.currentEpoch() == 2) // wake fire bumps: pre-sleep epochs stay stale
   #expect(manager.isEpochCurrent(2)) // suspension cleared
+  #expect(!manager.isAsleep)
   #expect(manager.isEpochCurrent(1) == false)
 }
 
@@ -213,4 +216,21 @@ private actor GatedDDC: DDCWriting {
   await controller.waitForPendingWrites() // must return, not hang
   let landed = await writer.recordedWrites()
   #expect(landed.map(\.value) == [30]) // the post-sleep-stale write never hit hardware
+}
+
+@Test func rawReconfigurationSignalSeesTheAlreadySuspendedEpoch() {
+  let state = OSAllocatedUnfairLock(initialState: DisplayManager.EpochState())
+  let (_, events) = AsyncStream.makeStream(of: Void.self)
+  let observed = OSAllocatedUnfairLock(initialState: [(UInt64, Bool, UInt32)]())
+  let intake = DisplayManager.IntakeBox(state: state, rawEvents: events) { flags in
+    let snapshot = state.withLock { ($0.epoch, $0.suspended, flags.rawValue) }
+    observed.withLock { $0.append(snapshot) }
+  }
+  intake.reconfigureEvent(displayID: 2, flags: .beginConfigurationFlag)
+  intake.reconfigureEvent(displayID: 2, flags: .addFlag)
+  let snapshots = observed.withLock { $0 }
+  #expect(snapshots.map { $0.0 } == [1, 2])
+  #expect(snapshots.map { $0.1 } == [true, true])
+  #expect(snapshots.map { $0.2 } == [CGDisplayChangeSummaryFlags.beginConfigurationFlag.rawValue,
+                                   CGDisplayChangeSummaryFlags.addFlag.rawValue])
 }

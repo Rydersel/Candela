@@ -432,7 +432,8 @@ final class DisplayModeCoordinator {
   init(
     gate: DisplayReconfigurationGate,
     configurator: any DisplayConfiguring = CoreGraphicsDisplayConfigurator(),
-    persistence: ModePersistence = ModePersistence()
+    persistence: ModePersistence = ModePersistence(),
+    notificationCenter: NotificationCenter = .default
   ) {
     self.gate = gate
     self.configurator = configurator
@@ -441,9 +442,17 @@ final class DisplayModeCoordinator {
     // Observed here rather than in a pane: a display can depart while its pane
     // is being dismissed for that very reason, and an outstanding preview on a
     // departed display has to be dropped whether or not anything is on screen.
-    screenObserver = NotificationCenter.default.addObserver(
+    //
+    // Injected centre so a test can post to this coordinator alone: a post on
+    // `.default` reaches every coordinator alive in the process.
+    screenObserver = notificationCenter.addObserver(
       forName: NSApplication.didChangeScreenParametersNotification,
       object: nil,
+      // `.main` delivers INSIDE the post [MEASURED 2026-09-09]: `NotificationCenter`
+      // short-circuits when the target queue is already the current one, and AppKit
+      // posts on the main thread. That is what makes the sample below a post-time
+      // sample, so the queue is not free to change; `ScreenParametersSampleTests`
+      // pins it.
       queue: .main
     ) { [weak self] _ in
       // Sampled HERE, synchronously in the notification block, and carried into

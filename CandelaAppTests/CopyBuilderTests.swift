@@ -180,14 +180,54 @@ struct CopyBuilderTests {
     #expect(resized.contains("not the size they were"))
     #expect(!resized.contains("overlap"))
     #expect(!resized.contains("cover each other"))
-    // It names the way out, because nothing else ends this state: the saved
-    // layout is deliberately never rewritten.
-    #expect(resized.contains("Arrange them again"))
+    // No save on offer here, so the sentence has to name the longer route out.
+    #expect(resized.contains("Arrange them again to save a new one"))
     // Says nothing about a particular screen; the fact is about the layout.
     #expect(!resized.contains("MAG 341C"))
     #expect(!resized.contains("DELL"))
 
     #expect(Set(Self.allReapplyNotices.map { render(ArrangementCopy.restoreNotice($0, name: Self.bothNamed)) }).count == 5)
+  }
+
+  /// Keyed on whether a save is on offer, not on which surface is asking: sending
+  /// a reader off to rearrange displays directly above a one-click button is the
+  /// incoherence this splits.
+  @Test func theStaleFootprintSentenceNamesTheSaveOnlyWhereTheSaveExists() {
+    let withSave = render(
+      ArrangementCopy.restoreNotice(
+        .savedForDifferentGeometry(["a"]), name: Self.bothNamed, offersSave: true))
+    #expect(withSave.contains("or save the layout you have now"))
+    // Rearranging stays first: the button records what is on screen, which is not
+    // always what the reader wants back.
+    #expect(withSave.contains("Arrange them again"))
+    #expect(!withSave.contains("to save a new one"))
+
+    // Every other notice says the same thing on both surfaces; only this one
+    // splits.
+    for notice in Self.allReapplyNotices {
+      if case .savedForDifferentGeometry = notice { continue }
+      #expect(
+        sentence(of: ArrangementCopy.restoreNotice(notice, name: Self.bothNamed, offersSave: true))
+          == sentence(of: ArrangementCopy.restoreNotice(notice, name: Self.bothNamed)),
+        "\(notice) has no save to name, so its sentence cannot depend on one")
+    }
+  }
+
+  /// A localized `Text` dumps the ADDRESS of its storage alongside its words, so
+  /// two separately built ones saying the same thing compare unequal. Stripped
+  /// here, so an equality between two builder calls is about the sentence.
+  private func sentence(of text: Text) -> String {
+    render(text).replacingOccurrences(of: "0x[0-9a-f]+", with: "", options: .regularExpression)
+  }
+
+  /// The stale-footprint refusal is the one restore notice with an in-app remedy,
+  /// so the pane offers a button and says when it cannot be pressed.
+  @Test func theStaleLayoutNoticeOffersASaveAndSaysWhenItCannot() {
+    // `render` dumps the reflection wrapper rather than the sentence, so the
+    // closing quote is what makes this an equality and not a prefix match.
+    #expect(render(ArrangementCopy.saveThisLayout).contains("key: \"Save This Layout\","))
+    // A greyed control has to say what to do about it, not merely what is wrong.
+    #expect(render(ArrangementCopy.saveThisLayoutBusy).contains("then save this layout"))
   }
 
   @Test func arrangementApplyNoticeNamesTheDisplayWhenItCan() {
@@ -968,6 +1008,8 @@ struct CopyBuilderTests {
     add("ArrangementCopy.keep", ArrangementCopy.keep)
     add("ArrangementCopy.revert", ArrangementCopy.revert)
     add("ArrangementCopy.restore", ArrangementCopy.restore)
+    add("ArrangementCopy.saveThisLayout", ArrangementCopy.saveThisLayout)
+    add("ArrangementCopy.saveThisLayoutBusy", ArrangementCopy.saveThisLayoutBusy)
     add("ArrangementCopy.applyFailure", ArrangementCopy.applyFailure)
     add("ArrangementCopy.resolveFailure", ArrangementCopy.resolveFailure)
     add("ArrangementCopy.expiryAlreadyRan", ArrangementCopy.expiryAlreadyRan)
@@ -988,7 +1030,11 @@ struct CopyBuilderTests {
         add("ArrangementCopy.invalidLayout", ArrangementCopy.invalidLayout(problems, name: name))
       }
       for notice in Self.allReapplyNotices {
-        add("ArrangementCopy.restoreNotice(\(notice))", ArrangementCopy.restoreNotice(notice, name: name))
+        for offersSave in [true, false] {
+          add(
+            "ArrangementCopy.restoreNotice(\(notice), offersSave: \(offersSave))",
+            ArrangementCopy.restoreNotice(notice, name: name, offersSave: offersSave))
+        }
       }
       for notice in Self.allApplyNotices {
         add("ArrangementCopy.notice(\(notice))", ArrangementCopy.notice(notice, name: name))
