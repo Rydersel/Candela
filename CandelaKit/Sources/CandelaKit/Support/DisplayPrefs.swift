@@ -179,6 +179,23 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(clampSwitchingPoint(newValue), forKey: key("combinedSwitchingPoint")) }
   }
 
+  /// True while a temporary hardware dim is engaged on this display. Set before
+  /// the dim's first submit and cleared after the restoring one, so a marker
+  /// that survives a launch means the register may disagree with the slider.
+  ///
+  /// Engine state, not a setting: no `PrefName` case, no pane writes it, and a
+  /// per-display OLED care reset leaves it alone. Clearing it as a setting would
+  /// discard the one recovery signal.
+  ///
+  /// Two identical monitors share one persistence key, so a crash while one of a
+  /// matched pair was dimmed makes the recovery reassert on both. The twin gets
+  /// its own saved brightness, so the cost is a redundant write, not a wrong
+  /// value.
+  public var temporaryDimEngaged: Bool {
+    get { defaults.bool(forKey: key("temporaryDimEngaged")) }
+    set { defaults.set(newValue, forKey: key("temporaryDimEngaged")) }
+  }
+
   // MARK: - OLED care
 
   // The defaults ARE the Recommended preset, so enrolling writes nothing but

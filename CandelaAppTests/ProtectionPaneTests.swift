@@ -47,12 +47,53 @@ struct ProtectionPaneTests {
     pixelWidth: 1920, pixelHeight: 1080, refreshHz: 59.9
   )
 
+  // MARK: - The dimming row
+
+  /// The row previews its destination's state, and the singular is not the
+  /// plural with an s.
+  @Test func theDimmingRowSaysHowManyDisplaysAreEnrolled() {
+    #expect(ProtectionPane.dimmingRowValue(enrolledCount: 0) == "Off")
+    #expect(ProtectionPane.dimmingRowValue(enrolledCount: 1) == "On for 1 display")
+    #expect(ProtectionPane.dimmingRowValue(enrolledCount: 3) == "On for 3 displays")
+  }
+
+  /// House copy rules: no em dash, and the hardware is never called a panel.
+  @Test func theDimmingNoteFollowsTheCopyRules() {
+    #expect(!ProtectionPane.dimmingNote.isEmpty)
+    #expect(!ProtectionPane.dimmingNote.contains("\u{2014}"))
+    #expect(!ProtectionPane.dimmingNote.lowercased().contains("panel"))
+  }
+
+  /// "The rules below" names the Startup section by POSITION, so the note is
+  /// true only while Dimming leads the pane. A reworded note comes past this pin.
+  @Test func theDimmingNoteNamesTheRulesBelowIt() {
+    #expect(
+      ProtectionPane.dimmingNote
+        == "Protection has two halves. The rules below put your settings back; OLED Care does the dimming, fading idle screens and static regions so they are not left lit at full brightness for hours.")
+  }
+
+  /// Safe mode suppresses the driver loop, so the row must not report the
+  /// enrollment as if it were running. The words are the display hub preview's.
+  /// Enrollment still answers first: nothing enrolled reads "Off" either way.
+  @Test func theDimmingRowSaysPausedInASafeModeSession() {
+    let paused = ProtectionPane.dimmingRow(enrolledCount: 2, isSafeMode: true)
+    #expect(paused.value == "Paused")
+    #expect(paused.spokenValue == "Paused for this session, Safe Mode")
+    #expect(ProtectionPane.dimmingRow(enrolledCount: 0, isSafeMode: true).value == "Off")
+
+    let running = ProtectionPane.dimmingRow(enrolledCount: 2, isSafeMode: false)
+    #expect(running.value == "On for 2 displays")
+    #expect(running.spokenValue == running.value)
+  }
+
   // MARK: - The startup caption
 
+  /// `.doNothing` names its one exception: the launch recovery of an interrupted
+  /// dim does write, so a caption promising no launch write would be wrong.
   @Test func eachStartupChoiceKeepsItsOwnSentence() {
     #expect(
       render(ProtectionPane.startupCaption(for: .doNothing))
-        == "Keeps using the values from last time, and sends them to the display the first time you change something.")
+        == "Keeps using the values from last time, and sends them to the display the first time you change something. The one exception is a display a crash left dimmed, which gets its brightness back at the next launch.")
     #expect(
       render(ProtectionPane.startupCaption(for: .write))
         == "Useful when a display forgets its settings while asleep.")
@@ -164,8 +205,9 @@ struct ProtectionPaneTests {
   // MARK: - The page itself
 
   /// Layer 2. The fixture model has no displays, so this covers the page
-  /// with the restore picker on it and the summary in its empty state, which is
-  /// what a Mac with nothing attached opens on.
+  /// with the dimming doorway at its head, the restore picker under it, and the
+  /// summary in its empty state, which is what a Mac with nothing attached
+  /// opens on.
   @Test func thePageRendersWithNoDisplaysAttached() {
     let model = TestFixtures.appModel()
     let pane = ProtectionPane()

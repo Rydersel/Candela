@@ -1283,8 +1283,9 @@ final class OledCareCoordinator: CheckupCareHolding {
     switch decision {
     case let .dim(factor):
       if !state.lockDimEngaged {
-        // The lock edge: fade in over ~1.2 s rather than stepping, which is the
-        // only place a ramp is wanted. Everything else here jumps.
+        // The lock edge: ramp over ~1.2 s rather than stepping, because an OLED
+        // bands visibly when the register jumps. The only DDC ramp wanted here,
+        // and no lift ever fades.
         state.lockDimRamp = controller.rampTemporaryDim(to: factor)
         state.lockDimEngaged = true
       } else if controller.temporaryDimFactor == nil {
@@ -1417,7 +1418,11 @@ final class OledCareCoordinator: CheckupCareHolding {
       }
     }
 
-    guard overlay.apply(alpha: alpha, mask: mask, blackout: blackout, on: id) else {
+    guard
+      overlay.apply(
+        alpha: alpha, mask: mask, blackout: blackout,
+        mayFadeIn: OverlayFade.fadesInOnEntry(to: dimState), on: id)
+    else {
       // No NSScreen matched: nothing reached the screen, so there is nothing to
       // verify and no state to memoise. The next tick retries, and the overlay
       // rate-limits its own warning.
@@ -1469,11 +1474,13 @@ final class OledCareCoordinator: CheckupCareHolding {
     adaptiveProtection[key] = protection
   }
 
-  private enum VerifyOutcome {
+  enum VerifyOutcome: Equatable {
     case agreed
     case mismatched
-    /// A close the server has not finished reporting; neither an attempt nor a
-    /// mismatch. Bounded by `OledOverlay.closeGrace`.
+    /// In flight, so neither an attempt nor a mismatch: a close the server has
+    /// not reported yet (bounded by `OledOverlay.closeGrace`), or a nudge
+    /// declined while an entry fade toward this same state arrives (bounded by
+    /// `OledOverlay.fadeDeclineWindow`).
     case settling
   }
 
@@ -1482,13 +1489,35 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// is `reassert(on:)` (NEVER a repeat apply, which is a no-op by construction
   /// against the overlay's memo) and re-verification waits for the NEXT tick:
   /// one nudge per detected mismatch, log, don't loop.
+  ///
+  /// The nudge declines while an entry fade toward the same state is in flight,
+  /// so a reconcile cannot snap it.
   private func verifyLastRender(of state: PerDisplay, on id: CGDirectDisplayID) -> VerifyOutcome {
     let wanted = state.lastAppliedAlpha != nil
-    switch (wanted, overlay.verifyPresence(on: id)) {
+    let presence = overlay.verifyPresence(on: id)
+    var reasserted = false
+    if wanted, presence == .absent {
+      // Silent on a decline: an entry fade spans four fast ticks, so logging it
+      // would put four errors in the log for every dim that arrives normally.
+      reasserted = overlay.reassert(on: id)
+      if reasserted {
+        log.error("OLED care overlay for display \(id, privacy: .public) not on screen after apply; reasserting")
+      }
+    }
+    return Self.verifyOutcome(wanted: wanted, presence: presence, reasserted: reasserted)
+  }
+
+  /// Split out of `verifyLastRender` so the one row that can regress silently
+  /// is pinnable from the app suite.
+  static func verifyOutcome(
+    wanted: Bool, presence: OledOverlay.Presence, reasserted: Bool
+  ) -> VerifyOutcome {
+    switch (wanted, presence) {
     case (true, .absent):
-      log.error("OLED care overlay for display \(id, privacy: .public) not on screen after apply; reasserting")
-      overlay.reassert(on: id)
-      return .mismatched
+      // A declined nudge is our own entry fade, not a structural mismatch.
+      // Counting it would burn four of the five attempts on a fade nothing is
+      // failing at; `.settling` retries later with the budget intact.
+      return reasserted ? .mismatched : .settling
     case (false, .present):
       // A removal the server has not honoured: verifyPresence already
       // re-closed the strand and logged. Check again next tick.

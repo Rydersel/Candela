@@ -136,7 +136,59 @@ struct OverlayWindowTests {
     #expect(OledOverlay.fallbackAlpha(forUnrendered: nil) == 0)
   }
 
+  // MARK: - The entry fade
+
+  /// Two of these must not animate whatever the state says, and both break
+  /// quietly: a faded lift reads as lag on a control that exists to feel
+  /// instant, and a masked escalation would fade a property that is not moving.
+  @Test func onlyADarkeningEntryFades() {
+    #expect(OledOverlay.fadeSeconds(mayFadeIn: true, from: nil, to: 0.5) == OverlayFade.entrySeconds)
+    #expect(OledOverlay.fadeSeconds(mayFadeIn: true, from: 0.5, to: 0.2) == nil)  // a lift is instant
+    #expect(OledOverlay.fadeSeconds(mayFadeIn: false, from: nil, to: 0.3) == nil)  // unfocused dim
+    #expect(OledOverlay.fadeSeconds(mayFadeIn: true, from: 1.0, to: 1.0) == nil)  // masked idle dim to blackout
+  }
+
+  /// A fade spans four of the five verify attempts at the fast cadence, so
+  /// mapping a declined nudge to `.mismatched` would spend the budget on a fade
+  /// nothing is failing at, then log a mismatch that is nothing of the kind.
+  @Test func aDeclinedNudgeIsSettlingRatherThanAMismatch() {
+    #expect(
+      OledCareCoordinator.verifyOutcome(wanted: true, presence: .absent, reasserted: false)
+        == .settling)
+    #expect(
+      OledCareCoordinator.verifyOutcome(wanted: true, presence: .absent, reasserted: true)
+        == .mismatched)
+    #expect(
+      OledCareCoordinator.verifyOutcome(wanted: false, presence: .present, reasserted: false)
+        == .mismatched)
+  }
+
+  /// The decline's bound, for the case where the completion handler never comes
+  /// (window torn down mid-animation, display departs). Without it that display's
+  /// reconcile sits in `.settling` for the rest of the session.
+  @Test func anAgedFadeStopsDecliningTheNudge() throws {
+    let screen = try #require(Self.firstScreen, "the test process sees no screens")
+    let displayID = try #require(screen.displayID)
+    let overlay = OledOverlay()
+    defer { overlay.removeAll() }
+
+    #expect(overlay.apply(alpha: 0.5, blackout: false, mayFadeIn: true, on: displayID))
+    // Inside the bound: a nudge now would snap a fade that is still arriving.
+    #expect(overlay.reassert(on: displayID) == false)
+    // Past twice the fade the nudge proceeds, and the second call shows the
+    // bound cleared the entry rather than stepping around it once.
+    #expect(overlay.reassert(on: displayID, at: .now + .seconds(4 * OverlayFade.entrySeconds)))
+    #expect(overlay.reassert(on: displayID))
+  }
+
   // MARK: - Helpers
+
+  /// Any attached display answers the question, so it comes from the live set. A
+  /// process that sees none fails at `try #require` rather than asserting against
+  /// nothing, the way `CheckupFieldWindowTests` treats the same absence.
+  static var firstScreen: NSScreen? {
+    NSScreen.screens.first { $0.displayID != nil }
+  }
 
   /// A display ID no attached screen answers to. Derived from the live set
   /// rather than picked as a constant, so it stays absent whatever is plugged

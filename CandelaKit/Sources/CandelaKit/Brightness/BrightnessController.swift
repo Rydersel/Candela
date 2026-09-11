@@ -516,6 +516,12 @@ public final class BrightnessController: PendingWireDraining {
   /// or zeros still publish: those the wire did carry.
   public func refreshFromHardware(settling: Bool = false) async {
     guard temporaryDimFactor == nil else { return }
+    // A surviving marker means the register still carries a dim no process holds
+    // a factor for, so a readback would adopt our own multiplier and persist it
+    // over the value the recovery has to put back. The guard above cannot cover
+    // that: the launch readback runs BEFORE the recovery. The recovery clears
+    // the marker after its re-assert, so later passes read again.
+    guard !prefs.temporaryDimEngaged else { return }
     if role == .builtIn {
       // The built-in panel has no DDC wire, so the native read is the only truth
       // (fork: `AppleDisplay.getAppleBrightness`). Publish only; no store, because
@@ -2065,8 +2071,17 @@ public final class BrightnessController: PendingWireDraining {
   /// reconfiguration, which a lock dim outlasts. THIS process is covered, because that
   /// function returns early while a dim is outstanding. What is left is a readback by
   /// a process that did not set the dim: the next launch after a crash or force-quit,
-  /// which finds the register still down with no factor recorded anywhere. The store
-  /// is right either way; the readback is what would overwrite it.
+  /// which finds the register still down. The marker closes that one, not the
+  /// factor: `refreshFromHardware` returns early on both, so no process adopts a
+  /// register that still carries a dim. `DisplayPrefs.temporaryDimEngaged` records
+  /// only THAT a dim was outstanding, which is enough for `InterruptedDimRecovery`
+  /// to put the saved value back and not enough to overwrite it.
+  ///
+  /// The native ADOPTION route is not one of those early returns. `adoptExternal`
+  /// and `adoptNativeForSurface` persist what they read, and under HDR the lock dim
+  /// rides the native leg. Within a process the factor `freshNativeRead` checks and
+  /// the echo slot's generation cover them; a fresh process has neither, so a poll
+  /// tick that beats the recovery is the remaining gap.
   public private(set) var temporaryDimFactor: Double?
 
   /// The ONE place the temporary dim is folded in. Everything that computes a
@@ -2146,6 +2161,13 @@ public final class BrightnessController: PendingWireDraining {
     lastAppliedSw = nil
     coalescer.resetDuplicateState()
     applyPaths()
+    // After the submit, never before: clearing first widens the window where a
+    // crash looks clean while the register is still down.
+    //
+    // Residual: `applyPaths` submits into the coalescer, so a crash in the few ms
+    // before the bytes land leaves a dimmed register with no marker. An exact
+    // clear would have to be async, and `applicationWillTerminate` cannot await.
+    prefs.temporaryDimEngaged = false
   }
 
   /// The one place a dim factor is set. Private so the token discipline above
@@ -2168,6 +2190,12 @@ public final class BrightnessController: PendingWireDraining {
     if starting {
       lastAppliedSw = nil
       coalescer.resetDuplicateState()
+      // On the nil-to-non-nil edge only, so a ramp marks on its first step and
+      // on none of the rest. Synchronous and ahead of the submit: a crash from
+      // the moment the first bytes can leave has to find this set. Safe mode
+      // never reaches here, since `OledCareCoordinator.start` returns before it
+      // builds the driver loop.
+      prefs.temporaryDimEngaged = true
     }
     applyPaths()
   }

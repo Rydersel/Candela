@@ -1,6 +1,8 @@
 import Foundation
 
-public enum OledDimState: Equatable, Sendable {
+/// `CaseIterable` so a rule written over these states can be checked over the
+/// whole state space. `OverlayFade.fadesInOnEntry` is the rule that relies on it.
+public enum OledDimState: Equatable, Sendable, CaseIterable {
   case active, idleDim, blackout, lockDim, unfocusedDim, suspended
 }
 

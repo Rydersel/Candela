@@ -3,12 +3,14 @@ import CoreGraphics
 import SwiftUI
 
 /// The Protection pillar: the policies that guard a display's
-/// configuration. The startup and wake restore choice, and under it a read-only
-/// summary of what Remember-size promises on each display. The Remember control
-/// itself stays on that display's page, so the pref keeps one write surface.
+/// configuration. A link to the dimming half of the pillar, then the startup
+/// and wake restore choice, and under it a read-only summary of what
+/// Remember-size promises on each display. Neither the dimming controls nor the
+/// Remember control lives here, so both prefs keep one write surface.
 ///
 /// Nothing unbuilt is listed: a greyed row for a feature nobody can turn
-/// on is a promise the app cannot keep.
+/// on is a promise the app cannot keep. The Dimming row links to a shipped
+/// feature on another pane, so it is not one of those.
 ///
 /// `@MainActor`: a `View`'s non-`body` properties are nonisolated under complete
 /// concurrency, and these read main-actor types.
@@ -32,9 +34,73 @@ struct ProtectionPane: View {
           "A display does not always come back the way you left it. Protection holds the rules "
           + "that decide what \(AppInfo.productName) puts back at startup, at wake, and on reconnect."
       )
+      dimmingSection
       startupSection
       rememberedSizesSection
     }
+  }
+
+  // MARK: - Dimming
+
+  /// A link, not a control: every dimming setting lives on the OLED Care pane.
+  /// It leads the pane because `dimmingNote` names the startup rules as the ones
+  /// below it.
+  private var dimmingSection: some View {
+    let row = dimmingRowValues
+    return SettingsCardSection(title: "Dimming") {
+      NavigationRow(
+        title: "OLED Care",
+        value: row.value,
+        spokenValue: row.spokenValue,
+        action: { actions.reveal(.pane(.oledCare)) })
+      SettingsRowNote(verbatim: Self.dimmingNote)
+    }
+  }
+
+  /// Both values from one read, so the sighted and the spoken form cannot
+  /// answer different enrollment counts.
+  private var dimmingRowValues: (value: String, spokenValue: String) {
+    Self.dimmingRow(enrolledCount: enrolledExternalCount(), isSafeMode: model.isSafeMode)
+  }
+
+  /// Verbatim rather than a key: the test bundle reads this string directly.
+  static let dimmingNote =
+    "Protection has two halves. The rules below put your settings back; OLED Care does the "
+    + "dimming, fading idle screens and static regions so they are not left lit at full "
+    + "brightness for hours."
+
+  /// The count half only. Safe mode outranks it and that branch lives in
+  /// `dimmingRow`, so a view calling this one directly would claim dimming in a
+  /// session where the care loop is not running. "Off" is the Remembered Sizes
+  /// summary's word for the same shape of answer, so the two sections agree.
+  static func dimmingRowValue(enrolledCount: Int) -> String {
+    switch enrolledCount {
+    case 0: "Off"
+    case 1: "On for 1 display"
+    default: "On for \(enrolledCount) displays"
+    }
+  }
+
+  /// What the row draws and what VoiceOver reads. Enrollment answers first, so
+  /// nothing enrolled reads "Off" in either kind of session. Safe mode then
+  /// outranks the count, since the care loop is not running: the display hub's
+  /// preview already says Paused for the same state, in these words.
+  static func dimmingRow(
+    enrolledCount: Int, isSafeMode: Bool
+  ) -> (value: String, spokenValue: String) {
+    let counted = dimmingRowValue(enrolledCount: enrolledCount)
+    guard enrolledCount > 0, isSafeMode else { return (counted, counted) }
+    return ("Paused", "Paused for this session, Safe Mode")
+  }
+
+  /// Nothing publishes enrollment, so this is a live read per display. The
+  /// `prefsRevision` read at the top of `body` is what refreshes the row when
+  /// enrollment changes elsewhere in the window. `model.displays` is externals
+  /// only, which is all OLED care enrolls.
+  private func enrolledExternalCount() -> Int {
+    model.displays.filter {
+      DisplayPrefs(persistenceKey: $0.display.persistenceKey).oledCareEnrolled
+    }.count
   }
 
   // MARK: - Startup
@@ -121,7 +187,7 @@ struct ProtectionPane: View {
     switch action {
     case .write: "Useful when a display forgets its settings while asleep."
     case .read: "Reads brightness, contrast and volume back from the display. Not all hardware answers."
-    case .doNothing: "Keeps using the values from last time, and sends them to the display the first time you change something."
+    case .doNothing: "Keeps using the values from last time, and sends them to the display the first time you change something. The one exception is a display a crash left dimmed, which gets its brightness back at the next launch."
     }
   }
 
