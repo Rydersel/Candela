@@ -26,6 +26,8 @@ The [simulator](../../../tools/pontusm-sim/README.md) runs locally with Python 3
 
 The reports link to small data supplements with column definitions and reproduction instructions. Original measurement records are retained without changing their values. The [provenance manifest](data/provenance.json) identifies the source recording and records the publication's file hashes and formatting changes.
 
+For two worked checks, follow the [pixel-shift setting through the firmware instructions](firmware-boundary.md#worked-example-the-pixel-shift-speed-setting), or [compare the original C curve controller with its Python reconstruction](simulator-comparison.md#checking-a-reconstruction-against-the-original-c). The latter requires a C11 compiler and the separately obtained 2023 source file.
+
 The original 4.59 GB recording is not distributed. The camera report explains which results can be checked from the published data and which require original footage or a new acquisition. No vendor firmware binaries, complete Samsung source files or full vendor orbit tables are included.
 
 [Back to Candela](../../../README.md)

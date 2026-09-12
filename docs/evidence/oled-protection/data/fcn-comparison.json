@@ -1,0 +1,47 @@
+{
+  "source_sha256": "6c2e4f331ee73a203e46b068daef30e1c7c02a7a60184bc82f6a16e1714f37f4",
+  "function": "QD_FCN_CURVE_CTRL",
+  "source_lines": [
+    2241,
+    2377
+  ],
+  "function_bytes_sha256": "2751cf3419b3221bdbff41736139fd70e81974e5040d9bdc177ac68ae23cf083",
+  "phases": [
+    {
+      "name": "assert-through-saturation",
+      "calls": 18000,
+      "retention": true
+    },
+    {
+      "name": "release",
+      "calls": 7,
+      "retention": false
+    },
+    {
+      "name": "stop-before-threshold",
+      "calls": 3499,
+      "retention": true
+    },
+    {
+      "name": "reset",
+      "calls": 1,
+      "retention": false
+    },
+    {
+      "name": "rearm",
+      "calls": 3500,
+      "retention": true
+    },
+    {
+      "name": "clear-small-gain",
+      "calls": 1,
+      "retention": false
+    }
+  ],
+  "calls_compared": 25008,
+  "curve_values_compared": 1025328,
+  "state_values_compared": 50016,
+  "mismatches": 0,
+  "trace_sha256": "65cc9c98eb9db06e4853de5f6c19cb8ac1568374be212a1d899149ec871179f4",
+  "trace_encoding": "Per call: count, gain, then 41 curve values; each unsigned 32-bit big-endian"
+}

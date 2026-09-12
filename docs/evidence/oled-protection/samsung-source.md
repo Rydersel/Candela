@@ -59,6 +59,8 @@ The enclosing condition at line 2341 is `if (uLD_RETENTION_PATT > 0)`. This is n
 
 The same file's lines 2209 and 2217 label retention-dependent ISP and screen-saver exclusions with the comment `// Rtings Retention`. The comment names a test context. It does not by itself establish deceptive benchmark behavior or tell us which settings the MSI uses.
 
+The [direct C/Python comparison](simulator-comparison.md#checking-a-reconstruction-against-the-original-c) executes the original curve controller and checks every output point through threshold crossing, saturation and recovery.
+
 Version 20 also contains `QD_CNN_DETECTION`, which examines lower-screen image statistics and temporal history. The visible function uses thresholds and counters rather than a model-inference call. That observation says nothing conclusive about unpublished upstream processing.
 
 ## 2024 pipeline change

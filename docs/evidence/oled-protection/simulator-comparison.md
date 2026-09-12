@@ -65,6 +65,47 @@ Use a destination that does not already exist. The comparison produces per-versi
 
 The implementation's tests exercise reconstruction behavior. Passing tests alone cannot prove correspondence with hardware or rule out a shared mistake in a model and its expectations.
 
+## Checking a reconstruction against the original C
+
+For one independently executable check, I compared the v20 global dimming-curve controller with Samsung's original `QD_FCN_CURVE_CTRL` function. This is the retention-triggered curve discussed in the article, separate from the regional v20/v22 comparison above. The check uses lines 2241–2377 of the [identified 2023 source file](samsung-source.md#2023-retention-counter).
+
+The [comparison program](../../../tools/pontusm-sim/validation/compare_fcn.py) verifies the complete source file's SHA-256, extracts those lines without changing the function, and compiles them with a small C wrapper. The wrapper supplies the retention flag and captures all 41 curve writes in memory. It replaces hardware addresses with array indices, supplies 32-bit unsigned state variables, and leaves debug mode disabled. No display is involved.
+
+Both implementations start with a zero counter and zero gain. Each receives the same sequence: 18,000 asserted calls, seven clear calls, a 3,499-call near miss, a reset, a full 3,500-call rearm, and a final clear. The program compares the counter, gain and every curve point after every call. Expected values come from executing the original C function, rather than from a second transcription of its arithmetic.
+
+All **25,008 calls** matched, including **1,025,328 curve values** and 50,016 counter/gain values. Selected checkpoints show the threshold and recovery:
+
+| Call | Retention input | Counter | Gain | Final curve point |
+| --- | --- | ---: | ---: | ---: |
+| 3,499 | Asserted | 3,499 | 0 | 16,383 |
+| 3,500 | Asserted | 3,500 | 1 | 16,382 |
+| 17,899 | Asserted | 3,500 | 14,400 | 9,506 |
+| 18,001 | Clear | 0 | 12,000 | 10,652 |
+| 18,006 | Clear | 0 | 0 | 16,383 |
+| 21,506 | Asserted, 3,499 calls since reset | 3,499 | 0 | 16,383 |
+| 21,507 | Clear | 0 | 0 | 16,383 |
+
+The first threshold crossing illustrates the translation. Source lines 2341–2352 increment the counter only while retention is asserted and reset it otherwise. At count 3,500, lines 2354–2366 select target gain 14,400 and advance the current gain by one. The final curve point then follows line 2372's integer interpolation:
+
+```text
+((16383 × (16384 − 1)) + (8559 × 1)) >> 14 = 16382
+```
+
+The [Python controller](../../../tools/pontusm-sim/pontusm_sim/curve.py) performs the same counter update, gain step and interpolation. At the gain limit, the final point is 9,506. Clearing retention resets the counter immediately and reduces gain by 2,400 per call, restoring the original curve in six calls. These are digital code values, not measured luminance.
+
+To repeat the comparison, extract `QD_burn_in.c` from the 2023 archive using the [member path](samsung-source.md#locate-the-code), then run with Python 3.11 or newer and a C11 compiler:
+
+```sh
+export PYTHONPATH=tools/pontusm-sim
+python3 tools/pontusm-sim/validation/compare_fcn.py \
+  --source /path/to/QD_burn_in.c \
+  --output /tmp/pontusm-fcn-check
+```
+
+The [saved result](data/fcn-comparison.json) records source and function hashes, the input phases, counts and a digest of the complete comparison trace. The [checkpoint table](data/fcn-checkpoints.csv) also includes saturation, each release step and rearming. `call` counts function invocations from one; `phase_call` restarts for each input phase. `curve_40` is the final point of the 41-point output. A mismatch or a different source hash makes the program fail.
+
+This check supports the ordinary-mode FCN reconstruction over the stated inputs. It does not validate the upstream retention classifier, debug override, regional v20/v22 processing, hardware register effects or the unpublished MSI panel code. The 2024 worker no longer calls this function.
+
 ## Data supplement
 
 - [Version 20 checkpoints](data/simulator-v20.csv)

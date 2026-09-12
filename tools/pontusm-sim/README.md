@@ -80,6 +80,17 @@ python3 -m pontusm_sim msi-run \
 
 The fixtures cover completion, timeout, temperature refusal, abort, VRR settings and a latent EL sequence. They simulate recovered scaler decisions. They neither invoke panel maintenance nor predict its electrical outcome. See the [model notes](docs/msi-source-map.md) for timing normalization and the latent sequence's reachability limit.
 
+## Compare the curve controller with original C
+
+An optional check compiles the original v20 `QD_FCN_CURVE_CTRL` function and compares its counter, gain and all 41 curve outputs with the Python reconstruction after every call. It requires a C11 compiler and the unmodified `QD_burn_in.c` extracted from the identified 2023 archive. Register writes are captured in memory; no monitor is accessed.
+
+```sh
+PYTHONPATH=tools/pontusm-sim python3 tools/pontusm-sim/validation/compare_fcn.py \
+  --source /path/to/QD_burn_in.c --output /tmp/pontusm-fcn-check
+```
+
+Use `--cc clang` or another compiler executable if `cc` is unavailable. The [worked comparison](../../docs/evidence/oled-protection/simulator-comparison.md#checking-a-reconstruction-against-the-original-c) explains the inputs, checkpoints and limits. This check compiles and runs only the hash-pinned function; the separate `verify-source` command continues to parse archives without executing code.
+
 ## Tests
 
 ```sh
