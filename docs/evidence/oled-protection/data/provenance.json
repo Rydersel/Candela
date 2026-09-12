@@ -11,7 +11,8 @@
   "editorial_changes": [
     "Public capture and hypothesis manifests have new explanatory notes. Measurement records and copied CSV values are unchanged.",
     "positions.csv is a readable projection of display.offset_px records, preserving order and integer coordinates.",
-    "Image and SVG assets are copied without modification."
+    "Image and SVG assets are copied without modification.",
+    "Added a firmware-byte-checked pixel-shift disassembly excerpt and a direct comparison of the original v20 C curve function with the Python reconstruction. These supplements do not change the camera measurements."
   ],
   "files": {
     "assets/calibration.png": "4b7707ef3c0c7c39ad7693c83db995dd23f731be7e1f9394e822c977cd39efeb",
@@ -31,6 +32,9 @@
     "data/simulator-v22.csv": "082c56d9f42ee6c32acc39a612c7b61fdd0b2c233126bed05411330b581d297d",
     "data/table-diagnostics.json": "f57b0e0c5e9c9334589b522f6794e78db07fafd4bae2c6b86e908aae6949acfd",
     "data/transition-measurements.csv": "923819feacb8a8025dbb4d5e482c8f1bc672c6ccf1b9c1e42d9e3dfded1ccc09",
-    "data/.gitattributes": "63f2f60a395f6408f508dc41a254fe401f640936bebdbc6924d9248225f43550"
+    "data/.gitattributes": "63f2f60a395f6408f508dc41a254fe401f640936bebdbc6924d9248225f43550",
+    "data/pixel-shift-disassembly.txt": "32db92ab02c76b3d4bc43b69eabe4c3c8751a64662213cae0d10f19b24198cbe",
+    "data/fcn-comparison.json": "8736aa5a4c7ab6ab85ff5b551a4847c19b79661baf5b405a84ec0235532750b2",
+    "data/fcn-checkpoints.csv": "42a71dc1c8b29645949941c4c5e328d5912b1a725acc347ab7bc29a8262b22a6"
   }
 }

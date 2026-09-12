@@ -1,0 +1,84 @@
+MSI MAG 341CQP firmware 041: pixel-shift speed path
+
+Image: MSI_MAG_341CQP_QD-OLED_FW.041_A019.bin
+Image SHA-256: 69b75a1b67652a0fcfb20bda8de958a203784d70111a76740380b29fc7ebda59
+Instruction set: SPARC, big-endian
+Application address mapping: file offset = virtual address + 0x108000
+Disassembly: Capstone 5.0.7; addresses and raw bytes come from the image.
+Names and explanations below are analysis annotations.
+
+This excerpt records existing firmware behavior. It is not a monitor command script.
+
+Settings application calls the speed wrapper
+File      VA        Bytes     Instruction
+0012dc08  00025c08  40013df6  call 0x753e0
+0012dc0c  00025c0c  01000000  nop
+
+OSD path calls the same wrapper
+File      VA        Bytes     Instruction
+0013f7dc  000377dc  4000f701  call 0x753e0
+0013f7e0  000377e0  01000000  nop
+
+Speed wrapper: load setting byte; tail-jump to setter
+File      VA        Bytes     Instruction
+0017d3e0  000753e0  032a00b1  sethi 0x2a00b1, %g1
+0017d3e4  000753e4  d0086345  ldub [%g1+0x345], %o0
+0017d3e8  000753e8  030002fd  sethi 0x2fd, %g1
+0017d3ec  000753ec  81c0634c  jmp %g1+0x34c
+0017d3f0  000753f0  01000000  nop
+
+Setter: form payload, check panel state, log, write, then read back
+File      VA        Bytes     Instruction
+001c774c  000bf74c  9de3bf90  save %sp, -0x70, %sp
+001c7750  000bf750  2b2a00b2  sethi 0x2a00b2, %l5
+001c7754  000bf754  a2156308  or %l5, 0x308, %l1
+001c7758  000bf758  f02c6001  stb %i0, [%l1+1]
+001c775c  000bf75c  7ffff6b9  call 0xbd240
+001c7760  000bf760  c02d6308  stb %g0, [%l5+0x308]
+001c7764  000bf764  808a20ff  andcc %o0, 0xff, %g0
+001c7768  000bf768  02800054  be 0xbf8b8
+001c776c  000bf76c  15000562  sethi 0x562, %o2
+001c7770  000bf770  920e20ff  and %i0, 0xff, %o1
+001c7774  000bf774  7ffee7db  call 0x796e0
+001c7778  000bf778  9012a340  or %o2, 0x340, %o0
+001c777c  000bf77c  82102001  mov 1, %g1
+001c7780  000bf780  a4102002  mov 2, %l2
+001c7784  000bf784  c223a060  st %g1, [%sp+0x60]
+001c7788  000bf788  9a100011  mov %l1, %o5
+001c778c  000bf78c  92102002  mov 2, %o1
+001c7790  000bf790  94102072  mov 0x72, %o2
+001c7794  000bf794  96102005  mov 5, %o3
+001c7798  000bf798  98102000  mov 0, %o4
+001c779c  000bf79c  e423a05c  st %l2, [%sp+0x5c]
+001c77a0  000bf7a0  40007f7d  call 0xdf594
+001c77a4  000bf7a4  90102060  mov 0x60, %o0
+001c77a8  000bf7a8  67fdb665  call -0x5ffd2ec4
+001c77ac  000bf7ac  90102032  mov 0x32, %o0
+001c77b0  000bf7b0  2d2a00b2  sethi 0x2a00b2, %l6
+001c77b4  000bf7b4  96102005  mov 5, %o3
+001c77b8  000bf7b8  98102000  mov 0, %o4
+001c77bc  000bf7bc  9a15a300  or %l6, 0x300, %o5
+001c77c0  000bf7c0  e423a05c  st %l2, [%sp+0x5c]
+001c77c4  000bf7c4  92102002  mov 2, %o1
+001c77c8  000bf7c8  94102072  mov 0x72, %o2
+001c77cc  000bf7cc  40007f84  call 0xdf5dc
+001c77d0  000bf7d0  90102060  mov 0x60, %o0
+
+Interpretation
+0x753E4 loads the byte at 0xA802C745, settings base 0xA802C56C + 0x1D9.
+0x753EC jumps to 0xBF400 + 0x34C = 0xBF74C. The delay slot executes first.
+After SAVE, the incoming selector in %o0 is available as %i0.
+0xBF758 stores the selector at 0xA802CB09; 0xBF760 stores zero at 0xA802CB08.
+The latter store is in the delay slot of the panel-state check call.
+0xBF768 skips the write when that check returns zero.
+0xBF788 passes the two-byte buffer pointer in %o5.
+0xBF790 selects register 0x072; the write call is at 0xBF7A0.
+0xBF7A4 sets bus address 0x60 in the call delay slot.
+The subsequent call at 0xBF7CC reads the same register.
+The complete setter continues beyond this excerpt with comparison and retry handling.
+
+Embedded label
+VA 0x158B40 / file 0x260B40:
+b'\x1b[1;32mOLED set PixelShift Speed %d\r\n\x1b[m'
+The setter passes this string to its logging call at 0xBF774.
+The label supports the pixel-shift-speed interpretation; it does not specify timing.
