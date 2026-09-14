@@ -20,7 +20,8 @@ export function Footer({ placement = 'footer' }: { placement?: 'footer' | 'guide
           <a className="footer-link" href={`/github?placement=${placement}`}>
             {githubStarLabel}
           </a>
-          <a className="footer-link" href="/guides/">
+          <a className="footer-link" href="/research/">{navigation.research}</a>
+            <a className="footer-link" href="/guides/">
             {navigation.guides}
           </a>
           <a className="footer-link" href="/privacy/">Privacy</a>

@@ -39,6 +39,8 @@ export function parseFrontmatter(source) {
     }
   }
   if (frontmatter.updated < frontmatter.published) throw new Error('Guide updated date is before its published date')
+  frontmatter.section ??= 'guides'
+  if (!['guides', 'research'].includes(frontmatter.section)) throw new Error('Article section must be guides or research')
   frontmatter.order = frontmatter.order === undefined ? 100 : Number(frontmatter.order)
   if (!Number.isInteger(frontmatter.order)) throw new Error('Guide order must be an integer')
   return { frontmatter, body: source.slice(match[0].length) }
@@ -76,6 +78,14 @@ function engineFor(captures) {
         const capture = captures[href]
         if (!capture) throw new Error(`Guide image is not in the captures manifest: ${href}`)
         const caption = title ? `<figcaption>${escapeAttribute(title)}</figcaption>` : ''
+        if (capture.kind === 'video') {
+          // Prefer H.264: some Chromium decoders accept VP9 metadata but fail
+          // during playback, after source selection has already finished.
+          return `<figure class="guide-figure guide-motion"><video class="guide-video" width="${capture.width}" height="${capture.height}" poster="${escapeAttribute(capture.poster)}" aria-label="${escapeAttribute(text)}" controls muted loop playsinline preload="metadata"><source src="${escapeAttribute(href)}" type="video/mp4" /><source src="${escapeAttribute(capture.webm)}" type="video/webm" />Your browser cannot play this video. <a href="${escapeAttribute(href)}">Download the MP4.</a></video>${caption}</figure>\n`
+        }
+        if (capture.presentation === 'diagram') {
+          return `<figure class="guide-figure guide-diagram"><div class="guide-diagram-scroll" role="region" aria-label="Scrollable diagram" tabindex="0"><img src="${escapeAttribute(href)}" alt="${escapeAttribute(text)}" width="${capture.width}" height="${capture.height}" loading="lazy" decoding="async" /></div><div class="guide-diagram-tools"><span>Scroll to explore the diagram</span><a href="${escapeAttribute(href)}" target="_blank" rel="noopener" aria-label="Open full-size diagram in a new tab">Open full size</a></div>${caption}</figure>\n`
+        }
         return `<figure class="guide-figure"><img src="${href}" alt="${text}" width="${capture.width}" height="${capture.height}" loading="lazy" decoding="async" />${caption}</figure>\n`
       },
     },
@@ -97,9 +107,17 @@ const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 export async function loadCaptures(siteRoot) {
   const manifest = JSON.parse(await readFile(new URL('src/content/guides/captures.json', siteRoot), 'utf8'))
   for (const [path, capture] of Object.entries(manifest)) {
-    if (!path.startsWith('/guides/img/')) throw new Error(`Capture path must live under /guides/img/: ${path}`)
+    const isVideo = capture.kind === 'video'
+    const expectedDirectory = isVideo ? '/guides/video/' : '/guides/img/'
+    if (!path.startsWith(expectedDirectory)) throw new Error(`Capture path must live under ${expectedDirectory}: ${path}`)
     if (!Number.isInteger(capture.width) || !Number.isInteger(capture.height)) throw new Error(`Capture needs integer width and height: ${path}`)
     await access(new URL(`public${path}`, siteRoot))
+    if (isVideo) {
+      if (!capture.poster?.startsWith('/guides/img/')) throw new Error(`Video poster must live under /guides/img/: ${path}`)
+      if (!capture.webm?.startsWith('/guides/video/')) throw new Error(`Video WebM must live under /guides/video/: ${path}`)
+      await access(new URL(`public${capture.poster}`, siteRoot))
+      await access(new URL(`public${capture.webm}`, siteRoot))
+    }
   }
   return manifest
 }
@@ -129,7 +147,7 @@ export async function loadGuides(dir, { captures = {} } = {}) {
       if (!captures[frontmatter.image]) throw new Error(`Guide image is not in the captures manifest: ${frontmatter.image}`)
       image = `${siteUrl}${frontmatter.image}`
     }
-    guides.push({ slug, path: `/guides/${slug}/`, ...frontmatter, hero, image, body, html: renderGuideBody(body, captures) })
+    guides.push({ slug, path: `/${frontmatter.section}/${slug}/`, ...frontmatter, hero, image, body, html: renderGuideBody(body, captures) })
   }
   return guides.sort((a, b) => a.order - b.order || a.title.localeCompare(b.title))
 }
@@ -142,19 +160,30 @@ export function guideAgentMarkdown(guide, guides = []) {
     `description: ${yamlScalar(guide.description)}`,
     `image: ${guide.image ?? `${siteUrl}/social-card.png`}`,
   ]
+  if (guide.author) frontmatter.push(`author: ${yamlScalar(guide.author)}`)
+  const section = guide.section ?? 'guides'
+  const label = section === 'research' ? 'research' : 'guides'
   // Same links as the page's More guides block, so an agent reader can move between guides.
-  const more = ['- [All the guides](/guides/)', ...guides
-    .filter((entry) => entry.slug !== guide.slug)
+  const more = [`- [${section === 'research' ? 'All research' : 'All the guides'}](/${section}/)`, ...guides
+    .filter((entry) => entry.slug !== guide.slug && (entry.section ?? 'guides') === section)
     .map((entry) => `- [${entry.title}](${entry.path})`)]
   // Site-relative image paths become absolute: the twin is read away from the site.
-  const body = guide.body.trim().replaceAll('](/guides/img/', `](${siteUrl}/guides/img/`)
-  return `---\n${frontmatter.join('\n')}\n---\n\n# ${guide.title}\n\n${body}\n\n## More guides\n\n${more.join('\n')}\n`
+  const body = guide.body
+    .trim()
+    .replaceAll('](/guides/img/', `](${siteUrl}/guides/img/`)
+    .replaceAll('](/guides/video/', `](${siteUrl}/guides/video/`)
+  return `---\n${frontmatter.join('\n')}\n---\n\n# ${guide.title}\n\n${body}\n\n## More ${label}\n\n${more.join('\n')}\n`
 }
 
 // A plain index for AI crawlers that look for one at the site root.
 export function llmsText(guides, { lead }) {
-  const lines = ['# Candela', '', `> ${lead}`, '', '## Guides', '']
-  for (const guide of guides) lines.push(`- [${guide.title}](${siteUrl}${guide.path}): ${guide.description}`)
+  const lines = ['# Candela', '', `> ${lead}`]
+  for (const section of ['guides', 'research']) {
+    lines.push('', section === 'research' ? '## Research' : '## Guides', '')
+    for (const guide of guides.filter((entry) => (entry.section ?? 'guides') === section)) {
+      lines.push(`- [${guide.title}](${siteUrl}${guide.path}): ${guide.description}`)
+    }
+  }
   lines.push('', '## Site', '', `- [Home](${siteUrl}/): the landing page`, `- [Privacy](${siteUrl}/privacy/): the website analytics disclosure`)
   return `${lines.join('\n')}\n`
 }

@@ -59,6 +59,7 @@ export const navigation = {
   label: "Primary",
   brand: "Candela",
   guides: "Guides",
+  research: "Research",
   faq: "FAQ",
   github: "GitHub",
   download: "Download",
@@ -377,6 +378,14 @@ export const guides: {
   updated: "Updated",
   tryPillars: ["Panel health", "Burn-in protection", "Monitor checkup", "Every control"],
   more: "More guides",
+}
+
+export const research = {
+  ...guides,
+  h1: "Research",
+  lead: "Investigations into display engineering, with source code, measurements and evidence you can inspect.",
+  listLabel: "Research articles",
+  more: "More research",
 }
 
 export const privacy = {

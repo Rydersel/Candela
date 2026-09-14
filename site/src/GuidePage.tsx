@@ -1,6 +1,6 @@
 import { Header } from './components/Header'
 import { Footer } from './components/Footer'
-import { guides as copy, githubStarLabel, hero, navigation } from './content/copy'
+import { guides as guideCopy, research as researchCopy, githubStarLabel, hero, navigation } from './content/copy'
 import { formatGuideDate, type Guide } from './guides'
 import candelaMark from './assets/candela-c.svg'
 import './components/Guide.css'
@@ -8,19 +8,22 @@ import './components/Guide.css'
 // The body is Markdown from this repository rendered at build time, so the
 // raw HTML here is our own copy, never anything a visitor supplied.
 export function GuidePage({ guide, guides }: { guide: Guide; guides: Guide[] }) {
-  const more = guides.filter((entry) => entry.slug !== guide.slug)
+  const isResearch = guide.section === 'research'
+  const copy = isResearch ? researchCopy : guideCopy
+  const more = guides.filter((entry) => entry.slug !== guide.slug && (entry.section ?? 'guides') === (guide.section ?? 'guides'))
 
   return (
     <>
       <Header homeHref="/" faqHref="/#faq" placement="guide" />
       <main id="content" className="guide-page">
-        <article className="guide-article">
+        <article className={`guide-article${isResearch ? ' guide-research' : ''}`}>
           <header className="guide-intro">
             <p className="guide-kicker">
-              <a href="/guides/">{copy.h1}</a>
+              <a href={isResearch ? '/research/' : '/guides/'}>{copy.h1}</a>
             </p>
             <h1>{guide.title}</h1>
             <p className="guide-meta">
+              {guide.author && <span>By <a href="https://github.com/Rydersel" rel="author">{guide.author}</a></span>}
               <span>
                 {copy.updated} <time dateTime={guide.updated}>{formatGuideDate(guide.updated)}</time>
               </span>
@@ -36,32 +39,40 @@ export function GuidePage({ guide, guides }: { guide: Guide; guides: Guide[] }) 
 
           <div className="guide-body" dangerouslySetInnerHTML={{ __html: guide.html }} />
 
-          {/* The section's one conversion, styled after the social card. */}
-          <section className="guide-try" aria-labelledby="guide-try-title">
-            <p className="guide-try-brand">
-              <img src={candelaMark} alt="" width="26" height="27" />
-              <span>{navigation.brand}</span>
-            </p>
-            {/* The landing hero's line, so this card and the social card match; the full stop is the accent wick. */}
-            <h2 id="guide-try-title">
-              {hero.h1.replace(/\.$/, '')}
-              <span className="guide-try-wick">.</span>
-            </h2>
-            <ul className="guide-try-pillars" role="list">
-              {copy.tryPillars.map((pillar) => (
-                <li key={pillar}>{pillar}</li>
-              ))}
-            </ul>
-            <div className="guide-try-actions">
-              <a className="guide-try-primary" href="/download?placement=guide">
-                {hero.ctaPrimary}
-              </a>
-              <a className="guide-try-secondary" href="/github?placement=guide">
-                {githubStarLabel}
-              </a>
-              <span className="guide-try-foss">{hero.foss}</span>
-            </div>
-          </section>
+          {isResearch ? (
+            <aside className="guide-research-note" aria-label="About Candela">
+              <p>
+                <a href="/">Candela</a> is free and open source. If you found this investigation useful,
+                {' '}<a href="/github?placement=guide">star Candela on GitHub</a> to support the project.
+              </p>
+            </aside>
+          ) : (
+            <section className="guide-try" aria-labelledby="guide-try-title">
+              <p className="guide-try-brand">
+                <img src={candelaMark} alt="" width="26" height="27" />
+                <span>{navigation.brand}</span>
+              </p>
+              {/* The landing hero's line, so this card and the social card match; the full stop is the accent wick. */}
+              <h2 id="guide-try-title">
+                {hero.h1.replace(/\.$/, '')}
+                <span className="guide-try-wick">.</span>
+              </h2>
+              <ul className="guide-try-pillars" role="list">
+                {copy.tryPillars.map((pillar) => (
+                  <li key={pillar}>{pillar}</li>
+                ))}
+              </ul>
+              <div className="guide-try-actions">
+                <a className="guide-try-primary" href="/download?placement=guide">
+                  {hero.ctaPrimary}
+                </a>
+                <a className="guide-try-secondary" href="/github?placement=guide">
+                  {githubStarLabel}
+                </a>
+                <span className="guide-try-foss">{hero.foss}</span>
+              </div>
+            </section>
+          )}
 
           {more.length > 0 && (
             <nav className="guide-more" aria-labelledby="guide-more-title">

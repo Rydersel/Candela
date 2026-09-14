@@ -2,6 +2,8 @@
 export type Guide = {
   slug: string
   path: string
+  section?: 'guides' | 'research'
+  author?: string
   title: string
   description: string
   published: string

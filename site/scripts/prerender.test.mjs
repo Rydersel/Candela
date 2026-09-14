@@ -6,6 +6,7 @@ import {
   buildSitemap,
   guideMetadata,
   guidesIndexMetadata,
+  researchIndexMetadata,
   htmlToAgentMarkdown,
   inlineStylesheet,
   injectAppMarkup,
@@ -320,4 +321,16 @@ test('validateSeoOutput requires every page in the sitemap', () => {
     () => validateSeoOutput({ html: landing.html, robots, sitemap: buildSitemap([{ path: '/' }]), pages }),
     /sitemap\.xml does not list \/privacy\/[\s\S]*sitemap\.xml does not list \/guides\//,
   )
+})
+
+
+test('research metadata gives the article and hub their canonical identities', () => {
+  const research = { ...guide, section: 'research', author: 'Ryder Selikow', path: '/research/investigation/' }
+  const html = guideMetadata(landingShell, research)
+  assert.match(html, /rel="canonical" href="https:\/\/candela\.fyi\/research\/investigation\/"/)
+  const ld = JSON.parse(html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1])
+  assert.equal(ld[0].author.name, 'Ryder Selikow')
+  assert.equal(ld[1].itemListElement[1].name, 'Research')
+  assert.equal(ld[1].itemListElement[1].item, 'https://candela.fyi/research/')
+  assert.match(researchIndexMetadata(landingShell), /<title>Research \| Candela<\/title>/)
 })

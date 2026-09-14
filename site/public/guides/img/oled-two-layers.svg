@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 738" width="1400" height="738" role="img" aria-label="Desktop context before the cable and physical panel information after the cable support complementary ways to reduce persistent bright exposure.">
+<rect x="0" y="0" width="1400" height="738" fill="#09090b"/>
+<g font-family="system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">
+<text x="64" y="72" font-size="38" font-weight="500" fill="#f4efe7">What each layer can know</text>
+<text x="64" y="114" font-size="23" font-weight="400" fill="#a7a29a">Candela acts before transmission. The display can inspect and maintain the panel.</text>
+<line x1="64" y1="148" x2="1336" y2="148" stroke="#343238" stroke-width="1"/>
+<text x="64" y="212" font-size="24" font-weight="500" fill="#72e0b5">macOS · before the cable</text>
+<text x="810" y="212" font-size="24" font-weight="500" fill="#e8a13a">Display · after the cable</text>
+<text x="64" y="270" font-size="34" font-weight="500" fill="#f4efe7">Desktop context</text>
+<text x="810" y="270" font-size="34" font-weight="500" fill="#f4efe7">Physical panel state</text>
+<text x="64" y="330" font-size="27" font-weight="400" fill="#a7a29a">Idle and lock state</text>
+<text x="810" y="330" font-size="27" font-weight="400" fill="#a7a29a">Final composed video signal</text>
+<text x="64" y="380" font-size="27" font-weight="400" fill="#a7a29a">Window focus and geometry</text>
+<text x="810" y="380" font-size="27" font-weight="400" fill="#a7a29a">Temperature and lifetime state</text>
+<text x="64" y="430" font-size="27" font-weight="400" fill="#a7a29a">Menu bar and Dock identity</text>
+<text x="810" y="430" font-size="27" font-weight="400" fill="#a7a29a">Electrical drift and drive behavior</text>
+<text x="64" y="480" font-size="27" font-weight="400" fill="#a7a29a">Display use and app history</text>
+<text x="810" y="480" font-size="27" font-weight="400" fill="#a7a29a">Sensing and compensation maps</text>
+<line x1="694" y1="198" x2="694" y2="480" stroke="#65615c" stroke-width="1" stroke-dasharray="5 7"/>
+<rect x="680" y="323" width="28" height="54" fill="#09090b" stroke="#a7a29a"/>
+<line x1="686" y1="335" x2="702" y2="335" stroke="#a7a29a" stroke-width="2"/>
+<line x1="686" y1="346" x2="702" y2="346" stroke="#a7a29a" stroke-width="2"/>
+<text x="694" y="418" font-size="22" font-weight="400" fill="#a7a29a" text-anchor="middle">cable</text>
+<line x1="64" y1="534" x2="676" y2="534" stroke="#72e0b5" stroke-width="2"/>
+<line x1="712" y1="534" x2="1336" y2="534" stroke="#e8a13a" stroke-width="2"/>
+<path d="M1324 527L1336 534L1324 541" fill="none" stroke="#e8a13a" stroke-width="2"/>
+<circle cx="694" cy="534" r="7" fill="#09090b" stroke="#f4efe7" stroke-width="2"/>
+<text x="64" y="590" font-size="25" font-weight="400" fill="#72e0b5">Remove avoidable pixels before sending</text>
+<text x="810" y="590" font-size="25" font-weight="400" fill="#e8a13a">Shift, sense and compensate</text>
+<line x1="64" y1="634" x2="1336" y2="634" stroke="#343238" stroke-width="1"/>
+<text x="64" y="684" font-size="23" font-weight="500" fill="#a7a29a">Shared goal</text>
+<text x="264" y="684" font-size="28" font-weight="400" fill="#f4efe7">Reduce persistent bright exposure</text>
+</g>
+</svg>

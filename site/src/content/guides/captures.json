@@ -42,5 +42,73 @@
   "/guides/img/social-external-monitor-brightness-mac.png": {
     "width": 1200,
     "height": 630
+  },
+  "/guides/img/header-reverse-engineered-oled-monitor.svg": {
+    "width": 1400,
+    "height": 600
+  },
+  "/guides/img/oled-evidence-map.svg": {
+    "width": 1400,
+    "height": 872,
+    "presentation": "diagram"
+  },
+  "/guides/img/oled-msi-register-boundary.svg": {
+    "width": 1400,
+    "height": 894,
+    "presentation": "diagram"
+  },
+  "/guides/img/oled-samsung-pipeline.svg": {
+    "width": 1400,
+    "height": 872,
+    "presentation": "diagram"
+  },
+  "/guides/img/oled-generation-timeline.svg": {
+    "width": 1400,
+    "height": 702,
+    "presentation": "diagram"
+  },
+  "/guides/img/oled-simulator-version-delta.svg": {
+    "width": 1400,
+    "height": 758,
+    "presentation": "diagram"
+  },
+  "/guides/img/oled-pixel-shift-capture.svg": {
+    "width": 1400,
+    "height": 800,
+    "presentation": "diagram"
+  },
+  "/guides/img/oled-pixel-shift-orbit.svg": {
+    "width": 1400,
+    "height": 760
+  },
+  "/guides/img/oled-two-layers.svg": {
+    "width": 1400,
+    "height": 738,
+    "presentation": "diagram"
+  },
+  "/guides/video/oled-pixel-shift-trace.mp4": {
+    "kind": "video",
+    "width": 1920,
+    "height": 1080,
+    "poster": "/guides/img/oled-pixel-shift-trace-poster.webp",
+    "webm": "/guides/video/oled-pixel-shift-trace.webm"
+  },
+  "/guides/video/oled-orbit-falsification.mp4": {
+    "kind": "video",
+    "width": 1920,
+    "height": 1080,
+    "poster": "/guides/img/oled-orbit-falsification-poster.webp",
+    "webm": "/guides/video/oled-orbit-falsification.webm"
+  },
+  "/guides/video/oled-orbit-local-divergence.mp4": {
+    "kind": "video",
+    "width": 1920,
+    "height": 1080,
+    "poster": "/guides/img/oled-orbit-local-divergence-poster.webp",
+    "webm": "/guides/video/oled-orbit-local-divergence.webm"
+  },
+  "/guides/img/oled-camera-calibration.png": {
+    "width": 1200,
+    "height": 1000
   }
 }

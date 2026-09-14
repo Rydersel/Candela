@@ -51,6 +51,21 @@
   font-variant-numeric: tabular-nums;
 }
 
+.guide-meta a {
+  color: inherit;
+  text-underline-offset: 0.2em;
+}
+
+.guide-meta a:hover {
+  color: var(--text);
+}
+
+@media (max-width: 560px) {
+  .guide-research .guide-meta {
+    flex-direction: column;
+  }
+}
+
 /* Bleeds past the column like the closing card, so the page opens and closes on the same wide beat. */
 .guide-hero {
   --guide-hero-width: min(100vw - 3.5rem, 58rem);
@@ -228,6 +243,21 @@
   background: var(--surface);
 }
 
+.guide-video {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-inline: auto;
+  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.guide-video:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
 .guide-figure figcaption {
   max-width: 40rem;
   margin: 0.75rem auto 0;
@@ -236,6 +266,143 @@
   line-height: 1.55;
   text-align: center;
   text-wrap: pretty;
+}
+
+.guide-research .guide-intro h1 {
+  word-spacing: 0.08em;
+}
+
+.guide-research-note {
+  margin-top: 2.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
+  color: var(--text-dim);
+  line-height: 1.7;
+}
+
+.guide-research-note a {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Research diagrams need a wider measure than the prose. Keep their labels
+   readable on small screens with a keyboard-accessible horizontal viewport. */
+.guide-research .guide-figure {
+  --figure-width: min(100vw - 3rem, 64rem);
+  width: var(--figure-width);
+  margin: 2.5rem calc((100% - var(--figure-width)) / 2) 3rem;
+}
+
+.guide-research .guide-hero img {
+  box-shadow: none;
+  border-color: color-mix(in srgb, var(--text) 14%, transparent);
+}
+
+.guide-diagram {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 1.5rem;
+}
+
+.guide-diagram-scroll {
+  grid-column: 1 / -1;
+  overflow-x: auto;
+  border: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
+  border-radius: var(--radius);
+  background: #09090b;
+  scrollbar-color: var(--text-dim) #09090b;
+  scrollbar-width: thin;
+}
+
+.guide-diagram-scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.guide-diagram-scroll img {
+  display: block;
+  width: 100%;
+  min-width: 52rem;
+  max-width: none;
+  border: 0;
+  border-radius: 0;
+}
+
+.guide-diagram-tools {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: start;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.guide-diagram-tools span {
+  display: none;
+}
+
+.guide-diagram-tools a {
+  padding-block: 0.25rem;
+}
+
+.guide-research .guide-figure figcaption {
+  max-width: 46rem;
+  margin-top: 1rem;
+  text-align: left;
+  line-height: 1.65;
+}
+
+.guide-research .guide-diagram figcaption {
+  grid-column: 1;
+  grid-row: 2;
+  margin-inline: 0;
+}
+
+/* Keep native playback controls below the encoded picture, so they never
+   obscure the coordinates or methodology at the bottom of these 16:9 films. */
+.guide-research .guide-motion {
+  container-type: inline-size;
+}
+
+.guide-research .guide-video {
+  height: calc(100cqw * 9 / 16 + 4rem);
+  object-fit: contain;
+  object-position: top;
+  background: #09090b;
+}
+
+.guide-research .guide-video:fullscreen {
+  height: 100%;
+  object-position: center;
+}
+
+@media (max-width: 880px) {
+  .guide-diagram-tools {
+    grid-column: 1 / -1;
+    justify-content: space-between;
+  }
+
+  .guide-diagram-tools span {
+    display: inline;
+  }
+
+  .guide-research .guide-diagram figcaption {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+}
+
+@media (max-width: 700px) {
+  .guide-research .guide-figure {
+    --figure-width: 100%;
+    margin-block: 2rem 2.5rem;
+  }
 }
 
 /* A small social card: near-black field, amber bloom in one corner, fine grain. Gradients

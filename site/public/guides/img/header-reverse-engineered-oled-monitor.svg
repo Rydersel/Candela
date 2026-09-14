@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 600" width="1400" height="600" role="img" aria-label="An OLED signal path passing through software, scaler firmware, an opaque panel controller and a grid of pixels">
+  <defs>
+    <radialGradient id="lamp" cx="86%" cy="42%" r="52%">
+      <stop offset="0" stop-color="#e8a13a" stop-opacity="0.24"/>
+      <stop offset="0.55" stop-color="#e8a13a" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#e8a13a" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="pixels" width="34" height="32" patternUnits="userSpaceOnUse">
+      <rect x="2" y="2" width="8" height="25" rx="2" fill="#d85650" opacity="0.62"/>
+      <rect x="12" y="2" width="8" height="25" rx="2" fill="#65b891" opacity="0.58"/>
+      <rect x="22" y="2" width="8" height="25" rx="2" fill="#6b89d5" opacity="0.58"/>
+    </pattern>
+    <filter id="soft" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+    <clipPath id="screen"><rect x="92" y="76" width="1216" height="448" rx="22"/></clipPath>
+  </defs>
+
+  <rect width="1400" height="600" fill="#09090b"/>
+
+  <rect x="72" y="56" width="1256" height="488" rx="31" fill="#070709" stroke="#fff" stroke-opacity="0.12" stroke-width="2"/>
+  <g clip-path="url(#screen)">
+    <rect x="92" y="76" width="1216" height="448" fill="#0c0c10"/>
+
+    <g opacity="0.92">
+      <rect x="126" y="118" width="312" height="364" rx="16" fill="#15121d" stroke="#a77ee8" stroke-opacity="0.28"/>
+      <rect x="154" y="148" width="256" height="26" rx="7" fill="#a77ee8" opacity="0.18"/>
+      <rect x="154" y="190" width="170" height="16" rx="5" fill="#fff" opacity="0.14"/>
+      <rect x="154" y="222" width="222" height="16" rx="5" fill="#fff" opacity="0.09"/>
+      <rect x="154" y="280" width="92" height="126" rx="10" fill="#a77ee8" opacity="0.15"/>
+      <rect x="260" y="280" width="116" height="56" rx="10" fill="#fff" opacity="0.07"/>
+      <rect x="260" y="350" width="116" height="56" rx="10" fill="#fff" opacity="0.11"/>
+      <circle cx="390" cy="446" r="5" fill="#a77ee8"/>
+    </g>
+
+    <path d="M438 300H563" stroke="#a77ee8" stroke-width="3" stroke-linecap="round" opacity="0.55"/>
+    <circle cx="500" cy="300" r="7" fill="#a77ee8"/>
+
+    <g>
+      <rect x="563" y="154" width="228" height="292" rx="18" fill="#161616" stroke="#e8a13a" stroke-opacity="0.42"/>
+      <path d="M605 201H749M605 235H714M605 269H736M605 335H749M605 369H718M605 403H744" stroke="#e8a13a" stroke-opacity="0.36" stroke-width="9" stroke-linecap="round"/>
+      <circle cx="620" cy="302" r="14" fill="#e8a13a" opacity="0.75"/>
+      <circle cx="668" cy="302" r="14" fill="#e8a13a" opacity="0.4"/>
+      <circle cx="716" cy="302" r="14" fill="#e8a13a" opacity="0.2"/>
+    </g>
+
+    <path d="M791 300H871" stroke="#e8a13a" stroke-width="3" stroke-linecap="round" opacity="0.7"/>
+    <circle cx="831" cy="300" r="7" fill="#e8a13a"/>
+
+    <g>
+      <rect x="871" y="184" width="170" height="232" rx="13" fill="#050506" stroke="#ffd68c" stroke-opacity="0.48" stroke-width="2"/>
+      <path d="M897 216H1015M897 246H976M897 276H1002M897 324H986M897 354H1015M897 384H968" stroke="#fff" stroke-opacity="0.12" stroke-width="8" stroke-linecap="round"/>
+      <rect x="857" y="218" width="14" height="14" fill="#e8a13a" opacity="0.7"/>
+      <rect x="857" y="260" width="14" height="14" fill="#e8a13a" opacity="0.7"/>
+      <rect x="857" y="302" width="14" height="14" fill="#e8a13a" opacity="0.7"/>
+      <rect x="857" y="344" width="14" height="14" fill="#e8a13a" opacity="0.7"/>
+      <rect x="1041" y="218" width="14" height="14" fill="#ffd68c" opacity="0.7"/>
+      <rect x="1041" y="260" width="14" height="14" fill="#ffd68c" opacity="0.7"/>
+      <rect x="1041" y="302" width="14" height="14" fill="#ffd68c" opacity="0.7"/>
+      <rect x="1041" y="344" width="14" height="14" fill="#ffd68c" opacity="0.7"/>
+      <circle cx="956" cy="300" r="96" fill="#e8a13a" opacity="0.08" filter="url(#soft)"/>
+    </g>
+
+    <path d="M1055 300H1101" stroke="#ffd68c" stroke-width="3" stroke-linecap="round"/>
+    <rect x="1101" y="104" width="270" height="392" fill="url(#pixels)"/>
+    <rect x="1101" y="104" width="270" height="392" fill="url(#lamp)"/>
+
+  </g>
+
+  <g font-family="'Instrument Sans Variable','Instrument Sans',ui-sans-serif,system-ui,-apple-system,sans-serif" font-weight="600" letter-spacing="0.2">
+    <text x="126" y="105" font-size="20" fill="#bfa8e8">macOS</text>
+    <text x="563" y="140" font-size="20" fill="#d49a48">MSI scaler</text>
+    <text x="871" y="170" font-size="20" fill="#e8b96f">Panel controller</text>
+    <text x="1101" y="92" font-size="20" fill="#d7d0c7">OLED pixels</text>
+  </g>
+</svg>
