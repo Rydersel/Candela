@@ -147,9 +147,8 @@ struct DisplayRotationTests {
 
   // MARK: - The verification the platform makes necessary
 
-  /// An earlier experiment's result, reproduced: the setter can return success and change nothing. The fake
-  /// swallows the write the way `SLSSetDisplayRotation(display, 360)` does, so a
-  /// caller that trusts the return value is visibly wrong here.
+  /// A setter can report success without changing the orientation. The fake
+  /// swallows the write so a caller that trusts only the return value fails.
   @Test func aSwallowedRotationIsVisibleInTheReadbackEvenThoughTheCallSucceeded() throws {
     let fake = FakeConfigurator()
     fake.rotations = [2: .standard]

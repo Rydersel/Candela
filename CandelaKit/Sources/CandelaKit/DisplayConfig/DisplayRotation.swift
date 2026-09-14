@@ -1,13 +1,12 @@
 import CoreGraphics
 import Foundation
 
-/// A display's orientation, as one of the only four values the platform accepts.
+/// A display's orientation, restricted to the four angles the app supports.
 ///
-/// **Closed, not an `Int`.** `SLSSetDisplayRotation` refuses `45` with
-/// `kCGErrorIllegalArgument`, which is the safe half. The dangerous half is that
-/// `-90` and `360` return `CGError` **0 and do nothing**, so the obvious
-/// spelling of "rotate counter-clockwise" is silently ignored while reporting
-/// success. A raw-integer API would make that the natural thing to write.
+/// Raw angles outside this set have inconsistent platform behavior: an earlier
+/// measurement found `360` unchanged, while a later run normalized it to `0`.
+/// Keep requests canonical and verify achieved state instead of inferring it
+/// from the setter's success status.
 public enum DisplayRotation: Int, Sendable, CaseIterable, Codable {
   case standard = 0
   case ninety = 90

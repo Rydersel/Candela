@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import Observation
 import os
 
@@ -293,6 +294,9 @@ public final class BrightnessController: PendingWireDraining {
   /// the default on every launch.
   private let store: (any BrightnessStoring)?
   private let storageKey: String?
+  @ObservationIgnored private var quitHandback: QuitBrightnessHandback?
+  @ObservationIgnored private var quitHandbackLease: QuitHandbackLease?
+  @ObservationIgnored private let quitHandbackTicket = OSAllocatedUnfairLock(initialState: UUID())
 
   /// Software-leg dedupe memo (the fork's `.SwBrightness` skip), critical at 60 Hz
   /// drag rates because every software apply reprograms the gamma table or shade.
@@ -449,6 +453,8 @@ public final class BrightnessController: PendingWireDraining {
     self.boundPanelIdentity = panelIdentity
     self.store = store
     self.storageKey = storageKey
+    self.quitHandback = prefs.quitBrightnessHandback
+    self.quitHandbackLease = self.quitHandback.map { QuitHandbackLease(record: $0, prefs: prefs) }
     self.coalescer = BrightnessWriteCoalescer()
     self.hdrMode = prefs.hdrMode
 
@@ -564,13 +570,15 @@ public final class BrightnessController: PendingWireDraining {
     // takes: a read on a wedged bus spans hundreds of milliseconds, and a write
     // submitted meanwhile (a key press, the panel's surface fan-out) is newer
     // than anything this read can be carrying. Any submit bumps the generation.
+    let mappingAtStart = QuitBrightnessHandback.Mapping(prefs)
     let issuedAtStart = issuedGeneration
     let registerAtStart = readSkip.registerGeneration
     let outcome = await writer.readOutcome(command: readCode)
     // Preferences can change while the wire is busy, with or without another
     // refresh. Evidence and scale from the old register belong to that register.
     bindReadRegister(to: prefs.tuning(for: .brightness).remapCodes.first ?? VCP.brightness)
-    guard readSkip.registerGeneration == registerAtStart else { return }
+    guard readSkip.registerGeneration == registerAtStart,
+      mappingAtStart == .init(prefs) else { return }
     // Dropped before the latch sees it, so a settling pass leaves the count, the
     // verdict and the skip exactly as it found them.
     if settling, outcome.evidence == .noReply { return }
@@ -598,6 +606,9 @@ public final class BrightnessController: PendingWireDraining {
     // issued since the read began is the newer intent, so the read is dropped and
     // the next pass re-reads.
     guard issuedGeneration == issuedAtStart else { return }
+    if await recoverQuitHandback(current: result.current, maximum: result.max, tuning: tuning) {
+      return
+    }
     // Read mirrors write (fork convDDCToValue): un-apply curve and invert through
     // the same tuning, or a tuned readable panel adopts a corrupted brightness at
     // every launch.
@@ -638,6 +649,7 @@ public final class BrightnessController: PendingWireDraining {
   /// drains on the global executor. The software leg runs inline right here, and that
   /// immediacy is the drag-smoothness payoff of software dimming.
   public func setBrightness(_ value: Double) {
+    discardQuitHandback()
     let clamped = min(max(value, 0), 1)
     brightness = clamped
     applyPaths()
@@ -870,7 +882,9 @@ public final class BrightnessController: PendingWireDraining {
     )
   }
 
-  private func brightnessApplier(tuning: CommandTuning) -> any BrightnessApplying {
+  private func brightnessApplier(
+    tuning: CommandTuning, recordQuitSuccess: (@Sendable () -> Void)? = nil
+  ) -> any BrightnessApplying {
     #if DEBUG
       // Nothing on the rig can make a live display's wire fail on demand.
       // Wraps the real applier rather than the writer, so only BRIGHTNESS fails
@@ -879,10 +893,17 @@ public final class BrightnessController: PendingWireDraining {
         return FailingDDCApplier()
       }
     #endif
-    return DDCCommandApplier(writer: writer, command: VCP.brightness, remapCodes: tuning.remapCodes)
+    let wire: any DDCWriting = if let recordQuitSuccess {
+      RecordingQuitBrightnessWriter(base: writer,
+        readRegister: tuning.remapCodes.first ?? VCP.brightness, recordSuccess: recordQuitSuccess)
+    } else { writer }
+    return DDCCommandApplier(writer: wire, command: VCP.brightness, remapCodes: tuning.remapCodes)
   }
 
-  private func submitHardware(_ target: HardwareTarget, applier: any BrightnessApplying) {
+  private func submitHardware(
+    _ target: HardwareTarget, applier: any BrightnessApplying, preservingHandback: Bool = false
+  ) {
+    if !preservingHandback { quitHandbackTicket.withLock { $0 = UUID() } }
     _onSubmit?(target, applier)
     issuedGeneration += 1
     // Kept so a write the queue completed without applying can be re-issued,
@@ -1156,6 +1177,7 @@ public final class BrightnessController: PendingWireDraining {
   }
 
   private func persist(_ value: Double) {
+    if let record = quitHandback, record.savedLogical != value { discardQuitHandback() }
     if let store, let storageKey {
       store.saveBrightness(value, for: storageKey)
     }
@@ -1995,6 +2017,8 @@ public final class BrightnessController: PendingWireDraining {
   /// or port arrives as a reconfiguration either way, and `handleReconfigure` clears
   /// the skip there.
   public func rebind(writer: any DDCWriting, panelIdentity: String?) {
+    quitHandbackTicket.withLock { $0 = UUID() }
+    if panelIdentity != boundPanelIdentity { discardQuitHandback() }
     self.writer = writer
     if panelIdentity != boundPanelIdentity {
       boundPanelIdentity = panelIdentity
@@ -2041,6 +2065,7 @@ public final class BrightnessController: PendingWireDraining {
   /// Wake-restore prerequisite: without the memo reset, repeat passes are
   /// duplicate-skipped and never hit the wire.
   public func resetWriteMemo() {
+    quitHandbackTicket.withLock { $0 = UUID() }
     coalescer.resetDuplicateState()
   }
 
@@ -2428,7 +2453,105 @@ public final class BrightnessController: PendingWireDraining {
     let tuning = prefs.tuning(for: .brightness)
     guard !tuning.unavailableDDC else { return }
     coalescer.resetDuplicateState()
-    submitDDCBrightness(portion: brightness, tuning: tuning)
+    quitHandbackTicket.withLock { $0 = UUID() }
+    let raw = brightnessRaw(brightness, tuning: tuning)
+    guard let saved = storedLogicalBrightness, saved.isFinite else {
+      submitDDCBrightness(portion: brightness, tuning: tuning)
+      return
+    }
+    let record = QuitBrightnessHandback(
+      id: UUID(), savedLogical: saved, quitLogical: brightness, mapping: .init(prefs),
+      raw: raw, effectiveMaximum: tuning.effectiveMaxDDC(readMax: Int(maxDDCValue)))
+    let ticket = quitHandbackTicket
+    let mine = UUID()
+    ticket.withLock { $0 = mine }
+    let prefs = prefs
+    let epoch = epochProvider()
+    let isCurrent = isEpochCurrent
+    let applier = brightnessApplier(tuning: tuning, recordQuitSuccess: {
+      ticket.withLock { current in
+        guard current == mine, isCurrent(epoch), record.mapping == .init(prefs) else { return }
+        prefs.quitBrightnessHandback = record
+      }
+    })
+    submittedDDCPortion = brightness
+    submitHardware(.ddc(raw: raw), applier: applier, preservingHandback: true)
+  }
+
+  private var storedLogicalBrightness: Double? {
+    guard let store, let storageKey else { return nil }
+    return store.savedBrightness(for: storageKey)
+  }
+
+  /// One-time eligibility supplied only by a known update from the old quit path.
+  /// Persisted as untrusted evidence so Safe Mode can defer the hardware check.
+  public func noteLegacyUpdateHandback() {
+    guard quitHandback == nil else { return }
+    if let existing = prefs.quitBrightnessHandback {
+      quitHandback = existing
+      quitHandbackLease = QuitHandbackLease(record: existing, prefs: prefs)
+      return
+    }
+    guard role == .external, let saved = storedLogicalBrightness,
+      saved.isFinite, (0...1).contains(saved) else { return }
+    let record = QuitBrightnessHandback(
+      id: UUID(), savedLogical: saved, quitLogical: saved, mapping: .init(prefs),
+      raw: nil, effectiveMaximum: nil)
+    quitHandback = record
+    quitHandbackLease = QuitHandbackLease(record: record, prefs: prefs)
+    prefs.quitBrightnessHandback = record
+  }
+
+  private func discardQuitHandback() {
+    quitHandbackTicket.withLock { $0 = UUID() }
+    if let lease = quitHandbackLease {
+      lease.resolve()
+      quitHandbackLease = nil
+    } else if let record = prefs.quitBrightnessHandback {
+      QuitHandbackLease.consumeIfUnheld(record, prefs: prefs)
+    }
+    quitHandback = nil
+  }
+
+  /// Returns true while the read belongs to a quit handback, including a failed
+  /// normalization. Repeated reads must not adopt the same full-range value.
+  private func recoverQuitHandback(
+    current: UInt16, maximum: UInt16, tuning: CommandTuning
+  ) async -> Bool {
+    guard let record = quitHandback else { return false }
+    guard record.savedLogical == storedLogicalBrightness,
+      record.mapping == .init(prefs),
+      record.effectiveMaximum == nil
+        || record.effectiveMaximum == tuning.effectiveMaxDDC(readMax: Int(maximum))
+    else { discardQuitHandback(); return false }
+    let expected = record.raw ?? brightnessRaw(record.quitLogical, tuning: tuning)
+    guard current == expected else { discardQuitHandback(); return false }
+    // Preserve the initializer's software-zone park and the lower saved value.
+    let portion = prefs.disableCombinedBrightness ? brightness
+      : DimmingMath.combinedSplit(value: brightness, switching: switchingValue).ddc
+    let canonical = brightnessRaw(portion, tuning: tuning)
+    if canonical != current {
+      let epoch = epochProvider()
+      coalescer.resetDuplicateState()
+      submittedDDCPortion = portion
+      submitHardware(.ddc(raw: canonical), applier: brightnessApplier(tuning: tuning),
+                     preservingHandback: true)
+      let generation = issuedGeneration
+      await coalescer.waitUntilCompleted(through: generation)
+      guard issuedGeneration == generation, quitHandback?.id == record.id,
+        isEpochCurrent(epoch), await coalescer.appliedThrough() == generation else { return true }
+      // A write ACK is not achieved state. Keep the evidence if readback fails
+      // or the monitor ignored the canonical target.
+      let achieved = await writer.readOutcome(command: tuning.remapCodes.first ?? VCP.brightness)
+      guard issuedGeneration == generation, quitHandback?.id == record.id,
+        isEpochCurrent(epoch), record.mapping == .init(prefs),
+        record.savedLogical == storedLogicalBrightness,
+        achieved.value?.current == canonical, achieved.value?.max == maximum else { return true }
+    }
+    quitHandbackLease?.resolve()
+    quitHandbackLease = nil
+    quitHandback = nil
+    return true
   }
 
   /// Test seam: observes the coalescer's duplicate-memo reset counter (the

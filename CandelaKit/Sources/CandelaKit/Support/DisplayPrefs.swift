@@ -196,6 +196,37 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: key("temporaryDimEngaged")) }
   }
 
+  // Compound record operations must be atomic across controllers sharing an identity.
+  private static let handbackLock = NSLock()
+
+  var quitBrightnessHandback: QuitBrightnessHandback? {
+    get {
+      Self.handbackLock.withLock {
+        guard let data = defaults.data(forKey: key("quitBrightnessHandback")) else { return nil }
+        return try? JSONDecoder().decode(QuitBrightnessHandback.self, from: data)
+      }
+    }
+    set {
+      Self.handbackLock.withLock {
+        if let newValue, let data = try? JSONEncoder().encode(newValue) {
+          defaults.set(data, forKey: key("quitBrightnessHandback"))
+        } else {
+          defaults.removeObject(forKey: key("quitBrightnessHandback"))
+        }
+      }
+    }
+  }
+
+  func consumeQuitBrightnessHandback(_ id: UUID) {
+    Self.handbackLock.withLock {
+      let key = key("quitBrightnessHandback")
+      guard let data = defaults.data(forKey: key),
+        let record = try? JSONDecoder().decode(QuitBrightnessHandback.self, from: data),
+        record.id == id else { return }
+      defaults.removeObject(forKey: key)
+    }
+  }
+
   // MARK: - OLED care
 
   // The defaults ARE the Recommended preset, so enrolling writes nothing but

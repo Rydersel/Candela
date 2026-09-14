@@ -609,6 +609,9 @@ final class AppModel {
   /// deliberately not observable.
   var isSafeMode: Bool { safeMode }
 
+  /// Eligibility captured before Sparkle's relaunch UI mark is consumed.
+  @ObservationIgnored private var recoverLegacyUpdateHandbacks: Bool
+
   var volumeMode: MultiKeyboardVolume { appPrefs.multiKeyboardVolume }
 
   /// Bumped by the propagation seam on any pref write a view renders. The panel
@@ -704,6 +707,7 @@ final class AppModel {
     hdrToggling: (any HDRToggling)? = nil,
     audioDevices: (any AudioDeviceProviding)? = nil,
     safeMode: Bool = false,
+    recoverLegacyUpdateHandbacks: Bool = false,
     discoverDisplays: @escaping (Set<CGDirectDisplayID>) -> DisplayDiscoverySurvey = {
       DisplayDiscovery.survey(excluding: $0)
     }
@@ -713,6 +717,7 @@ final class AppModel {
     self.hdrToggling = hdrToggling ?? MonitorPanelService()
     self.audioDevices = audioDevices ?? CoreAudioDeviceProvider()
     self.safeMode = safeMode
+    self.recoverLegacyUpdateHandbacks = recoverLegacyUpdateHandbacks
     self.discoverDisplays = discoverDisplays
     appPrefs = DisplayPrefs(persistenceKey: "app", safeMode: safeMode)
   }
@@ -1517,6 +1522,10 @@ final class AppModel {
   /// before the drain task exits, so no explicit `waitForPendingWrites()` is
   /// needed.
   private func performRefresh(settling: Bool = false) async -> [CGDirectDisplayID] {
+    // The updater hint belongs only to the initial discovery, even if no panels
+    // are attached. Consume it before any suspension or later topology pass.
+    let recoverLegacyHandbacks = recoverLegacyUpdateHandbacks
+    recoverLegacyUpdateHandbacks = false
     redactRecentDisplayEvents()
     // The display set is about to be re-derived, so a memoized "discovery does
     // not know this id" is no longer evidence about anything.
@@ -1614,6 +1623,11 @@ final class AppModel {
       )
       appeared.append(state)
       return state
+    }
+    // Seed every controller before the first read can consume a shared identity's
+    // record. Safe Mode persists the hint but continues to skip hardware changes.
+    if recoverLegacyHandbacks {
+      for state in appeared { state.controller.noteLegacyUpdateHandback() }
     }
     refreshBuiltIn()
     // The diagnostics ring's one insertion point for externals: `appeared` and

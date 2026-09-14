@@ -64,7 +64,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // instance.
     let monitor = GammaInterferenceMonitor(gamma: gamma, alerts: EngineAlerts())
     interferenceMonitor = monitor
-    let model = AppModel(shade: shade, gamma: gamma, safeMode: safeMode)
+    let model = AppModel(
+      shade: shade, gamma: gamma, safeMode: safeMode,
+      recoverLegacyUpdateHandbacks: UpdateRelaunch.needsLegacyBrightnessRecovery())
     self.model = model
     // Reporting-only handoff: built here because it needs the AppKit alert
     // island, read there because the diagnostics pane has no other way to say how
