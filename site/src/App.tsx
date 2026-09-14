@@ -71,8 +71,11 @@ export default function App({ pathname = '/', guides = [] }: { pathname?: string
   const path = pathname.replace(/\/+$/, '')
   if (path === '/privacy') return <PrivacyPage />
   if (path === '/terms') return <TermsPage />
-  if (path === '/guides') return <GuidesIndexPage guides={guides} />
-  const guide = guides.find((entry) => `/guides/${entry.slug}` === path)
+  if (path === '/guides' || path === '/research') {
+    const section = path === '/research' ? 'research' : 'guides'
+    return <GuidesIndexPage section={section} guides={guides.filter((entry) => (entry.section ?? 'guides') === section)} />
+  }
+  const guide = guides.find((entry) => entry.path.replace(/\/+$/, '') === path)
   if (guide) return <GuidePage guide={guide} guides={guides} />
   return <LandingPage />
 }

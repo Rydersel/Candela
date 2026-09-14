@@ -81,10 +81,10 @@ async function htmlResponse(context: Context) {
 
 const canonicalHost = 'candela.fyi'
 
-// Only the landing and the guides section get a Markdown twin from the prerender.
+// The landing page, guides and research get a Markdown twin from the prerender.
 function markdownAssetPath(pathname: string) {
   if (pathname === '/') return '/index.md'
-  if (/^\/guides\/(?:[a-z0-9-]+\/)?$/.test(pathname)) return `${pathname}index.md`
+  if (/^\/(?:guides|research)\/(?:[a-z0-9-]+\/)?$/.test(pathname)) return `${pathname}index.md`
   return null
 }
 
@@ -94,6 +94,11 @@ export const onRequest = async (context: Context) => {
   // one address the sitemap, canonical tags and analytics know.
   if (url.hostname === `www.${canonicalHost}`) {
     url.hostname = canonicalHost
+    return Response.redirect(url.toString(), 301)
+  }
+  const oldArticle = '/guides/reverse-engineered-oled-monitor'
+  if ([oldArticle, `${oldArticle}/`, `${oldArticle}/index.html`, `${oldArticle}/index.md`].includes(url.pathname)) {
+    url.pathname = '/research/reverse-engineered-oled-monitor/' + (url.pathname.endsWith('/index.md') ? 'index.md' : '')
     return Response.redirect(url.toString(), 301)
   }
   if (url.pathname === '/appcast.xml') {

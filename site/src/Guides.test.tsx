@@ -74,6 +74,24 @@ describe('guide pages', () => {
     expect(queryByRole('navigation', { name: 'More guides' })).toBeNull()
   })
 
+  it('closes the research article with attribution instead of the download card', () => {
+    const research: Guide = {
+      section: 'research',
+      author: 'Ryder Selikow',
+      ...burnIn,
+      slug: 'reverse-engineered-oled-monitor',
+      path: '/research/reverse-engineered-oled-monitor/',
+    }
+    const { getByRole, container } = render(<App pathname={research.path} guides={[research]} />)
+    const note = getByRole('complementary', { name: 'About Candela' })
+    expect(within(note).getByRole('link', { name: 'star Candela on GitHub' }).getAttribute('href'))
+      .toBe('/github?placement=guide')
+    expect(container.querySelector('.guide-try')).toBeNull()
+    expect(container.querySelector('.guide-meta')?.textContent).toContain('By Ryder Selikow')
+    expect(getByRole('link', { name: 'Ryder Selikow' }).getAttribute('rel')).toBe('author')
+    expect(container.querySelector('.guide-kicker a')?.getAttribute('href')).toBe('/research/')
+  })
+
   it('lists every guide on the index with its description and date', () => {
     const { getByRole, getAllByRole, queryAllByRole } = render(<App pathname="/guides/" guides={[burnIn, brightness]} />)
 
@@ -101,5 +119,23 @@ describe('guide pages', () => {
     const footer = getByRole('contentinfo')
     expect(within(footer).getByRole('link', { name: 'Guides' }).getAttribute('href')).toBe('/guides/')
     expect(within(footer).getByRole('link', { name: 'Privacy' }).getAttribute('href')).toBe('/privacy/')
+  })
+})
+
+
+describe('research navigation', () => {
+  afterEach(cleanup)
+  const research: Guide = { ...burnIn, section: 'research', author: 'Ryder Selikow', slug: 'investigation', path: '/research/investigation/', title: 'An investigation' }
+  it('keeps research in its own index and supports trailing-slash-free routes', () => {
+    const page = render(<App pathname="/research" guides={[burnIn, research]} />)
+    expect(page.getByRole('heading', { level: 1 }).textContent).toBe('Research')
+    const list = page.getByRole('list', { name: 'Research articles' })
+    expect(within(list).getByRole('link', { name: /An investigation/ }).getAttribute('href')).toBe(research.path)
+    expect(within(list).queryByRole('link', { name: /How to prevent/ })).toBeNull()
+    cleanup()
+    const guides = render(<App pathname="/guides/" guides={[burnIn, research]} />)
+    expect(within(guides.getByRole('list', { name: 'Guides' })).queryByText('An investigation')).toBeNull()
+    cleanup()
+    expect(render(<App pathname="/research/investigation" guides={[research]} />).getByRole('heading', { level: 1 }).textContent).toBe(research.title)
   })
 })

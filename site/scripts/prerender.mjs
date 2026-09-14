@@ -130,13 +130,20 @@ export function guidesIndexMetadata(html) {
   return pageMetadata(html, { title: guidesIndexTitle, description: guidesIndexDescription, path: '/guides/' })
 }
 
+const researchIndexTitle = 'Research | Candela'
+const researchIndexDescription = 'Investigations into display engineering, with source code, measurements and evidence you can inspect.'
+
+export function researchIndexMetadata(html) {
+  return pageMetadata(html, { title: researchIndexTitle, description: researchIndexDescription, path: '/research/' })
+}
+
 export function breadcrumbJsonLd(guide) {
   return {
     '@context': 'https://schema.org',
     '@type': 'BreadcrumbList',
     itemListElement: [
       { '@type': 'ListItem', position: 1, name: 'Candela', item: canonicalUrl },
-      { '@type': 'ListItem', position: 2, name: 'Guides', item: `${siteUrl}/guides/` },
+      { '@type': 'ListItem', position: 2, name: guide.section === 'research' ? 'Research' : 'Guides', item: `${siteUrl}/${guide.section ?? 'guides'}/` },
       { '@type': 'ListItem', position: 3, name: guide.title, item: `${siteUrl}${guide.path}` },
     ],
   }
@@ -155,7 +162,7 @@ export function articleJsonLd(guide) {
     datePublished: guide.published,
     dateModified: guide.updated,
     inLanguage: 'en',
-    author: { '@type': 'Person', name: 'Ryder Selikow', url: 'https://github.com/Rydersel' },
+    author: { '@type': 'Person', name: guide.author ?? 'Ryder Selikow', url: 'https://github.com/Rydersel' },
     publisher: { '@type': 'Organization', name: 'Candela', url: canonicalUrl },
     about: {
       '@type': 'SoftwareApplication',
@@ -276,7 +283,7 @@ export function validateSeoOutput({ html, robots, sitemap, pages = [] }) {
 export async function prerender({ siteRoot = new URL('../', import.meta.url) } = {}) {
   const dist = new URL('dist/', siteRoot)
   const server = new URL('dist-ssr/entry-server.js', siteRoot)
-  const [{ render, guidesCopy }, rawShell, robots, guides] = await Promise.all([
+  const [{ render, guidesCopy, researchCopy }, rawShell, robots, guides] = await Promise.all([
     import(pathToFileURL(server.pathname).href),
     readFile(new URL('index.html', dist), 'utf8'),
     readFile(new URL('robots.txt', dist), 'utf8'),
@@ -286,6 +293,8 @@ export async function prerender({ siteRoot = new URL('../', import.meta.url) } =
   const html = injectAppMarkup(shell, render('/', guides))
   const markdown = htmlToAgentMarkdown(html)
 
+  const tutorials = guides.filter((guide) => guide.section !== 'research')
+  const research = guides.filter((guide) => guide.section === 'research')
   const indexHtml = rebaseNestedAssets(guidesIndexMetadata(injectAppMarkup(shell, render('/guides/', guides))), 1)
   const pages = [
     {
@@ -301,13 +310,25 @@ export async function prerender({ siteRoot = new URL('../', import.meta.url) } =
     {
       path: '/guides/',
       kind: 'page',
-      lastmod: latestGuideUpdate(guides),
+      lastmod: latestGuideUpdate(tutorials),
       html: indexHtml,
-      markdown: guidesIndexMarkdown(guides, {
+      markdown: guidesIndexMarkdown(tutorials, {
         title: guidesIndexTitle,
         description: guidesIndexDescription,
         heading: guidesCopy.h1,
         lead: guidesCopy.lead,
+      }),
+    },
+    {
+      path: '/research/',
+      kind: 'page',
+      lastmod: latestGuideUpdate(research),
+      html: rebaseNestedAssets(researchIndexMetadata(injectAppMarkup(shell, render('/research/', guides))), 1),
+      markdown: guidesIndexMarkdown(research, {
+        title: researchIndexTitle,
+        description: researchIndexDescription,
+        heading: researchCopy.h1,
+        lead: researchCopy.lead,
       }),
     },
     ...guides.map((guide) => ({
@@ -333,6 +354,13 @@ export async function prerender({ siteRoot = new URL('../', import.meta.url) } =
       ...(page.markdown ? [writeFile(new URL(`.${page.path}index.md`, dist), page.markdown)] : []),
     ]),
   ])
+  // Static preview hosts do not run Pages middleware. Keep the former URL
+  // usable there too; production sends a 301 before reaching this fallback.
+  const oldArticle = new URL('guides/reverse-engineered-oled-monitor/', dist)
+  if (research.some((guide) => guide.slug === 'reverse-engineered-oled-monitor')) {
+    await mkdir(oldArticle, { recursive: true })
+    await writeFile(new URL('index.html', oldArticle), '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Article moved | Candela</title><link rel="canonical" href="https://candela.fyi/research/reverse-engineered-oled-monitor/"><meta http-equiv="refresh" content="0;url=/research/reverse-engineered-oled-monitor/"></head><body><p>This article has moved to <a href="/research/reverse-engineered-oled-monitor/">Research</a>.</p></body></html>')
+  }
   await rm(new URL('dist-ssr/', siteRoot), { recursive: true, force: true })
 }
 

@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 760" width="1400" height="760" role="img" aria-label="Published Samsung orbit contradicted at the third measured MSI position">
+  <defs>
+    <linearGradient id="o-bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0a0a0c"/><stop offset="1" stop-color="#17110e"/></linearGradient>
+    <pattern id="o-grid" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M50 0H0V50" fill="none" stroke="#fff" stroke-opacity="0.075"/></pattern>
+    <filter id="o-grain"><feTurbulence type="fractalNoise" baseFrequency="0.78" numOctaves="2" seed="31"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="table" tableValues="0 0.05"/></feComponentTransfer></filter>
+  </defs>
+  <rect width="1400" height="760" rx="18" fill="url(#o-bg)"/>
+  <g font-family="'Instrument Sans Variable','Instrument Sans',ui-sans-serif,system-ui,-apple-system,sans-serif">
+    <text x="60" y="66" font-size="27" font-weight="650" fill="#f3eee6">One surviving start. Then none.</text>
+    <text x="60" y="98" font-size="16" font-weight="500" fill="#a8a29b">Every cyclic start in Samsung's 1,956-position normal orbit was tested with the calibration fixed in advance.</text>
+
+    <g transform="translate(60 146)">
+      <text x="0" y="0" font-size="14" font-weight="650" fill="#e8a13a" letter-spacing="1.1">THE FIRST CONTRADICTION</text>
+      <rect x="0" y="30" width="610" height="508" fill="#0d0d10" stroke="#fff" stroke-opacity="0.11"/>
+      <rect x="30" y="60" width="550" height="420" fill="url(#o-grid)"/>
+      <line x1="305" y1="60" x2="305" y2="480" stroke="#fff" stroke-opacity="0.18"/>
+      <line x1="30" y1="380" x2="580" y2="380" stroke="#fff" stroke-opacity="0.18"/>
+
+      <path d="M305 380L305 280L405 380" fill="none" stroke="#a77ee8" stroke-width="4" stroke-dasharray="10 8" stroke-linejoin="round"/>
+      <path d="M305 380L305 280L205 280" fill="none" stroke="#e8a13a" stroke-width="5" stroke-linejoin="round"/>
+      <circle cx="305" cy="380" r="8" fill="#f3eee6"/>
+      <circle cx="305" cy="280" r="8" fill="#f3eee6"/>
+      <circle cx="405" cy="380" r="9" fill="#a77ee8"/>
+      <circle cx="205" cy="280" r="9" fill="#e8a13a"/>
+      <text x="288" y="405" font-size="14" fill="#c0bab2" text-anchor="end">1 · (0,0)</text>
+      <text x="290" y="262" font-size="14" fill="#c0bab2" text-anchor="end">2 · (0,+1)</text>
+      <text x="428" y="386" font-size="14" fill="#c5afea">Samsung 3 · (+1,0)</text>
+      <text x="185" y="260" font-size="14" font-weight="650" fill="#ffd68c" text-anchor="end">MSI 3 · (−1,+1)</text>
+
+      <g transform="translate(52 432)">
+        <line x1="0" y1="0" x2="32" y2="0" stroke="#a77ee8" stroke-width="4" stroke-dasharray="9 7"/><text x="44" y="6" font-size="14" fill="#c0bab2">only surviving Samsung alignment</text>
+        <line x1="300" y1="0" x2="332" y2="0" stroke="#e8a13a" stroke-width="4"/><text x="344" y="6" font-size="14" fill="#c0bab2">measured MSI</text>
+      </g>
+      <rect x="0" y="492" width="610" height="46" fill="#ff8073" opacity="0.08"/>
+      <text x="305" y="522" font-size="15" font-weight="650" fill="#ff9a90" text-anchor="middle">position 3: surviving starts 1 → 0</text>
+    </g>
+
+    <g transform="translate(742 146)">
+      <text x="0" y="0" font-size="14" font-weight="650" fill="#75c9a5" letter-spacing="1.1">ALL 43 MEASURED POSITIONS</text>
+      <rect x="0" y="30" width="598" height="508" fill="#0d0d10" stroke="#fff" stroke-opacity="0.11"/>
+      <g transform="translate(-650 -20)">
+        <path d="M1220 550 L1220 530 L1200 530 L1200 510 L1180 510 L1180 490 L1160 490 L1160 470 L1140 470 L1140 450 L1120 450 L1120 430 L1100 430 L1100 410 L1080 410 L1060 390 L1040 370 L1020 350 L1000 330 L980 310 L960 290 L940 310 L960 330 L980 350 L1000 370 L1020 390 L1040 410 L1060 430 L1080 450 L1100 470 L1120 490 L1140 510 L1160 530 L1140 550 L1120 530 L1100 510 L1080 490 L1060 470 L1040 450 L1020 430 L1000 410 L980 390 L960 370" fill="none" stroke="#e8a13a" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        <g fill="#ffd68c">
+          <circle cx="1220" cy="550" r="7"/><circle cx="1220" cy="530" r="5"/><circle cx="1200" cy="530" r="5"/><circle cx="1200" cy="510" r="5"/><circle cx="1180" cy="510" r="5"/><circle cx="1180" cy="490" r="5"/><circle cx="1160" cy="490" r="5"/><circle cx="1160" cy="470" r="5"/><circle cx="1140" cy="470" r="5"/><circle cx="1140" cy="450" r="5"/><circle cx="1120" cy="450" r="5"/><circle cx="1120" cy="430" r="5"/><circle cx="1100" cy="430" r="5"/><circle cx="1100" cy="410" r="5"/><circle cx="1080" cy="410" r="5"/><circle cx="1060" cy="390" r="5"/><circle cx="1040" cy="370" r="5"/><circle cx="1020" cy="350" r="5"/><circle cx="1000" cy="330" r="5"/><circle cx="980" cy="310" r="5"/><circle cx="960" cy="290" r="5"/><circle cx="940" cy="310" r="5"/><circle cx="960" cy="330" r="5"/><circle cx="980" cy="350" r="5"/><circle cx="1000" cy="370" r="5"/><circle cx="1020" cy="390" r="5"/><circle cx="1040" cy="410" r="5"/><circle cx="1060" cy="430" r="5"/><circle cx="1080" cy="450" r="5"/><circle cx="1100" cy="470" r="5"/><circle cx="1120" cy="490" r="5"/><circle cx="1140" cy="510" r="5"/><circle cx="1160" cy="530" r="5"/><circle cx="1140" cy="550" r="5"/><circle cx="1120" cy="530" r="5"/><circle cx="1100" cy="510" r="5"/><circle cx="1080" cy="490" r="5"/><circle cx="1060" cy="470" r="5"/><circle cx="1040" cy="450" r="5"/><circle cx="1020" cy="430" r="5"/><circle cx="1000" cy="410" r="5"/><circle cx="980" cy="390" r="5"/><circle cx="960" cy="370" r="7"/>
+        </g>
+      </g>
+      <line x1="40" y1="452" x2="558" y2="452" stroke="#fff" stroke-opacity="0.08"/>
+      <text x="40" y="486" font-size="15" fill="#c0bab2">42 relocations · exact one-source-pixel lattice</text>
+      <text x="40" y="516" font-size="15" fill="#c0bab2">mean interval 60.134 s · sample SD 0.012 s</text>
+      <text x="558" y="516" font-size="13" fill="#8f8982" text-anchor="end">relative coordinates</text>
+    </g>
+  </g>
+  <rect width="1400" height="760" filter="url(#o-grain)" opacity="0.32"/>
+</svg>

@@ -23,6 +23,7 @@ export function Header({
             {navigation.brand}
           </a>
           <div className="site-nav-links">
+            <a className="site-nav-link" href="/research/">{navigation.research}</a>
             <a className="site-nav-link" href="/guides/">
               {navigation.guides}
             </a>

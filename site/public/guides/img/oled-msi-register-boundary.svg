@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 894" width="1400" height="894" role="img" aria-label="MSI scaler settings cross the bus at 0x60 to nine fixed Samsung panel registers; the algorithms below the interface were not recovered.">
+<rect x="0" y="0" width="1400" height="894" fill="#09090b"/>
+<g font-family="system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">
+<text x="64" y="72" font-size="38" font-weight="500" fill="#f4efe7">The exact MSI-to-panel boundary</text>
+<text x="64" y="114" font-size="23" font-weight="400" fill="#a7a29a">Firmware 041: scaler policy and 53 fixed-address panel transactions.</text>
+<line x1="64" y1="148" x2="1336" y2="148" stroke="#343238" stroke-width="1"/>
+<text x="64" y="204" font-size="25" font-weight="500" fill="#e8a13a">Novatek scaler</text>
+<text x="64" y="246" font-size="30" font-weight="500" fill="#f4efe7">Settings and scheduling</text>
+<text x="64" y="302" font-size="24" font-weight="400" fill="#a7a29a">User settings and menu state</text>
+<text x="64" y="350" font-size="24" font-weight="400" fill="#a7a29a">Usage counters and reminders</text>
+<text x="64" y="398" font-size="24" font-weight="400" fill="#a7a29a">Temperature gate</text>
+<text x="64" y="446" font-size="24" font-weight="400" fill="#a7a29a">Maintenance scheduling</text>
+<text x="64" y="494" font-size="24" font-weight="400" fill="#a7a29a">VRR-dependent configuration</text>
+<text x="64" y="542" font-size="24" font-weight="400" fill="#a7a29a">Start, poll and cancel states</text>
+<line x1="64" y1="598" x2="458" y2="598" stroke="#343238" stroke-width="1"/>
+<text x="64" y="642" font-size="26" font-weight="500" fill="#f4efe7">53 fixed panel-bus accesses</text>
+<text x="64" y="685" font-size="22" font-weight="400" fill="#a7a29a">Every register address is immediate.</text>
+<text x="64" y="717" font-size="22" font-weight="400" fill="#a7a29a">No caller-selected memory or length.</text>
+<line x1="496" y1="362" x2="594" y2="362" stroke="#e8a13a" stroke-width="2"/>
+<path d="M584 356L594 362L584 368" fill="none" stroke="#e8a13a" stroke-width="2"/>
+<text x="545" y="335" font-size="20" font-weight="400" fill="#a7a29a" text-anchor="middle">I²C-style</text>
+<text x="545" y="399" font-size="22" font-weight="400" fill="#e8a13a" text-anchor="middle">0x60</text>
+<text x="636" y="204" font-size="25" font-weight="500" fill="#e8a13a">Samsung panel controller</text>
+<text x="636" y="246" font-size="30" font-weight="500" fill="#f4efe7">Fixed register interface</text>
+<text x="636" y="296" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="24" fill="#e8a13a">0x008</text>
+<text x="768" y="296" font-size="24" font-weight="400" fill="#f4efe7">Panel temperature</text>
+<line x1="636" y1="310" x2="1336" y2="310" stroke="#343238" stroke-width="1"/>
+<text x="636" y="340" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="24" fill="#e8a13a">0x060</text>
+<text x="768" y="340" font-size="24" font-weight="400" fill="#f4efe7">Static-screen configuration</text>
+<line x1="636" y1="354" x2="1336" y2="354" stroke="#343238" stroke-width="1"/>
+<text x="636" y="384" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="24" fill="#e8a13a">0x070</text>
+<text x="768" y="384" font-size="24" font-weight="400" fill="#f4efe7">Pixel-shift enable</text>
+<line x1="636" y1="398" x2="1336" y2="398" stroke="#343238" stroke-width="1"/>
+<text x="636" y="428" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="24" fill="#e8a13a">0x072</text>
+<text x="768" y="428" font-size="24" font-weight="400" fill="#f4efe7">Pixel-shift speed</text>
+<line x1="636" y1="442" x2="1336" y2="442" stroke="#343238" stroke-width="1"/>
+<text x="636" y="472" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="24" fill="#e8a13a">0x0C0</text>
+<text x="768" y="472" font-size="24" font-weight="400" fill="#f4efe7">OFF sensing</text>
+<line x1="636" y1="486" x2="1336" y2="486" stroke="#343238" stroke-width="1"/>
+<text x="636" y="516" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="24" fill="#e8a13a">0x0C2</text>
+<text x="768" y="516" font-size="24" font-weight="400" fill="#f4efe7">EL sensing</text>
+<line x1="636" y1="530" x2="1336" y2="530" stroke="#343238" stroke-width="1"/>
+<text x="636" y="560" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="24" fill="#e8a13a">0x1B2</text>
+<text x="768" y="560" font-size="24" font-weight="400" fill="#f4efe7">Logo detection</text>
+<line x1="636" y1="574" x2="1336" y2="574" stroke="#343238" stroke-width="1"/>
+<text x="636" y="604" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="24" fill="#e8a13a">0x1B4</text>
+<text x="768" y="604" font-size="24" font-weight="400" fill="#f4efe7">Boundary detection</text>
+<line x1="636" y1="618" x2="1336" y2="618" stroke="#343238" stroke-width="1"/>
+<text x="636" y="648" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="24" fill="#e8a13a">0x1B6</text>
+<text x="768" y="648" font-size="24" font-weight="400" fill="#f4efe7">Taskbar detection</text>
+<line x1="636" y1="662" x2="1336" y2="662" stroke="#343238" stroke-width="1"/>
+<line x1="64" y1="764" x2="1336" y2="764" stroke="#ff9a90" stroke-width="1" stroke-dasharray="5 7"/>
+<text x="64" y="808" font-size="24" font-weight="500" fill="#ff9a90">Below this interface</text>
+<text x="380" y="808" font-size="24" font-weight="400" fill="#a7a29a">Image analysis, sensing and coefficient calculation</text>
+<text x="380" y="844" font-size="24" font-weight="400" fill="#a7a29a">Compensation maps and the actual movement path</text>
+<text x="64" y="844" font-size="21" font-weight="400" fill="#a7a29a">Executable not recovered</text>
+</g>
+</svg>

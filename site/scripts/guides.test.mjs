@@ -90,10 +90,10 @@ test('loadGuides returns nothing for a directory that does not exist yet', async
   assert.deepEqual(await loadGuides(pathToFileURL('/nonexistent/candela-guides/')), [])
 })
 
-test('guideAgentMarkdown carries the same three frontmatter keys as the landing twin', () => {
+test('guideAgentMarkdown carries its canonical URL and dates alongside the article metadata', () => {
   const { frontmatter, body } = parseFrontmatter(source)
   const markdown = guideAgentMarkdown({ ...frontmatter, slug: 'oled-burn-in-mac', path: '/guides/oled-burn-in-mac/', body })
-  assert.match(markdown, /^---\ntitle: How to prevent OLED burn-in on a Mac\ndescription: "What wears, what macOS offers, and where software fills the gap\."\nimage: https:\/\/candela\.fyi\/social-card\.png\n---\n\n# How to prevent OLED burn-in on a Mac\n\nAn OLED panel wears/)
+  assert.match(markdown, /^---\ntitle: How to prevent OLED burn-in on a Mac\ndescription: "What wears, what macOS offers, and where software fills the gap\."\nimage: https:\/\/candela\.fyi\/social-card\.png\nurl: https:\/\/candela\.fyi\/guides\/oled-burn-in-mac\/\npublished: 2026-09-02\nupdated: 2026-09-03\n---\n\n# How to prevent OLED burn-in on a Mac\n\nAn OLED panel wears/)
   assert.doesNotMatch(markdown, /checkedOn|order:/)
   assert.match(markdown, /\n## More guides\n\n- \[All the guides\]\(\/guides\/\)\n$/)
 
@@ -145,6 +145,40 @@ test('renderGuideBody turns a listed image into a figure with its size and capti
   assert.throws(() => renderGuideBody('![alt](https://example.com/x.png)', captures), /not in the captures manifest/)
 })
 
+test('renderGuideBody turns a listed motion capture into a controlled looping video', () => {
+  const captures = {
+    '/guides/video/oled-shift.mp4': {
+      kind: 'video',
+      width: 1920,
+      height: 1080,
+      poster: '/guides/img/oled-shift-poster.webp',
+      webm: '/guides/video/oled-shift.webm',
+    },
+  }
+  const html = renderGuideBody(
+    '![A measured pixel-shift trace](/guides/video/oled-shift.mp4 "Forty-three measured positions, compressed to twenty-one seconds & counting")',
+    captures,
+  )
+  assert.match(html, /<figure class="guide-figure guide-motion">/)
+  assert.match(html, /<video class="guide-video" width="1920" height="1080" poster="\/guides\/img\/oled-shift-poster\.webp" aria-label="A measured pixel-shift trace" controls muted loop playsinline preload="metadata">/)
+  assert.match(html, /<source src="\/guides\/video\/oled-shift\.webm" type="video\/webm" \/>/)
+  assert.match(html, /<source src="\/guides\/video\/oled-shift\.mp4" type="video\/mp4" \/>/)
+  assert.ok(html.indexOf('type="video/mp4"') < html.indexOf('type="video/webm"'))
+  assert.match(html, /Forty-three measured positions, compressed to twenty-one seconds &amp; counting/)
+  assert.doesNotMatch(html, /autoplay/)
+})
+
+test('research diagrams retain alt text and captions with keyboard scrolling and full-size access', () => {
+  const captures = { '/guides/img/research.svg': { width: 1400, height: 800, presentation: 'diagram' } }
+  const html = renderGuideBody('![A diagram with "quoted" labels & arrows](/guides/img/research.svg "The evidence and its limits.")', captures)
+  assert.match(html, /class="guide-diagram-scroll" role="region" aria-label="Scrollable diagram" tabindex="0"/)
+  assert.match(html, /alt="A diagram with &quot;quoted&quot; labels &amp; arrows"/)
+  assert.match(html, /width="1400" height="800" loading="lazy"/)
+  assert.match(html, /href="\/guides\/img\/research.svg" target="_blank" rel="noopener"/)
+  assert.match(html, /<figcaption>The evidence and its limits\.<\/figcaption>/)
+  assert.doesNotMatch(html, /<p><figure/)
+})
+
 test('loadCaptures reads the manifest and insists every file exists under public', async () => {
   const root = await mkdtemp(join(tmpdir(), 'candela-captures-'))
   try {
@@ -166,10 +200,45 @@ test('loadCaptures reads the manifest and insists every file exists under public
   }
 })
 
+test('loadCaptures validates a video, its WebM source and its poster', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'candela-motion-'))
+  try {
+    await mkdir(join(root, 'src/content/guides'), { recursive: true })
+    await mkdir(join(root, 'public/guides/img'), { recursive: true })
+    await mkdir(join(root, 'public/guides/video'), { recursive: true })
+    await writeFile(join(root, 'public/guides/img/poster.webp'), 'poster')
+    await writeFile(join(root, 'public/guides/video/trace.mp4'), 'mp4')
+    await writeFile(join(root, 'public/guides/video/trace.webm'), 'webm')
+    const manifest = join(root, 'src/content/guides/captures.json')
+    const video = {
+      '/guides/video/trace.mp4': {
+        kind: 'video',
+        width: 1920,
+        height: 1080,
+        poster: '/guides/img/poster.webp',
+        webm: '/guides/video/trace.webm',
+      },
+    }
+    await writeFile(manifest, JSON.stringify(video))
+    assert.deepEqual(await loadCaptures(pathToFileURL(`${root}/`)), video)
+
+    await rm(join(root, 'public/guides/video/trace.webm'))
+    await assert.rejects(loadCaptures(pathToFileURL(`${root}/`)), /ENOENT/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('guideAgentMarkdown makes guide image paths absolute for readers away from the site', () => {
   const { frontmatter } = parseFrontmatter(source)
   const markdown = guideAgentMarkdown({ ...frontmatter, slug: 's', path: '/guides/s/', body: 'See ![alt](/guides/img/heat-map.webp "cap").' })
   assert.match(markdown, /!\[alt\]\(https:\/\/candela\.fyi\/guides\/img\/heat-map\.webp "cap"\)/)
+})
+
+test('guideAgentMarkdown makes guide video paths absolute for readers away from the site', () => {
+  const { frontmatter } = parseFrontmatter(source)
+  const markdown = guideAgentMarkdown({ ...frontmatter, slug: 's', path: '/guides/s/', body: '![trace](/guides/video/trace.mp4 "Measured trace").' })
+  assert.match(markdown, /!\[trace\]\(https:\/\/candela\.fyi\/guides\/video\/trace\.mp4 "Measured trace"\)/)
 })
 
 test('loadGuides resolves an optional hero image through the manifest and refuses an unlisted one', async () => {
@@ -196,7 +265,7 @@ test('loadGuides serves an optional social image absolute and refuses an unliste
     await writeFile(join(dir, 'a.md'), source.replace('order: 10\n', 'order: 10\nimage: /guides/img/social.png\n'))
     const [guide] = await loadGuides(pathToFileURL(`${dir}/`), { captures })
     assert.equal(guide.image, 'https://candela.fyi/guides/img/social.png')
-    assert.match(guideAgentMarkdown(guide), /^---\ntitle: [^\n]*\ndescription: [^\n]*\nimage: https:\/\/candela\.fyi\/guides\/img\/social\.png\n---/)
+    assert.match(guideAgentMarkdown(guide), /^---\ntitle: [^\n]*\ndescription: [^\n]*\nimage: https:\/\/candela\.fyi\/guides\/img\/social\.png\nurl: https:\/\/candela\.fyi\/guides\/a\/\npublished: 2026-09-02\nupdated: 2026-09-03\n---/)
     await writeFile(join(dir, 'a.md'), source.replace('order: 10\n', 'order: 10\nimage: /guides/img/nope.png\n'))
     await assert.rejects(loadGuides(pathToFileURL(`${dir}/`), { captures }), /image is not in the captures manifest/)
   } finally {
@@ -210,4 +279,20 @@ test('llmsText lists every guide with an absolute link and its description', () 
     { title: 'B', path: '/guides/b/', description: 'About b.' },
   ], { lead: 'The lead.' })
   assert.match(text, /^# Candela\n\n> The lead\.\n\n## Guides\n\n- \[A\]\(https:\/\/candela\.fyi\/guides\/a\/\): About a\.\n- \[B\]\(https:\/\/candela\.fyi\/guides\/b\/\): About b\.\n/)
+})
+
+
+test('research metadata selects the canonical route and its Markdown section', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'candela-research-'))
+  try {
+    await writeFile(join(dir, 'investigation.md'), source.replace('order: 10', 'section: research\nauthor: Ryder Selikow'))
+    const [article] = await loadGuides(pathToFileURL(`${dir}/`))
+    assert.equal(article.path, '/research/investigation/')
+    assert.equal(article.author, 'Ryder Selikow')
+    const markdown = guideAgentMarkdown(article)
+    assert.match(markdown, /author: Ryder Selikow/)
+    assert.match(markdown, /All research.*\/research\//)
+    assert.match(llmsText([article], { lead: 'Displays' }), /## Research[\s\S]*\/research\/investigation\//)
+    assert.throws(() => parseFrontmatter(source.replace('order: 10', 'section: unknown')), /section/)
+  } finally { await rm(dir, { recursive: true, force: true }) }
 })

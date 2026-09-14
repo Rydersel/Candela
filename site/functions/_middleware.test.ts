@@ -295,3 +295,28 @@ describe('update feed counting', () => {
     expect(next).toHaveBeenCalledTimes(1)
   })
 })
+
+
+describe('research routes', () => {
+  it.each(['', '/', '/index.html', '/index.md'])('redirects the old article %s and retains the query', async (suffix) => {
+    const { context, next, fetch } = contextFor(undefined, `/guides/reverse-engineered-oled-monitor${suffix}?source=hn`)
+    const response = await onRequest(context)
+    expect(response.status).toBe(301)
+    expect(response.headers.get('location')).toBe(`https://candela.fyi/research/reverse-engineered-oled-monitor/${suffix === '/index.md' ? 'index.md' : ''}?source=hn`)
+    expect(next).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+  it.each(['/research/', '/research/reverse-engineered-oled-monitor/'])('serves the Markdown twin for %s', async (path) => {
+    const { context, fetch } = contextFor('text/markdown', path)
+    const response = await onRequest(context)
+    expect(response.headers.get('content-type')).toContain('text/markdown')
+    expect(fetch.mock.calls[0][0].url).toBe(`https://candela.fyi${path}index.md`)
+  })
+})
+
+
+it('routes research requests through the production Markdown middleware', () => {
+  const routes = JSON.parse(readFileSync(new URL('../public/_routes.json', import.meta.url), 'utf8'))
+  expect(routes.include).toContain('/research/*')
+  expect(routes.exclude).not.toContain('/research/*')
+})

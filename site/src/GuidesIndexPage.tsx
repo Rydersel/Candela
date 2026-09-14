@@ -1,10 +1,11 @@
 import { Header } from './components/Header'
 import { Footer } from './components/Footer'
-import { guides as copy } from './content/copy'
+import { guides as guideCopy, research as researchCopy } from './content/copy'
 import { formatGuideDate, type Guide } from './guides'
 import './components/Guide.css'
 
-export function GuidesIndexPage({ guides }: { guides: Guide[] }) {
+export function GuidesIndexPage({ guides, section = 'guides' }: { guides: Guide[]; section?: 'guides' | 'research' }) {
+  const copy = section === 'research' ? researchCopy : guideCopy
   return (
     <>
       <Header homeHref="/" faqHref="/#faq" placement="guide" />
@@ -24,6 +25,7 @@ export function GuidesIndexPage({ guides }: { guides: Guide[] }) {
                   <h2>{guide.title}</h2>
                   <p>{guide.description}</p>
                   <p className="guide-list-meta">
+                    {guide.author && <span>By {guide.author} · </span>}
                     {copy.updated} <time dateTime={guide.updated}>{formatGuideDate(guide.updated)}</time>
                   </p>
                 </a>

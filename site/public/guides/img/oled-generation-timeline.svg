@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 702" width="1400" height="702" role="img" aria-label="Samsung PontusM QD protection in 2022 v18, 2023 v20 and 2024 v22; the normal shift orbit remains unchanged.">
+<rect x="0" y="0" width="1400" height="702" fill="#09090b"/>
+<g font-family="system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">
+<text x="64" y="72" font-size="38" font-weight="500" fill="#f4efe7">Three releases of Samsung’s QD worker</text>
+<text x="64" y="114" font-size="23" font-weight="400" fill="#a7a29a">The regional protection changes; the published normal shift orbit stays the same.</text>
+<line x1="64" y1="148" x2="1336" y2="148" stroke="#343238" stroke-width="1"/>
+<line x1="64" y1="288" x2="1336" y2="288" stroke="#695339" stroke-width="2"/>
+<text x="64" y="204" font-size="24" font-weight="400" fill="#a7a29a">2022</text>
+<text x="156" y="206" font-size="34" font-weight="500" fill="#f4efe7">v18</text>
+<text x="64" y="252" font-size="24" font-weight="400" fill="#f4efe7">Baseline QD worker</text>
+<circle cx="74" cy="288" r="7" fill="#09090b" stroke="#e8a13a" stroke-width="3"/>
+<text x="64" y="350" font-size="23" font-weight="400" fill="#a7a29a">Retention classifier</text>
+<text x="64" y="398" font-size="23" font-weight="400" fill="#a7a29a">41-point global curve</text>
+<text x="64" y="446" font-size="23" font-weight="400" fill="#a7a29a">225-region local map</text>
+<text x="64" y="494" font-size="23" font-weight="400" fill="#a7a29a">1,956 shift positions</text>
+<text x="502" y="204" font-size="24" font-weight="400" fill="#a7a29a">2023</text>
+<text x="594" y="206" font-size="34" font-weight="500" fill="#f4efe7">v20</text>
+<text x="502" y="252" font-size="24" font-weight="400" fill="#f4efe7">Added scene context</text>
+<circle cx="512" cy="288" r="7" fill="#09090b" stroke="#e8a13a" stroke-width="3"/>
+<text x="502" y="350" font-size="23" font-weight="400" fill="#a7a29a">Lower-screen banner heuristic</text>
+<text x="502" y="398" font-size="23" font-weight="400" fill="#a7a29a">Off / Low / High local scaling</text>
+<text x="502" y="446" font-size="23" font-weight="400" fill="#a7a29a">Rotation-aware shifting</text>
+<text x="502" y="494" font-size="23" font-weight="400" fill="#a7a29a">Retention path preserved</text>
+<text x="940" y="204" font-size="24" font-weight="400" fill="#a7a29a">2024</text>
+<text x="1032" y="206" font-size="34" font-weight="500" fill="#f4efe7">v22</text>
+<text x="940" y="252" font-size="24" font-weight="400" fill="#f4efe7">Changed regional path</text>
+<circle cx="950" cy="288" r="7" fill="#09090b" stroke="#e8a13a" stroke-width="3"/>
+<text x="940" y="350" font-size="23" font-weight="400" fill="#a7a29a">24Y_SRP: 225-cell input</text>
+<text x="940" y="398" font-size="23" font-weight="400" fill="#a7a29a">New post-processing and LPC</text>
+<text x="940" y="446" font-size="23" font-weight="400" fill="#a7a29a">Old retention calls inactive</text>
+<text x="940" y="494" font-size="23" font-weight="400" fill="#a7a29a">SRP generator unpublished</text>
+<line x1="64" y1="550" x2="1336" y2="550" stroke="#343238" stroke-width="1"/>
+<text x="64" y="602" font-size="24" font-weight="500" fill="#72e0b5">Unchanged in all three</text>
+<text x="64" y="646" font-size="26" font-weight="400" fill="#f4efe7">1,956-position normal BIP orbit · default one-minute interval</text>
+</g>
+</svg>
