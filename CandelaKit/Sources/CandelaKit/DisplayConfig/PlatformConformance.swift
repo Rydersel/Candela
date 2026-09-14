@@ -170,6 +170,47 @@ public enum PlatformConformance {
     return .pass("all \(densities.count) densities within [\(CGSModeRevelation.minimumDensity), \(CGSModeRevelation.maximumDensity)]")
   }
 
+  /// Exercise one supported change and restore the original orientation. Setter
+  /// status alone is insufficient: both directions must reach their requested
+  /// state. The injected pause keeps delayed readback and failed restoration
+  /// deterministic in tests; live checks wait up to half a second per direction.
+  static func rotationRoundtrip(
+    displayID: CGDirectDisplayID,
+    before: DisplayRotation,
+    set: (DisplayRotation) -> Int32,
+    read: () -> DisplayRotation?,
+    pause: () -> Void
+  ) -> Outcome {
+    let target: DisplayRotation = before == .standard ? .ninety : .standard
+    func achieved(_ expected: DisplayRotation) -> DisplayRotation? {
+      var current = read()
+      for _ in 0..<50 {
+        if current == expected { break }
+        pause()
+        current = read()
+      }
+      return current
+    }
+    let applyStatus = set(target)
+    let applied = achieved(target)
+    // Even an error may have changed hardware. Always attempt and verify the
+    // restore, preserving both results if either direction fails.
+    let restoreStatus = set(before)
+    let restored = achieved(before)
+    guard applyStatus == 0, applied == target,
+          restoreStatus == 0, restored == before
+    else {
+      func reading(_ value: DisplayRotation?) -> String {
+        value.map { String($0.degrees) } ?? "unreadable"
+      }
+      return .fail(
+        "display \(displayID): apply \(target.degrees) returned \(applyStatus), readback \(reading(applied)); "
+          + "restore \(before.degrees) returned \(restoreStatus), readback \(reading(restored))"
+      )
+    }
+    return .pass("display \(displayID): \(before.degrees) -> \(target.degrees) -> \(before.degrees) verified")
+  }
+
   // MARK: - The hardware run
 
   /// Runs every non-destructive check, plus the reconfiguring ones when
@@ -396,6 +437,7 @@ public enum PlatformConformance {
 
     guard !displays.isEmpty else {
       checks.append(Check(name: "rotation.readback", outcome: .skip(noDisplays)))
+      checks.append(Check(name: "rotation.roundtrip", outcome: .skip(noDisplays)))
       return checks
     }
     var readings: [String] = []
@@ -413,13 +455,10 @@ public enum PlatformConformance {
         ?? .pass("every display reports a valid rotation (\(readings.joined(separator: " ")))")
     ))
 
-    // An earlier experiment's measured no-ops. If a macOS update ever makes 360 or -90 a real
-    // rotation, this run must find out rather than a user; the restore attempt
-    // below is why it needs the operator's consent.
     guard applyDestructive else {
       checks.append(Check(
-        name: "rotation.noop",
-        outcome: .skip("requires --apply (calls the private setter on live hardware)")
+        name: "rotation.roundtrip",
+        outcome: .skip("requires --apply (changes and restores one display's orientation)")
       ))
       return checks
     }
@@ -428,26 +467,18 @@ public enum PlatformConformance {
           let before = configurator.rotation(of: target.id)
     else {
       checks.append(Check(
-        name: "rotation.noop", outcome: .skip("no rotatable display or missing symbol")
+        name: "rotation.roundtrip", outcome: .skip("no rotatable display or missing symbol")
       ))
       return checks
     }
-    var noopFailure: String?
-    for degrees: Int32 in [360, -90] {
-      let status = setRotation(target.id, degrees)
-      let after = configurator.rotation(of: target.id)
-      if status != 0 || after != before {
-        noopFailure = "\(degrees) returned \(status), rotation \(before.degrees) -> \(after.map { String($0.degrees) } ?? "unreadable")"
-        // Achieved state moved: put it back before reporting, or the check
-        // leaves the rig in the state it exists to warn about.
-        if after != before { _ = setRotation(target.id, before.degrees) }
-        break
-      }
-    }
     checks.append(Check(
-      name: "rotation.noop",
-      outcome: noopFailure.map { .fail($0) }
-        ?? .pass("360 and -90 both return 0 and change nothing on display \(target.id)")
+      name: "rotation.roundtrip",
+      outcome: rotationRoundtrip(
+        displayID: target.id, before: before,
+        set: { setRotation(target.id, $0.degrees) },
+        read: { configurator.rotation(of: target.id) },
+        pause: { Thread.sleep(forTimeInterval: 0.01) }
+      )
     ))
     return checks
   }

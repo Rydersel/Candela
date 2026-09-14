@@ -609,6 +609,9 @@ final class AppModel {
   /// deliberately not observable.
   var isSafeMode: Bool { safeMode }
 
+  /// Eligibility captured before Sparkle's relaunch UI mark is consumed.
+  @ObservationIgnored private var recoverLegacyUpdateHandbacks: Bool
+
   var volumeMode: MultiKeyboardVolume { appPrefs.multiKeyboardVolume }
 
   /// Bumped by the propagation seam on any pref write a view renders. The panel
@@ -704,6 +707,7 @@ final class AppModel {
     hdrToggling: (any HDRToggling)? = nil,
     audioDevices: (any AudioDeviceProviding)? = nil,
     safeMode: Bool = false,
+    recoverLegacyUpdateHandbacks: Bool = false,
     discoverDisplays: @escaping (Set<CGDirectDisplayID>) -> DisplayDiscoverySurvey = {
       DisplayDiscovery.survey(excluding: $0)
     }
@@ -713,6 +717,7 @@ final class AppModel {
     self.hdrToggling = hdrToggling ?? MonitorPanelService()
     self.audioDevices = audioDevices ?? CoreAudioDeviceProvider()
     self.safeMode = safeMode
+    self.recoverLegacyUpdateHandbacks = recoverLegacyUpdateHandbacks
     self.discoverDisplays = discoverDisplays
     appPrefs = DisplayPrefs(persistenceKey: "app", safeMode: safeMode)
   }
@@ -1308,18 +1313,22 @@ final class AppModel {
   )
 
   /// Puts back the brightness of a display a previous process left dimmed.
-  /// Externals only (the built-in has no DDC register to strand) and brightness
-  /// only: the dim never touched contrast or volume.
-  func recoverInterruptedDims() {
-    let evaluated = displays.count
+  /// Externals only, on their DDC or native HDR leg. Polling starts after the
+  /// queued restores finish, so an old dim cannot be mistaken for a user change.
+  func recoverInterruptedDims() async {
+    let recoveryDisplays = displays
+    let evaluated = recoveryDisplays.count
     var reasserted = 0
+    var recovering: [(key: String, controller: BrightnessController)] = []
+    let liveDimKeysAtStart = Set(recoveryDisplays.filter { $0.controller.temporaryDimFactor != nil }
+      .map(\.display.persistenceKey))
     // Twins share a marker, but each has its own wire. Snapshot before any
     // clearing so discovery order cannot decide which one gets recovered.
-    let markedKeys = Set(displays.map(\.display.persistenceKey)).filter {
+    let markedKeys = Set(recoveryDisplays.map(\.display.persistenceKey)).filter {
       DisplayPrefs(persistenceKey: $0, safeMode: safeMode).temporaryDimEngaged
     }
     var keysToClear: Set<String> = []
-    for state in displays {
+    for state in recoveryDisplays {
       let key = state.display.persistenceKey
       switch InterruptedDimRecovery.action(
         markerSurvived: markedKeys.contains(key),
@@ -1336,21 +1345,35 @@ final class AppModel {
         // reaches the wire.
         state.controller.resetWriteMemo()
         state.controller.reassertHardware()
+        recovering.append((key, state.controller))
         keysToClear.insert(key)
+      }
+    }
+    // Submission alone does not mean the panel has moved. Keep the marker
+    // through the drain so opening a surface cannot adopt the old native value.
+    var failedKeys: Set<String> = []
+    for (key, controller) in recovering {
+      if await controller.drainPendingWrites() {
         reasserted += 1
-        // The tag, never the persistence key: a key without an EDID UUID embeds
-        // the panel's serial number.
         restoreLog.info("""
-          interrupted dim recovered on display \
+          interrupted dim recovery applied on display \
+          \(DisplayLogging.tag(for: key), privacy: .public)
+          """)
+      } else {
+        failedKeys.insert(key)
+        restoreLog.warning("""
+          interrupted dim recovery not applied; retaining marker on display \
           \(DisplayLogging.tag(for: key), privacy: .public)
           """)
       }
     }
     // A recovered twin cannot consume the signal a still-live dim needs if
-    // this process crashes next. The whole pass is synchronous on the main actor.
-    let liveDimKeys = Set(displays.filter { $0.controller.temporaryDimFactor != nil }
+    // this process crashes next. Retain departed controllers too: a dim can
+    // begin while the drain is suspended, then disappear from discovery.
+    let liveDimKeys = liveDimKeysAtStart.union((recoveryDisplays + displays)
+      .filter { $0.controller.temporaryDimFactor != nil }
       .map(\.display.persistenceKey))
-    for key in keysToClear.subtracting(liveDimKeys) {
+    for key in keysToClear.subtracting(liveDimKeys).subtracting(failedKeys) {
       DisplayPrefs(persistenceKey: key, safeMode: safeMode).temporaryDimEngaged = false
     }
     // `.info`, not `.debug`: macOS does not persist debug records. This line is
@@ -1359,6 +1382,8 @@ final class AppModel {
       interrupted dim pass: \(evaluated, privacy: .public) evaluated, \
       \(reasserted, privacy: .public) reasserted
       """)
+    hasCompletedLaunchBrightnessRecovery = true
+    restartPoller()
   }
 
   /// One write-restore pass: every duplicate memo reset FIRST, then re-write
@@ -1397,6 +1422,10 @@ final class AppModel {
   /// targets capture a fixed controller set, so a departed display's target
   /// must never outlive the pass that dropped it.
   @ObservationIgnored private var pollerTask: Task<Void, Never>?
+
+  @ObservationIgnored private var hasCompletedLaunchBrightnessRecovery = false
+
+  var isNativeBrightnessPolling: Bool { pollerTask != nil }
 
   /// Whether a surface showing a brightness value is on screen; one of the
   /// poller's cadence signals.
@@ -1493,6 +1522,10 @@ final class AppModel {
   /// before the drain task exits, so no explicit `waitForPendingWrites()` is
   /// needed.
   private func performRefresh(settling: Bool = false) async -> [CGDirectDisplayID] {
+    // The updater hint belongs only to the initial discovery, even if no panels
+    // are attached. Consume it before any suspension or later topology pass.
+    let recoverLegacyHandbacks = recoverLegacyUpdateHandbacks
+    recoverLegacyUpdateHandbacks = false
     redactRecentDisplayEvents()
     // The display set is about to be re-derived, so a memoized "discovery does
     // not know this id" is no longer evidence about anything.
@@ -1590,6 +1623,11 @@ final class AppModel {
       )
       appeared.append(state)
       return state
+    }
+    // Seed every controller before the first read can consume a shared identity's
+    // record. Safe Mode persists the hint but continues to skip hardware changes.
+    if recoverLegacyHandbacks {
+      for state in appeared { state.controller.noteLegacyUpdateHandback() }
     }
     refreshBuiltIn()
     // The diagnostics ring's one insertion point for externals: `appeared` and
@@ -1786,7 +1824,7 @@ final class AppModel {
   /// stay in sync on the native path.
   private func restartPoller() {
     pollerTask?.cancel()
-    guard !displays.isEmpty || builtIn != nil else {
+    guard hasCompletedLaunchBrightnessRecovery, !displays.isEmpty || builtIn != nil else {
       pollerTask = nil
       return
     }

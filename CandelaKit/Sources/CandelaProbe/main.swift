@@ -630,7 +630,7 @@ case "provenance":
 case "conform":
   // Does the platform still behave as this app assumes? Non-destructive by
   // default; --apply adds the checks that reconfigure hardware (a preview mode
-  // apply, the rotation no-op calls, a same-value brightness write). The exit
+  // apply, a supported rotation roundtrip, a same-value brightness write). The exit
   // code is the interface: 0 only when something passed and nothing failed, so a
   // run that demonstrated nothing exits non-zero.
   let applyDestructive = arguments.contains("--apply")

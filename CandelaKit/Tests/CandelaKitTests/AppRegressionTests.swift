@@ -701,7 +701,7 @@ struct AppRegressionTests {
   // MARK: - The capabilities-denial rule through the panel dump
 
   private static let magRow =
-    "2026-08-17 11:02:03.100 Df Candela[9:1] [com.rydersel.Candela:panel] panel.row display=\"MAG 341C OLED\" volumeSlider=shown volumeEnabled=yes volumeSupport=unknown"
+    "2026-08-17 11:02:03.100 Df Candela[9:1] [com.rydersel.Candela:panel] panel.row display=\"MAG 341C OLED\" volumeSlider=shown volumeEnabled=yes volumeSupport=supported"
   private static let dellRow =
     "2026-08-17 11:02:03.101 Df Candela[9:1] [com.rydersel.Candela:panel] panel.row display=\"DELL U2725QE\" volumeSlider=shown volumeEnabled=no volumeSupport=unsupported volumeReason=\"This display lists no volume command.\""
 
@@ -720,10 +720,8 @@ struct AppRegressionTests {
     #expect(isInconclusive(outcome))
   }
 
-  @Test func aGreyedSliderOnTheWriteOnlyPanelFails() {
-    // The slider greys on the monitor's own denial. The write-only panel answers no
-    // capabilities at all, so its verdict is unknown and its slider stays
-    // enabled; greying it would be the app inventing a denial.
+  @Test func aGreyedSliderOnTheSupportingPanelFails() {
+    // The MSI now answers capability reads and explicitly supports volume.
     let greyedMAG = Self.magRow
       .replacingOccurrences(of: "volumeEnabled=yes", with: "volumeEnabled=no")
     let outcome = AppRegression.panelDumpVerdict(
@@ -792,13 +790,15 @@ struct AppRegressionTests {
   private static let dellAfterVerdict = dumpRow(
     title: "DELL U2725QE", volumeSupport: "unsupported", volumeEnabled: "no",
     volumeReason: "This display lists no volume command.")
-  private static let magAnyPass = dumpRow(title: "MAG 341C OLED", volumeSupport: "unknown")
+  private static let magBeforeVerdict = dumpRow(title: "MAG 341C OLED", volumeSupport: "unknown")
+
+  private static let magAfterVerdict = dumpRow(title: "MAG 341C OLED", volumeSupport: "supported")
 
   /// One instrumented launch as the rig logs it: the window starts at launch,
   /// so it accumulates BOTH dumps and the older one comes first.
   private static let twoPassWindow = [
-    header(pass: 1), magAnyPass, dellBeforeVerdict, unrelatedLine,
-    header(pass: 2), magAnyPass, dellAfterVerdict,
+    header(pass: 1), magBeforeVerdict, dellBeforeVerdict, unrelatedLine,
+    header(pass: 2), magAfterVerdict, dellAfterVerdict,
   ]
 
   @Test func theControlCountsHeadersAsDumpOutput() {
@@ -841,12 +841,33 @@ struct AppRegressionTests {
     #expect(!landed)
   }
 
-  @Test func aDenyingPanelIsTheVerdictLanding() {
+  @Test func bothPanelVerdictsMustLand() {
     let landed = AppRegression.panelDumpVerdictLanded(inLogLines: [
-      Self.dumpRow(title: "MAG 341C OLED", volumeSupport: "unknown"),
+      Self.dumpRow(title: "MAG 341C OLED", volumeSupport: "supported"),
       Self.dumpRow(title: "DELL U2725QE", volumeSupport: "unsupported"),
     ])
     #expect(landed)
+  }
+
+  @Test func anUnknownMAGVerdictNoLongerPassesTheMeasuredPair() {
+    let unknown = Self.magRow.replacingOccurrences(of: "volumeSupport=supported", with: "volumeSupport=unknown")
+    #expect(isFail(AppRegression.panelDumpVerdict(
+      dumpLines: [unknown, Self.dellRow], noVarDumpLineCount: 0,
+      magTitleFragment: "MAG 341C", dellTitleFragment: "U2725QE")))
+  }
+
+  @Test(arguments: [false, true])
+  func onePanelVerdictCannotEndTheWait(magFirst: Bool) {
+    let rows = magFirst
+      ? [Self.magAfterVerdict, Self.dellBeforeVerdict]
+      : [Self.magBeforeVerdict, Self.dellAfterVerdict]
+    #expect(!AppRegression.panelDumpVerdictLanded(inLogLines: [Self.header(pass: 2)] + rows))
+  }
+
+  @Test func aMissingExpectedPanelCannotEndTheWait() {
+    #expect(!AppRegression.panelDumpVerdictLanded(inLogLines: [
+      Self.header(pass: 2, rows: 1), Self.magAfterVerdict,
+    ]))
   }
 
   // MARK: - Which dump in the window gets judged
@@ -877,7 +898,7 @@ struct AppRegressionTests {
     // segment would stop here and then judge rows that are not the ones the
     // wait was satisfied by.
     let window = Self.twoPassWindow + [
-      Self.header(pass: 3), Self.magAnyPass, Self.dellBeforeVerdict,
+      Self.header(pass: 3), Self.magBeforeVerdict, Self.dellBeforeVerdict,
     ]
     #expect(!AppRegression.panelDumpVerdictLanded(inLogLines: window))
   }
@@ -904,7 +925,7 @@ struct AppRegressionTests {
 
   @Test func theCompletedSegmentLands() {
     let window = [
-      Self.header(pass: 2, rows: 3), Self.builtInRow, Self.magAnyPass, Self.dellAfterVerdict,
+      Self.header(pass: 2, rows: 3), Self.builtInRow, Self.magAfterVerdict, Self.dellAfterVerdict,
     ]
     #expect(AppRegression.panelDumpVerdictLanded(inLogLines: window))
     // The built-in row carries no verdict of its own and still counts: the
@@ -917,7 +938,7 @@ struct AppRegressionTests {
     // cut it at. Reporting no rows there would turn a readable dump into a
     // silent one.
     let rows = AppRegression.newestPanelDumpRows(fromLogLines: [
-      Self.magAnyPass, Self.dellAfterVerdict,
+      Self.magBeforeVerdict, Self.dellAfterVerdict,
     ])
     #expect(rows.count == 2)
   }

@@ -55,7 +55,7 @@ enum SafetySentence {
   /// The same sentence shown under the control. Nil for the HDR block, which
   /// is stated once for the whole page at the foot of Control Method, so that
   /// case goes into the label and nowhere else.
-  var visibleCaption: SettingsCaption? {
+  @MainActor var visibleCaption: SettingsCaption? {
     switch self {
     case .blankDisplay, .hardwareMute: spoken.map { SettingsCaption(verbatim: $0) }
     case .hdrBlock: nil

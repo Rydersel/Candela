@@ -14,6 +14,22 @@ enum UpdateRelaunch {
     defaults.set(true, forKey: defaultsKey)
   }
 
+  /// Only the shipped predecessor is known to have written full-range DDC
+  /// brightness without recording its origin. Read this before consuming the UI mark.
+  static func needsLegacyBrightnessRecovery(
+    in defaults: UserDefaults = .standard, version: String = AppInfo.version
+  ) -> Bool {
+    guard defaults.bool(forKey: defaultsKey),
+          defaults.string(forKey: previousVersionKey) == "1.0.3" else { return false }
+    let parts = version.split(separator: ".", omittingEmptySubsequences: false)
+    guard parts.count == 3,
+          parts.allSatisfy({ !$0.isEmpty && $0.utf8.allSatisfy { (48...57).contains($0) } })
+    else { return false }
+    let numbers = parts.compactMap { Int($0) }
+    guard numbers.count == 3 else { return false }
+    return [1, 0, 3].lexicographicallyPrecedes(numbers)
+  }
+
   static func consume(in defaults: UserDefaults = .standard) -> Bool {
     guard defaults.bool(forKey: defaultsKey) else { return false }
     defaults.removeObject(forKey: defaultsKey)

@@ -61,6 +61,44 @@ struct SurfaceBrightnessReadTests {
 
   private func near(_ a: Double, _ b: Double) -> Bool { abs(a - b) <= 1e-6 }
 
+  @Test(arguments: [false, true])
+  func anInterruptedDimCannotReplaceSavedNativeBrightness(fromPoller: Bool) async {
+    let (h, hardware) = await nativeExternal(at: 1.0)
+    h.prefs.temporaryDimEngaged = true
+    hardware.withLock { $0 = 0.25 }
+    #expect(h.controller.temporaryDimFactor == nil)
+    let generation = h.controller.expectedNative().generation
+
+    let delta = fromPoller
+      ? h.controller.adoptExternal(0.25, generation: generation)
+      : h.controller.adoptNativeForSurface()
+
+    #expect(delta == 0)
+    #expect(h.controller.brightness == 1.0)
+    #expect(h.store.values[Harness.storageKey] == 1.0)
+    #expect(!h.controller.isConvergingFromExternal())
+
+    // The same reading becomes an external change only after recovery clears
+    // the marker. This control catches a guard that permanently blocks adoption.
+    h.prefs.temporaryDimEngaged = false
+    let resumed = fromPoller
+      ? h.controller.adoptExternal(0.25, generation: generation)
+      : h.controller.adoptNativeForSurface()
+    #expect(resumed < 0)
+    #expect(h.controller.brightness < 1.0)
+    #expect(h.store.values[Harness.storageKey] == h.controller.brightness)
+  }
+
+  @Test func aKeyDoesNotStepFromAnInterruptedNativeDim() async {
+    let (h, hardware) = await nativeExternal(at: 1.0)
+    h.prefs.temporaryDimEngaged = true
+    hardware.withLock { $0 = 0.25 }
+
+    h.controller.syncFromNativeBeforeStep()
+    #expect(h.controller.brightness == 1.0)
+    #expect(h.store.values[Harness.storageKey] == 1.0)
+  }
+
   @Test func aSurfaceReadPersistsWhatItPublishes() async {
     let (h, hardware) = await nativeExternal(at: 1.0)
     #expect(h.store.values[Harness.storageKey] == 1.0)

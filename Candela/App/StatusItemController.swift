@@ -64,7 +64,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // instance.
     let monitor = GammaInterferenceMonitor(gamma: gamma, alerts: EngineAlerts())
     interferenceMonitor = monitor
-    let model = AppModel(shade: shade, gamma: gamma, safeMode: safeMode)
+    let model = AppModel(
+      shade: shade, gamma: gamma, safeMode: safeMode,
+      recoverLegacyUpdateHandbacks: UpdateRelaunch.needsLegacyBrightnessRecovery())
     self.model = model
     // Reporting-only handoff: built here because it needs the AppKit alert
     // island, read there because the diagnostics pane has no other way to say how
@@ -680,7 +682,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // `oledCare.displaysReconfigured()` first, which drops the lock dim for at
       // least one care tick; a recovery in that window would see no live dim,
       // write the undimmed value to a locked screen, and spend the marker.
-      if !isSafeMode { model.recoverInterruptedDims() }
+      // Safe Mode preserves every marker and issues no recovery writes, but
+      // still completes this launch gate so ordinary native polling can begin.
+      await model.recoverInterruptedDims()
       restoreCoordinator.noteLaunchOrReconfigure()
       // Before the first open, for the same reason the display list is warmed
       // here: nothing the panel starts can be relied on to run while the menu
