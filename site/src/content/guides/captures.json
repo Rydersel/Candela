@@ -110,5 +110,9 @@
   "/guides/img/oled-camera-calibration.png": {
     "width": 1200,
     "height": 1000
+  },
+  "/guides/img/social-reverse-engineered-oled-monitor.png": {
+    "width": 1200,
+    "height": 630
   }
 }

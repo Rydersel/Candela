@@ -81,7 +81,7 @@ async function htmlResponse(context: Context) {
 
 const canonicalHost = 'candela.fyi'
 
-// Only the landing and the guides section get a Markdown twin from the prerender.
+// The landing page, guides and research get a Markdown twin from the prerender.
 function markdownAssetPath(pathname: string) {
   if (pathname === '/') return '/index.md'
   if (/^\/(?:guides|research)\/(?:[a-z0-9-]+\/)?$/.test(pathname)) return `${pathname}index.md`

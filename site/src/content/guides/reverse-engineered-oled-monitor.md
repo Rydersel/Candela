@@ -7,6 +7,7 @@ published: 2026-09-11
 updated: 2026-09-11
 order: 50
 hero: /guides/img/header-reverse-engineered-oled-monitor.svg
+image: /guides/img/social-reverse-engineered-oled-monitor.png
 ---
 
 I spent three weeks building [Candela.fyi](https://candela.fyi/), a Mac app to help prevent OLED burn-in. Then I realized my monitor might already be doing the same job.

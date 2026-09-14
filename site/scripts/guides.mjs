@@ -160,6 +160,9 @@ export function guideAgentMarkdown(guide, guides = []) {
     `description: ${yamlScalar(guide.description)}`,
     `image: ${guide.image ?? `${siteUrl}/social-card.png`}`,
   ]
+  if (guide.path) frontmatter.push(`url: ${siteUrl}${guide.path}`)
+  if (guide.published) frontmatter.push(`published: ${guide.published}`)
+  if (guide.updated) frontmatter.push(`updated: ${guide.updated}`)
   if (guide.author) frontmatter.push(`author: ${yamlScalar(guide.author)}`)
   const section = guide.section ?? 'guides'
   const label = section === 'research' ? 'research' : 'guides'
@@ -184,7 +187,7 @@ export function llmsText(guides, { lead }) {
       lines.push(`- [${guide.title}](${siteUrl}${guide.path}): ${guide.description}`)
     }
   }
-  lines.push('', '## Site', '', `- [Home](${siteUrl}/): the landing page`, `- [Privacy](${siteUrl}/privacy/): the website analytics disclosure`)
+  lines.push('', '## Site', '', `- [Home](${siteUrl}/): the landing page`, `- [Research](${siteUrl}/research/): display engineering investigations`, `- [Guides](${siteUrl}/guides/): practical display guides`, `- [Privacy](${siteUrl}/privacy/): the website analytics disclosure`, `- [Terms](${siteUrl}/terms/): website terms`)
   return `${lines.join('\n')}\n`
 }
 

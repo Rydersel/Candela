@@ -1,6 +1,6 @@
 # Candela website
 
-Candela's landing, Privacy and Guides pages, built with Vite + React + TypeScript
+Candela's landing, Privacy, Terms, Guides and Research pages, built with Vite + React + TypeScript
 and hosted on Cloudflare Pages.
 
 ```sh
@@ -89,3 +89,19 @@ The report command requires a separate read-only token in
 - `/guides/` lists every guide, and `curl -H 'Accept: text/markdown' https://candela.fyi/guides/<slug>/` returns Markdown.
 - The guide placement migration has been applied (`npm run d1:migrate:remote`) before the deploy that first sends `placement=guide`.
 - A Search Console domain property for candela.fyi is verified and receiving data before the guides section is announced anywhere.
+
+
+## Research publication
+
+Articles share the prerender pipeline with guides. Set `section: research` and
+`author` in frontmatter to publish under `/research/` with a visible byline.
+The build generates the Research index, article HTML and Markdown, canonical
+and social metadata, Article/Breadcrumb structured data, sitemap and `llms.txt`.
+Keep `/research/*` in `public/_routes.json` so Pages runs Markdown content
+negotiation in production. The former OLED guide URL redirects permanently to
+`/research/reverse-engineered-oled-monitor/`.
+
+After deployment, verify both research URLs return HTML and respond to
+`Accept: text/markdown`, the new article is in the sitemap, and the old URL
+returns a 301. Deploy from a clean checkout of merged `main`, from this `site/`
+directory, with `npx wrangler pages deploy dist --project-name candela-site --branch main`.

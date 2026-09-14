@@ -90,10 +90,10 @@ test('loadGuides returns nothing for a directory that does not exist yet', async
   assert.deepEqual(await loadGuides(pathToFileURL('/nonexistent/candela-guides/')), [])
 })
 
-test('guideAgentMarkdown carries the same three frontmatter keys as the landing twin', () => {
+test('guideAgentMarkdown carries its canonical URL and dates alongside the article metadata', () => {
   const { frontmatter, body } = parseFrontmatter(source)
   const markdown = guideAgentMarkdown({ ...frontmatter, slug: 'oled-burn-in-mac', path: '/guides/oled-burn-in-mac/', body })
-  assert.match(markdown, /^---\ntitle: How to prevent OLED burn-in on a Mac\ndescription: "What wears, what macOS offers, and where software fills the gap\."\nimage: https:\/\/candela\.fyi\/social-card\.png\n---\n\n# How to prevent OLED burn-in on a Mac\n\nAn OLED panel wears/)
+  assert.match(markdown, /^---\ntitle: How to prevent OLED burn-in on a Mac\ndescription: "What wears, what macOS offers, and where software fills the gap\."\nimage: https:\/\/candela\.fyi\/social-card\.png\nurl: https:\/\/candela\.fyi\/guides\/oled-burn-in-mac\/\npublished: 2026-09-02\nupdated: 2026-09-03\n---\n\n# How to prevent OLED burn-in on a Mac\n\nAn OLED panel wears/)
   assert.doesNotMatch(markdown, /checkedOn|order:/)
   assert.match(markdown, /\n## More guides\n\n- \[All the guides\]\(\/guides\/\)\n$/)
 
@@ -265,7 +265,7 @@ test('loadGuides serves an optional social image absolute and refuses an unliste
     await writeFile(join(dir, 'a.md'), source.replace('order: 10\n', 'order: 10\nimage: /guides/img/social.png\n'))
     const [guide] = await loadGuides(pathToFileURL(`${dir}/`), { captures })
     assert.equal(guide.image, 'https://candela.fyi/guides/img/social.png')
-    assert.match(guideAgentMarkdown(guide), /^---\ntitle: [^\n]*\ndescription: [^\n]*\nimage: https:\/\/candela\.fyi\/guides\/img\/social\.png\n---/)
+    assert.match(guideAgentMarkdown(guide), /^---\ntitle: [^\n]*\ndescription: [^\n]*\nimage: https:\/\/candela\.fyi\/guides\/img\/social\.png\nurl: https:\/\/candela\.fyi\/guides\/a\/\npublished: 2026-09-02\nupdated: 2026-09-03\n---/)
     await writeFile(join(dir, 'a.md'), source.replace('order: 10\n', 'order: 10\nimage: /guides/img/nope.png\n'))
     await assert.rejects(loadGuides(pathToFileURL(`${dir}/`), { captures }), /image is not in the captures manifest/)
   } finally {

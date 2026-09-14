@@ -313,3 +313,10 @@ describe('research routes', () => {
     expect(fetch.mock.calls[0][0].url).toBe(`https://candela.fyi${path}index.md`)
   })
 })
+
+
+it('routes research requests through the production Markdown middleware', () => {
+  const routes = JSON.parse(readFileSync(new URL('../public/_routes.json', import.meta.url), 'utf8'))
+  expect(routes.include).toContain('/research/*')
+  expect(routes.exclude).not.toContain('/research/*')
+})
