@@ -680,7 +680,7 @@ public final class BrightnessController: PendingWireDraining {
   private func freshNativeRead() -> Double? {
     // Under a temporary dim the read is our own write; folding it in corrupts what
     // `endTemporaryDim` restores.
-    guard isNativeActive(), temporaryDimFactor == nil else { return nil }
+    guard isNativeActive(), temporaryDimFactor == nil, !prefs.temporaryDimEngaged else { return nil }
     // Mid-reconfigure and asleep, display state is being rebuilt and every read is
     // suspect. The poller skips its whole tick on this same gate.
     guard isWireOpen else { return nil }
@@ -1853,6 +1853,9 @@ public final class BrightnessController: PendingWireDraining {
   /// `BrightnessSync` fans that delta out to the other displays.
   @discardableResult
   public func adoptExternal(_ value: Double, generation: UInt64) -> Double {
+    // A previous process may have left the native HDR leg dimmed. Until its
+    // marker is cleared, that reading is our dim, not a new user preference.
+    guard temporaryDimFactor == nil, !prefs.temporaryDimEngaged else { return 0 }
     // Generation check first: an adoption queued before a local write (during a
     // starved drag, say) is stale, so discard it entirely.
     let current = echo.withLock { $0.generation }
@@ -2077,11 +2080,9 @@ public final class BrightnessController: PendingWireDraining {
   /// only THAT a dim was outstanding, which is enough for `InterruptedDimRecovery`
   /// to put the saved value back and not enough to overwrite it.
   ///
-  /// The native ADOPTION route is not one of those early returns. `adoptExternal`
-  /// and `adoptNativeForSurface` persist what they read, and under HDR the lock dim
-  /// rides the native leg. Within a process the factor `freshNativeRead` checks and
-  /// the echo slot's generation cover them; a fresh process has neither, so a poll
-  /// tick that beats the recovery is the remaining gap.
+  /// Native adoption obeys the same marker in `adoptExternal` and the shared
+  /// freshness read. Under HDR the dim rides the native leg, so neither a poll
+  /// nor an opening surface may save that reading before launch recovery.
   public private(set) var temporaryDimFactor: Double?
 
   /// The ONE place the temporary dim is folded in. Everything that computes a
