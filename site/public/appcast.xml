@@ -12,6 +12,56 @@
     <description>Update feed for Candela.</description>
     <language>en</language>
     <item>
+      <title>Version 1.0.4</title>
+      <pubDate>Mon, 14 Sep 2026 18:04:50 +0000</pubDate>
+      <sparkle:version>1.0.4</sparkle:version>
+      <sparkle:shortVersionString>1.0.4</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description sparkle:format="markdown"><![CDATA[
+## New
+
+- Protection: automatic regional dimming adapts to static content and recorded exposure.
+- Protection: regional dimming keeps the foreground app and the window under the pointer clear.
+- Arrangement: saved display setups remember and restore each display's rotation.
+- Arrangement: Save This Layout replaces an outdated saved setup directly from its notice.
+- Checkup: abandoned runs can be deleted from history.
+- Settings: About links directly to Candela on GitHub.
+
+## Changed
+
+- Protection: idle dimming and blackout fade in smoothly.
+- Settings: diagnostic reports include monitor capabilities and control availability.
+- Settings: diagnostic reports identify displays Candela cannot control and explain why.
+- Settings: background animations and status polling pause while the window is covered.
+- Checkup: older write-only reports explain when the DDC read defect may have affected their grade.
+
+## Fixed
+
+- Controls: DDC read requests use the correct checksum so compatible monitors answer brightness and capability queries.
+- Controls: saved brightness survives an interrupted care dim, including with HDR enabled.
+- Controls: brightness no longer increases unexpectedly across quit, relaunch, and updates on readable monitors.
+- Controls: dimming stays applied as display reconfiguration finishes.
+- Controls: Option plus a volume key opens Sound settings without playing the volume feedback sound.
+- Menu bar: percentage readouts and hover captions use consistent text sizing.
+- Health: measurement switches reflect saved preference changes without reopening the pane.
+- Protection: the OLED Care summary reflects paused displays.
+- Arrangement: a blocked-save explanation clears when the display operation finishes.
+- Checkup: excluded displays remain visible in the picker with a reason they cannot be selected.
+- Checkup: Escape ends the current test field without recording an answer.
+- Checkup: closing a refresh sweep stops it and reports any failure to restore the original display mode.
+- Checkup: a failed deletion shows an error and keeps the report in history for retry.
+- Setup: display detection and OLED selection scroll when the display list exceeds the window.
+- Setup: launch-time Accessibility prompts require a previously observed grant on the same Mac.
+- Updates: scheduled checks show a menu-bar reminder without taking focus.
+- Menu bar: launching multiple copies leaves one instance running.
+]]></description>
+      <sparkle:fullReleaseNotesLink>https://github.com/Rydersel/Candela/releases</sparkle:fullReleaseNotesLink>
+      <enclosure
+        url="https://github.com/Rydersel/Candela/releases/download/v1.0.4/Candela-1.0.4.zip"
+        sparkle:edSignature="Wle4Tw3w8pNiDmYY+vdwUI+SSM1Znp1siE27hDg+WJLfPmssGRnb16R55m8rBT5MKLtQx2XtA+xrrli2uqhZDw==" length="5580332"
+        type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Version 1.0.3</title>
       <pubDate>Wed, 09 Sep 2026 04:04:38 +0000</pubDate>
       <sparkle:version>1.0.3</sparkle:version>
