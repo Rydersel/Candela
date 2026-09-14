@@ -533,10 +533,9 @@ public enum AppRegression {
   // MARK: - The capabilities-denial rule through the panel dump
 
   /// A volume slider is greyed only by the monitor's own denial. The
-  /// write-only panel answers no capabilities at all, so its verdict is
-  /// unknown and its slider stays enabled; the panel whose capabilities parsed
-  /// cleanly with no volume command is shown GREYED, never removed, carrying
-  /// its own reason.
+  /// MSI answers capability reads and supports volume, so its slider stays
+  /// enabled. The Dell lists no volume command and is shown greyed, never
+  /// removed, carrying its own reason.
   ///
   /// The control is the launch WITHOUT the dump variable: it proves the query
   /// can come back empty, before an empty result is read as a panel with no
@@ -560,7 +559,7 @@ public enum AppRegression {
 
     var failures: [String] = []
     if let magRow = dumpLines.first(where: { $0.contains(magTitleFragment) }) {
-      for fragment in ["volumeSlider=shown", "volumeEnabled=yes", "volumeSupport=unknown"]
+      for fragment in ["volumeSlider=shown", "volumeEnabled=yes", "volumeSupport=supported"]
       where !magRow.contains(fragment) {
         failures.append("the \(magTitleFragment) row does not carry \(fragment)")
       }
@@ -581,7 +580,7 @@ public enum AppRegression {
 
     guard failures.isEmpty else { return .fail(failures.joined(separator: "; ")) }
     return .pass(
-      "the volume slider is greyed only by the monitor's own denial: \(magTitleFragment) shows an enabled slider on an unknown verdict, \(dellTitleFragment) shows a greyed one carrying the display's own reason"
+      "the volume slider is greyed only by the monitor's own denial: \(magTitleFragment) shows an enabled slider on a supported verdict, \(dellTitleFragment) shows a greyed one carrying the display's own reason"
     )
   }
 
@@ -660,36 +659,23 @@ public enum AppRegression {
     return Int(header[marker.upperBound...].prefix { $0.isNumber })
   }
 
-  /// Whether the NEWEST dump in a window is the one that knows.
-  ///
-  /// The capabilities verdict lands asynchronously, so the launch dump reports
-  /// every panel `unknown` by construction; a run that judged it would convict
-  /// the denying panel of the app's own not-yet-knowing. Waiting on a verdict
-  /// rather than on the pass counter is deliberate: the counter says how many
-  /// dumps have happened, and what the capabilities-denial pair needs is one that knows.
-  ///
-  /// Asked of the newest segment rather than of the window, for two halves of
-  /// one reason. A landed verdict in an OLDER dump would end a wait whose rows
-  /// are then judged from a newer dump nobody checked, and a reconfigure can
-  /// re-dump `unknown` while the app re-resolves. A header whose rows have not
-  /// persisted yet leaves the segment empty, which is not landed, so the poll
-  /// waits for them instead of judging nothing.
-  ///
-  /// A segment is landed only once it is COMPLETE, which is the same problem
-  /// one degree finer. The dump writes its rows in the panel's title order and
-  /// the store persists them in that order, so the denying panel's row can
-  /// arrive before the write-only panel's, and that row carries the very
-  /// verdict the wait is watching for. A poll landing in the gap would stop on
-  /// a segment with no MAG row in it and FAIL a healthy rig for a missing row.
-  /// The header already says how many rows are coming, so the count is what the
-  /// wait holds out for. A window with no header has nothing to count against
-  /// and falls back to the verdict alone.
-  public static func panelDumpVerdictLanded(inLogLines lines: [String]) -> Bool {
+  /// Both measured monitors must finish their capability reads. Either can
+  /// answer first, so one known verdict must not end the wait for the pair.
+  /// The header also has to match the row count: log persistence can expose a
+  /// header or one row before the rest of that dump arrives.
+  public static func panelDumpVerdictLanded(
+    inLogLines lines: [String],
+    magTitleFragment: String = "MAG 341C", dellTitleFragment: String = "U2725QE"
+  ) -> Bool {
     let rows = newestPanelDumpRows(fromLogLines: lines)
     if let expected = newestPanelDumpRowCount(fromLogLines: lines), rows.count != expected {
       return false
     }
-    return panelDumpVolumeSupport(fromLogLines: rows).contains { $0 != "unknown" }
+    return [magTitleFragment, dellTitleFragment].allSatisfy { title in
+      guard let row = rows.first(where: { $0.contains(title) }),
+            let support = panelDumpVolumeSupport(fromLogLines: [row]).first else { return false }
+      return support == "supported" || support == "unsupported"
+    }
   }
 
   // MARK: - Comparing two paths to the same file

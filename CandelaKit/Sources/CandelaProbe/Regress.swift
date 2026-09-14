@@ -2291,7 +2291,8 @@ enum Regress {
     var window = instruments.logWindow(since: instrumentedStart)
     let deadline = Date().addingTimeInterval(20)
     while !window.queryFailed,
-          !AppRegression.panelDumpVerdictLanded(inLogLines: window.lines),
+          !AppRegression.panelDumpVerdictLanded(
+            inLogLines: window.lines, magTitleFragment: magNameFragment, dellTitleFragment: dellNameFragment),
           Date() < deadline {
       Thread.sleep(forTimeInterval: 2)
       window = instruments.logWindow(since: instrumentedStart)
@@ -2301,7 +2302,8 @@ enum Regress {
     // handing the verdict the whole window selects the denying panel's
     // pre-verdict row and convicts a healthy rig of a capability-verdict regression.
     let rows = AppRegression.newestPanelDumpRows(fromLogLines: window.lines)
-    let landed = AppRegression.panelDumpVerdictLanded(inLogLines: window.lines)
+    let landed = AppRegression.panelDumpVerdictLanded(
+            inLogLines: window.lines, magTitleFragment: magNameFragment, dellTitleFragment: dellNameFragment)
     // Both counts, and what the newest header promised, because a timeout has
     // two causes the segment's own count cannot tell apart: no dump rows
     // ANYWHERE is a build with no dump compiled into it, while rows in the
@@ -2327,7 +2329,7 @@ enum Regress {
       // read, and a clause substituted for a number makes it unreadable.
       let promised = promisedRows.map { "\($0)" } ?? "an unstated number of"
       return setupMiss(
-        "no complete dump carried a volume verdict other than unknown within 20 s of launching \(running.described): the newest dump holds \(rows.count) of \(promised) rows, over \(windowDumpRows) dump rows in a \(instrumentedLines)-line window. The launch dump reports every panel unknown by construction and the capabilities verdict lands after it, so the capability-verdict pair was never observable. With no dump rows anywhere in the window, the likeliest cause is a Release bundle behind --debug-app: the dump is compiled out of Release entirely, which looks exactly like this. With rows in the window over an incomplete newest dump, the store had not finished flushing it"
+        "no complete dump carried known volume verdicts for both measured monitors within 20 s of launching \(running.described): the newest dump holds \(rows.count) of \(promised) rows, over \(windowDumpRows) dump rows in a \(instrumentedLines)-line window. The launch dump reports every panel unknown by construction and the capabilities verdict lands after it, so the capability-verdict pair was never observable. With no dump rows anywhere in the window, the likeliest cause is a Release bundle behind --debug-app: the dump is compiled out of Release entirely, which looks exactly like this. With rows in the window over an incomplete newest dump, the store had not finished flushing it"
       )
     }
 
