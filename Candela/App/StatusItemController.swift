@@ -1077,16 +1077,20 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// starves main-actor work, so a hop would land after the menu closed. The flag
   /// changes only the NEXT interval, so the first frame takes a direct read; a
   /// rebuilt poll job would adopt after the panel closed, for the same reason.
-  func menuWillOpen(_: NSMenu) {
+  func menuWillOpen(_ menu: NSMenu) {
     model.surfaceVisibility.setPanelOpen(true)
     model.refreshNativeBrightnessForSurface()
-    // Content appearing inside an already-open menu grows it and clips the footer
-    // off the bottom. AppKit posts this before the menu is displayed, so the row
-    // is one value for the whole open and can neither arrive nor leave
-    // mid-tracking. Nothing here orders the SwiftUI update ahead of the menu
-    // sizing the item view, so whether the first open after a marker arrives lays
-    // out at the new size is a rig check.
+    // Freeze the reminder before sizing, so it cannot arrive or leave while
+    // the menu is tracking.
     updaterModel.reminder.freezeForMenuOpen()
+    // Recompute for the opening screen, including after a resolution change.
+    // Leave room for the menu's own top and bottom padding. Size synchronously
+    // before tracking starts; a queued layout can arrive after the menu closes.
+    if let host = menu.items.first?.view as? PanelHostingView<PanelRoot> {
+      let screen = statusItem?.button?.window?.screen ?? NSScreen.main
+      host.rootView.maximumHeight = screen.map { max(1, $0.visibleFrame.height - 16) }
+      host.setFrameSize(host.fittingSize)
+    }
   }
 
   func menuDidClose(_: NSMenu) {
@@ -1646,19 +1650,21 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
 private struct PanelRoot: View {
   let model: AppModel
   let updater: UpdaterModel
+  var maximumHeight: CGFloat? = nil
 
   var body: some View {
-    PanelView()
+    PanelView(maximumHeight: maximumHeight)
       .environment(model)
       .environment(updater)
+      .environment(updater.reminder)
   }
 }
 
 /// Hosting view that keeps its frame matched to SwiftUI's ideal size. Menu item
 /// views are frame-based with no Auto Layout parent, so when the panel's content
 /// changes the frame has to follow the new fitting size.
-private final class PanelHostingView: NSHostingView<PanelRoot> {
-  required init(rootView: PanelRoot) {
+final class PanelHostingView<Content: View>: NSHostingView<Content> {
+  required init(rootView: Content) {
     super.init(rootView: rootView)
   }
 

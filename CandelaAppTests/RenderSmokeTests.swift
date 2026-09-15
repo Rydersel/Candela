@@ -162,10 +162,12 @@ struct RenderSmokeTests {
   // passes over scaling code. Only a person at a large accessibility size can
   // tell you.
   //
-  // Anyone attempting one anyway: the FIRST `PanelView` render in a process
-  // differs from every later one by about 144 per channel at identical inputs, so
-  // two compared panel renders pass or fail on which ran first. Nothing above
-  // compares panel renders byte for byte.
+  // Pixel comparisons also need an explicit warm-up. In the full app suite on
+  // macOS 26.7, the first capture can place the footer's SF Symbols one pixel
+  // above later captures, producing a channel delta of 127 with unchanged
+  // glyph shapes and alpha totals. Cold isolated captures can agree, so this
+  // is not universally the first render in a process. PanelRenderDeterminismTests
+  // records the comparison contract and the limits of that finding.
 
   // MARK: - The settings window
 
