@@ -162,12 +162,11 @@ struct RenderSmokeTests {
   // passes over scaling code. Only a person at a large accessibility size can
   // tell you.
   //
-  // Pixel comparisons also need an explicit warm-up. In the full app suite on
-  // macOS 26.7, the first capture can place the footer's SF Symbols one pixel
-  // above later captures, producing a channel delta of 127 with unchanged
-  // glyph shapes and alpha totals. Cold isolated captures can agree, so this
-  // is not universally the first render in a process. PanelRenderDeterminismTests
-  // records the comparison contract and the limits of that finding.
+  // Repeated panel captures can differ despite a discarded capture. On macOS
+  // 26.7 the footer's SF Symbols moved one pixel, with unchanged glyph shapes
+  // and alpha totals. Cold isolated captures can also agree; neither the first
+  // capture nor a fixed warm-up count defines a reliable comparison contract.
+  // See docs/evidence/panel-rendering.md for the unresolved investigation (#94).
 
   // MARK: - The settings window
 
