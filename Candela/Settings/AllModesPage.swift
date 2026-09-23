@@ -76,6 +76,7 @@ struct AllModesPage: View {
   }
 
   var body: some View {
+    let _ = model.prefsRevision
     // The scaffold's reading variant: it owns the scroller, and the two hooks
     // that land the page on the mode in use need that scroller's proxy.
     SettingsPageScaffold(reading: { proxy in
@@ -504,33 +505,38 @@ struct AllModesPage: View {
   /// Draws one derived row. The two lists differ in what they derive, never in
   /// how a row is drawn, so a row model is all this needs.
   private func choice(_ row: AllModesRow, in catalog: DisplayModeCoordinator.Catalog) -> some View {
-    ModeChoice(
-      title: row.title, detail: row.detail, badge: row.badge, spoken: row.spoken,
-      spokenValue: row.spokenValue, isCurrent: row.isCurrent,
-      chevronExpanded: row.chevronExpanded
-    ) {
-      switch row.kind {
-      case let .mode(mode):
-        apply(mode, in: catalog)
-      case let .size(header):
-        // Animated HERE, not by an `.animation` on the list: only the click
-        // should move, and a re-enumeration must not replay the seed.
-        //
-        // Keyed on the row's own chevron, not on set membership: a rate filter
-        // shows matching sizes open while their headers are absent from the set,
-        // and pressing there stays a no-op.
-        withAnimation(Motion.disclosure(reduceMotion: reduceMotion)) {
-          if row.chevronExpanded == true {
-            expandedSizes.remove(header)
-          } else {
-            expandedSizes.insert(header)
+    HStack(spacing: 4) {
+      ModeChoice(
+        title: row.title, detail: row.detail, badge: row.badge, spoken: row.spoken,
+        spokenValue: row.spokenValue, isCurrent: row.isCurrent,
+        chevronExpanded: row.chevronExpanded
+      ) {
+        switch row.kind {
+        case let .mode(mode):
+          apply(mode, in: catalog)
+        case let .size(header):
+          // Animated HERE, not by an `.animation` on the list: only the click
+          // should move, and a re-enumeration must not replay the seed.
+          //
+          // Keyed on the row's own chevron, not on set membership: a rate filter
+          // shows matching sizes open while their headers are absent from the set,
+          // and pressing there stays a no-op.
+          withAnimation(Motion.disclosure(reduceMotion: reduceMotion)) {
+            if row.chevronExpanded == true {
+              expandedSizes.remove(header)
+            } else {
+              expandedSizes.insert(header)
+            }
           }
         }
       }
+      .disabled(feedback.controlsDisabled)
+      .id(row.id)
+      .focused($focusedRow, equals: row.id)
+      if case let .mode(mode) = row.kind {
+        ModeFavoriteButton(mode: mode, catalog: catalog, coordinator: model.displayModes)
+      }
     }
-    .disabled(feedback.controlsDisabled)
-    .id(row.id)
-    .focused($focusedRow, equals: row.id)
   }
 
   /// A row's marks as the ONE string `ModeChoice` draws. Joined rather than
@@ -925,7 +931,7 @@ private struct ModeChoice: View {
 ///
 /// The checkmark stays beside the ring, so the state is never carried by colour
 /// alone.
-private struct ModeChoiceButtonStyle: ButtonStyle {
+struct ModeChoiceButtonStyle: ButtonStyle {
   let isHovering: Bool
   let isCurrent: Bool
   let accent: Color

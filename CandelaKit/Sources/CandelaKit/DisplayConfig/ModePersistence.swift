@@ -54,6 +54,29 @@ public final class ModePersistence: @unchecked Sendable {
     defaults.removeObject(forKey: key(PrefName.storedDisplayMode, identity))
   }
 
+  public func favorites(for identity: DisplayConfigIdentity) -> [FavoriteResolution] {
+    guard let data = defaults.data(forKey: key(.favoriteDisplayModes, identity)),
+          let saved = try? JSONDecoder().decode([FavoriteResolution].self, from: data)
+    else { return [] }
+    return uniqueFavorites(saved)
+  }
+
+  public func setFavorites(_ favorites: [FavoriteResolution], for identity: DisplayConfigIdentity) {
+    let favorites = uniqueFavorites(favorites)
+    let storageKey = key(.favoriteDisplayModes, identity)
+    guard !favorites.isEmpty else {
+      defaults.removeObject(forKey: storageKey)
+      return
+    }
+    guard let data = try? JSONEncoder().encode(favorites) else { return }
+    defaults.set(data, forKey: storageKey)
+  }
+
+  private func uniqueFavorites(_ favorites: [FavoriteResolution]) -> [FavoriteResolution] {
+    var seen = Set<FavoriteResolution>()
+    return favorites.filter { $0.isValid && seen.insert($0).inserted }
+  }
+
   /// Resolves a stored choice against the live list, first in the orientation
   /// it was recorded in and then transposed.
   ///

@@ -23,6 +23,25 @@ downsamples. `low resolution` marks a size that has a sharper twin at the same
 logical dimensions. `Recommended` marks the size the density model picked.
 `Default` appears on the built-in display for the size macOS calls Default.
 
+## Favorites
+
+Click the star beside a size in Settings' **All Sizes & Refresh Rates** to
+save it for that display. The star beside **Size** in Settings saves
+the resolution currently on screen. Saving a favorite does not change the display.
+
+Favorites appear above the regular size choices in the panel and on the
+display's Settings page. The panel offers quick switching; add and remove
+favorites in Settings. Each saves its size, refresh rate, and rendering
+resolution. Selecting one uses the usual **Keep** or **Revert** confirmation.
+Sizes marked **Rendered by Candela** keep the display's refresh rate instead
+of saving a specific rate.
+
+Favorites survive restarts and reconnects. If a saved choice is unavailable,
+it stays listed as **Unavailable**; Candela does not substitute a different
+rate or a lower-resolution version. Click its filled star to remove it.
+Favorites do not enable **Remember this resolution** or change what reconnect
+restores.
+
 ## The sizes macOS does not list
 
 Some panels can drive HiDPI sizes that macOS never lists, most often

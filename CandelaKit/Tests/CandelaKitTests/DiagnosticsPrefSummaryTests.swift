@@ -136,6 +136,8 @@ struct DiagnosticsPrefSummaryTests {
     // Same reasoning: the mode line carries the synthesized stop, and
     // `offerSyntheticSizes` already reports that synthesis is available here.
     .storedSyntheticSize,
+    // Picker shortcuts do not configure the display or affect restore.
+    .favoriteDisplayModes,
   ]
 
   /// A fixture that only sets the prefs someone remembered to add covers exactly

@@ -47,6 +47,7 @@ public enum PrefName: String, Sendable, CaseIterable {
   case pollingMode, pollingCount
   // Per-display: display configuration
   case rememberDisplayMode, storedDisplayMode
+  case favoriteDisplayModes
   // Per-display: synthesized sizes. The opt-in that makes synthesized rows
   // visible in the picker, and the stop the display is set to, stored as a JSON
   // descriptor the way `storedDisplayMode` is.
@@ -133,7 +134,7 @@ public enum PrefPropagation {
 
     case .showContrast, .enableSliderSnap, .enableSliderPercent,
          .hideVolumeSlider, .friendlyName, .isDisabled, .hideOsd,
-         .hideKeepAwake, .hideCombinedBrightness:
+         .hideKeepAwake, .hideCombinedBrightness, .favoriteDisplayModes:
       // `hideKeepAwake` is presentation alone: hiding the row while keep awake is ON
       // leaves the display awake, which the Menu Bar pane's caption says out loud.
       // `isDisabled` carries no `.rearmTap` deliberately: a display whose keyboard

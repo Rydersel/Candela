@@ -407,6 +407,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       else { return }
       self.settingsActions.prefDidChange(.storedDisplayMode, persistenceKey: key)
     }
+    model.displayModes.didWriteFavorites = { [weak self] key in
+      self?.settingsActions.prefDidChange(.favoriteDisplayModes, persistenceKey: key)
+    }
     // The same rule for the two synthesis prefs, which the coordinator writes
     // rather than a pane: the opt-in is settable from the hub and from a reset,
     // and the stored size is written by the picker and by an unattended reapply.
