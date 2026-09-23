@@ -5,14 +5,18 @@ import SwiftUI
 /// Control-Center-style menu-bar panel, one section per display. Built-in-first
 /// ordering lives here in the view; `model.displays` stays external-only.
 struct PanelView: View {
+  /// Set from the status item's screen immediately before the menu opens.
+  var maximumHeight: CGFloat? = nil
+
   @Environment(AppModel.self) private var model
 
   /// Optional so the render tests can lay the panel out with the app model
   /// alone; the app itself always injects it from `PanelRoot`.
   @Environment(UpdaterModel.self) private var updater: UpdaterModel?
+  @Environment(UpdateReminderState.self) private var updateReminder: UpdateReminderState?
 
-  /// One disclosure open at a time across the whole panel; more would push the
-  /// footer off screen. Keyed by (display, section): keyed by display alone,
+  /// One disclosure open at a time keeps the display list compact.
+  /// Keyed by (display, section): keyed by display alone,
   /// opening one of a display's sections opens the other underneath it.
   @State private var expandedSection: PanelDisclosureID?
 
@@ -31,135 +35,143 @@ struct PanelView: View {
     let appPrefs = DisplayPrefs(persistenceKey: "app")
     let snapsToStops = appPrefs.enableSliderSnap
     let showsPercent = appPrefs.enableSliderPercent
+    let displayRows = VStack(alignment: .leading, spacing: 14) {
+      if externals.isEmpty, !showsBuiltIn {
+        emptyState
+      }
+      let combined = CombinedBrightness.participants(
+        builtIn: showsBuiltIn ? model.builtIn : nil, externals: externals,
+        prefs: Self.standardPrefs)
+      if CombinedBrightness.shows(participantCount: combined.count, appPrefs: appPrefs) {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("All displays")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .accessibilityHidden(true) // the slider carries the name
+          CombinedSliderRow(
+            participants: combined, snapsToStops: snapsToStops, showsPercent: showsPercent)
+        }
+      }
+      if showsBuiltIn, let builtIn = model.builtIn {
+        // Name header only, no HDR chrome: the built-in never routes HDR
+        // (role .builtIn). The slider drives the native path, so Control
+        // Center's own slider follows live.
+        let name = Self.title(for: builtIn.display)
+        VStack(alignment: .leading, spacing: 8) {
+          Text(name)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .accessibilityHidden(true) // the slider carries the display name
+          DisplaySliderRow(
+            controller: builtIn.controller, displayName: name,
+            snapsToStops: snapsToStops, showsPercent: showsPercent
+          )
+        }
+      }
+      ForEach(externals) { state in
+        let name = Self.title(for: state.display)
+        let rowPrefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
+        VStack(alignment: .leading, spacing: 8) {
+          DisplayHeaderRow(
+            controller: state.controller, displayName: name,
+            // Asked of the engine that owns the pairing: a catalog refresh
+            // inside an engage window answers "not engaged" with the mirror
+            // already up.
+            isShowingSynthesizedSize: model.synthesis.isEngaged(displayID: state.display.id),
+            careLine: Self.careLine(for: state, model: model)
+          )
+          DisplaySliderRow(
+            controller: state.controller, displayName: name,
+            snapsToStops: snapsToStops, showsPercent: showsPercent
+          )
+          // Not greyed like the volume denial below; the slider still
+          // dims in software. `staysLive` keeps the hover watcher off drags.
+          .panelHoverReason(model.brightnessSliderCompactReason(state), staysLive: true)
+          if Self.showsVolumeSlider(for: state, prefs: rowPrefs) {
+            let volumeEnabled = model.volumeSliderEnabled(state)
+            ValueSliderRow(
+              controller: state.volume,
+              systemImage: "speaker.wave.2.fill",
+              // The friendly-name local, not `state.display.name`: a renamed
+              // display announces one name in every row of its section.
+              accessibilityLabel: "\(name) volume",
+              // Non-defaulted on `ValueSliderRow` by design: giving them
+              // defaults would silently disable snapping and the percent
+              // readout on every volume slider.
+              snapsToStops: snapsToStops,
+              showsPercent: showsPercent,
+              // `ValueSliderRow` derives `snapsToZero: !mutesAtZero` from
+              // this glyph. Dropping it lets the row snap to 0, which
+              // hardware-mutes the display over VCP 0x8D.
+              mutedSystemImage: "speaker.slash.fill"
+            )
+            .disabled(!volumeEnabled)
+            // The reason comes from the policy that decided, so it cannot
+            // name a cause other than the one that applied. Hover, not
+            // a tooltip: the panel delivers no tooltip anywhere.
+            .panelHoverReason(model.volumeSliderCompactReason(state))
+          }
+          if Self.showsContrastSlider(for: state, prefs: rowPrefs) {
+            ValueSliderRow(
+              controller: state.contrast,
+              systemImage: "circle.lefthalf.filled",
+              accessibilityLabel: "\(name) contrast",
+              snapsToStops: snapsToStops,
+              showsPercent: showsPercent
+            )
+          }
+          PanelResolutionSection(
+            displayID: state.id,
+            displayName: name,
+            coordinator: model.displayModes,
+            expanded: $expandedSection
+          )
+          // Shares the expansion binding above: only one disclosure may be
+          // open. On a single-display rig it must resolve to nothing rather
+          // than draw nothing, or the VStack spacing reserves a gap for it.
+          PanelMirroringSection(
+            displayID: state.id,
+            displayName: name,
+            coordinator: model.mirroring,
+            expanded: $expandedSection
+          )
+        }
+      }
+    }
+    .padding(.horizontal, 14)
+    .padding(.vertical, 12)
     VStack(spacing: 0) {
       // Same predicate as the Keyboard pane's warning row, never a bare
       // `!isGranted`: an all-custom-shortcut rig needs no grant.
       if model.accessibility.isWarningWarranted {
         accessibilityBanner
+          .fixedSize(horizontal: false, vertical: true)
         Divider()
       }
       // The frozen marker, never the live one: the freeze runs in `menuWillOpen`,
       // before the menu lays out, so this row's height is fixed for the open.
-      if let marker = updater?.reminder.markerAtOpen {
+      if let marker = updateReminder?.markerAtOpen {
         updateReminderBanner(version: marker.version)
+          .fixedSize(horizontal: false, vertical: true)
         Divider()
       }
-      VStack(alignment: .leading, spacing: 14) {
-        if externals.isEmpty, !showsBuiltIn {
-          emptyState
-        }
-        // Above the per-display sections so a disclosure below never crowds
-        // the footer.
-        let combined = CombinedBrightness.participants(
-          builtIn: showsBuiltIn ? model.builtIn : nil, externals: externals,
-          prefs: Self.standardPrefs)
-        if CombinedBrightness.shows(participantCount: combined.count, appPrefs: appPrefs) {
-          VStack(alignment: .leading, spacing: 8) {
-            Text("All displays")
-              .font(.system(size: 13, weight: .semibold))
-              .foregroundStyle(.secondary)
-              .accessibilityHidden(true) // the slider carries the name
-            CombinedSliderRow(
-              participants: combined, snapsToStops: snapsToStops, showsPercent: showsPercent)
-          }
-        }
-        if showsBuiltIn, let builtIn = model.builtIn {
-          // Name header only, no HDR chrome: the built-in never routes HDR
-          // (role .builtIn). The slider drives the native path, so Control
-          // Center's own slider follows live.
-          let name = Self.title(for: builtIn.display)
-          VStack(alignment: .leading, spacing: 8) {
-            Text(name)
-              .font(.system(size: 13, weight: .semibold))
-              .foregroundStyle(.secondary)
-              .lineLimit(1)
-              .accessibilityHidden(true) // the slider carries the display name
-            DisplaySliderRow(
-              controller: builtIn.controller, displayName: name,
-              snapsToStops: snapsToStops, showsPercent: showsPercent
-            )
-          }
-        }
-        ForEach(externals) { state in
-          let name = Self.title(for: state.display)
-          let rowPrefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
-          VStack(alignment: .leading, spacing: 8) {
-            DisplayHeaderRow(
-              controller: state.controller, displayName: name,
-              // Asked of the engine that owns the pairing: a catalog refresh
-              // inside an engage window answers "not engaged" with the mirror
-              // already up.
-              isShowingSynthesizedSize: model.synthesis.isEngaged(displayID: state.display.id),
-              careLine: Self.careLine(for: state, model: model)
-            )
-            DisplaySliderRow(
-              controller: state.controller, displayName: name,
-              snapsToStops: snapsToStops, showsPercent: showsPercent
-            )
-            // Not greyed like the volume denial below; the slider still
-            // dims in software. `staysLive` keeps the hover watcher off drags.
-            .panelHoverReason(model.brightnessSliderCompactReason(state), staysLive: true)
-            if Self.showsVolumeSlider(for: state, prefs: rowPrefs) {
-              let volumeEnabled = model.volumeSliderEnabled(state)
-              ValueSliderRow(
-                controller: state.volume,
-                systemImage: "speaker.wave.2.fill",
-                // The friendly-name local, not `state.display.name`: a renamed
-                // display announces one name in every row of its section.
-                accessibilityLabel: "\(name) volume",
-                // Non-defaulted on `ValueSliderRow` by design: giving them
-                // defaults would silently disable snapping and the percent
-                // readout on every volume slider.
-                snapsToStops: snapsToStops,
-                showsPercent: showsPercent,
-                // `ValueSliderRow` derives `snapsToZero: !mutesAtZero` from
-                // this glyph. Dropping it lets the row snap to 0, which
-                // hardware-mutes the display over VCP 0x8D.
-                mutedSystemImage: "speaker.slash.fill"
-              )
-              .disabled(!volumeEnabled)
-              // The reason comes from the policy that decided, so it cannot
-              // name a cause other than the one that applied. Hover, not
-              // a tooltip: the panel delivers no tooltip anywhere.
-              .panelHoverReason(model.volumeSliderCompactReason(state))
-            }
-            if Self.showsContrastSlider(for: state, prefs: rowPrefs) {
-              ValueSliderRow(
-                controller: state.contrast,
-                systemImage: "circle.lefthalf.filled",
-                accessibilityLabel: "\(name) contrast",
-                snapsToStops: snapsToStops,
-                showsPercent: showsPercent
-              )
-            }
-            PanelResolutionSection(
-              displayID: state.id,
-              displayName: name,
-              coordinator: model.displayModes,
-              expanded: $expandedSection
-            )
-            // Shares the expansion binding above: only one disclosure may be
-            // open. On a single-display rig it must resolve to nothing rather
-            // than draw nothing, or the VStack spacing reserves a gap for it.
-            PanelMirroringSection(
-              displayID: state.id,
-              displayName: name,
-              coordinator: model.mirroring,
-              expanded: $expandedSection
-            )
-          }
-        }
+      // Preserve the natural height for short lists. Only the display content
+      // scrolls; banners and the footer keep their full height outside it.
+      ViewThatFits(in: .vertical) {
+        displayRows
+        ScrollView(.vertical) { displayRows }
       }
-      .padding(.horizontal, 14)
-      .padding(.vertical, 12)
       Divider()
       if Self.showsKeepAwake(appPrefs: appPrefs) {
         keepAwakeRow
+          .fixedSize(horizontal: false, vertical: true)
         Divider()
       }
       footer
     }
     .frame(width: 280)
+    .frame(maxHeight: maximumHeight)
     // The offset draws outside layout, so the entrance reflows nothing; the
     // menu window clips the first frames.
     .opacity(hasEntered ? 1 : 0)
