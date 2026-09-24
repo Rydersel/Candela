@@ -8,6 +8,35 @@ import Testing
 /// scroll-wheel delivery during real menu tracking remains an interactive check.
 @Suite("Panel sizing") @MainActor
 struct PanelSizingTests {
+  @Test(arguments: [false, true])
+  func returningToNaturalHeightKeepsTheDisplayContentMounted(scrolled: Bool) async throws {
+    let model = await populatedModel()
+    let host = PanelHostingView(rootView: PanelView(maximumHeight: 400).environment(model))
+    host.setFrameSize(host.fittingSize)
+    let window = mount(host)
+    defer { window.contentView = nil; window.close() }
+    await settleScrollContent(host)
+    let original = try #require(descendants(host).compactMap { $0 as? NSScrollView }.first)
+    let document = try #require(original.documentView)
+    if scrolled {
+      original.contentView.scroll(to: NSPoint(
+        x: 0, y: document.bounds.height - original.contentView.bounds.height))
+      original.reflectScrolledClipView(original.contentView)
+      #expect(original.contentView.bounds.minY > 0)
+    }
+
+    // Crossing the scroll threshold must not replace the display hierarchy
+    // while a disclosure is animating its rows out.
+    host.rootView = PanelView(maximumHeight: 2000).environment(model)
+    host.setFrameSize(host.fittingSize)
+    host.layoutSubtreeIfNeeded()
+    let current = try #require(descendants(host).compactMap { $0 as? NSScrollView }.first)
+    #expect(current === original)
+    #expect(current.documentView === document)
+    #expect(document.frame.height <= current.contentView.bounds.height + 1)
+    #expect(abs(current.contentView.bounds.minY) <= 1)
+  }
+
   @Test func aLongDisplayListScrollsWithinTheHeightBudget() async throws {
     let model = await populatedModel()
     let host = PanelHostingView(rootView: PanelView(maximumHeight: 400).environment(model))
@@ -31,7 +60,7 @@ struct PanelSizingTests {
     #expect(natural.fittingSize == bounded.fittingSize)
     bounded.setFrameSize(bounded.fittingSize)
     bounded.layoutSubtreeIfNeeded()
-    #expect(descendants(bounded).allSatisfy { !($0 is NSScrollView) })
+    #expect(bounded.frame.height < 700)
   }
 
   @Test func theSameHostAdaptsToEachOpeningHeight() async {
@@ -44,8 +73,6 @@ struct PanelSizingTests {
       host.setFrameSize(host.fittingSize)
       host.layoutSubtreeIfNeeded()
       #expect(abs(host.frame.height - min(height, naturalHeight)) <= 1)
-      let scrolls = descendants(host).contains { $0 is NSScrollView }
-      #expect(scrolls == (naturalHeight > height))
     }
   }
 
