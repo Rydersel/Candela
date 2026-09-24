@@ -156,12 +156,9 @@ struct PanelView: View {
           .fixedSize(horizontal: false, vertical: true)
         Divider()
       }
-      // Preserve the natural height for short lists. Only the display content
-      // scrolls; banners and the footer keep their full height outside it.
-      ViewThatFits(in: .vertical) {
-        displayRows
-        ScrollView(.vertical) { displayRows }
-      }
+      // Keep the same hierarchy when a disclosure crosses the height limit.
+      // The scroll view's ideal height still fits short lists to their content.
+      ScrollView(.vertical) { displayRows }
       Divider()
       if Self.showsKeepAwake(appPrefs: appPrefs) {
         keepAwakeRow
