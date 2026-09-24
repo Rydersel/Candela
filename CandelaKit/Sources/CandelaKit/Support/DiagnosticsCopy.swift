@@ -423,7 +423,8 @@ public enum DiagnosticsCopy {
     support: VCPSupport?,
     hasDescription: Bool,
     forceSoftware: Bool,
-    app: String
+    app: String,
+    usesCompatibilityException: Bool = false
   ) -> String {
     switch override {
     case .forceNone:
@@ -439,6 +440,9 @@ public enum DiagnosticsCopy {
     }
     switch support {
     case .supported:
+      if usesCompatibilityException {
+        return "Available: a known compatibility exception enables volume for this model even though its description omits the command"
+      }
       return "Available: this display lists the volume command"
     case .unsupported:
       return "Unavailable: this display's description parsed cleanly and does not list the volume command"
