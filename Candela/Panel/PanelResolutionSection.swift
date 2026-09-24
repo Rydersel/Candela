@@ -72,31 +72,32 @@ struct PanelResolutionSection: View {
     // One usable size is not a choice, so the control is absent rather than
     // present-and-dead. A nil catalog is "not enumerated yet" (never "no
     // modes"), and renders as nothing for the same reason.
-    if let catalog, catalog.rows.count > 1 {
+    if let catalog, catalog.rows.count > 1 || !coordinator.favorites(for: displayID).isEmpty {
       VStack(alignment: .leading, spacing: 2) {
         disclosureRow(catalog)
         if isExpanded {
           // One container so the whole list shares one fade: the rows dim as a
           // block while the animated layout supplies the vertical unfurl.
           VStack(alignment: .leading, spacing: 2) {
-            ForEach(catalog.rows.prefix(Self.maximumRows)) { row in
+            let hasCurrentFavorite = coordinator.favorites(for: displayID).contains {
+              coordinator.isCurrentFavorite($0, on: displayID)
+            }
+            favoriteRows(catalog)
+            ForEach(otherRows(catalog).prefix(Self.maximumRows)) { row in
               PanelModeRow(
                 // Tagged and marked, like every other surface that OFFERS a
                 // size to choose from: the size label is bare, so these words
                 // are the whole of the copy rule here.
-                //
-                // Width, measured at 280 pt: "1440 × 2560 (HiDPI, Scaled)" on
-                // the Dell fit with room to spare, and the row truncates rather
-                // than wraps, so the worst case is "1440 × 2560 (Scaled,
-                // Recommended)".
                 title: catalog.badgedSize(row.mode),
                 accessibilityName: displayName,
-                isCurrent: catalog.isCurrentSize(row.mode)
+                // An exact favorite owns the checkmark when a different
+                // framebuffer at the same logical size is offered below it.
+                isCurrent: !hasCurrentFavorite && catalog.isCurrentSize(row.mode)
               ) {
                 apply(catalog.modeKeepingCurrentRefreshRate(for: row), in: catalog)
               }
+              .disabled(coordinator.isApplying || isAwaitingAnswer)
             }
-            .disabled(coordinator.isApplying || isAwaitingAnswer)
             overflowCaption(catalog)
           }
           .transition(.opacity)
@@ -128,6 +129,34 @@ struct PanelResolutionSection: View {
   }
 
   // MARK: - Rows
+
+  @ViewBuilder
+  private func favoriteRows(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
+    let favorites = coordinator.favorites(for: displayID)
+    if !favorites.isEmpty {
+      PanelCaption("Favorites", style: .tertiary)
+      ForEach(favorites, id: \.self) { favorite in
+        let mode = coordinator.resolvedFavorite(favorite, on: displayID)
+        let label = FavoriteResolutionLabel(favorite, mode: mode, catalog: catalog)
+        PanelModeRow(title: label.title, detail: label.detail, accessibilityName: displayName,
+                     isCurrent: coordinator.isCurrentFavorite(favorite, on: displayID)) {
+          if coordinator.selectFavorite(favorite, on: displayID, from: .panel, surface: .floatingPanel) {
+            PanelMenu.endTracking()
+          }
+        }
+        .disabled(mode == nil || coordinator.isApplying || isAwaitingAnswer)
+      }
+      if !otherRows(catalog).isEmpty {
+        PanelCaption("Other sizes", style: .tertiary)
+      }
+    }
+  }
+
+  private func otherRows(_ catalog: DisplayModeCoordinator.Catalog) -> [DisplayModeRow] {
+    catalog.rows.filter {
+      !coordinator.isFavorite(catalog.modeKeepingCurrentRefreshRate(for: $0), on: displayID)
+    }
+  }
 
   private func disclosureRow(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
     PanelDisclosureRow(
@@ -183,7 +212,9 @@ struct PanelResolutionSection: View {
   /// claims nothing about what macOS shows or hides, only what THIS list left
   /// out.
   @ViewBuilder private func overflowCaption(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
-    if catalog.rows.count > Self.maximumRows {
+    if !coordinator.favorites(for: displayID).isEmpty {
+      PanelCaption("Edit favorites and see all sizes in Settings.", style: .tertiary)
+    } else if catalog.rows.count > Self.maximumRows {
       PanelCaption("All sizes and refresh rates are in Settings.", style: .tertiary)
     }
   }
@@ -290,6 +321,7 @@ struct PanelResolutionSection: View {
 /// reconfigures the screen, a click that feels unregistered invites a second.
 private struct PanelModeRow: View {
   let title: String
+  var detail: String? = nil
   /// Same rule as `PanelDisclosureRow`: a bare "2560 × 1440 (Scaled)" told
   /// nobody which display it would change.
   let accessibilityName: String
@@ -306,20 +338,29 @@ private struct PanelModeRow: View {
           .foregroundStyle(.tint)
           .opacity(isCurrent ? 1 : 0)
           .accessibilityHidden(true)
-        Text(verbatim: title)
-          .font(.system(size: 12))
-          .lineLimit(1)
+        VStack(alignment: .leading, spacing: 1) {
+          Text(verbatim: title)
+            .font(.system(size: 12))
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+          if let detail {
+            Text(verbatim: detail)
+              .font(.system(size: 10))
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+        }
         Spacer(minLength: 0)
       }
       .padding(.leading, 4)
       .padding(.trailing, 6)
-      .frame(height: 20)
+      .frame(minHeight: detail == nil ? 20 : 36)
       .contentShape(Rectangle())
     }
     .buttonStyle(PanelRowButtonStyle(isHovering: isHovering))
     .onHover { isHovering = $0 }
     .onDisappear { isHovering = false }
-    .accessibilityLabel(Text(verbatim: "\(accessibilityName), \(title)"))
+    .accessibilityLabel(Text(verbatim: "\(accessibilityName), \(title)\(detail.map { ", " + $0 } ?? "")"))
     .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
   }
 }

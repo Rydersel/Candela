@@ -56,6 +56,7 @@ struct SynthesisFixture {
     optedIn: Bool = true, secondPanel: Bool = false, mirroring: CGDirectDisplayID? = nil,
     mirrorMaster: Bool = false, nativeRidesTheHiDPITwin: Bool = false,
     enumerateOnInit: Bool = true,
+    modePersistence: ModePersistence = ModePersistence(),
     hdr: FakeSynthesisHDR = FakeSynthesisHDR(supports: false)
   ) {
     let world = FakeDisplayWorld()
@@ -109,7 +110,7 @@ struct SynthesisFixture {
     synthesis.persistenceKey = { _ in key }
     DisplayPrefs(persistenceKey: key).setOfferSyntheticSizes(optedIn)
 
-    let modes = DisplayModeCoordinator(gate: gate, configurator: configurator)
+    let modes = DisplayModeCoordinator(gate: gate, configurator: configurator, persistence: modePersistence)
     modes.synthesis = synthesis
     if enumerateOnInit {
       modes.refreshCatalog(for: Self.panelID)

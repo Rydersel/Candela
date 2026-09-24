@@ -96,7 +96,8 @@ struct PrefPropagationTests {
     // Hide-shaped like `hideBuiltInDisplay`: an absent key means row shown.
     #expect(PrefName.hideKeepAwake.rawValue == "hideKeepAwake")
     #expect(PrefName.hideCombinedBrightness.rawValue == "hideCombinedBrightness")
-    #expect(PrefName.allCases.count == 70)
+    #expect(PrefName.favoriteDisplayModes.rawValue == "favoriteDisplayModes")
+    #expect(PrefName.allCases.count == 71)
   }
 
   // MARK: - Rows

@@ -273,6 +273,8 @@ final class DisplayModeCoordinator {
   }
 
   private(set) var catalogs: [CGDirectDisplayID: Catalog] = [:]
+  private(set) var favoritesRevision: UInt = 0
+  @ObservationIgnored var didWriteFavorites: (String) -> Void = { _ in }
   private(set) var preview: Preview?
   private(set) var startFailure: StartFailure?
   /// Keyed by `DisplayConfigIdentity.key`, not by display ID, so a report
@@ -1098,6 +1100,72 @@ final class DisplayModeCoordinator {
     // The view may not have redrawn its disabled state before a repeat click.
     guard !isApplying, mode.ioModeID != currentModeID else { return }
     select(mode, on: displayID, from: origin, surface: surface)
+  }
+
+  // Favorites are shortcuts only: their writes never enter the display queue.
+  func favorites(for displayID: CGDirectDisplayID) -> [FavoriteResolution] {
+    _ = favoritesRevision
+    guard let identity = identity(for: displayID) else { return [] }
+    return persistence.favorites(for: identity)
+  }
+
+  func resolvedFavorite(_ favorite: FavoriteResolution, on displayID: CGDirectDisplayID) -> DisplayMode? {
+    guard let catalog = catalogs[displayID] else { return nil }
+    return favorite.resolve(in: catalog.all + catalog.syntheticStops.map { SyntheticSizeCatalog.row(for: $0) })
+  }
+
+  func isFavorite(_ mode: DisplayMode, on displayID: CGDirectDisplayID) -> Bool {
+    favorites(for: displayID).contains { favorite in
+      resolvedFavorite(favorite, on: displayID).map { FavoriteResolution(mode: $0) } == FavoriteResolution(mode: mode)
+    }
+  }
+
+  func toggleFavorite(_ mode: DisplayMode, on displayID: CGDirectDisplayID) {
+    guard let identity = identity(for: displayID),
+          resolvedFavorite(FavoriteResolution(mode: mode), on: displayID) != nil else { return }
+    var saved = favorites(for: displayID)
+    let matching = saved.filter {
+      resolvedFavorite($0, on: displayID).map { FavoriteResolution(mode: $0) } == FavoriteResolution(mode: mode)
+    }
+    if matching.isEmpty {
+      saved.append(FavoriteResolution(mode: mode))
+    } else {
+      saved.removeAll { matching.contains($0) }
+    }
+    persistence.setFavorites(saved, for: identity)
+    favoritesRevision &+= 1
+    didWriteFavorites(identity.key)
+  }
+
+  func removeFavorite(_ favorite: FavoriteResolution, on displayID: CGDirectDisplayID) {
+    guard let identity = identity(for: displayID) else { return }
+    let saved = favorites(for: displayID)
+    guard saved.contains(favorite) else { return }
+    persistence.setFavorites(saved.filter { $0 != favorite }, for: identity)
+    favoritesRevision &+= 1
+    didWriteFavorites(identity.key)
+  }
+
+  func isCurrentFavorite(_ favorite: FavoriteResolution, on displayID: CGDirectDisplayID) -> Bool {
+    guard let catalog = catalogs[displayID], let current = catalog.onScreen,
+          let mode = resolvedFavorite(favorite, on: displayID) else { return false }
+    return FavoriteResolution(mode: mode) == FavoriteResolution(mode: current)
+  }
+
+  /// Resolve against the current safe catalog at the click, never a saved runtime ID.
+  @discardableResult
+  func selectFavorite(
+    _ favorite: FavoriteResolution, on displayID: CGDirectDisplayID,
+    from origin: PreviewOrigin, surface: PreviewSurface
+  ) -> Bool {
+    guard !isApplying, preview?.displayID != displayID,
+          favorites(for: displayID).contains(favorite),
+          !isCurrentFavorite(favorite, on: displayID),
+          let catalog = catalogs[displayID],
+          let mode = resolvedFavorite(favorite, on: displayID) else { return false }
+    selectFromList(mode, on: displayID, from: origin, surface: surface,
+                   currentModeID: catalog.alreadyOnScreenModeID)
+    return isApplying
   }
 
   /// `answered` is the preview the caller was LOOKING AT when it answered. It

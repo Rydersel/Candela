@@ -101,12 +101,20 @@ struct DisplaySizeRows: View {
   }
 
   var body: some View {
+    let _ = model.prefsRevision
+    FavoriteResolutionRows(catalog: catalog, coordinator: model.displayModes)
     if let caption = feedback.caption {
       SettingsRowNote(verbatim: caption)
     }
     if !catalog.rows.isEmpty {
       SettingRow("Changes how big text and windows look.") {
-        sizePicker.disabled(feedback.controlsDisabled)
+        HStack(spacing: 6) {
+          sizePicker.disabled(feedback.controlsDisabled)
+          if let current = catalog.onScreen,
+             model.displayModes.resolvedFavorite(FavoriteResolution(mode: current), on: displayID) != nil {
+            ModeFavoriteButton(mode: current, catalog: catalog, coordinator: model.displayModes)
+          }
+        }
       }
       refreshPicker.disabled(feedback.controlsDisabled)
       synthesizedRateRow
