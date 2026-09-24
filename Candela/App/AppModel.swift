@@ -491,7 +491,7 @@ final class AppModel {
     resettingOffMain.withLock { $0 = false }
   }
 
-  /// Per-display VCP 0x62 verdict from the capabilities string. Observable,
+  /// Per-display VCP 0x62 verdict, including known compatibility exceptions. Observable,
   /// so the panel's volume slider enables live the moment a probe lands. An ABSENT
   /// entry means "not probed yet, or the probe was skipped" and reads as
   /// `.unknown`, so the panel is usable before any DDC happens. A STORED
@@ -791,7 +791,9 @@ final class AppModel {
       support: volumeSupport[key],
       hasDescription: capabilityString[key] != nil,
       forceSoftware: prefs.forceSoftware,
-      app: AppInfo.productName
+      app: AppInfo.productName,
+      usesCompatibilityException: assessedVolumeSupport(for: state, capabilities: capabilityString[key])
+        .usesCompatibilityException
     )
   }
 
@@ -1216,6 +1218,29 @@ final class AppModel {
     )
   }
 
+  private func assessedVolumeSupport(for state: DisplayState, capabilities: String?) -> VolumeCapabilityAssessment {
+    VolumeCapabilityAssessment(
+      reportedSupport: capabilities.map { CapabilityString.support(forVCP: VCP.audioSpeakerVolume, in: $0) } ?? .unknown,
+      hardwareName: state.display.name,
+      manufacturerID: hardwareFacts[state.display.persistenceKey]?.manufacturerID)
+  }
+
+  /// Names and manufacturer facts can arrive later than the stable display key.
+  /// Reuse the recorded description, but reassess exceptions against fresh facts.
+  private func refreshCachedVolumeSupport() {
+    var changed = false
+    for state in displays {
+      let key = state.display.persistenceKey
+      guard let previous = volumeSupport[key] else { continue }
+      let current = assessedVolumeSupport(for: state, capabilities: capabilityString[key]).support
+      if current != previous {
+        volumeSupport[key] = current
+        changed = true
+      }
+    }
+    if changed { onVolumeKeyRoutingChanged?() }
+  }
+
   /// Starts a capabilities probe for every display `CapabilityProbePolicy` says
   /// is eligible.
   ///
@@ -1252,9 +1277,7 @@ final class AppModel {
         if let capabilities { self.capabilityString[persistenceKey] = capabilities }
         let previousVolume = self.volumeSupport[persistenceKey]
         let previousMute = self.muteSupport[persistenceKey]
-        self.volumeSupport[persistenceKey] = capabilities.map {
-          CapabilityString.support(forVCP: VCP.audioSpeakerVolume, in: $0)
-        } ?? .unknown
+        self.volumeSupport[persistenceKey] = self.assessedVolumeSupport(for: state, capabilities: capabilities).support
         // One string, both verdicts, one statement: the probe gate reads
         // `volumeSupport`, so a mute verdict written anywhere else would be
         // sampled from a display this pass never asked.
@@ -1624,6 +1647,7 @@ final class AppModel {
       appeared.append(state)
       return state
     }
+    refreshCachedVolumeSupport()
     // Seed every controller before the first read can consume a shared identity's
     // record. Safe Mode persists the hint but continues to skip hardware changes.
     if recoverLegacyHandbacks {
