@@ -20,9 +20,10 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/macOS-14%2B-e8a13a" alt="macOS 14 or later">
-  <img src="https://img.shields.io/badge/Apple%20silicon-arm64-e8a13a" alt="Apple silicon">
+  <img src="https://img.shields.io/github/downloads/Rydersel/Candela/total?label=downloads" alt="Downloads">
   <img src="https://img.shields.io/badge/signed%20%26%20notarized-Apple-e8a13a" alt="Signed and notarized">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-e8a13a" alt="MIT license"></a>
+  
 </p>
 
 <p align="center">Find Candela useful? Star this repository to support the project.</p>
