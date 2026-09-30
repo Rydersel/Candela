@@ -112,9 +112,7 @@ struct FavoriteResolutionControlTests {
   }
 
   @Test func resolvedKeySetMatchesThePerFavoriteAnswers() throws {
-    let suite = "favorite-tests-\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = InMemoryDefaults()
     let store = ModePersistence(defaults: defaults)
     let fixture = SynthesisFixture(modePersistence: store)
     defer { fixture.forgetPrefs() }
