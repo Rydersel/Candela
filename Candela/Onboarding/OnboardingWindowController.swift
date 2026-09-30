@@ -209,7 +209,13 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     // The window is reused, so its hosting view would keep the finish and care
     // page animations running after close; `present()` reinstalls a fresh flow.
     // The applier stays: an answer still awaiting its first preview needs it.
-    window?.contentView = nil
-    flowModel = nil
+    // Deferred a turn: the flow's Done button closes from inside its own action,
+    // and releasing the hosting view there frees it mid-dispatch.
+    DispatchQueue.main.async { [weak self] in
+      // A re-present in between installed a live flow; leave it alone.
+      guard let self, self.window?.isVisible == false else { return }
+      self.window?.contentView = nil
+      self.flowModel = nil
+    }
   }
 }
