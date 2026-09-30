@@ -63,10 +63,14 @@ struct ModeFavoriteButton: View {
   let mode: DisplayMode
   let catalog: DisplayModeCoordinator.Catalog
   let coordinator: DisplayModeCoordinator
+  /// Passed in by long lists so favourites resolve once per body, not per row.
+  /// Nil asks the coordinator.
+  var favoriteKeys: Set<FavoriteResolution>?
 
   var body: some View {
     ResolutionFavoriteButton(
-      isFavorite: coordinator.isFavorite(mode, on: catalog.display.id),
+      isFavorite: favoriteKeys.map { $0.contains(FavoriteResolution(mode: mode)) }
+        ?? coordinator.isFavorite(mode, on: catalog.display.id),
       label: "\(catalog.display.name), \(FavoriteResolutionLabel(FavoriteResolution(mode: mode), mode: mode, catalog: catalog).spoken)",
       persistenceKey: catalog.display.identity.key
     ) {

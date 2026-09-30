@@ -206,5 +206,10 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     if wasFirstRun {
       onFirstRunClosed?()
     }
+    // The window is reused, so its hosting view would keep the finish and care
+    // page animations running after close; `present()` reinstalls a fresh flow.
+    // The applier stays: an answer still awaiting its first preview needs it.
+    window?.contentView = nil
+    flowModel = nil
   }
 }

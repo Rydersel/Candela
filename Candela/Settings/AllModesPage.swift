@@ -275,6 +275,7 @@ struct AllModesPage: View {
   /// divider separates unrelated settings, and a rule between every pair of one
   /// long list is a grid. Hover and the accent ring tell the rows apart.
   @ViewBuilder private func modeList(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
+    let favoriteKeys = model.displayModes.resolvedFavoriteKeys(on: catalog.display.id)
     // A11y 6 asks for the rows to read as one radio group. `.contain` names it
     // without collapsing its children; never `.combine`, which would announce
     // the whole list as one element.
@@ -283,7 +284,7 @@ struct AllModesPage: View {
       case .recommended:
         SettingsCardSection(title: "Recommended Sizes") {
           ForEach(catalog.rows) { row in
-            choice(Self.recommendedRowModel(row, in: catalog), in: catalog)
+            choice(Self.recommendedRowModel(row, in: catalog), in: catalog, favoriteKeys: favoriteKeys)
           }
         }
       case .all:
@@ -311,7 +312,8 @@ struct AllModesPage: View {
           }
           ForEach(filteredGroups(catalog), id: \.header) { group in
             choice(
-              Self.sizeRowModel(group, in: catalog, expanded: isExpanded(group)), in: catalog
+              Self.sizeRowModel(group, in: catalog, expanded: isExpanded(group)), in: catalog,
+              favoriteKeys: favoriteKeys
             )
             if isExpanded(group) {
               // A `Group`, not a real container: its modifier reaches each
@@ -322,7 +324,7 @@ struct AllModesPage: View {
                 ForEach(group.modes) { mode in
                   choice(
                     Self.fullRowModel(mode, in: catalog, lowResolution: lowResolution),
-                    in: catalog
+                    in: catalog, favoriteKeys: favoriteKeys
                   )
                   .padding(.leading, 18)
                 }
@@ -504,7 +506,10 @@ struct AllModesPage: View {
 
   /// Draws one derived row. The two lists differ in what they derive, never in
   /// how a row is drawn, so a row model is all this needs.
-  private func choice(_ row: AllModesRow, in catalog: DisplayModeCoordinator.Catalog) -> some View {
+  private func choice(
+    _ row: AllModesRow, in catalog: DisplayModeCoordinator.Catalog,
+    favoriteKeys: Set<FavoriteResolution>
+  ) -> some View {
     HStack(spacing: 4) {
       ModeChoice(
         title: row.title, detail: row.detail, badge: row.badge, spoken: row.spoken,
@@ -534,7 +539,8 @@ struct AllModesPage: View {
       .id(row.id)
       .focused($focusedRow, equals: row.id)
       if case let .mode(mode) = row.kind {
-        ModeFavoriteButton(mode: mode, catalog: catalog, coordinator: model.displayModes)
+        ModeFavoriteButton(
+          mode: mode, catalog: catalog, coordinator: model.displayModes, favoriteKeys: favoriteKeys)
       }
     }
   }

@@ -82,8 +82,9 @@ struct PanelResolutionSection: View {
             let hasCurrentFavorite = coordinator.favorites(for: displayID).contains {
               coordinator.isCurrentFavorite($0, on: displayID)
             }
-            favoriteRows(catalog)
-            ForEach(otherRows(catalog).prefix(Self.maximumRows)) { row in
+            let others = otherRows(catalog)
+            favoriteRows(catalog, hasOtherRows: !others.isEmpty)
+            ForEach(others.prefix(Self.maximumRows)) { row in
               PanelModeRow(
                 // Tagged and marked, like every other surface that OFFERS a
                 // size to choose from: the size label is bare, so these words
@@ -131,7 +132,7 @@ struct PanelResolutionSection: View {
   // MARK: - Rows
 
   @ViewBuilder
-  private func favoriteRows(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
+  private func favoriteRows(_ catalog: DisplayModeCoordinator.Catalog, hasOtherRows: Bool) -> some View {
     let favorites = coordinator.favorites(for: displayID)
     if !favorites.isEmpty {
       PanelCaption("Favorites", style: .tertiary)
@@ -146,15 +147,16 @@ struct PanelResolutionSection: View {
         }
         .disabled(mode == nil || coordinator.isApplying || isAwaitingAnswer)
       }
-      if !otherRows(catalog).isEmpty {
+      if hasOtherRows {
         PanelCaption("Other sizes", style: .tertiary)
       }
     }
   }
 
   private func otherRows(_ catalog: DisplayModeCoordinator.Catalog) -> [DisplayModeRow] {
-    catalog.rows.filter {
-      !coordinator.isFavorite(catalog.modeKeepingCurrentRefreshRate(for: $0), on: displayID)
+    let favoriteKeys = coordinator.resolvedFavoriteKeys(on: displayID)
+    return catalog.rows.filter {
+      !favoriteKeys.contains(FavoriteResolution(mode: catalog.modeKeepingCurrentRefreshRate(for: $0)))
     }
   }
 
