@@ -120,4 +120,37 @@ struct FavoriteResolutionControlTests {
     #expect(fixture.modes.isFavorite(newMode, on: 42))
     #expect(!fixture.modes.selectFavorite(favorite, on: 42, from: .settings, surface: .settingsBanner))
   }
+
+  @Test func resolvedKeySetMatchesThePerFavoriteAnswers() throws {
+    let suite = "favorite-tests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let store = ModePersistence(defaults: defaults)
+    let fixture = SynthesisFixture(modePersistence: store)
+    defer { fixture.forgetPrefs() }
+    let id = SynthesisFixture.panelID
+    let catalog = try #require(fixture.modes.catalogs[id])
+    let current = try #require(catalog.current)
+    let stop = try #require(catalog.syntheticStops.first)
+    let rendered = SyntheticSizeCatalog.row(for: stop)
+    let absent = DisplayMode(ioModeID: 999, logicalWidth: 1920, logicalHeight: 1080,
+                            pixelWidth: 3840, pixelHeight: 2160, refreshHz: 60, isNative: false)
+    let saved = [current, rendered, absent].map { FavoriteResolution(mode: $0) }
+    store.setFavorites(saved, for: catalog.display.identity)
+
+    let keys = fixture.modes.resolvedFavoriteKeys(on: id)
+    let perFavorite = Set(saved.compactMap { favorite in
+      fixture.modes.resolvedFavorite(favorite, on: id).map { FavoriteResolution(mode: $0) }
+    })
+    #expect(keys == perFavorite)
+    #expect(keys.count == 2)
+    // Reference: the per-favourite scan, independent of the key set.
+    for mode in catalog.all + [rendered, absent] {
+      let scanned = saved.contains { favorite in
+        fixture.modes.resolvedFavorite(favorite, on: id).map { FavoriteResolution(mode: $0) }
+          == FavoriteResolution(mode: mode)
+      }
+      #expect(fixture.modes.isFavorite(mode, on: id) == scanned)
+    }
+  }
 }

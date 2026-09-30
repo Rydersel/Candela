@@ -7,7 +7,7 @@ import SwiftUI
 /// rather than cutting to a new one. Reduce Motion holds it at its first frame.
 /// A non-key window holds the frame it froze on, so the drift resumes where it
 /// stopped. Stricter than the poller's consumer threshold on purpose: only the
-/// focused window has to pay for 12 frames a second.
+/// focused window pays for the animation.
 struct SettingsCanvas: View {
   var accent: Color
   var secondary: Color
@@ -26,14 +26,15 @@ struct SettingsCanvas: View {
       if reduceMotion {
         blobs(at: 0)
       } else if activeState == .key {
-        // 12 fps: a blob centre moves about a third of a point per frame, and
-        // each frame costs two full-window Gaussian blurs.
-        TimelineView(.animation(minimumInterval: 1.0 / 12.0)) { context in
+        // 4 fps: blob 1's x, the fastest term, moves about 1 pt a frame in an
+        // 1100 pt window; under a ~200 pt blur ramp that is a quarter of an 8-bit
+        // step. Each frame costs two full-window Gaussian blurs.
+        TimelineView(.animation(minimumInterval: 1.0 / 4.0)) { context in
           blobs(at: drift(at: context.date))
         }
       } else {
         // A CLOSED window lands here too: the object outlives the close and used
-        // to pay for two blurs 12 times a second forever.
+        // to pay for two blurs on every frame forever.
         blobs(at: drift(at: offKeySince ?? .now))
       }
       RadialGradient(

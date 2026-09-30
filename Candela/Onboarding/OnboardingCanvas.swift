@@ -67,7 +67,9 @@ struct OnboardingCanvas: View {
       if reduceMotion {
         blobs(at: 0)
       } else if activeState == .key {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+        // 12 fps: in this 760 pt window a blob centre moves about a third of a
+        // point per frame, and each frame costs two full-window Gaussian blurs.
+        TimelineView(.animation(minimumInterval: 1.0 / 12.0)) { context in
           blobs(at: drift(at: context.date))
         }
       } else {
