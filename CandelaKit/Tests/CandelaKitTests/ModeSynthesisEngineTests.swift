@@ -416,11 +416,14 @@ struct ModeSynthesisEngineTests {
     let engine = engine(world)
     _ = await engage(engine, world, size, on: Self.physical)
     world.panelStaysOnMasterGeometryAfterUnmirror = true
+    let readsBefore = world.achievedModeReads
 
     let result = await engine.disengage(fromPhysical: Self.physical)
 
     #expect(result.failureValue == .unwindIncomplete)
     #expect(await engine.pairing(forPhysical: Self.physical)?.slot == 4)
+    // Judged only after all three reads said the same thing.
+    #expect(world.achievedModeReads - readsBefore == 3)
     // The break and the destroy both ran and both landed: the panel is the only
     // thing that did not come back.
     #expect(world.mirrors.isEmpty)
@@ -482,6 +485,25 @@ struct ModeSynthesisEngineTests {
     #expect(await engine.pairing(forPhysical: Self.physical) == nil)
     #expect(world.achievedModeReads - readsBefore == 3)
     #expect(world.unlistedReadsBeforeSettlingAfterUnmirror == 0)
+  }
+
+  /// A stale read of the rendered size is as much evidence of nothing as an
+  /// unlisted one: taken mid-reconfiguration, it can precede the panel's own mode.
+  @Test func aPanelThatSettlesOffTheRenderedSizeWithinTheRetriesCompletesTheDisengage() async {
+    let world = world()
+    let engine = engine(world)
+    _ = await engage(engine, world, size, on: Self.physical)
+    world.renderedReadsBeforeSettlingAfterUnmirror = 2
+    let readsBefore = world.achievedModeReads
+
+    let result = await engine.disengage(fromPhysical: Self.physical)
+
+    #expect(result.failureValue == nil)
+    #expect(await engine.pairing(forPhysical: Self.physical) == nil)
+    #expect(world.achievedModeReads - readsBefore == 3)
+    // The control: both stale reads really were consumed, so the first two
+    // answers were the rendered size.
+    #expect(world.renderedReadsBeforeSettlingAfterUnmirror == 0)
   }
 
   /// Geometry decides, never the id: a reconfiguration reassigns mode ids, so a

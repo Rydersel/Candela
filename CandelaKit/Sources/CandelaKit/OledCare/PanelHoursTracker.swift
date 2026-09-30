@@ -70,8 +70,9 @@ public final class PanelHoursTracker {
     writeThrough()
   }
 
-  /// The undebounced write, for termination. Not `noteStandby()`: a quit is not
-  /// rest, so the since-standby counter and the note dismissal both survive it.
+  /// The undebounced write, for termination, system sleep and the periodic persist.
+  /// Not `noteStandby()`: a flush only saves, so the since-standby counter and the
+  /// note dismissal both survive it.
   /// Skipped when nothing is owed, so a tracker a pane built only to read never
   /// writes zeros.
   public func flush() {

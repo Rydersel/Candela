@@ -68,6 +68,7 @@ final class FakeSynthesisWorld: @unchecked Sendable {
   private var _panelReadbackIsUnreadable = false
   private var _panelReturnsUnderANewModeIDAfterUnmirror = false
   private var _unlistedReadsBeforeSettlingAfterUnmirror = 0
+  private var _renderedReadsBeforeSettlingAfterUnmirror = 0
   private var _achievedModeReads = 0
 
   // MARK: - Wiring
@@ -216,6 +217,13 @@ final class FakeSynthesisWorld: @unchecked Sendable {
     set { lock.withLock { _unlistedReadsBeforeSettlingAfterUnmirror = newValue } }
   }
 
+  /// After the mirror comes off, this many raw reads still report the master's
+  /// geometry before the panel settles on its own mode.
+  var renderedReadsBeforeSettlingAfterUnmirror: Int {
+    get { lock.withLock { _renderedReadsBeforeSettlingAfterUnmirror } }
+    set { lock.withLock { _renderedReadsBeforeSettlingAfterUnmirror = newValue } }
+  }
+
   /// Every raw readback, in any state, so a test can see the patience it bought.
   var achievedModeReads: Int { lock.withLock { _achievedModeReads } }
 
@@ -357,10 +365,15 @@ final class FakeSynthesisWorld: @unchecked Sendable {
         _panels[master]?.ownMode
       } else if _panelStaysOnMasterGeometryAfterUnmirror {
         _lastMasterMode[id]
+      } else if _renderedReadsBeforeSettlingAfterUnmirror > 0 {
+        _lastMasterMode[id]
       } else {
         nil
       }
       guard let masterMode else { return panel.ownMode }
+      if _mirrors[id] == nil, _renderedReadsBeforeSettlingAfterUnmirror > 0 {
+        _renderedReadsBeforeSettlingAfterUnmirror -= 1
+      }
       return DisplayMode(
         ioModeID: 166,
         logicalWidth: masterMode.logicalWidth, logicalHeight: masterMode.logicalHeight,

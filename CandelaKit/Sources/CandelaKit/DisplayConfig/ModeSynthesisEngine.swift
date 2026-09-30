@@ -404,10 +404,10 @@ public actor ModeSynthesisEngine {
   /// that came back perfectly.
   ///
   /// Up to three reads, because a display mid-reconfiguration is evidence of
-  /// nothing: a nil read and a read the list does not carry are both re-read,
-  /// and the verdict is the last non-nil one. Only the rendered size is judged
-  /// on sight, since no settling moves a panel onto the size it was just freed
-  /// from. No non-nil read at all is `.unreadable`.
+  /// nothing: a nil read, the rendered size and a mode the list does not carry
+  /// are all re-read. Only a listed geometry of the panel's own is judged on
+  /// sight. After three reads the last non-nil read decides, so the rendered
+  /// size or an unlisted mode is `.wrong`; no non-nil read at all is `.unreadable`.
   ///
   /// The readback is `achievedMode(for:)`, never `currentMode(for:)`: the
   /// resolved read answers nil for an unpublished descriptor, which would turn
@@ -423,7 +423,7 @@ public actor ModeSynthesisEngine {
         && panel.logicalHeight == pairing.size.logicalHeight
         && panel.pixelWidth == pairing.size.pixelWidth
         && panel.pixelHeight == pairing.size.pixelHeight
-      guard !isTheRenderedSize else { return .wrong }
+      guard !isTheRenderedSize else { continue }
       if modes == nil {
         guard let listed = publishedModes(of: pairing.physicalDisplayID) else { return .unreadable }
         modes = listed
