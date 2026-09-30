@@ -8,7 +8,7 @@ packages:
     # .xcodeproj, so a range re-resolves per worktree and can drift within 3.x
     # with nothing committed to pin it. Matches the house convention (M4 pinned
     # SimplyCoreAudio exactly and MediaKeyTap to a commit).
-    exactVersion: 3.0.1
+    exactVersion: 3.1.0
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     # Exact for the same Package.resolved reason as KeyboardShortcuts. Added by
