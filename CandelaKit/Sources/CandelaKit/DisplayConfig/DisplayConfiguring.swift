@@ -265,6 +265,13 @@ public protocol DisplayConfiguring: DisplayRotationConfiguring {
   func displays() -> [ConfiguredDisplay]
   func modes(for displayID: CGDirectDisplayID) -> [DisplayMode]
   func currentMode(for displayID: CGDirectDisplayID) -> DisplayMode?
+  /// What the display reports running, NOT resolved into `modes(for:)`.
+  ///
+  /// For achieved-state checks: `currentMode(for:)` answers nil for a mode the
+  /// list does not carry, or a different entry sharing its id, so it cannot see a
+  /// panel running a mode it does not publish. Compare geometry only; ids are
+  /// positional. Defaults to `currentMode(for:)` for conformers with no raw read.
+  func achievedMode(for displayID: CGDirectDisplayID) -> DisplayMode?
   /// The panel's own pixel count, from the mode flagged native. Needed to tell
   /// scaled modes from native ones.
   func nativePixels(for displayID: CGDirectDisplayID) -> (width: Int, height: Int)?
@@ -354,6 +361,10 @@ public protocol DisplayRotationConfiguring: Sendable {
 }
 
 extension DisplayConfiguring {
+  public func achievedMode(for displayID: CGDirectDisplayID) -> DisplayMode? {
+    currentMode(for: displayID)
+  }
+
   /// Correct for any conformance and cheap for a fake; the real configurator
   /// overrides it.
   public func modeSnapshot(for displayID: CGDirectDisplayID) -> DisplayModeSnapshot {

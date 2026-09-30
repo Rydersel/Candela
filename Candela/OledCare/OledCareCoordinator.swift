@@ -180,11 +180,14 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// Spec §4: one capture per enrolled display per 60 s, and the window list on
   /// the same clock. Kit-owned so the settings panes can derive staleness from it.
   private static let samplingInterval: Duration = OledCareCadence.sampling
-  /// How often a DISPLAYED nomination re-checks window geometry. One second: a
-  /// dim clearing within a second reads as cleanup, while a dim sitting on moved
+  /// How often the nomination re-checks window geometry. One second: a dim
+  /// clearing within a second reads as cleanup, while a dim sitting on moved
   /// content for a whole sampling slot reads as burn-in, the symptom the feature
-  /// exists to prevent. The poll under it is a measured 0.46 ms, and it only
-  /// runs while a mask is on screen.
+  /// exists to prevent. The poll under it is a measured 0.46 ms.
+  ///
+  /// Gated on the display holding regional evidence, not on a mask being up:
+  /// a window can age past the stationary threshold between samples, and only
+  /// this re-check lets it nominate before the next capture.
   ///
   /// Derived, never a second literal: the driver ticks at `windowFollow` while a
   /// mask is up, and a throttle above that tick silently halves the follow rate.
@@ -2172,14 +2175,17 @@ final class OledCareCoordinator: CheckupCareHolding {
     flushExposureHistory()
   }
 
-  /// The undebounced write: termination, system sleep, and a display leaving.
+  /// The undebounced write: termination, system sleep, and the periodic persist.
+  /// A departing display saves its exposure history directly, and its hours
+  /// write through `noteStandby()`.
   ///
-  /// The wear tracker's histogram rides the same three moments. It debounces on the same
-  /// 60 s as panel hours, so without this a quit loses up to a minute per
-  /// display per launch, which over a multi-week soak is a systematic
-  /// undercount rather than noise.
+  /// Panel hours and the wear histogram ride the same moments. Both
+  /// debounce on 60 s, so without this a quit loses up to a minute per display
+  /// per launch, which over a multi-week soak is a systematic undercount rather
+  /// than noise, and the two counters stop agreeing.
   private func flushExposureHistory() {
     for key in unsavedExposureKeys { saveExposureHistory(for: key) }
+    for tracker in trackers.values { tracker.flush() }
     for tracker in wearTrackers.values { tracker.flush() }
   }
 

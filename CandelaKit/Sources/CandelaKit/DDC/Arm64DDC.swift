@@ -230,10 +230,12 @@ public class Arm64DDC: NSObject {
     )
     // Max frame: source + length byte + (op + 2 offset + 32 payload) + checksum.
     var reply = [UInt8](repeating: 0, count: 38)
-    for _ in 0 ... numOfRetryAttempts {
+    for attempt in 0 ... numOfRetryAttempts {
+      // Nothing follows the last attempt; the next request pays its own write sleep.
+      let isLast = attempt == numOfRetryAttempts
       transport.sleep(writeSleepTime ?? 10000)
       guard transport.write(service, &packet, UInt32(packet.count)) == 0 else {
-        transport.sleep(retrySleepTime ?? 20000)
+        if !isLast { transport.sleep(retrySleepTime ?? 20000) }
         continue
       }
       transport.sleep(readSleepTime ?? 50000)
@@ -241,7 +243,7 @@ public class Arm64DDC: NSObject {
         let fragment = CapabilityString.fragment(fromFrame: reply, expectedOffset: offset) {
         return fragment
       }
-      transport.sleep(retrySleepTime ?? 20000)
+      if !isLast { transport.sleep(retrySleepTime ?? 20000) }
     }
     return nil
   }
@@ -362,7 +364,8 @@ public class Arm64DDC: NSObject {
     // in full.
     var firstPacket = true
     var failedReadCalls = 0
-    for _ in 1 ... (numOfRetryAttemps ?? 4) + 1 {
+    let attempts = Int(numOfRetryAttemps ?? 4) + 1
+    for attempt in 1 ... attempts {
       // ONE packet per logical write. The inherited default of 2 put two
       // identical packets on the bus for every write and cost 20 ms of sleep
       // before the caller could proceed. Duplicate writes saturate I2C and delay
@@ -413,7 +416,9 @@ public class Arm64DDC: NSObject {
           if failedReadCalls >= Self.maxFailedReadCalls { return outcome }
         }
       }
-      transport.sleep(retrySleepTime ?? 20000)
+      // Nothing follows the last attempt, and the next transaction's first
+      // packet is already spaced by the pacer's floor.
+      if attempt < attempts { transport.sleep(retrySleepTime ?? 20000) }
     }
     return outcome
   }
@@ -557,8 +562,10 @@ public class Arm64DDC: NSObject {
         break
       }
       guard IORegistryEntryGetName(entry, name) == KERN_SUCCESS else {
+        // An entry terminated mid-walk (a hotplug) must not end the walk for
+        // every display after it. IOIteratorNext always advances.
         IOObjectRelease(entry)
-        break
+        continue
       }
       let nameString = String(cString: name)
       for interest in interests where nameString.contains(interest) {
@@ -575,6 +582,7 @@ public class Arm64DDC: NSObject {
       ioregService.edidUUID = edidUUID
     }
     let cpath = UnsafeMutablePointer<CChar>.allocate(capacity: MemoryLayout<io_string_t>.size)
+    defer { cpath.deallocate() }
     IORegistryEntryGetPath(entry, kIOServicePlane, cpath)
     ioregService.ioDisplayLocation = String(cString: cpath)
     if let unmanagedDisplayAttrs = IORegistryEntryCreateCFProperty(entry, "DisplayAttributes" as CFString, kCFAllocatorDefault, IOOptionBits(kIORegistryIterateRecursively)), let displayAttrs = unmanagedDisplayAttrs.takeRetainedValue() as? NSDictionary {

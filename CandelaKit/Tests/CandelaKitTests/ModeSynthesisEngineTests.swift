@@ -446,17 +446,60 @@ struct ModeSynthesisEngineTests {
     let engine = engine(world)
     _ = await engage(engine, world, size, on: Self.physical)
     world.panelReportsAnUnlistedModeAfterUnmirror = true
+    let readsBefore = world.achievedModeReads
 
     let result = await engine.disengage(fromPhysical: Self.physical)
 
     #expect(result.failureValue == .unwindIncomplete)
     #expect(await engine.pairing(forPhysical: Self.physical)?.slot == 4)
-    // The control: the descriptor it reports is NOT the rendered size, so the
-    // old comparison would have passed this teardown.
-    let reported = FakeSynthesisConfigurator(world).currentMode(for: Self.physical)
+    // Judged only after all three reads said the same thing.
+    #expect(world.achievedModeReads - readsBefore == 3)
+    // The controls: the descriptor it reports is NOT the rendered size, so a
+    // rendered-size comparison alone would have passed this teardown; and the
+    // resolved read answers nil for it, so a verdict built on `currentMode`
+    // would have called this panel unreadable and accepted it.
+    let configurator = FakeSynthesisConfigurator(world)
+    let reported = configurator.achievedMode(for: Self.physical)
+    #expect(reported != nil)
     #expect(reported?.logicalWidth != size.logicalWidth)
+    #expect(configurator.currentMode(for: Self.physical) == nil)
     #expect(world.mirrors.isEmpty)
     #expect(world.liveSlots.isEmpty)
+  }
+
+  /// A panel still settling when the teardown first asks is not a wrong answer:
+  /// two unlisted reads and then its own mode is a panel that came back.
+  @Test func aPanelThatSettlesOntoItsOwnModeWithinTheRetriesCompletesTheDisengage() async {
+    let world = world()
+    let engine = engine(world)
+    _ = await engage(engine, world, size, on: Self.physical)
+    world.unlistedReadsBeforeSettlingAfterUnmirror = 2
+    let readsBefore = world.achievedModeReads
+
+    let result = await engine.disengage(fromPhysical: Self.physical)
+
+    #expect(result.failureValue == nil)
+    #expect(await engine.pairing(forPhysical: Self.physical) == nil)
+    #expect(world.achievedModeReads - readsBefore == 3)
+    #expect(world.unlistedReadsBeforeSettlingAfterUnmirror == 0)
+  }
+
+  /// Geometry decides, never the id: a reconfiguration reassigns mode ids, so a
+  /// panel back on its own size under an id its list does not carry came back.
+  @Test func aPanelBackOnItsOwnGeometryUnderANewModeIDCompletesTheDisengage() async {
+    let world = world()
+    let engine = engine(world)
+    _ = await engage(engine, world, size, on: Self.physical)
+    world.panelReturnsUnderANewModeIDAfterUnmirror = true
+
+    let result = await engine.disengage(fromPhysical: Self.physical)
+
+    #expect(result.failureValue == nil)
+    #expect(await engine.pairing(forPhysical: Self.physical) == nil)
+    // The control: the id really is one the list does not carry.
+    let configurator = FakeSynthesisConfigurator(world)
+    let reported = configurator.achievedMode(for: Self.physical)
+    #expect(configurator.modes(for: Self.physical).allSatisfy { $0.ioModeID != reported?.ioModeID })
   }
 
   /// A panel that will not say what it is running is NOT a failed teardown.
