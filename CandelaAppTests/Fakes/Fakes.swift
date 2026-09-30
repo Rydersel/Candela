@@ -132,11 +132,10 @@ final class ScriptedDiscovery {
 }
 
 enum TestFixtures {
-  /// A unique suite per call, so a test collides with neither the app's domain
-  /// nor another test's, and nothing lands where the app would read it.
+  /// Fresh in-memory store per call: no domain shared with the app or another
+  /// test, and nothing reaches disk.
   static func prefs(persistenceKey: String, safeMode: Bool = false) -> DisplayPrefs {
-    let suite = UserDefaults(suiteName: "app-tests-\(UUID().uuidString)")!
-    return DisplayPrefs(defaults: suite, persistenceKey: persistenceKey, safeMode: safeMode)
+    DisplayPrefs(defaults: InMemoryDefaults(), persistenceKey: persistenceKey, safeMode: safeMode)
   }
 
   /// A real DisplayState over fake hardware: real Kit controllers, fake wire.

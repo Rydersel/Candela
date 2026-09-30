@@ -5,9 +5,7 @@ import Testing
 @Suite("Favorite resolution controls") @MainActor
 struct FavoriteResolutionControlTests {
   @Test func savingAndRemovingNeverStartsAPreview() throws {
-    let suite = "favorite-tests-\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = InMemoryDefaults()
     let fixture = SynthesisFixture(modePersistence: ModePersistence(defaults: defaults))
     defer { fixture.forgetPrefs() }
     let id = SynthesisFixture.panelID
@@ -27,9 +25,7 @@ struct FavoriteResolutionControlTests {
   }
 
   @Test func selectionUsesTheExistingPreviewAndRejectsRepeatClicks() async throws {
-    let suite = "favorite-tests-\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = InMemoryDefaults()
     let fixture = SynthesisFixture(modePersistence: ModePersistence(defaults: defaults))
     defer { fixture.forgetPrefs() }
     let id = SynthesisFixture.panelID
@@ -50,9 +46,7 @@ struct FavoriteResolutionControlTests {
   }
 
   @Test func unavailableFavoritesRemainRemovable() throws {
-    let suite = "favorite-tests-\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = InMemoryDefaults()
     let store = ModePersistence(defaults: defaults)
     let fixture = SynthesisFixture(modePersistence: store)
     defer { fixture.forgetPrefs() }
@@ -70,9 +64,7 @@ struct FavoriteResolutionControlTests {
   }
 
   @Test func renderedFavoritesUseSynthesisAndCannotBeAppliedTwice() async throws {
-    let suite = "favorite-tests-\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = InMemoryDefaults()
     let fixture = SynthesisFixture(modePersistence: ModePersistence(defaults: defaults))
     defer { fixture.forgetPrefs() }
     let id = SynthesisFixture.panelID
@@ -96,9 +88,7 @@ struct FavoriteResolutionControlTests {
   }
 
   @Test func reconnectResolvesTheSameFavoriteWithNewDisplayAndModeIDs() throws {
-    let suite = "favorite-tests-\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = InMemoryDefaults()
     let fixture = SynthesisFixture(optedIn: false, modePersistence: ModePersistence(defaults: defaults))
     defer { fixture.forgetPrefs() }
     let id = SynthesisFixture.panelID

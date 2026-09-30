@@ -3,7 +3,7 @@ import Testing
 
 @Suite("Update relaunch mark")
 struct UpdateRelaunchTests {
-  let defaults = UserDefaults(suiteName: "update-relaunch-tests-\(UUID().uuidString)")!
+  let defaults = InMemoryDefaults()
 
   @Test func aPlainLaunchConsumesNothing() {
     #expect(UpdateRelaunch.consume(in: defaults) == false)

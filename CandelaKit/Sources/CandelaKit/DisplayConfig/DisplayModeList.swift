@@ -12,11 +12,12 @@ import Foundation
 /// against a positive control and achieved the same logical size, framebuffer,
 /// refresh, bounds and scale.
 ///
-/// The residual, stated because nothing can close it: two modes could be bound
-/// to different WIRE TIMINGS, and no IORegistry property records the driven
-/// timing. This collapses rows identical in everything observable, which is not
-/// proof the panel scans them out alike. The keep/revert countdown stays the
-/// detector of last resort, as it is for revealed modes.
+/// The residual: two modes could be bound to different WIRE TIMINGS. The
+/// IORegistry records the driven timing (`DPTimingModeId` on `AppleCLCD2`,
+/// measured 2026-09-09), but nothing here reads it yet, so this collapses rows
+/// identical in everything CoreGraphics reports, which is not proof the panel
+/// scans them out alike. The keep/revert countdown stays the detector of last
+/// resort, as it is for revealed modes.
 public enum DisplayModeList {
   /// What a person can actually see in a row. Refresh arrives quantized from
   /// `DisplayMode.quantizedRefresh`, which is load-bearing in BOTH directions:

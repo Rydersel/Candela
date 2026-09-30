@@ -9,6 +9,7 @@ import Foundation
 /// primitives: a silent fall-through would write test keys into a real domain.
 /// Not `final` so tests can subclass to spy on writes, the only way to tell
 /// "wrote nothing" from "rewrote the same value".
+// @unchecked: every read and write of `storage` goes through `lock`.
 class InMemoryDefaults: UserDefaults, @unchecked Sendable {
   private let lock = NSLock()
   private var storage: [String: Any] = [:]
@@ -36,9 +37,29 @@ class InMemoryDefaults: UserDefaults, @unchecked Sendable {
     default: return false
     }
   }
-  override func integer(forKey key: String) -> Int { object(forKey: key) as? Int ?? 0 }
-  override func double(forKey key: String) -> Double { object(forKey: key) as? Double ?? 0 }
-  override func float(forKey key: String) -> Float { object(forKey: key) as? Float ?? 0 }
+
+  /// Same reason as `bool`: `defaults write` stores "3440", which the real class coerces.
+  override func integer(forKey key: String) -> Int {
+    switch object(forKey: key) {
+    case let number as NSNumber: return number.intValue
+    case let string as String: return (string as NSString).integerValue
+    default: return 0
+    }
+  }
+  override func double(forKey key: String) -> Double {
+    switch object(forKey: key) {
+    case let number as NSNumber: return number.doubleValue
+    case let string as String: return (string as NSString).doubleValue
+    default: return 0
+    }
+  }
+  override func float(forKey key: String) -> Float {
+    switch object(forKey: key) {
+    case let number as NSNumber: return number.floatValue
+    case let string as String: return (string as NSString).floatValue
+    default: return 0
+    }
+  }
   override func string(forKey key: String) -> String? { object(forKey: key) as? String }
   override func data(forKey key: String) -> Data? { object(forKey: key) as? Data }
   override func array(forKey key: String) -> [Any]? { object(forKey: key) as? [Any] }

@@ -15,6 +15,23 @@ struct CheckupStoreTests {
       claims: [], plant: nil, showings: [:], exposureBookingID: nil)
   }
 
+  /// Export file names carry this string, so it must match `ISO8601DateFormatter`
+  /// byte for byte, across UTC midnight and far from the epoch.
+  @Test func dayMatchesTheISO8601FormatterItReplaced() {
+    let reference = ISO8601DateFormatter()
+    reference.formatOptions = [.withFullDate]
+    reference.timeZone = TimeZone(identifier: "UTC")
+    let seconds: [TimeInterval] = [
+      0, -1, 1, 86_399, 86_400, 812_505_599, 812_505_600,
+      -3_000_000_000, 4_000_000_000, 1_000_000_000_000,
+    ]
+    for offset in seconds {
+      let date = Date(timeIntervalSince1970: offset)
+      #expect(CheckupStore.day(date) == reference.string(from: date))
+    }
+    #expect(CheckupStore.day(Date(timeIntervalSince1970: 1_790_726_400)) == "2026-09-30")
+  }
+
   @Test func savesListsNewestFirstAndLoadsBack() throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     let store = CheckupStore(directory: dir)

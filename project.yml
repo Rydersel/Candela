@@ -53,6 +53,9 @@ targets:
         excludes:
           - "Info.plist"
       - CandelaAppTests
+      # Shared in-memory UserDefaults; disk-backed suites leave a prefs stub
+      # per test in ~/Library/Preferences.
+      - path: CandelaKit/Tests/CandelaKitTests/ScratchDefaults.swift
     dependencies:
       - package: CandelaKit
       - package: KeyboardShortcuts
@@ -97,6 +100,9 @@ targets:
         # shows — About, notifications, System Settings > Login Items — are the
         # ones that read the catalog. Masters and the .icns live in `icons/`.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # CandelaKit's public symbols survive whole-module optimisation even when
+        # the app never calls them; the linker strips what only the probe and tests reach.
+        DEAD_CODE_STRIPPING: YES
       configs:
         # Hardened runtime on Release only. It is a notarization prerequisite,
         # so it has to be on for anything shipped; keeping it off in Debug
