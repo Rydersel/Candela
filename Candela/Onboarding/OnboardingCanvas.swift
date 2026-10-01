@@ -68,9 +68,9 @@ struct OnboardingCanvas: View {
       if reduceMotion {
         blobs(at: 0)
       } else if activeState == .key {
-        // On macOS 26 a TimelineView in a hosting view costs a full window layout per
-        // display cycle whatever its schedule (measured 12 to 16% of a core while key),
-        // so the drift is ticked by a task at the frame rate instead.
+        // On macOS 26 a TimelineView in a hosting view cost a full window layout per
+        // display cycle under every schedule tried (12 to 16% of a core, measured on
+        // the settings canvas), so the drift is ticked by a task at the frame rate.
         // 12 fps: in this 760 pt window a blob centre moves about a third of a
         // point per frame, and each frame costs two full-window Gaussian blurs.
         blobs(at: drift(at: tick))
@@ -89,12 +89,16 @@ struct OnboardingCanvas: View {
     .accessibilityHidden(true)
     .task(id: activeState == .key && !reduceMotion) {
       guard activeState == .key, !reduceMotion else { return }
+      // Reduce Motion turning off while key leaves the tick as old as when it
+      // turned on; without this the first frame is stale for a whole interval.
+      tick = .now
       while true {
         do {
           try await Task.sleep(for: .milliseconds(83), tolerance: .milliseconds(8))
         } catch {
           return
         }
+        guard !Task.isCancelled else { return }
         tick = .now
       }
     }
@@ -107,7 +111,9 @@ struct OnboardingCanvas: View {
         // stale tick against the new total and jumps back by the off-key time.
         tick = .now
       } else if offKeySince == nil {
-        offKeySince = .now
+        // The last tick, not now: the frozen frame is the one drawn at that tick,
+        // so resume picks up exactly where the motion stopped.
+        offKeySince = tick
       }
     }
   }
