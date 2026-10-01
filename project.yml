@@ -15,7 +15,7 @@ packages:
     # the W6 auto-update work as a deliberate amendment to the v1 dependency
     # decision; an updater is a correctness requirement for an app built on
     # private APIs that break across macOS releases.
-    exactVersion: 2.9.6
+    exactVersion: 2.10.0
 options:
   deploymentTarget:
     macOS: "14.0"
