@@ -168,6 +168,52 @@ struct AdaptiveRegionProtectionTests {
     #expect(!protection.needsInputTracking)
   }
 
+  @Test func onlyAWindowOwningNominatedCellsIsTrackedOrReturns() {
+    // Window 1 on the left is a background app; window 2 on the right belongs to
+    // the frontmost app, so none of its cells can be nominated.
+    let cells = (0..<240).map { $0 % 24 < 12 }
+    let observed = WindowObservation(
+      dominantOwnerByCell: cells.map { $0 ? "Editor" : "Browser" },
+      stationarySecondsByWindowID: [1: 600, 2: 600],
+      stationaryByCell: Array(repeating: true, count: 240),
+      fullScreenOwner: nil,
+      windowIDByCell: cells.map { $0 ? UInt32(1) : 2 },
+      ownerPIDByCell: cells.map { $0 ? Int32(7) : 8 })
+    let windows = [
+      WindowSnapshot(windowID: 1, ownerPID: 7, ownerName: "Editor",
+        bounds: CGRect(x: 0, y: 0, width: 1200, height: 1000), layer: 0),
+      WindowSnapshot(windowID: 2, ownerPID: 8, ownerName: "Browser",
+        bounds: CGRect(x: 1200, y: 0, width: 1200, height: 1000), layer: 0),
+    ]
+    var protection = warmed(observation: observed)
+    func nominate(_ point: CGPoint?, _ second: Double) -> OverlayMask? {
+      protection.nominate(observation: observed, exposure: .empty,
+        activity: .init(isFocusedDisplay: false, frontmostPID: 8, pointerPosition: point),
+        windows: windows, at: start.addingTimeInterval(second))
+    }
+    let beforeHover = nominate(nil, 300)
+    #expect((beforeHover?.cells[0] ?? 0) > 0)
+    #expect(beforeHover?.cells[23] == 0)
+
+    #expect(nominate(CGPoint(x: 1800, y: 500), 300) == beforeHover)
+    #expect(!protection.needsInputTracking && !protection.isRestoringWindows)
+    #expect(nominate(nil, 301) == beforeHover)
+    #expect(!protection.needsInputTracking && !protection.isRestoringWindows)
+
+    // The control: the nominated window restores, and leaving it still takes the
+    // two-second clear and the one-second fade.
+    #expect(nominate(CGPoint(x: 600, y: 500), 302)?.cells[0] ?? 0 == 0)
+    #expect(protection.needsInputTracking)
+    #expect(nominate(nil, 303)?.cells[0] ?? 0 == 0)
+    #expect(protection.isRestoringWindows)
+    #expect(nominate(nil, 305)?.cells[0] ?? 0 == 0)
+    let fading = nominate(nil, 305.5)
+    #expect((fading?.cells[0] ?? 0) > 0)
+    #expect((fading?.cells[0] ?? 1) < (beforeHover?.cells[0] ?? 0))
+    #expect(nominate(nil, 306)?.cells[0] == beforeHover?.cells[0])
+    #expect(!protection.needsInputTracking && !protection.isRestoringWindows)
+  }
+
   @Test func clearingTheLastMaskKeepsExitTrackingThroughTheReturn() {
     let windows = [WindowSnapshot(windowID: 1, ownerPID: 7, ownerName: "Editor",
       bounds: CGRect(x: 0, y: 0, width: 2400, height: 1000), layer: 0)]

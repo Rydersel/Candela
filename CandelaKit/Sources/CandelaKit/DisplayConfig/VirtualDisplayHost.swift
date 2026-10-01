@@ -305,12 +305,18 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
     }) else { return false }
     var config: CGDisplayConfigRef?
     guard CGBeginDisplayConfiguration(&config) == .success, let config else { return false }
-    CGConfigureDisplayWithDisplayMode(config, displayID, target, nil)
+    // Nothing was staged, so no commit result could say anything about this mode.
+    guard CGConfigureDisplayWithDisplayMode(config, displayID, target, nil) == .success else {
+      CGCancelDisplayConfiguration(config)
+      return false
+    }
     guard CGCompleteDisplayConfiguration(config, .permanently) == .success else { return false }
     // Achieved state, not the return code: the platform has returned .success
-    // without honouring a configuration before.
+    // without honouring a configuration before. The size is checked too, so a
+    // HiDPI mode at some other size is not taken for this one.
     guard let achieved = CGDisplayCopyDisplayMode(displayID) else { return false }
-    return achieved.pixelWidth >= achieved.width * 2
+    return achieved.width == logicalWidth && achieved.height == logicalHeight
+      && achieved.pixelWidth >= achieved.width * 2
   }
 
   /// The achieved mode of a live slot, for surfaces that must state what IS
@@ -324,8 +330,9 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
   /// works it is free and a helper process is not.
   ///
   /// So no caller may gate on a read of its own. The helper exits 0 only after
-  /// checking `pixelWidth >= width * 2` in a process that can always read the
-  /// display, so its exit status is the evidence and is kept when it lands.
+  /// checking the requested size at `pixelWidth >= width * 2`, in a process
+  /// that can always read the display, so its exit status is the evidence and
+  /// is kept when it lands.
   ///
   /// The `slots[slot] != nil` guard is load-bearing: a destroyed slot's verdict
   /// must not resurrect into an answer about a display that no longer exists,
