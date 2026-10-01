@@ -66,6 +66,10 @@ final class FakeSynthesisWorld: @unchecked Sendable {
   private var _panelStaysOnMasterGeometryAfterUnmirror = false
   private var _panelReportsAnUnlistedModeAfterUnmirror = false
   private var _panelReadbackIsUnreadable = false
+  private var _panelReturnsUnderANewModeIDAfterUnmirror = false
+  private var _unlistedReadsBeforeSettlingAfterUnmirror = 0
+  private var _renderedReadsBeforeSettlingAfterUnmirror = 0
+  private var _achievedModeReads = 0
 
   // MARK: - Wiring
 
@@ -168,7 +172,7 @@ final class FakeSynthesisWorld: @unchecked Sendable {
   }
 
   /// The mirror lands in the topology and the panel does not follow it: the
-  /// flags say mirrored, `currentMode` still reports the panel's own geometry.
+  /// flags say mirrored, the raw readback still reports the panel's own geometry.
   var physicalKeepsOwnModeWhileMirrored: Bool {
     get { lock.withLock { _physicalKeepsOwnModeWhileMirrored } }
     set { lock.withLock { _physicalKeepsOwnModeWhileMirrored = newValue } }
@@ -197,7 +201,33 @@ final class FakeSynthesisWorld: @unchecked Sendable {
     set { lock.withLock { _panelReportsAnUnlistedModeAfterUnmirror = newValue } }
   }
 
-  /// `currentMode` answers nil for a display that is still online: the ordinary
+  /// The mirror comes off and the panel is back on its own geometry, but under an
+  /// `ioModeID` its list does not carry: the reassignment a reconfiguration makes.
+  /// A panel that came back perfectly, so only a geometry comparison passes it.
+  var panelReturnsUnderANewModeIDAfterUnmirror: Bool {
+    get { lock.withLock { _panelReturnsUnderANewModeIDAfterUnmirror } }
+    set { lock.withLock { _panelReturnsUnderANewModeIDAfterUnmirror = newValue } }
+  }
+
+  /// The mirror comes off and the next this-many raw reads report a descriptor in
+  /// no enumeration, after which the panel settles on its own mode: a display
+  /// still mid-reconfiguration when the teardown first asks.
+  var unlistedReadsBeforeSettlingAfterUnmirror: Int {
+    get { lock.withLock { _unlistedReadsBeforeSettlingAfterUnmirror } }
+    set { lock.withLock { _unlistedReadsBeforeSettlingAfterUnmirror = newValue } }
+  }
+
+  /// After the mirror comes off, this many raw reads still report the master's
+  /// geometry before the panel settles on its own mode.
+  var renderedReadsBeforeSettlingAfterUnmirror: Int {
+    get { lock.withLock { _renderedReadsBeforeSettlingAfterUnmirror } }
+    set { lock.withLock { _renderedReadsBeforeSettlingAfterUnmirror = newValue } }
+  }
+
+  /// Every raw readback, in any state, so a test can see the patience it bought.
+  var achievedModeReads: Int { lock.withLock { _achievedModeReads } }
+
+  /// The raw readback answers nil for a display that is still online: the ordinary
   /// shape of a panel mid-reconfiguration, which is where the teardown's last
   /// check runs. Evidence of nothing, and the engine has to treat it that way.
   var panelReadbackIsUnreadable: Bool {
@@ -301,15 +331,27 @@ final class FakeSynthesisWorld: @unchecked Sendable {
     }
   }
 
-  /// The mode a display reports now. While mirrored that is a synthetic descriptor:
-  /// the master's geometry under the slave's own refresh, with a fabricated
-  /// `ioModeID` that appears in no enumeration.
-  func currentMode(for id: CGDirectDisplayID) -> DisplayMode? {
+  /// The raw readback: the mode a display reports now, unresolved. While mirrored
+  /// that is a synthetic descriptor: the master's geometry under the slave's own
+  /// refresh, with a fabricated `ioModeID` that appears in no enumeration.
+  func achievedMode(for id: CGDirectDisplayID) -> DisplayMode? {
     lock.withLock {
+      _achievedModeReads += 1
       guard let panel = _panels[id] else { return nil }
       if _panelReadbackIsUnreadable, _mirrors[id] == nil { return nil }
       guard !_physicalKeepsOwnModeWhileMirrored else { return panel.ownMode }
-      if _panelReportsAnUnlistedModeAfterUnmirror, _mirrors[id] == nil {
+      if _panelReturnsUnderANewModeIDAfterUnmirror, _mirrors[id] == nil {
+        let own = panel.ownMode
+        return DisplayMode(
+          ioModeID: 167,
+          logicalWidth: own.logicalWidth, logicalHeight: own.logicalHeight,
+          pixelWidth: own.pixelWidth, pixelHeight: own.pixelHeight,
+          refreshHz: own.refreshHz, isNative: own.isNative
+        )
+      }
+      let settling = _unlistedReadsBeforeSettlingAfterUnmirror > 0 && _mirrors[id] == nil
+      if settling { _unlistedReadsBeforeSettlingAfterUnmirror -= 1 }
+      if settling || (_panelReportsAnUnlistedModeAfterUnmirror && _mirrors[id] == nil) {
         return DisplayMode(
           ioModeID: 166,
           logicalWidth: panel.ownMode.logicalWidth - 8,
@@ -323,10 +365,15 @@ final class FakeSynthesisWorld: @unchecked Sendable {
         _panels[master]?.ownMode
       } else if _panelStaysOnMasterGeometryAfterUnmirror {
         _lastMasterMode[id]
+      } else if _renderedReadsBeforeSettlingAfterUnmirror > 0 {
+        _lastMasterMode[id]
       } else {
         nil
       }
       guard let masterMode else { return panel.ownMode }
+      if _mirrors[id] == nil, _renderedReadsBeforeSettlingAfterUnmirror > 0 {
+        _renderedReadsBeforeSettlingAfterUnmirror -= 1
+      }
       return DisplayMode(
         ioModeID: 166,
         logicalWidth: masterMode.logicalWidth, logicalHeight: masterMode.logicalHeight,
@@ -335,6 +382,16 @@ final class FakeSynthesisWorld: @unchecked Sendable {
         isNative: false
       )
     }
+  }
+
+  /// The raw readback resolved into the display's own list, exactly as
+  /// `CoreGraphicsDisplayConfigurator.currentMode(for:)` resolves it: by id, then
+  /// by exact geometry, else nil. So a descriptor the list does not carry never
+  /// comes back from here, which is the whole reason the engine reads
+  /// `achievedMode(for:)` instead.
+  func currentMode(for id: CGDirectDisplayID) -> DisplayMode? {
+    guard let raw = achievedMode(for: id) else { return nil }
+    return DisplayModeList.resolve(raw, in: modes(for: id))
   }
 
   /// What a display PUBLISHES, which is a different question from what it is
@@ -428,6 +485,10 @@ final class FakeSynthesisConfigurator: DisplayConfiguring, @unchecked Sendable {
 
   func currentMode(for displayID: CGDirectDisplayID) -> DisplayMode? {
     world.currentMode(for: displayID)
+  }
+
+  func achievedMode(for displayID: CGDirectDisplayID) -> DisplayMode? {
+    world.achievedMode(for: displayID)
   }
 
   func nativePixels(for _: CGDirectDisplayID) -> (width: Int, height: Int)? {

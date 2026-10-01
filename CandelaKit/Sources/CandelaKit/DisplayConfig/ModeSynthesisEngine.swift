@@ -276,6 +276,10 @@ public actor ModeSynthesisEngine {
   /// master's geometry. A commit can return success over a topology it never
   /// moved, and a moved topology does not prove the panel followed.
   ///
+  /// The raw readback, not `currentMode(for:)`: a mirrored slave reports the
+  /// master's geometry, which its own list need not carry, and resolving it
+  /// would answer nil or a different entry sharing the id.
+  ///
   /// Refresh is deliberately not compared. At this instant the physical reports
   /// the master's geometry at its OWN rate, and that lasts about two seconds
   /// until the engage tail re-times the slave. Nothing may persist or
@@ -284,7 +288,7 @@ public actor ModeSynthesisEngine {
     let mirrored = configurator.displays()
       .first { $0.id == pairing.physicalDisplayID }?
       .mirrorsDisplay == pairing.virtualDisplayID
-    guard mirrored, let achieved = configurator.currentMode(for: pairing.physicalDisplayID)
+    guard mirrored, let achieved = configurator.achievedMode(for: pairing.physicalDisplayID)
     else { return false }
     return achieved.logicalWidth == pairing.size.logicalWidth
       && achieved.logicalHeight == pairing.size.logicalHeight
@@ -397,38 +401,55 @@ public actor ModeSynthesisEngine {
   ///
   /// Geometry only, never `ioModeID`: mode ids are positional and a
   /// reconfiguration reassigns them, so an id comparison would fail for a panel
-  /// that came back perfectly. A nil readback is retried rather than judged; it
-  /// is the ordinary shape of a display mid-reconfiguration.
+  /// that came back perfectly.
+  ///
+  /// Up to three reads, because a display mid-reconfiguration is evidence of
+  /// nothing: a nil read, the rendered size and a mode the list does not carry
+  /// are all re-read. Only a listed geometry of the panel's own is judged on
+  /// sight. After three reads the last non-nil read decides, so the rendered
+  /// size or an unlisted mode is `.wrong`; no non-nil read at all is `.unreadable`.
+  ///
+  /// The readback is `achievedMode(for:)`, never `currentMode(for:)`: the
+  /// resolved read answers nil for an unpublished descriptor, which would turn
+  /// the membership half's `.wrong` into an accepted `.unreadable`.
   private func panelRestoreVerdict(_ pairing: SynthesisPairing) -> PanelRestoreVerdict {
-    var panel: DisplayMode?
+    var modes: [DisplayMode]?
+    var sawAReading = false
     for attempt in 1...3 {
-      panel = configurator.currentMode(for: pairing.physicalDisplayID)
-      if panel != nil { break }
+      if attempt > 1, readbackRetryDelay > 0 { Thread.sleep(forTimeInterval: readbackRetryDelay) }
+      guard let panel = configurator.achievedMode(for: pairing.physicalDisplayID) else { continue }
+      sawAReading = true
+      let isTheRenderedSize = panel.logicalWidth == pairing.size.logicalWidth
+        && panel.logicalHeight == pairing.size.logicalHeight
+        && panel.pixelWidth == pairing.size.pixelWidth
+        && panel.pixelHeight == pairing.size.pixelHeight
+      guard !isTheRenderedSize else { continue }
+      if modes == nil {
+        guard let listed = publishedModes(of: pairing.physicalDisplayID) else { return .unreadable }
+        modes = listed
+      }
+      let publishes = modes?.contains {
+        $0.logicalWidth == panel.logicalWidth
+          && $0.logicalHeight == panel.logicalHeight
+          && $0.pixelWidth == panel.pixelWidth
+          && $0.pixelHeight == panel.pixelHeight
+      } == true
+      if publishes { return .backOnItsOwnMode }
+    }
+    return sawAReading ? .wrong : .unreadable
+  }
+
+  /// The enumeration gets the same patience as the readback: an empty list is
+  /// CoreGraphics failing to enumerate mid-reconfiguration, and judging it
+  /// would call that a wrong answer and retain the pairing forever. Nil when it
+  /// stays empty. Read once per verdict.
+  private func publishedModes(of displayID: CGDirectDisplayID) -> [DisplayMode]? {
+    for attempt in 1...3 {
+      let modes = configurator.modes(for: displayID)
+      if !modes.isEmpty { return modes }
       if attempt < 3, readbackRetryDelay > 0 { Thread.sleep(forTimeInterval: readbackRetryDelay) }
     }
-    guard let panel else { return .unreadable }
-    let isTheRenderedSize = panel.logicalWidth == pairing.size.logicalWidth
-      && panel.logicalHeight == pairing.size.logicalHeight
-      && panel.pixelWidth == pairing.size.pixelWidth
-      && panel.pixelHeight == pairing.size.pixelHeight
-    guard !isTheRenderedSize else { return .wrong }
-    // The enumeration gets the same patience as the readback: an empty list is
-    // CoreGraphics failing to enumerate mid-reconfiguration, and judging it
-    // would call that a wrong answer and retain the pairing forever.
-    var modes: [DisplayMode] = []
-    for attempt in 1...3 {
-      modes = configurator.modes(for: pairing.physicalDisplayID)
-      if !modes.isEmpty { break }
-      if attempt < 3, readbackRetryDelay > 0 { Thread.sleep(forTimeInterval: readbackRetryDelay) }
-    }
-    guard !modes.isEmpty else { return .unreadable }
-    let publishes = modes.contains {
-      $0.logicalWidth == panel.logicalWidth
-        && $0.logicalHeight == panel.logicalHeight
-        && $0.pixelWidth == panel.pixelWidth
-        && $0.pixelHeight == panel.pixelHeight
-    }
-    return publishes ? .backOnItsOwnMode : .wrong
+    return nil
   }
 
   private func mirrorStands(_ pairing: SynthesisPairing) -> Bool {

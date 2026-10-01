@@ -3,14 +3,15 @@ import Foundation
 
 /// Restores a hovered window without changing its content-stability evidence.
 /// Bounds are display-local, independent of the coarse capture grid or rotation.
+/// `eligible` nil means every window may be hovered.
 struct AdaptiveWindowRestoration: Sendable {
   private var hovered: UInt32?
   private var leftAt: [UInt32: Date] = [:]
   var needsInputTracking: Bool { hovered != nil || !leftAt.isEmpty }
   var isReturning: Bool { !leftAt.isEmpty }
 
-  mutating func update(pointer: CGPoint?, windows: [WindowSnapshot], at now: Date)
-    -> [UInt32: Double]
+  mutating func update(pointer: CGPoint?, windows: [WindowSnapshot], at now: Date,
+                       eligible: Set<UInt32>? = nil) -> [UInt32: Double]
   {
     let present = Set(windows.map(\.windowID))
     leftAt = leftAt.filter { present.contains($0.key) }
@@ -18,7 +19,9 @@ struct AdaptiveWindowRestoration: Sendable {
     // Hit the frontmost rectangle before considering its layer. A menu or
     // overlay must not grant a hover to the ordinary window behind it.
     let hit = pointer.flatMap { point in windows.first { $0.bounds.contains(point) } }
-    let current = hit.flatMap { $0.layer == 0 ? $0.windowID : nil }
+    let current = hit.flatMap {
+      $0.layer == 0 && eligible?.contains($0.windowID) != false ? $0.windowID : nil
+    }
     if current != hovered {
       if let hovered { leftAt[hovered] = now }
       hovered = current
