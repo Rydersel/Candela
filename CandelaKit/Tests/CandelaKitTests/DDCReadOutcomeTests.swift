@@ -418,9 +418,10 @@ private func pacerOnAQuietBus(_ clock: FakeClock) -> DDCBusPacer {
   #expect(panel.trace == ["write", "sleep:10000", "write", "sleep:50000", "read"])
 }
 
-/// Retries are untouched: the retry sleep and the next attempt's own sleep both
-/// stand. Only the FIRST packet of a transaction is paced from the bus.
-@Test func aRetryKeepsBothOfItsSleeps() {
+/// Between attempts the retry sleep and the next attempt's own sleep both stand;
+/// only the FIRST packet of a transaction is paced from the bus. After the last
+/// attempt nothing is owed: the next transaction's first packet pays the floor.
+@Test func aRetryKeepsBothSleepsBetweenAttemptsAndNoneAfterTheLast() {
   let clock = FakeClock()
   let panel = ScriptedPanel([], writeResults: [-1], clock: clock)
   let outcome = runPaced(
@@ -428,7 +429,37 @@ private func pacerOnAQuietBus(_ clock: FakeClock) -> DDCBusPacer {
   )
   #expect(outcome == .silent)
   #expect(panel.writes == 2)
-  #expect(panel.trace == ["write", "sleep:20000", "sleep:10000", "write", "sleep:20000"])
+  #expect(panel.trace == ["write", "sleep:20000", "sleep:10000", "write"])
+  #expect(panel.trace.last?.hasPrefix("sleep") == false)
+}
+
+@Test func aFailedReadLadderEndsOnItsLastRead() {
+  let clock = FakeClock()
+  let panel = ScriptedPanel([[]], clock: clock)
+  let outcome = runPaced(
+    panel, pacer: pacerOnAQuietBus(clock), send: [0x10], replyLength: 11, retries: 1
+  )
+  #expect(outcome == .silent)
+  #expect(panel.trace == ["write", "sleep:50000", "read", "sleep:20000", "sleep:10000", "write", "sleep:50000", "read"])
+}
+
+private func capabilityTrace(_ panel: ScriptedPanel) -> [String] {
+  _ = Arm64DDC.runCapabilityRequest(
+    service: nil, offset: 0, writeSleepTime: 10000, readSleepTime: 50000,
+    numOfRetryAttempts: 1, retrySleepTime: 20000, transport: panel.transport
+  )
+  return panel.trace
+}
+
+/// Same rule for the capabilities ladder, on both of its failure arms.
+@Test func theCapabilitiesLadderSleepsBetweenAttemptsAndNotAfterTheLast() {
+  #expect(capabilityTrace(ScriptedPanel([nil])) == [
+    "sleep:10000", "write", "sleep:50000", "read", "sleep:20000",
+    "sleep:10000", "write", "sleep:50000", "read",
+  ])
+  #expect(capabilityTrace(ScriptedPanel([], writeResults: [-1])) == [
+    "sleep:10000", "write", "sleep:20000", "sleep:10000", "write",
+  ])
 }
 
 /// Same rule inside one attempt: a second write cycle is not the first packet,

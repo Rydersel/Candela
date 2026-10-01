@@ -96,9 +96,6 @@ public struct AdaptiveRegionProtection: Sendable {
       return nil
     }
 
-    let windowScales = windowRestoration.update(
-      pointer: activity.pointerPosition, windows: windows, at: now)
-
     // History only adjusts depth after a region qualifies on present evidence.
     // An immature or malformed record earns no extra dimming.
     let useHistory = exposure.sampleCount >= ExposureAccumulator.minimumSamplesForAnalysis
@@ -124,8 +121,14 @@ public struct AdaptiveRegionProtection: Sendable {
       cells[cell] = min(0.25, StaticRegionDetector.Thresholds.defaultDepth + extra)
     }
     cells = Self.featherBoundaries(cells)
-    // Hover changes opacity, not eligibility. Feather first so restoring one
-    // window cannot weaken protection at a neighboring window's boundary.
+    // Only a window with nominated cells earns a hover; any other holds input
+    // tracking for nothing. Taken before the hover scale so a cleared window stays eligible.
+    let eligible = Set(cells.indices.compactMap { cells[$0] > 0 ? observation.windowIDByCell[$0] : nil })
+    let windowScales = windowRestoration.update(
+      pointer: activity.pointerPosition, windows: windows, at: now, eligible: eligible)
+    // Hover changes opacity, never which cells are nominated. Feather first so
+    // restoring one window cannot weaken protection at a neighboring window's
+    // boundary.
     for cell in cells.indices {
       if let window = observation.windowIDByCell[cell] {
         cells[cell] *= windowScales[window] ?? 1

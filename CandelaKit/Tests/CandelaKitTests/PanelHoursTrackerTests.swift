@@ -242,4 +242,39 @@ struct PanelHoursTrackerTests {
     #expect(defaults.double(forKey: "oledPanelSeconds.abc") == 120)
     #expect(defaults.double(forKey: "oledStandbySeconds.abc") == 0)
   }
+
+  @Test func flushPersistsATailBelowTheDebounce() {
+    let defaults = InMemoryDefaults()
+    defaults.set(100.0, forKey: "oledPanelSeconds.pk")
+    defaults.set(9 * 3600.0, forKey: "oledStandbySeconds.pk")
+    let t = PanelHoursTracker(defaults: defaults, persistenceKey: "pk")
+    t.dismissStandbyNote()
+    t.noteTick(displayAwake: true, secondsSinceLastTick: 10)
+    #expect(defaults.double(forKey: "oledPanelSeconds.pk") == 100)
+    t.flush()
+    #expect(defaults.double(forKey: "oledPanelSeconds.pk") == 110)
+    // Not a standby: the since counter and the dismissal both survive a quit.
+    #expect(defaults.double(forKey: "oledStandbySeconds.pk") == 9 * 3600 + 10)
+    #expect(defaults.bool(forKey: "oledStandbyNoteDismissed.pk"))
+  }
+
+  @Test func flushOnAnUntouchedTrackerWritesNothing() {
+    let defaults = WriteCountingDefaults()
+    let t = PanelHoursTracker(defaults: defaults, persistenceKey: "pk")
+    t.flush()
+    #expect(defaults.writeCount == 0)
+    #expect(defaults.object(forKey: "oledPanelSeconds.pk") == nil)
+    #expect(defaults.object(forKey: "oledStandbySeconds.pk") == nil)
+  }
+
+  @Test func aSecondFlushWithNothingNewWritesNothing() {
+    let defaults = WriteCountingDefaults()
+    let t = PanelHoursTracker(defaults: defaults, persistenceKey: "pk")
+    t.noteTick(displayAwake: true, secondsSinceLastTick: 10)
+    t.flush()
+    let afterFirst = defaults.writeCount
+    #expect(afterFirst > 0)
+    t.flush()
+    #expect(defaults.writeCount == afterFirst)
+  }
 }

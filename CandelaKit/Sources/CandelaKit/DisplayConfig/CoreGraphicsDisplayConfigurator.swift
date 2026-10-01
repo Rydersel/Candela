@@ -146,7 +146,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// `kCGDisplayShowDuplicateLowResolutionModes`, measured on hardware at
   /// 132/132, 332/332 and 120/120 across three panels.
   public func currentMode(for displayID: CGDirectDisplayID) -> DisplayMode? {
-    Self.resolveCurrent(read: { achievedMode(displayID) }, in: modes(for: displayID))
+    Self.resolveCurrent(read: { achievedMode(for: displayID) }, in: modes(for: displayID))
   }
 
   /// Resolved rather than looked up: the display can be running a duplicate the
@@ -180,7 +180,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     let modes = Self.merged(pass)
     return DisplayModeSnapshot(
       modes: modes,
-      current: Self.resolveCurrent(read: { achievedMode(displayID) }, in: modes),
+      current: Self.resolveCurrent(read: { achievedMode(for: displayID) }, in: modes),
       nativePixels: DisplayModeSnapshot.nativePixels(in: modes),
       withheldByWireTimingGuard: Self.withheld(pass)
     )
@@ -253,7 +253,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
       // callers must revert, not report "nothing changed". The id compare is
       // sound here because CoreGraphics and CGS share one mode-ID space.
       throw DisplayConfigError(
-        unhonouredCommit: .init(requested: mode, achieved: achievedMode(displayID)))
+        unhonouredCommit: .init(requested: mode, achieved: achievedMode(for: displayID)))
     }
   }
 
@@ -303,7 +303,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
 
     // THE RETURN CODE IS NOT THE EVIDENCE; the achieved mode is. Bounded settle
     // rather than one read, as `applyRotation` does.
-    let achieved = settled(read: { achievedMode(displayID) }) {
+    let achieved = settled(read: { achievedMode(for: displayID) }) {
       ModeApplyVerification.verdict(requested: mode, achieved: $0) == .honoured
     }
     guard ModeApplyVerification.verdict(requested: mode, achieved: achieved) == .honoured else {
@@ -386,7 +386,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// Not `currentMode(for:)`: that resolves against the deduplicated list and
   /// answers nil for anything missing from it, which the settle loop would read
   /// as a mode that never landed. It also re-enumerates every CGS descriptor.
-  private func achievedMode(_ displayID: CGDirectDisplayID) -> DisplayMode? {
+  public func achievedMode(for displayID: CGDirectDisplayID) -> DisplayMode? {
     CGDisplayCopyDisplayMode(displayID).map {
       Self.displayMode(ioModeID: $0.ioDisplayModeID, mode: $0)
     }
