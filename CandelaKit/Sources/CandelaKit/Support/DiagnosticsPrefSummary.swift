@@ -93,10 +93,7 @@ public enum DiagnosticsPrefSummary {
       if !tuning.remapCodes.isEmpty {
         // Hex, matching `setTuning` and the Advanced page: a decimal report
         // could not be pasted back.
-        noteCommand(
-          .remapDDC, command,
-          tuning.remapCodes.map { String(format: "%02x", $0) }.joined(separator: ", ")
-        )
+        noteCommand(.remapDDC, command, DisplayPrefs.formatRemapCodes(tuning.remapCodes))
       }
     }
 

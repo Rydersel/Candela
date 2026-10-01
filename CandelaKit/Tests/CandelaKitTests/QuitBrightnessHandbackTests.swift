@@ -43,13 +43,11 @@ private actor HandbackPanel: DDCWriting {
 @Suite("Quit brightness handback") @MainActor
 struct QuitBrightnessHandbackTests {
   @MainActor private final class Rig {
-    let suite = "quit-handback-tests-\(UUID().uuidString)"
-    let defaults: UserDefaults
+    let defaults = InMemoryDefaults()
     let prefs: DisplayPrefs
     let store = PathMemoryStore()
     let panel = HandbackPanel()
     init(_ saved: Double = 0.81) {
-      defaults = UserDefaults(suiteName: suite)!
       prefs = DisplayPrefs(defaults: defaults, persistenceKey: "panel")
       store.values["logical"] = saved
     }
@@ -60,13 +58,11 @@ struct QuitBrightnessHandbackTests {
                                     shade: RecordingShade(), gamma: RecordingGamma()),
         prefs: prefs, displayID: 7, store: store, storageKey: "logical", wireSiblings: [])
     }
-    func clear() { defaults.removePersistentDomain(forName: suite) }
   }
 
   @Test(arguments: [0.81, 0.905])
   func repeatedQuitAndLaunchPreserveLogicalBrightness(saved: Double) async {
     let rig = Rig(saved)
-    defer { rig.clear() }
     var current = rig.controller()
     for _ in 0..<2 {
       current.restoreFullRangeDDC()
@@ -85,7 +81,6 @@ struct QuitBrightnessHandbackTests {
 
   @Test func realMonitorChangeUsesNormalCombinedAdoption() async {
     let rig = Rig()
-    defer { rig.clear() }
     let outgoing = rig.controller()
     outgoing.restoreFullRangeDDC()
     await outgoing.waitForPendingWrites()
@@ -99,7 +94,6 @@ struct QuitBrightnessHandbackTests {
 
   @Test func failedQuitDoesNotAuthorizeHandbackRecovery() async {
     let rig = Rig()
-    defer { rig.clear() }
     await rig.panel.setSuccess(false)
     let outgoing = rig.controller()
     outgoing.restoreFullRangeDDC()
@@ -114,7 +108,6 @@ struct QuitBrightnessHandbackTests {
 
   @Test func failedNormalizationAndAutomaticRestoreRetainEvidenceAcrossAnotherQuit() async {
     let rig = Rig()
-    defer { rig.clear() }
     let outgoing = rig.controller()
     outgoing.restoreFullRangeDDC()
     await outgoing.waitForPendingWrites()
@@ -138,7 +131,6 @@ struct QuitBrightnessHandbackTests {
 
   @Test func epochSkippedQuitDoesNotCreateProvenance() async {
     let rig = Rig()
-    defer { rig.clear() }
     let outgoing = rig.controller()
     outgoing.setEpochProvider({ 1 }, isCurrent: { _ in false })
     outgoing.restoreFullRangeDDC()
@@ -152,7 +144,6 @@ struct QuitBrightnessHandbackTests {
 
   @Test func softwareZoneRestoresParkedHardwareWithoutOverwritingStoredSoftwareValue() async {
     let rig = Rig(0.3)
-    defer { rig.clear() }
     let outgoing = rig.controller()
     outgoing.setBrightness(0.3)
     await outgoing.waitForPendingWrites()
@@ -171,7 +162,6 @@ struct QuitBrightnessHandbackTests {
   @Test(arguments: [0, 1, 2, 3, 4])
   func exactRawMatchingUsesTheQuitMapping(variant: Int) async {
     let rig = Rig()
-    defer { rig.clear() }
     var tuning = rig.prefs.tuning(for: .brightness)
     switch variant {
     case 0: tuning.curveIndex = 1
@@ -198,7 +188,6 @@ struct QuitBrightnessHandbackTests {
 
   @Test func changedMappingAndChangedSavedValueRejectStaleProvenance() async {
     let rig = Rig()
-    defer { rig.clear() }
     let outgoing = rig.controller()
     outgoing.restoreFullRangeDDC()
     await outgoing.waitForPendingWrites()
@@ -220,7 +209,6 @@ struct QuitBrightnessHandbackTests {
 
   @Test func onlyTheReadableRemapRegistersSuccessfulWriteAuthorizesRecovery() async {
     let rig = Rig()
-    defer { rig.clear() }
     var tuning = rig.prefs.tuning(for: .brightness)
     tuning.remapCodes = [0x10, 0x13]
     rig.prefs.setTuning(tuning, for: .brightness)
@@ -245,7 +233,6 @@ struct QuitBrightnessHandbackTests {
   @Test(arguments: [false, true])
   func aReadlessTwinKeepsDurableEvidenceAfterTheOtherTwinRecovers(abandonFirst: Bool) async {
     let rig = Rig()
-    defer { rig.clear() }
     let outgoing = rig.controller()
     outgoing.restoreFullRangeDDC()
     await outgoing.waitForPendingWrites()
@@ -268,7 +255,6 @@ struct QuitBrightnessHandbackTests {
 
   @Test func legacyEligibilitySurvivesUnreadableLaunchAndDurableProvenanceWins() async {
     let rig = Rig()
-    defer { rig.clear() }
     await rig.panel.setRaw(81)
     let first = rig.controller()
     first.noteLegacyUpdateHandback()
@@ -293,7 +279,6 @@ struct QuitBrightnessHandbackTests {
 
   @Test func aReadFromAnotherMappingCannotNormalizeAfterPreferencesReturnToTheRecordMapping() async {
     let rig = Rig()
-    defer { rig.clear() }
     let outgoing = rig.controller()
     outgoing.restoreFullRangeDDC()
     await outgoing.waitForPendingWrites()

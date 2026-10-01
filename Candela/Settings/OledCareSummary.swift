@@ -4,21 +4,6 @@ import SwiftUI
 
 /// Shared geometry for every surface that draws a display's exposure history.
 enum OledPanelGeometry {
-  /// The map's drawn aspect, panel-native (the manufactured landscape
-  /// rectangle), because that is the geometry the cells were binned in. Not the
-  /// grid's own ratio, which is one panel's and stretches every other display's
-  /// history. Nil when the geometry cannot be read or the rotation is not a
-  /// right angle; callers fall back to the grid's ratio rather than guessing.
-  static func panelNativeAspect(for displayID: CGDirectDisplayID?) -> CGFloat? {
-    guard let displayID else { return nil }
-    let width = CGFloat(CGDisplayPixelsWide(displayID))
-    let height = CGFloat(CGDisplayPixelsHigh(displayID))
-    guard width > 0, height > 0,
-      let rotation = DisplayRotation(degrees: CGDisplayRotation(displayID))
-    else { return nil }
-    return rotation.swapsAxes ? height / width : width / height
-  }
-
   /// The peak cell of a normalized map, ties to the first index, the same answer
   /// `ExposureMap.hottestCell` gives.
   static func hottestIndex(_ cells: [Double]) -> Int? {

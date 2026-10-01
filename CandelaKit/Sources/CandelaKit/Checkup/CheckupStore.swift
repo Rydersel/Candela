@@ -36,12 +36,10 @@ public struct CheckupStore: Sendable {
 
   /// The run's day in UTC. The exported file name and the document that names
   /// the run both read from here, so the two can never disagree about the date.
-  public static func day(_ date: Date) -> String {
-    let f = ISO8601DateFormatter()
-    f.formatOptions = [.withFullDate]
-    f.timeZone = TimeZone(identifier: "UTC")
-    return f.string(from: date)
-  }
+  public static func day(_ date: Date) -> String { date.formatted(dayStyle) }
+
+  private static let dayStyle = Date.ISO8601FormatStyle(timeZone: .gmt)
+    .year().month().day()
 
   /// For directory names nobody sees; flattens spaces too.
   static func safe(_ s: String) -> String {

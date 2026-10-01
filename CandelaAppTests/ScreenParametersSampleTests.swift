@@ -47,7 +47,6 @@ struct ScreenParametersSampleTests {
 
   @Test func theModeCoordinatorSamplesTheOnlineListInsideThePost() {
     let rig = Self.modeRig()
-    defer { rig.forgetPrefs() }
 
     let before = rig.configurator.onlineListReads
     rig.center.post(name: NSApplication.didChangeScreenParametersNotification, object: nil)
@@ -59,7 +58,6 @@ struct ScreenParametersSampleTests {
   /// `noteObserved(live:)` straight off `topology.displays`.
   @Test func theArrangementCoordinatorSamplesTheOnlineListInsideThePost() {
     let fixture = Self.layoutFixture()
-    defer { fixture.forgetPrefs() }
 
     let before = fixture.rig.topologyReads
     fixture.center.post(name: NSApplication.didChangeScreenParametersNotification, object: nil)
@@ -72,7 +70,6 @@ struct ScreenParametersSampleTests {
   /// records the departure that makes the second pass an arrival.
   @Test func aReplugInsideOneMainQueueTurnStillRestoresTheRememberedMode() async throws {
     let rig = Self.modeRig()
-    defer { rig.forgetPrefs() }
     rig.persistence.setEnabled(true, for: rig.identity)
     rig.persistence.store(Self.smaller.descriptor, for: rig.identity)
 
@@ -100,7 +97,6 @@ struct ScreenParametersSampleTests {
   /// sample is the only record that the display left.
   @Test func aReplugInsideOneMainQueueTurnStillRestoresTheSavedLayout() async {
     let fixture = Self.layoutFixture()
-    defer { fixture.forgetPrefs() }
     let rig = fixture.rig
     let saved = rig.currentArrangement()
     fixture.store.setRestoreEnabled(true)
@@ -133,11 +129,6 @@ struct ScreenParametersSampleTests {
     let persistence: ModePersistence
     let identity: DisplayConfigIdentity
     let center: NotificationCenter
-    let suiteName: String
-
-    func forgetPrefs() {
-      UserDefaults.standard.removePersistentDomain(forName: suiteName)
-    }
   }
 
   private static func panel(_ identity: DisplayConfigIdentity) -> ConfiguredDisplay {
@@ -152,8 +143,7 @@ struct ScreenParametersSampleTests {
       nativePixels: (width: 3440, height: 1440)
     )
     let configurator = FakeSynthesisDisplayConfigurator(world)
-    let suiteName = "app-tests-screen-parameters-\(UUID().uuidString)"
-    let persistence = ModePersistence(defaults: UserDefaults(suiteName: suiteName)!)
+    let persistence = ModePersistence(defaults: InMemoryDefaults())
     let center = NotificationCenter()
     let modes = DisplayModeCoordinator(
       gate: DisplayReconfigurationGate(),
@@ -163,7 +153,7 @@ struct ScreenParametersSampleTests {
     )
     return ModeRig(
       world: world, configurator: configurator, modes: modes, persistence: persistence,
-      identity: identity, center: center, suiteName: suiteName
+      identity: identity, center: center
     )
   }
 
@@ -172,18 +162,12 @@ struct ScreenParametersSampleTests {
     let coordinator: ArrangementCoordinator
     let store: ArrangementPersistence
     let center: NotificationCenter
-    let suiteName: String
-
-    func forgetPrefs() {
-      UserDefaults.standard.removePersistentDomain(forName: suiteName)
-    }
   }
 
   private static func layoutFixture() -> LayoutFixture {
-    let suiteName = "app-tests-screen-parameters-layout-\(UUID().uuidString)"
     let rig = LayoutRig()
     let center = NotificationCenter()
-    let store = ArrangementPersistence(defaults: UserDefaults(suiteName: suiteName)!)
+    let store = ArrangementPersistence(defaults: InMemoryDefaults())
     let coordinator = ArrangementCoordinator(
       gate: DisplayReconfigurationGate(),
       configurator: rig,
@@ -192,7 +176,7 @@ struct ScreenParametersSampleTests {
       notificationCenter: center
     )
     return LayoutFixture(
-      rig: rig, coordinator: coordinator, store: store, center: center, suiteName: suiteName
+      rig: rig, coordinator: coordinator, store: store, center: center
     )
   }
 }

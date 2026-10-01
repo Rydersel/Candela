@@ -5,7 +5,7 @@ import Testing
 @Suite("Update completion confirmation")
 @MainActor
 struct UpdateCompletionTests {
-  let defaults = UserDefaults(suiteName: "update-completion-tests-\(UUID().uuidString)")!
+  let defaults = InMemoryDefaults()
 
   @Test func ordinaryLaunchDoesNotProduceAConfirmation() {
     let state = UpdateCompletionState()

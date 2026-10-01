@@ -7,7 +7,7 @@ import Testing
 /// per-call `TestFixtures.prefs` suite cannot do: the factory has to answer
 /// from the same storage the test seeded.
 private struct PrefsDomain {
-  let defaults = UserDefaults(suiteName: "panel-row-tests-\(UUID().uuidString)")!
+  let defaults = InMemoryDefaults()
 
   func prefs(_ persistenceKey: String) -> DisplayPrefs {
     DisplayPrefs(defaults: defaults, persistenceKey: persistenceKey)
