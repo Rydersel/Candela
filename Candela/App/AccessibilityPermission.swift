@@ -165,6 +165,9 @@ final class AccessibilityPermission {
     let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
       MainActor.assumeIsolated { self?.recheck() }
     }
+    // Coalescable with other wakeups; the tap's own prober covers fast
+    // revocation, so a late backstop tick costs nothing.
+    timer.tolerance = interval * 0.1
     pollTimer = timer
     RunLoop.main.add(timer, forMode: .common)
   }
