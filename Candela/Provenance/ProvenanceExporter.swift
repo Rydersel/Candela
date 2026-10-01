@@ -6,8 +6,9 @@ import Foundation
 /// tracker over a key double-books every tick.
 @MainActor
 enum ProvenanceExporter {
-  /// Call from an action, never a view body: `hoursTracker(for:)` and `wearTracker(for:)`
-  /// memoise into observation-tracked state, so a body reading them mutates what it observes.
+  /// Call from an action, never a view body: it lists and decodes every checkup
+  /// file stored for the display, and `liveIdentity` runs a full mode
+  /// enumeration. A body can pay both on every re-render.
   static func record(for state: AppModel.DisplayState, model: AppModel, now: Date = .now) -> ProvenanceRecord {
     let key = state.display.persistenceKey
     let prefs = DisplayPrefs(persistenceKey: key)
@@ -66,14 +67,14 @@ enum ProvenanceExporter {
   /// native in a document that travels with the display.
   private static func liveIdentity(for state: AppModel.DisplayState) -> CheckupDisplayIdentity? {
     let configurator = CoreGraphicsDisplayConfigurator()
-    let modes = configurator.modes(for: state.display.id)
-    let native = configurator.nativePixels(for: state.display.id)
+    let snapshot = configurator.modeSnapshot(for: state.display.id)
+    let native = snapshot.nativePixels
     return CheckupIdentityFacts.read(
       displayID: state.display.id, identityKey: state.display.persistenceKey,
       vendorID: CGDisplayVendorNumber(state.display.id), modelID: CGDisplayModelNumber(state.display.id),
       nativePixels: (native?.width ?? Int(CGDisplayPixelsWide(state.display.id)),
                      native?.height ?? Int(CGDisplayPixelsHigh(state.display.id))),
-      maxRefreshHz: DisplayModeCatalog.distinctRates(modes).max())
+      maxRefreshHz: DisplayModeCatalog.distinctRates(snapshot.modes).max())
   }
 
   /// The checkup's own identity first, since a run measured native pixels the way
