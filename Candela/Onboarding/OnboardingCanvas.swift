@@ -60,6 +60,7 @@ struct OnboardingCanvas: View {
   /// motion instead of jumping it forward.
   @State private var offKeySince: Date?
   @State private var offKeyTotal: TimeInterval = 0
+  @State private var tick = Date.now
 
   var body: some View {
     ZStack {
@@ -67,13 +68,12 @@ struct OnboardingCanvas: View {
       if reduceMotion {
         blobs(at: 0)
       } else if activeState == .key {
-        // Periodic, not .animation: the animation schedule runs a full hosting-view
-        // layout every display cycle while key, whatever its minimum interval.
+        // On macOS 26 a TimelineView in a hosting view costs a full window layout per
+        // display cycle whatever its schedule (measured 12 to 16% of a core while key),
+        // so the drift is ticked by a task at the frame rate instead.
         // 12 fps: in this 760 pt window a blob centre moves about a third of a
         // point per frame, and each frame costs two full-window Gaussian blurs.
-        TimelineView(.periodic(from: .now, by: 1.0 / 12.0)) { context in
-          blobs(at: drift(at: context.date))
-        }
+        blobs(at: drift(at: tick))
       } else {
         // Off-key covers behind another app, minimized and another Space alike.
         blobs(at: drift(at: offKeySince ?? .now))
@@ -87,11 +87,25 @@ struct OnboardingCanvas: View {
     .animation(.easeInOut(duration: 1.4), value: act)
     .ignoresSafeArea()
     .accessibilityHidden(true)
+    .task(id: activeState == .key && !reduceMotion) {
+      guard activeState == .key, !reduceMotion else { return }
+      while true {
+        do {
+          try await Task.sleep(for: .milliseconds(83), tolerance: .milliseconds(8))
+        } catch {
+          return
+        }
+        tick = .now
+      }
+    }
     .onAppear { if activeState != .key, offKeySince == nil { offKeySince = .now } }
     .onChange(of: activeState) { _, state in
       if state == .key {
         if let since = offKeySince { offKeyTotal += Date.now.timeIntervalSince(since) }
         offKeySince = nil
+        // Same update as the offKeyTotal bump, or the first key frame renders a
+        // stale tick against the new total and jumps back by the off-key time.
+        tick = .now
       } else if offKeySince == nil {
         offKeySince = .now
       }
