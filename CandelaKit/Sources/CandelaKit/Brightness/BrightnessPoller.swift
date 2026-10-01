@@ -104,7 +104,9 @@ public actor BrightnessPoller {
     while !Task.isCancelled {
       let delay = pollOnce()
       do {
-        try await Task.sleep(for: delay)
+        // A tenth of the cadence lets the kernel coalesce this wakeup with
+        // others; the 100 ms fast cadence still lands within 10 ms.
+        try await Task.sleep(for: delay, tolerance: delay / 10)
       } catch {
         return
       }
