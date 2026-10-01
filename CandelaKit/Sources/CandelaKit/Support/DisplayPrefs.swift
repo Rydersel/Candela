@@ -371,10 +371,7 @@ public final class DisplayPrefs: @unchecked Sendable {
     defaults.set(tuning.maxDDCOverride, forKey: commandKey("maxDDCOverride", command))
     defaults.set(tuning.curveIndex, forKey: commandKey("curveDDC", command))
     defaults.set(tuning.invert, forKey: commandKey("invertDDC", command))
-    defaults.set(
-      tuning.remapCodes.map { String(format: "%02x", $0) }.joined(separator: ", "),
-      forKey: commandKey("remapDDC", command)
-    )
+    defaults.set(Self.formatRemapCodes(tuning.remapCodes), forKey: commandKey("remapDDC", command))
   }
 
   /// Comma-separated hex bytes; whitespace trimmed, and empty, zero and non-hex
@@ -385,6 +382,12 @@ public final class DisplayPrefs: @unchecked Sendable {
       guard !trimmed.isEmpty, let code = UInt8(trimmed, radix: 16), code != 0 else { return nil }
       return code
     }
+  }
+
+  /// Shipped on-disk schema, read back by `parseRemapCodes`. Every renderer
+  /// goes through here so none drifts from what is stored.
+  public static func formatRemapCodes(_ codes: [UInt8]) -> String {
+    codes.map { String(format: "%02x", $0) }.joined(separator: ", ")
   }
 
   /// Per-command key format `"<name>.<cmd.rawValue>.<pk>"`, fixed forever once

@@ -244,6 +244,16 @@ struct DisplayPrefsTests {
     #expect(DisplayPrefs.parseRemapCodes("") == [])
   }
 
+  /// On-disk schema: the exact string shipped builds wrote, and it must parse back.
+  @Test func remapCodesFormatToTheShippedStringAndRoundTrip() {
+    #expect(DisplayPrefs.formatRemapCodes([0x10, 0x62]) == "10, 62")
+    #expect(DisplayPrefs.formatRemapCodes([0x0A, 0xFF]) == "0a, ff")
+    #expect(DisplayPrefs.formatRemapCodes([]) == "")
+    for codes: [UInt8] in [[0x10, 0x62], [0x0A, 0xFF], [0x2F], []] {
+      #expect(DisplayPrefs.parseRemapCodes(DisplayPrefs.formatRemapCodes(codes)) == codes)
+    }
+  }
+
   @Test func effectiveMaxResolvesLikeTheFork() {
     var tuning = CommandTuning(
       unavailableDDC: false, minDDCOverride: 0, maxDDCOverride: 0,

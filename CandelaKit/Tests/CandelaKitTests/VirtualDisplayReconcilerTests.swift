@@ -179,7 +179,7 @@ struct VirtualDisplayReconcilerTests {
 @Suite("Virtual slot prefs")
 struct VirtualSlotPrefsTests {
   private func freshPrefs() -> DisplayPrefs {
-    let defaults = UserDefaults(suiteName: "vd-slot-tests-\(UUID().uuidString)")!
+    let defaults = InMemoryDefaults()
     return DisplayPrefs(defaults: defaults, persistenceKey: "app")
   }
 
@@ -201,7 +201,7 @@ struct VirtualSlotPrefsTests {
   /// that only set configured) still shows its tile; removal clears every
   /// key including the marker.
   @Test func definedFallsBackToConfiguredAndClearsWithTheSlot() {
-    let defaults = UserDefaults(suiteName: "vd-slot-tests-\(UUID().uuidString)")!
+    let defaults = InMemoryDefaults()
     defaults.set(true, forKey: "virtualSlotConfigured.1")
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "app")
     #expect(prefs.virtualSlot(1).defined)
@@ -214,7 +214,7 @@ struct VirtualSlotPrefsTests {
   /// `object(forKey:) as? Int` rejects while `defaults.bool` accepts "YES". Read
   /// both halves the same way or a staged slot half-applies with no error.
   @Test func shellWrittenStringValuesAreCoercedNotDropped() {
-    let defaults = UserDefaults(suiteName: "vd-slot-tests-\(UUID().uuidString)")!
+    let defaults = InMemoryDefaults()
     defaults.set("YES", forKey: "virtualSlotConfigured.1")
     defaults.set("3440", forKey: "virtualSlotWidth.1")
     defaults.set("1440", forKey: "virtualSlotHeight.1")
@@ -228,7 +228,7 @@ struct VirtualSlotPrefsTests {
   /// A wild stored value must never reach the engine: unclamped, a huge
   /// width traps the UInt32 conversion in the host on every launch.
   @Test func storedSizesAreClampedToTheEntryRange() {
-    let defaults = UserDefaults(suiteName: "vd-slot-tests-\(UUID().uuidString)")!
+    let defaults = InMemoryDefaults()
     defaults.set(9_999_999_999, forKey: "virtualSlotWidth.2")
     defaults.set(4, forKey: "virtualSlotHeight.2")
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "app")
@@ -241,7 +241,7 @@ struct VirtualSlotPrefsTests {
   /// nil for an unparseable stored string too, and a read-modify-write from
   /// any pane control must not delete the identity as a side effect.
   @Test func writingANilUUIDPreservesTheStoredOne() {
-    let defaults = UserDefaults(suiteName: "vd-slot-tests-\(UUID().uuidString)")!
+    let defaults = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "app")
     let uuid = UUID()
     var definition = prefs.virtualSlot(1)

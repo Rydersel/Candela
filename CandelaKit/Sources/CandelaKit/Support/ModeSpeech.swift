@@ -20,10 +20,8 @@ public enum ModeSpeech {
     return "\(q == q.rounded() ? String(Int(q)) : String(q)) hertz"
   }
 
-  private static func grouped(_ n: Int) -> String {
-    let f = NumberFormatter()
-    f.numberStyle = .decimal
-    f.locale = Locale(identifier: "en_US")  // English only, deterministic output
-    return f.string(from: NSNumber(value: n)) ?? String(n)
-  }
+  // English only, deterministic output
+  private static let groupedStyle = IntegerFormatStyle<Int>.number.locale(Locale(identifier: "en_US"))
+
+  private static func grouped(_ n: Int) -> String { n.formatted(groupedStyle) }
 }

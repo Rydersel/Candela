@@ -140,13 +140,13 @@ jobs:
           set -euo pipefail
           log="$RUNNER_TEMP/kit-tests.log"
 
-          # The floor is a collapse detector, not a ratchet. It sits far below
-          # the 1397 tests present when this was written so ordinary churn
+          # The floor is a collapse detector, not a ratchet. It sits well below
+          # the 2680 tests present when it was last raised, so ordinary churn
           # (deleting a suite, folding two together, moving coverage into the
           # app target) never has to touch it, and far enough above zero that a
           # run discovering nothing cannot slip past. If it ever stops
           # discriminating, raise it; do not track the real count with it.
-          floor=1000
+          floor=2000
 
           line="$(grep -E 'Test run with [0-9]+ tests' "$log" | tail -1 || true)"
           if [ -z "$line" ]; then
@@ -357,12 +357,12 @@ jobs:
           #                    exact vacuous pass the floor exists for.
           #
           # A collapse detector, not a ratchet, exactly as the Kit job's floor
-          # is. It sits far below the count this suite had when the step was
-          # written, so ordinary churn (folding two suites together, moving
+          # is. It sits well below the 803 tests this suite had when it was
+          # last raised, so ordinary churn (folding two suites together, moving
           # coverage down into the Kit) never has to touch it, and far enough
           # above zero that a run discovering nothing cannot slip past. If it
           # ever stops discriminating, raise it; never track the real count.
-          floor=25
+          floor=500
 
           line="$(grep -E 'Test run with [0-9]+ tests' "$log" | tail -1 || true)"
           if [ -z "$line" ]; then

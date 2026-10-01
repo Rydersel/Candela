@@ -568,9 +568,7 @@ struct AdvancedPage: View {
   /// `DisplayPrefs.parseRemapCodes` drops empty, zero and non-hex tokens, so the
   /// field shows what actually survived.
   private func storedRemapText(_ command: DDCCommand) -> String {
-    prefs.tuning(for: command).remapCodes
-      .map { String(format: "%02x", $0) }
-      .joined(separator: ", ")
+    DisplayPrefs.formatRemapCodes(prefs.tuning(for: command).remapCodes)
   }
 
   /// Return and focus loss both arrive here, so the two routes cannot disagree

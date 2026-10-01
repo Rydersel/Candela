@@ -186,12 +186,15 @@ public enum CGSModeRevelation {
       //    with the rightmost ~880 logical columns cropped off the desktop, the
       //    75 Hz rung at 1280x1024.
       //
-      //    NOTHING IN SOFTWARE CAN SEE THIS. `CGDisplayCopyDisplayMode`, the
+      //    CoreGraphics cannot see this. `CGDisplayCopyDisplayMode`, the
       //    capture size, `CGDisplayBounds`, `backingScaleFactor` and the
-      //    post-commit achieved-state check all read clean while broken, and no
-      //    IORegistry property records the driven timing (searched live while
-      //    broken). Prediction is the only defence, the keep/revert countdown
-      //    the only detector. Measured with a camera on the MAG 341C, 2026-08-07.
+      //    post-commit achieved-state check all read clean while broken.
+      //    Measured with a camera on the MAG 341C, 2026-08-07. The IORegistry
+      //    does record it (measured 2026-09-09): `DPTimingModeId` on the
+      //    display's `AppleCLCD2` node is the driven `TimingElements` id, with
+      //    positive controls on both externals. Nothing here reads it yet, so
+      //    prediction stays the defence and the keep/revert countdown stays
+      //    mandatory for revealed modes.
       if guardsWireTiming, !nativeRefreshes.contains(refresh) {
         counts.noNativeParentTiming += 1
         continue
