@@ -30,6 +30,10 @@ class MakefileTests(unittest.TestCase):
             shutil.copy2(checker, self.root / "tools/build")
         for name in ("Candela", "CandelaAppTests", "CandelaKit", "bin"):
             (self.root / name).mkdir()
+        # project.yml compiles the engine suite's in-memory defaults into the
+        # app-test bundle by path; xcodegen refuses a spec whose source is absent.
+        (self.root / "CandelaKit/Tests/CandelaKitTests").mkdir(parents=True)
+        (self.root / "CandelaKit/Tests/CandelaKitTests/ScratchDefaults.swift").write_text("class InMemoryDefaults {}\n")
         (self.root / "Candela/App.swift").write_text("struct App {}\n")
         (self.root / "CandelaAppTests/AppTests.swift").write_text("struct AppTests {}\n")
         self.calls = self.root / "calls.jsonl"
