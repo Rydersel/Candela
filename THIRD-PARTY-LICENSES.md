@@ -144,7 +144,7 @@ SOFTWARE.
 <https://github.com/sparkle-project/Sparkle>
 
 The other of Candela's two third-party dependencies, linked as a Swift package
-and pinned to 2.9.6. It performs the signed in-app update check and installs
+and pinned to 2.10.0. It performs the signed in-app update check and installs
 the update, and its framework ships inside the application bundle along with
 the four helper executables it signs separately.
 
