@@ -159,6 +159,8 @@ struct PanelView: View {
       // Keep the same hierarchy when a disclosure crosses the height limit.
       // The scroll view's ideal height still fits short lists to their content.
       ScrollView(.vertical) { displayRows }
+        // No rubber-banding on short lists.
+        .scrollBounceBehavior(.basedOnSize)
       Divider()
       if Self.showsKeepAwake(appPrefs: appPrefs) {
         keepAwakeRow

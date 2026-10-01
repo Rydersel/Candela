@@ -328,10 +328,7 @@ struct SavedLayoutConfirmationTests {
   private func withCoordinator(
     _ body: (ArrangementCoordinator, ArrangementPersistence, ConfirmationLayoutRig, DisplayReconfigurationGate) async throws -> Void
   ) async throws {
-    let suite = "test.saved-layout.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
-    let store = ArrangementPersistence(defaults: defaults)
+    let store = ArrangementPersistence(defaults: InMemoryDefaults())
     let rig = ConfirmationLayoutRig()
     let gate = DisplayReconfigurationGate()
     let coordinator = ArrangementCoordinator(gate: gate,

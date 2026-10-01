@@ -26,9 +26,7 @@ struct FavoriteResolutionUITests {
   }
 
   @Test func settingsStarsAreSeparateAccessibleActionsThatDoNotApplyAMode() throws {
-    let suite = "favorite-ui-tests-\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = InMemoryDefaults()
     let fixture = SynthesisFixture(modePersistence: ModePersistence(defaults: defaults))
     defer { fixture.forgetPrefs() }
     let id = SynthesisFixture.panelID
@@ -46,9 +44,7 @@ struct FavoriteResolutionUITests {
 
   @Test(arguments: [false, true])
   func panelOffersFavoritesOnceWithoutManagementButtons(hasSharperTwin: Bool) throws {
-    let suite = "favorite-ui-tests-\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = InMemoryDefaults()
     let fixture = SynthesisFixture(optedIn: false, modePersistence: ModePersistence(defaults: defaults))
     defer { fixture.forgetPrefs() }
     let id = SynthesisFixture.panelID
@@ -74,9 +70,7 @@ struct FavoriteResolutionUITests {
   }
 
   @Test func unavailableFavoriteDisablesSelectionButKeepsRemoveAccessible() throws {
-    let suite = "favorite-ui-tests-\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = InMemoryDefaults()
     let store = ModePersistence(defaults: defaults)
     let fixture = SynthesisFixture(modePersistence: store)
     defer { fixture.forgetPrefs() }

@@ -286,7 +286,7 @@ enum CheckupCopy {
     case .fieldConfirmSecondDot(let kind):
       "Showing \(fieldSubject(kind)) again, with nothing planted on it this time."
     case .hdr:
-      "What the panel advertises for high dynamic range, and whether switching it on and "
+      "What the display advertises for high dynamic range, and whether switching it on and "
         + "back off settles."
     case .summary:
       "The run is over. Its report is on this page, and it can be exported or copied."

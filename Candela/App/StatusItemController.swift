@@ -1091,9 +1091,25 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // before tracking starts; a queued layout can arrive after the menu closes.
     if let host = menu.items.first?.view as? PanelHostingView<PanelRoot> {
       let screen = statusItem?.button?.window?.screen ?? NSScreen.main
-      host.rootView.maximumHeight = screen.map { max(1, $0.visibleFrame.height - 16) }
+      host.rootView.maximumHeight = screen.map {
+        Self.panelMaximumHeight(
+          visibleHeight: $0.visibleFrame.height, frameMaxY: $0.frame.maxY,
+          visibleMaxY: $0.visibleFrame.maxY, barThickness: NSStatusBar.system.thickness)
+      }
       host.setFrameSize(host.fittingSize)
     }
+  }
+
+  /// An auto-hidden bar is inside `visibleFrame`, but the menu still opens below
+  /// it once revealed, so that part comes off too, then 16 pt for menu padding.
+  /// On a notched built-in the auto-hide case is short by the notch's extra height.
+  static func panelMaximumHeight(
+    visibleHeight: CGFloat, frameMaxY: CGFloat, visibleMaxY: CGFloat, barThickness: CGFloat
+  ) -> CGFloat {
+    let bar = NSScreen.menuBarAllowance(
+      frameMaxY: frameMaxY, visibleMaxY: visibleMaxY, barThickness: barThickness)
+    let unexcludedBar = bar - (frameMaxY - visibleMaxY)
+    return max(1, visibleHeight - unexcludedBar - 16)
   }
 
   func menuDidClose(_: NSMenu) {

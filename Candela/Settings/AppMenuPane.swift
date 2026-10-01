@@ -195,8 +195,12 @@ struct AppMenuPane: View {
 
   // MARK: - Slider appearance
 
+  /// The caption must not promise a 0% stop on every slider: volume rows snap
+  /// on `SliderSnap.stopsWithoutZero`, because landing on 0 is a mute in
+  /// `DDCValueController.apply` and, under `enableMuteUnmute`, a persistent VCP
+  /// 0x8D hardware mute a cosmetic convenience must never cause.
   private var snapRow: some View {
-    SettingRow {
+    SettingRow("Snapping pulls a slider to the nearest 25%, 50%, 75% or 100% position while you drag (and to 0% for brightness and contrast).") {
       Toggle("Snap to 25% steps", isOn: Binding(
         get: { prefs.enableSliderSnap },
         set: { enabled in
@@ -210,12 +214,8 @@ struct AppMenuPane: View {
     }
   }
 
-  /// The caption must not promise a 0% stop on every slider: volume rows snap
-  /// on `SliderSnap.stopsWithoutZero`, because landing on 0 is a mute in
-  /// `DDCValueController.apply` and, under `enableMuteUnmute`, a persistent VCP
-  /// 0x8D hardware mute a cosmetic convenience must never cause.
   private var percentRow: some View {
-    SettingRow("Snapping pulls a slider to the nearest 25%, 50%, 75% or 100% position while you drag (and to 0% for brightness and contrast). Percentages show the exact value next to each slider.") {
+    SettingRow("Percentages show the exact value next to each slider.") {
       Toggle("Show percentages", isOn: Binding(
         get: { prefs.enableSliderPercent },
         set: { enabled in

@@ -7,7 +7,7 @@ import SwiftUI
 /// rather than cutting to a new one. Reduce Motion holds it at its first frame.
 /// A non-key window holds the frame it froze on, so the drift resumes where it
 /// stopped. Stricter than the poller's consumer threshold on purpose: only the
-/// focused window has to pay for 12 frames a second.
+/// focused window pays for the animation.
 struct SettingsCanvas: View {
   var accent: Color
   var secondary: Color
@@ -19,6 +19,7 @@ struct SettingsCanvas: View {
   /// motion instead of jumping it forward.
   @State private var offKeySince: Date?
   @State private var offKeyTotal: TimeInterval = 0
+  @State private var tick = Date.now
 
   var body: some View {
     ZStack {
@@ -26,14 +27,16 @@ struct SettingsCanvas: View {
       if reduceMotion {
         blobs(at: 0)
       } else if activeState == .key {
-        // 12 fps: a blob centre moves about a third of a point per frame, and
-        // each frame costs two full-window Gaussian blurs.
-        TimelineView(.animation(minimumInterval: 1.0 / 12.0)) { context in
-          blobs(at: drift(at: context.date))
-        }
+        // On macOS 26 a TimelineView in a hosting view cost a full window layout per
+        // display cycle under every schedule tried (12 to 16% of a core, key on the
+        // General pane), so the drift is ticked by a task at the frame rate instead.
+        // 4 fps: blob 1's x, the fastest term, moves about 1 pt a frame in an
+        // 1100 pt window; under a ~200 pt blur ramp that is a quarter of an 8-bit
+        // step. Each frame costs two full-window Gaussian blurs.
+        blobs(at: drift(at: tick))
       } else {
         // A CLOSED window lands here too: the object outlives the close and used
-        // to pay for two blurs 12 times a second forever.
+        // to pay for two blurs on every frame forever.
         blobs(at: drift(at: offKeySince ?? .now))
       }
       RadialGradient(
@@ -43,13 +46,33 @@ struct SettingsCanvas: View {
     }
     .ignoresSafeArea()
     .accessibilityHidden(true)
+    .task(id: activeState == .key && !reduceMotion) {
+      guard activeState == .key, !reduceMotion else { return }
+      // Reduce Motion turning off while key leaves the tick as old as when it
+      // turned on; without this the first frame is stale for a whole interval.
+      tick = .now
+      while true {
+        do {
+          try await Task.sleep(for: .milliseconds(250), tolerance: .milliseconds(25))
+        } catch {
+          return
+        }
+        guard !Task.isCancelled else { return }
+        tick = .now
+      }
+    }
     .onAppear { if activeState != .key, offKeySince == nil { offKeySince = .now } }
     .onChange(of: activeState) { _, state in
       if state == .key {
         if let since = offKeySince { offKeyTotal += Date.now.timeIntervalSince(since) }
         offKeySince = nil
+        // Same update as the offKeyTotal bump, or the first key frame renders a
+        // stale tick against the new total and jumps back by the off-key time.
+        tick = .now
       } else if offKeySince == nil {
-        offKeySince = .now
+        // The last tick, not now: the frozen frame is the one drawn at that tick,
+        // so resume picks up exactly where the motion stopped.
+        offKeySince = tick
       }
     }
   }

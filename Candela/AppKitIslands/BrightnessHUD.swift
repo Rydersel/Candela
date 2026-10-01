@@ -143,13 +143,9 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   private static let menuBarClearance: CGFloat = 10
 
   /// Vertical space to keep free at the top of `screen`: the menu bar, plus
-  /// clearance. While the bar is showing, the frame/visibleFrame difference
-  /// measures it exactly and wins the `max`; while it is auto-hidden that
-  /// difference collapses (often to 0), so the bar's own thickness stands in for
-  /// the space it will occupy the moment it reveals. The clearance applies
-  /// either way, so it sits outside the `max`.
+  /// clearance that applies whether the bar is showing or auto-hidden.
   private static func menuBarAllowance(for screen: NSScreen) -> CGFloat {
-    max(screen.frame.maxY - screen.visibleFrame.maxY, NSStatusBar.system.thickness) + self.menuBarClearance
+    screen.menuBarAllowance + self.menuBarClearance
   }
 
   /// ONE window per display, shared by every pill kind: a show reuses the
@@ -440,5 +436,21 @@ final class BrightnessHUD: BrightnessHUDPresenting {
 extension NSScreen {
   var displayID: CGDirectDisplayID? {
     self.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+  }
+
+  /// The menu bar's height, or the status bar thickness standing in for it
+  /// while the bar is auto-hidden.
+  var menuBarAllowance: CGFloat {
+    Self.menuBarAllowance(
+      frameMaxY: frame.maxY, visibleMaxY: visibleFrame.maxY,
+      barThickness: NSStatusBar.system.thickness)
+  }
+
+  /// Auto-hiding collapses the frame/visibleFrame difference (often to 0), so the
+  /// thickness stands in for the bar once it reveals.
+  static func menuBarAllowance(
+    frameMaxY: CGFloat, visibleMaxY: CGFloat, barThickness: CGFloat
+  ) -> CGFloat {
+    max(frameMaxY - visibleMaxY, barThickness)
   }
 }

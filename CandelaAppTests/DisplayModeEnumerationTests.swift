@@ -32,11 +32,6 @@ struct DisplayModeEnumerationTests {
     let modes: DisplayModeCoordinator
     let persistence: ModePersistence
     let identity: DisplayConfigIdentity
-    let suiteName: String
-
-    func forgetPrefs() {
-      UserDefaults.standard.removePersistentDomain(forName: suiteName)
-    }
   }
 
   private static func rig() -> Rig {
@@ -48,8 +43,7 @@ struct DisplayModeEnumerationTests {
       nativePixels: (width: 3440, height: 1440)
     )
     let configurator = FakeSynthesisDisplayConfigurator(world)
-    let suiteName = "app-tests-enumeration-\(UUID().uuidString)"
-    let persistence = ModePersistence(defaults: UserDefaults(suiteName: suiteName)!)
+    let persistence = ModePersistence(defaults: InMemoryDefaults())
     let modes = DisplayModeCoordinator(
       gate: DisplayReconfigurationGate(),
       configurator: configurator,
@@ -57,14 +51,13 @@ struct DisplayModeEnumerationTests {
     )
     return Rig(
       world: world, configurator: configurator, modes: modes,
-      persistence: persistence, identity: identity, suiteName: suiteName
+      persistence: persistence, identity: identity
     )
   }
 
   @Test("One catalog refresh enumerates the display once")
   func refreshEnumeratesOnce() throws {
     let rig = Self.rig()
-    defer { rig.forgetPrefs() }
 
     rig.world.forgetEnumerations()
     rig.modes.refreshCatalog(for: Self.panelID)
@@ -85,7 +78,6 @@ struct DisplayModeEnumerationTests {
   @Test("The stored-mode reapply enumerates not at all when nothing is stored")
   func storedModeReapplyWithNothingStoredDoesNotEnumerate() async {
     let rig = Self.rig()
-    defer { rig.forgetPrefs() }
 
     rig.world.forgetEnumerations()
     await rig.modes.reapplyStoredModes()
@@ -99,7 +91,6 @@ struct DisplayModeEnumerationTests {
   @Test("The stored-mode reapply enumerates once when a mode is stored")
   func storedModeReapplyEnumeratesOnce() async {
     let rig = Self.rig()
-    defer { rig.forgetPrefs() }
     rig.persistence.setEnabled(true, for: rig.identity)
     rig.persistence.store(Self.native.descriptor, for: rig.identity)
 

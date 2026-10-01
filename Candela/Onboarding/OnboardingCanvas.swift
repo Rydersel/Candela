@@ -60,6 +60,7 @@ struct OnboardingCanvas: View {
   /// motion instead of jumping it forward.
   @State private var offKeySince: Date?
   @State private var offKeyTotal: TimeInterval = 0
+  @State private var tick = Date.now
 
   var body: some View {
     ZStack {
@@ -67,9 +68,12 @@ struct OnboardingCanvas: View {
       if reduceMotion {
         blobs(at: 0)
       } else if activeState == .key {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
-          blobs(at: drift(at: context.date))
-        }
+        // On macOS 26 a TimelineView in a hosting view cost a full window layout per
+        // display cycle under every schedule tried (12 to 16% of a core, measured on
+        // the settings canvas), so the drift is ticked by a task at the frame rate.
+        // 12 fps: in this 760 pt window a blob centre moves about a third of a
+        // point per frame, and each frame costs two full-window Gaussian blurs.
+        blobs(at: drift(at: tick))
       } else {
         // Off-key covers behind another app, minimized and another Space alike.
         blobs(at: drift(at: offKeySince ?? .now))
@@ -83,13 +87,33 @@ struct OnboardingCanvas: View {
     .animation(.easeInOut(duration: 1.4), value: act)
     .ignoresSafeArea()
     .accessibilityHidden(true)
+    .task(id: activeState == .key && !reduceMotion) {
+      guard activeState == .key, !reduceMotion else { return }
+      // Reduce Motion turning off while key leaves the tick as old as when it
+      // turned on; without this the first frame is stale for a whole interval.
+      tick = .now
+      while true {
+        do {
+          try await Task.sleep(for: .milliseconds(83), tolerance: .milliseconds(8))
+        } catch {
+          return
+        }
+        guard !Task.isCancelled else { return }
+        tick = .now
+      }
+    }
     .onAppear { if activeState != .key, offKeySince == nil { offKeySince = .now } }
     .onChange(of: activeState) { _, state in
       if state == .key {
         if let since = offKeySince { offKeyTotal += Date.now.timeIntervalSince(since) }
         offKeySince = nil
+        // Same update as the offKeyTotal bump, or the first key frame renders a
+        // stale tick against the new total and jumps back by the off-key time.
+        tick = .now
       } else if offKeySince == nil {
-        offKeySince = .now
+        // The last tick, not now: the frozen frame is the one drawn at that tick,
+        // so resume picks up exactly where the motion stopped.
+        offKeySince = tick
       }
     }
   }

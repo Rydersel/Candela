@@ -1111,13 +1111,24 @@ final class DisplayModeCoordinator {
 
   func resolvedFavorite(_ favorite: FavoriteResolution, on displayID: CGDirectDisplayID) -> DisplayMode? {
     guard let catalog = catalogs[displayID] else { return nil }
-    return favorite.resolve(in: catalog.all + catalog.syntheticStops.map { SyntheticSizeCatalog.row(for: $0) })
+    return favorite.resolve(in: Self.favoritePool(catalog))
+  }
+
+  /// Resolved favourites, keyed as `isFavorite` compares. Lists call this once
+  /// per body; asking per row decodes the saved list and rebuilds the pool each time.
+  func resolvedFavoriteKeys(on displayID: CGDirectDisplayID) -> Set<FavoriteResolution> {
+    let saved = favorites(for: displayID)
+    guard !saved.isEmpty, let catalog = catalogs[displayID] else { return [] }
+    let pool = Self.favoritePool(catalog)
+    return Set(saved.compactMap { $0.resolve(in: pool).map { FavoriteResolution(mode: $0) } })
   }
 
   func isFavorite(_ mode: DisplayMode, on displayID: CGDirectDisplayID) -> Bool {
-    favorites(for: displayID).contains { favorite in
-      resolvedFavorite(favorite, on: displayID).map { FavoriteResolution(mode: $0) } == FavoriteResolution(mode: mode)
-    }
+    resolvedFavoriteKeys(on: displayID).contains(FavoriteResolution(mode: mode))
+  }
+
+  private static func favoritePool(_ catalog: Catalog) -> [DisplayMode] {
+    catalog.all + catalog.syntheticStops.map { SyntheticSizeCatalog.row(for: $0) }
   }
 
   func toggleFavorite(_ mode: DisplayMode, on displayID: CGDirectDisplayID) {
