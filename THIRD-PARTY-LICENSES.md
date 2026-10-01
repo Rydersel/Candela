@@ -110,7 +110,7 @@ SOFTWARE.
 <https://github.com/sindresorhus/KeyboardShortcuts>
 
 One of Candela's two third-party dependencies, linked as a Swift package and
-pinned to 3.0.1. It provides the user-recordable global shortcuts in Settings,
+pinned to 3.1.0. It provides the user-recordable global shortcuts in Settings,
 Keyboard.
 
 ```
