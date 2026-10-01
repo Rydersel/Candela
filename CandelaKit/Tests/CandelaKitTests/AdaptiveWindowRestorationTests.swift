@@ -66,4 +66,21 @@ struct AdaptiveWindowRestorationTests {
     #expect(!restore.isReturning)
     #expect(restore.update(pointer: nil, windows: [window(1)], at: start).isEmpty)
   }
+
+  @Test func aWindowOutsideTheEligibleSetIsNeverHoveredOrReturning() {
+    var restore = AdaptiveWindowRestoration()
+    let windows = [window(1), window(2, 100)]
+    let over = restore.update(pointer: CGPoint(x: 150, y: 50), windows: windows,
+      at: start, eligible: [1])
+    #expect(over.isEmpty)
+    #expect(!restore.needsInputTracking && !restore.isReturning)
+    let left = restore.update(pointer: nil, windows: windows,
+      at: start.addingTimeInterval(1), eligible: [1])
+    #expect(left.isEmpty)
+    #expect(!restore.needsInputTracking && !restore.isReturning)
+    // The control: the eligible window still restores.
+    #expect(restore.update(pointer: CGPoint(x: 50, y: 50), windows: windows,
+      at: start.addingTimeInterval(2), eligible: [1])[1] == 0)
+    #expect(restore.needsInputTracking)
+  }
 }
