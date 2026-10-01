@@ -26,10 +26,12 @@ struct SettingsCanvas: View {
       if reduceMotion {
         blobs(at: 0)
       } else if activeState == .key {
+        // Periodic, not .animation: the animation schedule runs a full hosting-view
+        // layout every display cycle while key, whatever its minimum interval.
         // 4 fps: blob 1's x, the fastest term, moves about 1 pt a frame in an
         // 1100 pt window; under a ~200 pt blur ramp that is a quarter of an 8-bit
         // step. Each frame costs two full-window Gaussian blurs.
-        TimelineView(.animation(minimumInterval: 1.0 / 4.0)) { context in
+        TimelineView(.periodic(from: .now, by: 1.0 / 4.0)) { context in
           blobs(at: drift(at: context.date))
         }
       } else {
