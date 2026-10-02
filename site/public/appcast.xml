@@ -12,6 +12,51 @@
     <description>Update feed for Candela.</description>
     <language>en</language>
     <item>
+      <title>Version 1.0.5</title>
+      <pubDate>Fri, 02 Oct 2026 23:41:55 +0000</pubDate>
+      <sparkle:version>1.0.5</sparkle:version>
+      <sparkle:shortVersionString>1.0.5</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description sparkle:format="markdown"><![CDATA[
+## New
+- Controls: the Island, three new indicator styles that turn the notch into a live brightness, volume, contrast and mute indicator.
+- Controls: five more indicator styles: Classic, the box macOS drew for twenty years, Classic (centered), Sequoia, a Vertical capsule at the screen's edge, and a Ring gauge.
+- Menu bar: Keep display awake runs for a chosen duration or until a custom end time, and ends on its own.
+- Protection: dimming on an enrolled display can be paused for 15 minutes, an hour, or until a chosen time.
+- Controls: an optional keyboard shortcut toggles HDR on the external display under the pointer.
+- Sizes: after a resolution change, Candela checks the signal the display actually receives and puts back a size that did not take.
+- Sizes: favorite resolutions can be saved from All Sizes & Refresh Rates and chosen from the display's Settings page or the menu bar panel.
+- Controls: volume support for Kuycon P27U and P32U displays, with the slider and media keys working out of the box.
+
+## Changed
+- Menu bar: the panel is bounded to the screen's height and scrolls its display content, so Settings and Quit stay reachable with many displays.
+- Settings: optimized the Settings window to use a fraction of the CPU while active.
+- Health: optimized the OLED details page, halving its CPU use when idle.
+- Menu bar: function-key shortcuts fire while the panel is open, and highlighting keeps up with the pointer.
+- Settings: the shortcut recorder accepts a shortcut's own current binding.
+- Updates: updated Sparkle to 2.10.0 and KeyboardShortcuts to 3.1.0.
+
+## Fixed
+- Menu bar: collapsing a resolution list no longer makes the Mirroring row jump.
+- Menu bar: a short panel no longer rubber-bands when scrolled.
+- Menu bar: with the menu bar set to hide, a tall panel keeps Quit fully visible.
+- Settings: the Menu Bar pane and the All Modes page refresh their choices and captions as soon as a pop-up changes.
+- Settings: VoiceOver reads the snapping sentence on "Snap to 25% steps" and the percentages sentence on "Show percentages".
+- Setup: closing the Setup window stops its animations with it.
+- Health: panel hours are saved on quit, on sleep and periodically, so a session's hours are no longer lost.
+- Sizes: after a synthesized size is removed, the display's achieved size is checked directly rather than through the list of sizes it publishes.
+- Protection: ordinary mouse use outside a dimmed region no longer speeds up the care loop.
+- Controls: a small memory leak in display discovery, once per display on every menu close, is closed.
+- Controls: background timers let the system coalesce their wakeups.
+]]></description>
+      <sparkle:fullReleaseNotesLink>https://github.com/Rydersel/Candela/releases</sparkle:fullReleaseNotesLink>
+      <enclosure
+        url="https://github.com/Rydersel/Candela/releases/download/v1.0.5/Candela-1.0.5.zip"
+        sparkle:edSignature="h0G7Kdp6/bHp2Yg1ts/TkIVlxFK1xJkVqfm0i17L1toGGyUmzNwTK2vWfXfO4NQ+gU3IShUePEGHNct3hri2AQ==" length="5997879"
+        type="application/octet-stream"/>
+    </item>
+
+    <item>
       <title>Version 1.0.4</title>
       <pubDate>Mon, 14 Sep 2026 18:04:50 +0000</pubDate>
       <sparkle:version>1.0.4</sparkle:version>
