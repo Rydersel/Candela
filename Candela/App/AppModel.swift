@@ -518,8 +518,9 @@ final class AppModel {
   @ObservationIgnored private let resettingOffMain = OSAllocatedUnfairLock(initialState: false)
 
   /// Claims the latch. False means a reset is already running and this one must
-  /// not start.
-  func beginReset() async -> Bool {
+  /// not start. `display` scopes a per-display reset's claim on a failing
+  /// recovery to that display; nil is the whole-app reset.
+  func beginReset(display: CGDirectDisplayID? = nil) async -> Bool {
     resetRefusalMessage = nil
     guard !Task.isCancelled else {
       resetRefusalMessage = "The settings reset was cancelled."
@@ -537,7 +538,7 @@ final class AppModel {
     resettingOffMain.withLock { $0 = true }
     // A recovery whose restore keeps failing holds the display-modes claim
     // for as long as the display stays plugged in; the reset outranks it.
-    await displayModes.discardRecoveryForReset()
+    await displayModes.discardRecoveryForReset(on: display)
     if await reconfigurationGate.claim(.settingsReset).refusedBy != nil {
       resetRefusalMessage = "Finish the current display change before resetting settings."
       isResetting = false
@@ -561,8 +562,10 @@ final class AppModel {
 
   private(set) var resetRefusalMessage: String?
 
-  func withSettingsReset(_ operation: @MainActor () async -> Void) async -> Bool {
-    guard await beginReset() else { return false }
+  func withSettingsReset(
+    display: CGDirectDisplayID? = nil, _ operation: @MainActor () async -> Void
+  ) async -> Bool {
+    guard await beginReset(display: display) else { return false }
     await operation()
     await endReset()
     return true

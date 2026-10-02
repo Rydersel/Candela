@@ -424,6 +424,9 @@ final class DisplayModeCoordinator {
   @ObservationIgnored private var queuedRecoveries: [QueuedRecovery] = []
   private struct QueuedRecovery {
     let commit: DisplayConfigError.UnhonouredCommit
+    /// Where the failed rollback left the display: its own unhonoured commit's
+    /// achieved mode when it moved the display, otherwise the apply's.
+    let expected: DisplayMode?
     let previousMode: DisplayMode
     let displayID: CGDirectDisplayID
     let identity: DisplayConfigIdentity
@@ -834,9 +837,13 @@ final class DisplayModeCoordinator {
       arrivals.release(display.id)
     }
     let pending = displays.filter { !previewed.contains($0.id) }
-    // Synchronous on the main actor, so an unhonoured commit blocks here for the
-    // configurator's whole settle window. An honoured one returns on the first
-    // read; the alternative is reporting a restore that did not happen.
+    // Synchronous on the main actor, per display. An honoured apply costs the
+    // native lookup, the commit and one read. The worst case stacks the native
+    // lookup, the commit, up to 0.5 s for the mode to settle, up to 0.5 s for
+    // the scan-out reading to settle, a further 0.75 s read when the mismatch
+    // holds, then the restore with its own settle. Kept here rather than moved
+    // off the main actor: the alternative is reporting a restore that did not
+    // happen.
     for (index, display) in pending.enumerated() {
       // Synthesis reapply runs AFTER the stored-mode decision for the same
       // display, never beside it: engaging makes the panel a mirror slave, and a
@@ -938,7 +945,7 @@ final class DisplayModeCoordinator {
             configError = DisplayConfigError(unhonouredCommit: .init(
               requested: commit.requested, achieved: commit.achieved,
               scanoutTiming: commit.scanoutTiming, fallbackRestored: true))
-          } catch {
+          } catch let rollbackError {
             log.error("Could not restore the prior mode after a scan-out mismatch on display \(display.id)")
             // A standing synthesis preview owns the countdown; the mode session
             // refuses on its own preview by itself.
@@ -956,7 +963,10 @@ final class DisplayModeCoordinator {
               // without a way back.
               queuedRecoveries.removeAll { $0.displayID == display.id }
               queuedRecoveries.append(QueuedRecovery(
-                commit: commit, previousMode: previous, displayID: display.id,
+                commit: commit,
+                expected: (rollbackError as? DisplayConfigError)?.unhonouredCommit?.achieved
+                  ?? commit.achieved,
+                previousMode: previous, displayID: display.id,
                 identity: identity, error: configError))
             }
           }
@@ -1297,6 +1307,9 @@ final class DisplayModeCoordinator {
   /// refuse.
   func endOutstandingPreview() async -> Bool {
     await queue.enqueueReturning {
+      // Here and in the reset discard only: an ordinary pick also ends a
+      // preview, and a queued recovery has to outlive that.
+      self.dropQueuedRecoveries()
       // BOTH previews, awaited rather than short-circuited: a caller asking every
       // size preview to stand down must not leave one standing because the other
       // refused. A synthesized size is a size.
@@ -1310,7 +1323,6 @@ final class DisplayModeCoordinator {
   /// select paths call it from a queued operation, where re-entering the queue
   /// would wait on the operation doing the waiting.
   private func endOutstandingModePreview() async -> Bool {
-    dropQueuedRecoveries()
     guard let outstanding = await session.previewedMode else { return true }
     // Built FROM the session, so the intent check inside `performResolve` cannot
     // see it as stale. `secondsRemaining: 0` and `isCountingDown: false` describe
@@ -1334,7 +1346,6 @@ final class DisplayModeCoordinator {
   /// The same for a synthesized size: disengage, and report whether the panel
   /// is back on its own desktop.
   private func endOutstandingSynthesisPreview() async -> Bool {
-    dropQueuedRecoveries()
     guard let synthesis, let outstanding = await synthesis.session.previewedSynthesis
     else { return true }
     let answered = Preview(
@@ -1363,10 +1374,18 @@ final class DisplayModeCoordinator {
   /// countdown. Only a revert that fails discards, and then the display stays
   /// where the failed rollback left it, since nothing here can move it back.
   /// An ordinary preview is left alone; it refuses the reset by its claim.
-  func discardRecoveryForReset() async {
+  ///
+  /// `resetDisplayID` scopes a per-display reset to its own display: a
+  /// recovery on another display is neither reverted nor discarded, and still
+  /// refuses the reset by its claim. nil is the whole-app reset, which claims any.
+  func discardRecoveryForReset(on resetDisplayID: CGDirectDisplayID? = nil) async {
     await queue.enqueueReturning {
       guard let outstanding = await self.session.previewedMode,
-            outstanding.unhonouredCommit != nil else { return }
+            outstanding.unhonouredCommit != nil,
+            resetDisplayID.map({ $0 == outstanding.displayID }) ?? true else { return }
+      // After the guard: a reset refused by an ordinary preview leaves the
+      // queue for that preview to hand on when it resolves.
+      self.dropQueuedRecoveries(on: resetDisplayID)
       if await self.endOutstandingModePreview() { return }
       guard let still = await self.session.previewedMode,
             still.displayID == outstanding.displayID else {
@@ -2036,14 +2055,27 @@ final class DisplayModeCoordinator {
   private func retainQueuedRecovery() async -> Bool {
     while !queuedRecoveries.isEmpty {
       let queued = queuedRecoveries.removeFirst()
-      if let left = queued.commit.achieved {
+      if let left = queued.expected {
         guard let now = configurator.achievedMode(for: queued.displayID),
-              Self.sameGeometry(now, left) else { continue }
+              Self.sameGeometry(now, left) else {
+          log.error("skipped a queued recovery on display \(queued.displayID): it is no longer on the mode its failed rollback left it on")
+          continue
+        }
+      }
+      // A slave scans out its master's picture, so a countdown there would
+      // revert a mode nobody is looking at.
+      if let live = configurator.displays().first(where: { $0.id == queued.displayID }),
+         live.mirrorsDisplay != kCGNullDirectDisplay {
+        log.error("skipped a queued recovery on display \(queued.displayID): it now mirrors another display")
+        continue
       }
       guard await session.retainRecovery(
         after: queued.commit, previousMode: queued.previousMode,
         on: queued.displayID, identity: queued.identity)
-      else { continue }
+      else {
+        log.error("skipped a queued recovery on display \(queued.displayID): the display left or another preview stands")
+        continue
+      }
       log.error("retained a queued recovery on display \(queued.displayID) once the standing preview resolved")
       stopCountdown()
       surfaces[queued.displayID] = .floatingPanel
@@ -2057,12 +2089,14 @@ final class DisplayModeCoordinator {
   /// A stand-down's caller is about to reconfigure displays itself and needs
   /// nothing outstanding afterwards, so a queued recovery is dropped rather
   /// than retained underneath it. That display is left where its failed
-  /// rollback put it, as it was before recoveries queued at all.
-  private func dropQueuedRecoveries() {
-    for queued in queuedRecoveries {
+  /// rollback put it, as it was before recoveries queued at all. A display id
+  /// scopes the drop to that display; nil drops every display's.
+  private func dropQueuedRecoveries(on displayID: CGDirectDisplayID? = nil) {
+    let matches = { (queued: QueuedRecovery) in displayID == nil || queued.displayID == displayID }
+    for queued in queuedRecoveries where matches(queued) {
       log.error("dropped a queued recovery on display \(queued.displayID): a stand-down ended the preview it waited on")
     }
-    queuedRecoveries.removeAll()
+    queuedRecoveries.removeAll(where: matches)
   }
 
   /// Geometry and quantized refresh, never `ioModeID`, which is positional.

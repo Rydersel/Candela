@@ -102,9 +102,15 @@ final class ShortcutManager {
     let screenID = screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
     // A mirroring panel has no screen of its own, so the pointer finds the
     // surface it shows (a synthesized size's virtual master, for one).
-    let id = HDRShortcutAction.physicalDisplay(
-      underScreen: screenID, among: model.displays.map(\.id), mirrorsDisplay: CGDisplayMirrorsDisplay)
-    let state = id.flatMap { id in model.displays.first(where: { $0.id == id }) }
+    let target = HDRShortcutAction.pointerTarget(
+      underScreen: screenID, among: model.displays.map(\.id),
+      ownedSurfaces: model.virtualDisplays.ownedDisplayIDs, mirrorsDisplay: CGDisplayMirrorsDisplay)
+    // Resolved at the press, so a replug before the task runs cannot redirect it.
+    let state: AppModel.DisplayState? = if case let .display(id) = target {
+      model.displays.first(where: { $0.id == id })
+    } else {
+      nil
+    }
     PanelMenu.endTracking()
     Task { @MainActor [weak self] in
       guard let self else { return }
@@ -112,7 +118,7 @@ final class ShortcutManager {
       if let state {
         result = await model.hdrAction.toggle(state)
       } else {
-        result = await model.hdrAction.toggle(on: nil)
+        result = await model.hdrAction.toggle(at: target)
       }
       // The pointer's screen: a mirroring panel has none of its own to show it on.
       model.hdrFeedback.show(result.message, on: screen)

@@ -10,16 +10,53 @@ struct HDRShortcutTests {
   /// virtual master, and the panel the person is looking at mirrors it.
   @Test func thePointersScreenMapsThroughAMirrorToThePhysicalPanel() {
     let mirrors: (CGDirectDisplayID) -> CGDirectDisplayID = { $0 == 3 ? 79 : kCGNullDirectDisplay }
-    #expect(HDRShortcutAction.physicalDisplay(underScreen: 79, among: [1, 3], mirrorsDisplay: mirrors) == 3)
+    let target = { (screen: CGDirectDisplayID?) in
+      HDRShortcutAction.pointerTarget(underScreen: screen, among: [1, 3], ownedSurfaces: [79],
+        mirrorsDisplay: mirrors)
+    }
+    #expect(target(79) == .display(3))
     // A known display is its own target, mirrored or not.
-    #expect(HDRShortcutAction.physicalDisplay(underScreen: 3, among: [1, 3], mirrorsDisplay: mirrors) == 3)
-    #expect(HDRShortcutAction.physicalDisplay(underScreen: 1, among: [1, 3], mirrorsDisplay: mirrors) == 1)
+    #expect(target(3) == .display(3))
+    #expect(target(1) == .display(1))
     // Nothing under the pointer, or a screen nothing mirrors, names no display.
-    #expect(HDRShortcutAction.physicalDisplay(underScreen: nil, among: [1, 3], mirrorsDisplay: mirrors) == nil)
-    #expect(HDRShortcutAction.physicalDisplay(underScreen: 80, among: [1, 3], mirrorsDisplay: mirrors) == nil)
+    #expect(target(nil) == .nothing)
+    #expect(HDRShortcutAction.pointerTarget(underScreen: 80, among: [1, 3], ownedSurfaces: [79, 80],
+      mirrorsDisplay: mirrors) == .nothing)
     // Two panels mirroring one surface: neither is THE display under the pointer.
     let both: (CGDirectDisplayID) -> CGDirectDisplayID = { $0 == 3 || $0 == 4 ? 79 : kCGNullDirectDisplay }
-    #expect(HDRShortcutAction.physicalDisplay(underScreen: 79, among: [3, 4], mirrorsDisplay: both) == nil)
+    #expect(HDRShortcutAction.pointerTarget(underScreen: 79, among: [3, 4], ownedSurfaces: [79],
+      mirrorsDisplay: both) == .sharedSurface)
+  }
+
+  /// The built-in panel is never among the candidates, so an external
+  /// mirroring it would otherwise be picked while the pointer sits on the
+  /// built-in screen. Only a surface Candela created maps through a mirror.
+  @Test func anExternalMirroringTheBuiltInIsNotTheTargetOverTheBuiltIn() async {
+    let builtIn: CGDirectDisplayID = 1
+    let mirrors: (CGDirectDisplayID) -> CGDirectDisplayID = { $0 == 3 ? builtIn : kCGNullDirectDisplay }
+    let target = HDRShortcutAction.pointerTarget(underScreen: builtIn, among: [3], ownedSurfaces: [],
+      mirrorsDisplay: mirrors)
+    #expect(target == .nothing)
+
+    let hdr = ShortcutHDR()
+    let state = TestFixtures.displayState(hdr: hdr)
+    await state.controller.noteHDRStateMayHaveChanged()
+    let action = HDRShortcutAction(gate: .init(), target: { $0 == state.id ? state : nil })
+    #expect(await action.toggle(at: target)
+      == .refused("Move the pointer to an external display to switch HDR."))
+    #expect(await hdr.writes.isEmpty)
+  }
+
+  /// The pointer IS on an external display's picture here, so telling the
+  /// person to move it there would be wrong.
+  @Test func aSurfaceTwoPanelsShowRefusesWithItsOwnReason() async {
+    let hdr = ShortcutHDR()
+    let state = TestFixtures.displayState(hdr: hdr)
+    await state.controller.noteHDRStateMayHaveChanged()
+    let action = HDRShortcutAction(gate: .init(), target: { $0 == state.id ? state : nil })
+    #expect(await action.toggle(at: .sharedSurface)
+      == .refused("Two displays show this screen. Switch HDR from Candela."))
+    #expect(await hdr.writes.isEmpty)
   }
 
   /// The mapped panel reaches the synthesized-size refusal, which the
@@ -31,9 +68,9 @@ struct HDRShortcutTests {
     let master: CGDirectDisplayID = 79
     let action = HDRShortcutAction(gate: .init(), target: { $0 == state.id ? state : nil },
       isSynthesized: { $0 == state.id })
-    let mapped = HDRShortcutAction.physicalDisplay(underScreen: master, among: [state.id],
-      mirrorsDisplay: { $0 == state.id ? master : kCGNullDirectDisplay })
-    #expect(await action.toggle(on: mapped) == .refused(SynthesisCopy.hdrBlockedBySynthesizedSize))
+    let mapped = HDRShortcutAction.pointerTarget(underScreen: master, among: [state.id],
+      ownedSurfaces: [master], mirrorsDisplay: { $0 == state.id ? master : kCGNullDirectDisplay })
+    #expect(await action.toggle(at: mapped) == .refused(SynthesisCopy.hdrBlockedBySynthesizedSize))
     #expect(await hdr.writes.isEmpty)
   }
 
@@ -113,7 +150,8 @@ struct HDRShortcutTests {
     let state = TestFixtures.displayState(hdr: hdr)
     await state.controller.noteHDRStateMayHaveChanged()
     let action = HDRShortcutAction(gate: .init(), target: { _ in state })
-    if case .changed = await action.toggle(on: state.id) { Issue.record("Unachieved HDR reported as changed") }
+    #expect(await action.toggle(on: state.id)
+      == .refused("The display did not confirm the HDR change. Try again."))
     #expect(await hdr.writes == [true])
   }
 

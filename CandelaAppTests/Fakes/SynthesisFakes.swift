@@ -518,6 +518,13 @@ final class FakeSynthesisHDR: @unchecked Sendable {
   }
 
   var legs: [(enabled: Bool, granted: Bool)] { lock.withLock { _legs } }
+  /// Runs after each leg is recorded, outside the lock: what the HDR round
+  /// trip did to the display besides HDR, such as dropping a re-time.
+  var onLeg: (@Sendable (_ enabled: Bool) -> Void)? {
+    get { lock.withLock { _onLeg } }
+    set { lock.withLock { _onLeg = newValue } }
+  }
+  private var _onLeg: (@Sendable (_ enabled: Bool) -> Void)?
   var leftStanding: [CGDirectDisplayID] { lock.withLock { _leftStanding } }
 
   /// The seam a `SynthesisCoordinator` takes, over this fake.
@@ -526,7 +533,7 @@ final class FakeSynthesisHDR: @unchecked Sendable {
       supportsHDR: { [self] _ in lock.withLock { _supports } },
       measuredHDREnabled: { [self] _ in lock.withLock { _live } },
       setHDR: { [self] _, enabled, _ in
-        lock.withLock {
+        let (granted, hook) = lock.withLock {
           let granted = enabled ? _achievesOn : _achievesOff
           if granted { _live = enabled }
           // A leg that did not take leaves the state the fixture says: nil by
@@ -534,8 +541,10 @@ final class FakeSynthesisHDR: @unchecked Sendable {
           // every failure as "still off" made the old on-leg give-up look safe.
           if !granted, enabled { _live = _stateAfterFailedOn }
           _legs.append((enabled, granted))
-          return granted
+          return (granted, _onLeg)
         }
+        hook?(enabled)
+        return granted
       },
       reportHDRLeftStanding: { [self] displayID in
         lock.withLock { _leftStanding.append(displayID) }

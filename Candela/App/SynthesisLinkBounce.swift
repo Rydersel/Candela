@@ -107,13 +107,19 @@ struct BouncingSynthesisDriver: SynthesisDriving {
       // A wrong timing after the re-time is a link the bounce can renegotiate,
       // so it takes the bounce rather than ending the engagement here. The
       // check below judges what the bounce left.
-      let landed = await retime(displayID, to: target)
+      var landed = await retime(displayID, to: target)
       if !landed {
         await bounce(displayID)
       } else if let timing = await steadyMismatch(
         on: displayID, retimedOnto: target, landed: landed, nativePixels: nativePixels) {
         Self.log.info("synthesis.retime display \(displayID) landed on the wrong timing (\(timing.diagnosticDescription, privacy: .public)); bouncing")
         await bounce(displayID)
+        // The HDR round trip can drop the re-time, and a target-sized wire on a
+        // mode of the mirror's choosing is the measured crop, not the re-time.
+        landed = isOn(target, displayID)
+        if !landed {
+          Self.log.info("synthesis.retime display \(displayID) left its re-time target during the bounce")
+        }
       }
       if let timing = await steadyMismatch(
         on: displayID, retimedOnto: target, landed: landed, nativePixels: nativePixels) {
@@ -243,14 +249,7 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     // for the commit, which has been measured returning success over a request
     // it did not honour. Reporting a coerced re-time as landed skips the bounce
     // in exactly the situation the bounce exists for.
-    guard let achieved = configurator.currentMode(for: displayID),
-          achieved.logicalWidth == target.logicalWidth,
-          achieved.logicalHeight == target.logicalHeight,
-          achieved.pixelWidth == target.pixelWidth,
-          achieved.pixelHeight == target.pixelHeight,
-          DisplayMode.quantizedRefresh(achieved.refreshHz)
-          == DisplayMode.quantizedRefresh(target.refreshHz)
-    else {
+    guard isOn(target, displayID) else {
       Self.log.info(
         "synthesis.retime did not take on display \(displayID): the apply reported success and the display did not follow it"
       )
@@ -258,6 +257,17 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     }
     Self.log.info("synthesis.retime display \(displayID) onto \(target.logicalWidth)x\(target.logicalHeight) (framebuffer \(target.pixelWidth)x\(target.pixelHeight)) @\(target.refreshHz)Hz")
     return true
+  }
+
+  /// Geometry and quantized refresh, never `ioModeID`, which is positional.
+  private func isOn(_ target: DisplayMode?, _ displayID: CGDirectDisplayID) -> Bool {
+    guard let target, let achieved = configurator.currentMode(for: displayID) else { return false }
+    return achieved.logicalWidth == target.logicalWidth
+      && achieved.logicalHeight == target.logicalHeight
+      && achieved.pixelWidth == target.pixelWidth
+      && achieved.pixelHeight == target.pixelHeight
+      && DisplayMode.quantizedRefresh(achieved.refreshHz)
+      == DisplayMode.quantizedRefresh(target.refreshHz)
   }
 
   /// Takes the set down, then puts the panel back on the mode the user chose.

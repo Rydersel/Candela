@@ -21,6 +21,13 @@ struct DisplayModeEnumerationTests {
     ioModeID: 2, logicalWidth: 2560, logicalHeight: 1080,
     pixelWidth: 2560, pixelHeight: 1080, refreshHz: 175, isNative: false
   )
+  private static let middle = DisplayMode(
+    ioModeID: 3, logicalWidth: 1920, logicalHeight: 800,
+    pixelWidth: 1920, pixelHeight: 800, refreshHz: 175, isNative: false
+  )
+  private static let secondID: CGDirectDisplayID = 13
+  private static let secondIdentity = DisplayConfigIdentity(
+    vendor: 0x10AC, model: 9, serial: 13, isBuiltIn: false)
 
   /// A coordinator with no `SynthesisCoordinator` and its own defaults suite, so
   /// the stored-mode half of a reapply can be counted alone. Not the shape the
@@ -363,6 +370,129 @@ struct DisplayModeEnumerationTests {
     #expect(await rig.modes.revert(recovery) == .reverted)
     #expect(rig.world.currentMode(for: secondID) == Self.native)
     #expect(rig.modes.preview == nil)
+  }
+
+  /// A live preview on the first display and, beside it, a second display
+  /// whose stored-mode apply and rollback both failed, so its recovery is
+  /// queued behind that preview.
+  private static func queuedBesideALivePreview(
+    rollbackFailure: DisplayConfigError = DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
+  ) async throws -> (rig: Rig, live: DisplayModeCoordinator.Preview) {
+    let rig = Self.rig()
+    rig.world.attach(
+      ConfiguredDisplay(id: panelID, identity: rig.identity, name: "MAG341C", isBuiltIn: false),
+      modes: [native, smaller, middle], current: native,
+      nativePixels: (width: 3440, height: 1440))
+    rig.world.attach(
+      ConfiguredDisplay(id: secondID, identity: secondIdentity, name: "Second panel", isBuiltIn: false),
+      modes: [native, smaller, middle], current: native,
+      nativePixels: (width: 3440, height: 1440))
+    rig.persistence.setEnabled(true, for: secondIdentity)
+    rig.persistence.store(smaller.descriptor, for: secondIdentity)
+    rig.configurator.updatesCurrentModeOnApply = true
+    rig.modes.select(smaller, on: panelID, from: .settings, surface: .settingsBanner)
+    for _ in 0 ..< 2000 where rig.modes.isApplying {
+      try? await Task.sleep(for: .milliseconds(1))
+    }
+    let live = try #require(rig.modes.preview)
+    rig.configurator.modeApplyFailures = [
+      DisplayConfigError(unhonouredCommit: .init(
+        requested: smaller, achieved: smaller,
+        scanoutTiming: ScanoutTiming(width: 1280, height: 1024, refreshHz: 175))),
+      rollbackFailure,
+    ]
+    await rig.modes.reapplyStoredModes()
+    #expect(rig.modes.preview?.displayID == panelID, "the live preview keeps the countdown")
+    return (rig, live)
+  }
+
+  /// An ordinary pick on the previewed display ends that preview without
+  /// standing anything down for a mirror or a reset, so the queued recovery on
+  /// the other display survives it and arms once the new preview resolves.
+  @Test func aQueuedRecoverySurvivesAnOrdinaryPickOnAnotherDisplay() async throws {
+    let (rig, _) = try await Self.queuedBesideALivePreview()
+
+    rig.modes.select(Self.middle, on: Self.panelID, from: .settings, surface: .settingsBanner)
+    for _ in 0 ..< 2000 where rig.modes.isApplying {
+      try? await Task.sleep(for: .milliseconds(1))
+    }
+    let picked = try #require(rig.modes.preview)
+    #expect(picked.displayID == Self.panelID)
+    #expect(picked.mode == Self.middle)
+    #expect(await rig.modes.revert(picked) == .reverted)
+
+    let recovery = try #require(rig.modes.preview)
+    #expect(recovery.displayID == Self.secondID)
+    #expect(await rig.modes.revert(recovery) == .reverted)
+    #expect(rig.world.currentMode(for: Self.secondID) == Self.native)
+  }
+
+  /// A rollback that itself goes unhonoured moves the display to a third mode,
+  /// and that is the mode a queued recovery must expect to find.
+  @Test func aRollbackThatLandsOnAThirdModeStillQueuesItsRecovery() async throws {
+    let (rig, live) = try await Self.queuedBesideALivePreview(
+      rollbackFailure: DisplayConfigError(unhonouredCommit: .init(
+        requested: Self.native, achieved: Self.middle)))
+    #expect(rig.world.currentMode(for: Self.secondID) == Self.middle)
+
+    #expect(await rig.modes.revert(live) == .reverted)
+
+    let recovery = try #require(rig.modes.preview)
+    #expect(recovery.displayID == Self.secondID)
+    #expect(await rig.modes.revert(recovery) == .reverted)
+    #expect(rig.world.currentMode(for: Self.secondID) == Self.native)
+  }
+
+  /// A display that became a mirror slave while its recovery waited shows its
+  /// master's picture, so a countdown there would revert a mode nobody sees.
+  @Test func aQueuedRecoveryDoesNotArmOnAMirrorSlave() async throws {
+    let (rig, live) = try await Self.queuedBesideALivePreview()
+    rig.world.attach(
+      ConfiguredDisplay(id: Self.secondID, identity: Self.secondIdentity, name: "Second panel",
+        isBuiltIn: false, mirrorsDisplay: Self.panelID),
+      modes: [Self.native, Self.smaller], current: Self.smaller,
+      nativePixels: (width: 3440, height: 1440))
+
+    #expect(await rig.modes.revert(live) == .reverted)
+
+    #expect(rig.modes.preview == nil)
+    #expect(await rig.gate.holder == nil)
+  }
+
+  /// A per-display reset claims only a recovery on its own display; the
+  /// whole-app reset claims any.
+  @Test func aPerDisplayResetLeavesARecoveryOnAnotherDisplay() async throws {
+    let rig = Self.rig()
+    rig.world.attach(
+      ConfiguredDisplay(id: Self.secondID, identity: Self.secondIdentity, name: "Second panel", isBuiltIn: false),
+      modes: [Self.native, Self.smaller], current: Self.native,
+      nativePixels: (width: 3440, height: 1440))
+    rig.persistence.setEnabled(true, for: rig.identity)
+    rig.persistence.store(Self.smaller.descriptor, for: rig.identity)
+    rig.configurator.updatesCurrentModeOnApply = true
+    let refused = DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
+    rig.configurator.modeApplyFailures = [
+      DisplayConfigError(unhonouredCommit: .init(
+        requested: Self.smaller, achieved: Self.smaller,
+        scanoutTiming: ScanoutTiming(width: 1280, height: 1024, refreshHz: 175))),
+      refused, refused, refused,
+    ]
+    await rig.modes.reapplyStoredModes()
+    let recovery = try #require(rig.modes.preview)
+    #expect(recovery.displayID == Self.panelID)
+    let appliesBefore = rig.world.applies.count
+
+    await rig.modes.discardRecoveryForReset(on: Self.secondID)
+
+    #expect(rig.modes.preview == recovery)
+    #expect(rig.world.applies.count == appliesBefore, "no revert was attempted for another display's reset")
+    #expect(await rig.gate.claim(.settingsReset) == .refused(by: .displayModes))
+
+    await rig.modes.discardRecoveryForReset(on: Self.panelID)
+
+    #expect(rig.modes.preview == nil)
+    #expect(await rig.gate.claim(.settingsReset) == .granted)
+    await rig.gate.release(.settingsReset)
   }
 
   /// An ordinary preview is not a recovery, so the reset discard leaves it.

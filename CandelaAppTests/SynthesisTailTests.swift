@@ -105,6 +105,43 @@ struct SynthesisTailTests {
     #expect(await fixture.synthesis.disengageForModeChange(display))
   }
 
+  /// A bounce can drop the re-time, and the slave then sits on a mode of the
+  /// mirror's choosing. A target-sized wire there is the measured crop, so the
+  /// post-bounce check must judge it as a re-time that did not land.
+  @Test func aRetimeTheBounceDroppedIsNotTrustedAfterIt() async throws {
+    let hdr = FakeSynthesisHDR()
+    let fixture = Fixture(hdr: hdr)
+    defer { fixture.forgetPrefs() }
+    let rate = Fixture.nativeHz
+    let native = try nativeRow(fixture)
+    let own = DisplayMode(ioModeID: 4, logicalWidth: 2560, logicalHeight: 1440,
+      pixelWidth: 2560, pixelHeight: 1440, refreshHz: rate, isNative: false)
+    let twin = DisplayMode(ioModeID: 5, logicalWidth: 1280, logicalHeight: 720,
+      pixelWidth: 2560, pixelHeight: 1440, refreshHz: rate, isNative: false)
+    let display = try fixture.configured(Self.panelID)
+    fixture.world.attach(display, modes: [native, own, twin], current: own,
+      nativePixels: (width: Fixture.nativeWidth, height: Fixture.nativeHeight))
+    fixture.modes.refreshCatalog(for: Self.panelID)
+    let stop = try firstStop(fixture)
+    fixture.configurator.updatesCurrentModeOnApply = true
+    let world = fixture.world
+    let crop = ScanoutTiming(width: 2560, height: 1440, refreshHz: rate)
+    let wrong = ScanoutTiming(width: 1280, height: 1024, refreshHz: rate)
+    let id = Self.panelID
+    hdr.onLeg = { _ in world.setCurrentMode(native, for: id) }
+    fixture.configurator.scanoutRead = { _ in
+      if world.applies.isEmpty { return crop }
+      return hdr.legs.isEmpty ? wrong : crop
+    }
+
+    let result = await fixture.synthesis.engage(stop, on: display)
+
+    #expect(fixture.configurator.restores.first?.mode == twin)
+    #expect(hdr.legs.map(\.enabled) == [true, false])
+    #expect(result == .failure(.scanoutMismatch(crop)))
+    #expect(fixture.synthesis.pairings.isEmpty)
+  }
+
   /// The record can lag the re-time: a wrong timing that holds across the
   /// short poll and gives way at the extra read is the previous timing still
   /// landing, not a link the bounce has to renegotiate.

@@ -705,7 +705,7 @@ struct DisplayHubView: View {
   /// mute strategy is still in force), retire the strategy LAST.
   private func resetDisplay() {
     Task { @MainActor in
-      let ran = await model.withSettingsReset { await applyDisplayReset() }
+      let ran = await model.withSettingsReset(display: state.id) { await applyDisplayReset() }
       if !ran {
         model.hdrFeedback.show(model.resetRefusalMessage ?? "Wait for the current display change to finish before resetting settings.",
                                on: OverlayWindow.screen(for: state.id))

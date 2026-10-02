@@ -34,18 +34,46 @@ final class HDRShortcutAction {
     self.isSynthesized = isSynthesized
   }
 
-  /// The display a press over `screenID` is about. A screen that is not one of
-  /// `candidates` can be a surface a panel mirrors, the virtual master of a
-  /// synthesized size among them, so the panel showing it is the target. More
-  /// than one panel showing it names none: the press has to be about one.
-  static func physicalDisplay(
+  /// What a press over the pointer's screen is about.
+  enum PointerTarget: Equatable {
+    case display(CGDirectDisplayID)
+    /// No external display: nothing under the pointer, or a screen that is not
+    /// one (the built-in among them).
+    case nothing
+    /// A Candela surface more than one panel shows. The press has to be about
+    /// one display, so it names neither.
+    case sharedSurface
+  }
+
+  static let sharedSurfaceRefusal = "Two displays show this screen. Switch HDR from Candela."
+
+  /// A screen that is not one of `candidates` maps through a mirror only when
+  /// it is one of `ownedSurfaces`, a virtual display Candela created, such as a
+  /// synthesized size's master. The built-in panel is never a candidate, so
+  /// mapping any screen would turn a press over the built-in into a switch on
+  /// an external that merely mirrors it.
+  static func pointerTarget(
     underScreen screenID: CGDirectDisplayID?, among candidates: [CGDirectDisplayID],
+    ownedSurfaces: Set<CGDirectDisplayID>,
     mirrorsDisplay: (CGDirectDisplayID) -> CGDirectDisplayID
-  ) -> CGDirectDisplayID? {
-    guard let screenID else { return nil }
-    if candidates.contains(screenID) { return screenID }
+  ) -> PointerTarget {
+    guard let screenID else { return .nothing }
+    if candidates.contains(screenID) { return .display(screenID) }
+    guard ownedSurfaces.contains(screenID) else { return .nothing }
     let showing = candidates.filter { mirrorsDisplay($0) == screenID }
-    return showing.count == 1 ? showing[0] : nil
+    switch showing.count {
+    case 0: return .nothing
+    case 1: return .display(showing[0])
+    default: return .sharedSurface
+    }
+  }
+
+  func toggle(at target: PointerTarget) async -> Outcome {
+    switch target {
+    case let .display(id): await toggle(on: id)
+    case .nothing: await toggle(on: nil)
+    case .sharedSurface: .refused(Self.sharedSurfaceRefusal)
+    }
   }
 
   func toggle(on displayID: CGDirectDisplayID?) async -> Outcome {
@@ -99,7 +127,7 @@ final class HDRShortcutAction {
       return .refused("The display disconnected while switching HDR.")
     }
     guard !controller.isHDRSettling, controller.isHDREngaged == enabled else {
-      return .refused("The display did not confirm the HDR change. Try again from Candela.")
+      return .refused("The display did not confirm the HDR change. Try again.")
     }
     return .changed(name: PanelView.title(for: state.display), enabled: enabled)
   }
