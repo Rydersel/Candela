@@ -81,20 +81,51 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     // put the twin back rather than the mode the user chose. A stale capture is
     // rejected by the apply's own descriptor cross-check, so the tail falls to
     // the bounce rather than putting a wrong mode on the glass.
-    let ownMode = ownModes.remember(configurator.currentMode(for: displayID), for: displayID)
+    let original = ownModes.remember(
+      configurator.currentMode(for: displayID),
+      nativePixels: configurator.nativePixels(for: displayID),
+      identityKey: identityKey, for: displayID)
+    let ownMode = original.mode
+    let nativePixels = original.nativePixels
     let result = await engine.engage(size, onPhysical: displayID, identityKey: identityKey)
     switch result {
     case let .success(pairing):
       let target = retimeTarget(
         for: displayID, ownMode: ownMode, master: pairing.virtualDisplayID)
-      if await retime(displayID, to: target) == false { await bounce(displayID) }
+      do {
+        if try await retime(displayID, to: target) == false { await bounce(displayID) }
+      } catch let failure as SynthesisFailure {
+        return await rejectTiming(failure, on: displayID)
+      } catch {
+        return await rejectTiming(.unwindIncomplete, on: displayID)
+      }
+      // The tail can change the controller timing after the engine verified
+      // the mirror. Judge its final state against the pre-mirror panel size.
+      let requested = DisplayMode(
+        ioModeID: DisplayMode.syntheticIoModeID(stopIndex: 0),
+        logicalWidth: size.logicalWidth, logicalHeight: size.logicalHeight,
+        pixelWidth: size.pixelWidth, pixelHeight: size.pixelHeight,
+        refreshHz: 0, isNative: false, provenance: .synthesized)
+      if let timing = configurator.scanoutTiming(for: displayID),
+         ScanoutVerification.verdict(requested: requested, nativePixels: nativePixels,
+           timing: timing) == .mismatch {
+        return await rejectTiming(.scanoutMismatch(timing), on: displayID)
+      }
     case .failure:
-      // Nothing of ours stands, so nothing is owed a restore. A left record
-      // would have a later disengage reassert a mode the user has since
-      // changed.
-      ownModes.forget(displayID)
+      // A failed unwind retains its pairing and still owes the original mode
+      // restore. Drop the capture only once nothing of ours stands.
+      if await engine.pairing(forPhysical: displayID) == nil { ownModes.forget(displayID) }
     }
     return result
+  }
+
+  private func rejectTiming(
+    _ failure: SynthesisFailure, on displayID: CGDirectDisplayID
+  ) async -> Result<SynthesisPairing, SynthesisFailure> {
+    switch await disengage(fromPhysical: displayID) {
+    case .success: return .failure(failure)
+    case let .failure(unwind): return .failure(unwind)
+    }
   }
 
   /// **The re-time lands on the HiDPI TWIN of the display's own mode, not on the
@@ -156,13 +187,16 @@ struct BouncingSynthesisDriver: SynthesisDriving {
   /// picture [MEASURED 2026-08-18: OSD 175, picture intact, mirror standing].
   /// Returns false when it could not run OR could not be confirmed; the HDR
   /// bounce is the fallback renegotiator.
-  private func retime(_ displayID: CGDirectDisplayID, to target: DisplayMode?) async -> Bool {
+  private func retime(_ displayID: CGDirectDisplayID, to target: DisplayMode?) async throws -> Bool {
     guard let target else { return false }
     try? await Task.sleep(for: durations.beforeRetime)
     do {
       // Session scope, matching the engine's own applies.
       try configurator.apply(target, to: displayID, scope: .session)
     } catch {
+      if let timing = (error as? DisplayConfigError)?.unhonouredCommit?.scanoutTiming {
+        throw SynthesisFailure.scanoutMismatch(timing)
+      }
       // "Did not land": the apply also throws on a commit the display did not honour.
       Self.log.info("synthesis.retime did not land on display \(displayID): \(String(describing: error), privacy: .public)")
       return false
@@ -209,11 +243,11 @@ struct BouncingSynthesisDriver: SynthesisDriving {
   func disengage(fromPhysical displayID: CGDirectDisplayID) async -> Result<Void, SynthesisFailure> {
     // Read, not taken: a disengage that fails leaves the set standing, and the
     // panel still owes the restore.
-    let ownMode = ownModes.mode(for: displayID)
+    let original = ownModes.entry(for: displayID)
     let result = await engine.disengage(fromPhysical: displayID)
     if case .success = result {
       ownModes.forget(displayID)
-      await restoreOwnMode(displayID, to: ownMode)
+      await restoreOwnMode(displayID, to: original)
     }
     return result
   }
@@ -229,11 +263,14 @@ struct BouncingSynthesisDriver: SynthesisDriving {
   /// opposite of the HDR legs' rule in this file: their write can leave DDC
   /// dead, while the only thing this can put on the glass is the mode the user
   /// picked.
-  private func restoreOwnMode(_ displayID: CGDirectDisplayID, to ownMode: DisplayMode?) async {
-    guard let ownMode else { return }
+  private func restoreOwnMode(_ displayID: CGDirectDisplayID, to original: SynthesisOwnModeLedger.Entry?) async {
+    guard let original, let ownMode = original.mode else { return }
     // The mirror break is a reconfiguration and the window server lags it, so a
     // mode read taken inline would describe the world before it.
     try? await Task.sleep(for: durations.beforeRetime)
+    guard configurator.displays().contains(where: {
+      $0.id == displayID && $0.identity.key == original.identityKey
+    }) else { return }
     let achieved = configurator.currentMode(for: displayID)
     if let achieved, achieved.isHiDPI == ownMode.isHiDPI { return }
     do {
@@ -360,23 +397,33 @@ struct BouncingSynthesisDriver: SynthesisDriving {
 /// follows it, and a record stranded by a replug is dropped by the engage that
 /// claims the ID next.
 final class SynthesisOwnModeLedger: Sendable {
-  private let stored = OSAllocatedUnfairLock<[CGDirectDisplayID: DisplayMode]>(
+  struct Entry: Sendable {
+    let mode: DisplayMode?
+    let nativePixels: (width: Int, height: Int)?
+    let identityKey: String
+  }
+
+  private let stored = OSAllocatedUnfairLock<[CGDirectDisplayID: Entry]>(
     initialState: [:]
   )
 
-  /// Records `mode` unless something is already on record for this display, and
-  /// answers with whatever now stands.
+  /// Capture before the first mirror. Later stops may publish the virtual
+  /// master's dimensions, so neither mode nor native geometry may be replaced.
+  /// A new hardware identity cannot inherit a departed panel's capture.
   @discardableResult
-  func remember(_ mode: DisplayMode?, for displayID: CGDirectDisplayID) -> DisplayMode? {
-    stored.withLock { modes in
-      if let existing = modes[displayID] { return existing }
-      guard let mode else { return nil }
-      modes[displayID] = mode
-      return mode
+  func remember(
+    _ mode: DisplayMode?, nativePixels: (width: Int, height: Int)?,
+    identityKey: String, for displayID: CGDirectDisplayID
+  ) -> Entry {
+    stored.withLock { entries in
+      if let existing = entries[displayID], existing.identityKey == identityKey { return existing }
+      let entry = Entry(mode: mode, nativePixels: nativePixels, identityKey: identityKey)
+      entries[displayID] = entry
+      return entry
     }
   }
 
-  func mode(for displayID: CGDirectDisplayID) -> DisplayMode? {
+  func entry(for displayID: CGDirectDisplayID) -> Entry? {
     stored.withLock { $0[displayID] }
   }
 

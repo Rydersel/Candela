@@ -62,11 +62,50 @@ final class AppModel {
     }
   }
 
-  /// ONE gate for every display-reconfiguring feature: display modes,
-  /// mirroring, rotation and arrangement. Declared before all four because each
-  /// takes it as a required init parameter; a defaulted gate would give each
+  /// One gate for display modes, mirroring, rotation, arrangement, HDR,
+  /// checkups and settings resets. Each coordinator takes this shared gate;
+  /// a defaulted gate would give each
   /// coordinator a private one, which compiles, runs, and excludes nobody.
   let reconfigurationGate = DisplayReconfigurationGate()
+
+  @ObservationIgnored private(set) lazy var hdrAction = HDRShortcutAction(
+    gate: reconfigurationGate,
+    target: { [weak self] id in self?.displays.first(where: { $0.id == id }) },
+    isBlocked: { [weak self] in self?.isResetting ?? true },
+    isSynthesized: { [weak self] id in self?.synthesis.isEngaged(displayID: id) ?? false })
+
+  @ObservationIgnored let hdrFeedback = ShortcutFeedbackWindow()
+
+  var canResetSettings: Bool { !isResetting && !hdrAction.isRunning && !isCheckupRunning }
+
+  private(set) var isCheckupRunning = false
+
+  /// The checkup owns its mode/HDR changes until every restore has settled.
+  func beginCheckupConfiguration() async -> String? {
+    guard !Task.isCancelled else { return "The checkup was cancelled." }
+    guard !isResetting else { return "Wait for the settings reset to finish before starting a checkup." }
+    guard !isCheckupRunning else { return "Wait for the previous checkup to finish restoring the display." }
+    guard !hdrAction.isRunning else { return "Wait for the HDR change to finish before starting a checkup." }
+    isCheckupRunning = true
+    guard await reconfigurationGate.claim(.checkup).isGranted else {
+      isCheckupRunning = false
+      return "Finish the current display change before starting a checkup."
+    }
+    if Task.isCancelled {
+      await endCheckupConfiguration()
+      return "The checkup was cancelled."
+    }
+    return nil
+  }
+
+  func endCheckupConfiguration() async {
+    guard isCheckupRunning else { return }
+    await reconfigurationGate.release(.checkup)
+    isCheckupRunning = false
+  }
+
+  /// Copies share the session's rejected scan-out modes across both coordinators.
+  let displayConfigurator = CoreGraphicsDisplayConfigurator()
 
   /// Display-mode enumeration, the preview countdown and stored-mode writes.
   /// Owned here rather than by a view because the countdown must outlive whatever
@@ -80,7 +119,7 @@ final class AppModel {
   /// catalog is rebuilt at reconnect with nothing on screen, so a view-installed
   /// provider would be absent exactly when the panel's own size is judged.
   @ObservationIgnored private(set) lazy var displayModes: DisplayModeCoordinator = {
-    let coordinator = DisplayModeCoordinator(gate: reconfigurationGate)
+    let coordinator = DisplayModeCoordinator(gate: reconfigurationGate, configurator: displayConfigurator)
     coordinator.physicalFacts = { [weak self] display in
       self?.physicalPanelFacts(for: display)
     }
@@ -99,7 +138,7 @@ final class AppModel {
   @ObservationIgnored private(set) lazy var synthesis: SynthesisCoordinator = {
     let coordinator = SynthesisCoordinator(
       virtualDisplays: virtualDisplays,
-      configurator: CoreGraphicsDisplayConfigurator(),
+      configurator: displayConfigurator,
       gate: reconfigurationGate,
       topologyStore: mirrorTopology,
       // The link bounce's HDR seam, and every leg goes through the DISPLAY'S OWN
@@ -279,6 +318,7 @@ final class AppModel {
   /// reaches the panel: `isOn` is observable on `KeepAwake` itself, and that is
   /// what the row reads.
   @ObservationIgnored private(set) lazy var keepAwake = KeepAwake()
+  @ObservationIgnored private(set) lazy var endTimePicker = EndTimePicker()
 
   /// Displays Candela creates. In-process ownership is what makes a
   /// crash reclaim them; the host's owned set is the ONLY authority on "is
@@ -433,6 +473,7 @@ final class AppModel {
   /// removes the slot keys: a wiped `configured` with the display still
   /// standing would be state the pane can no longer explain.
   func destroyAllVirtualDisplaysForReset() async {
+    guard isResetting, await reconfigurationGate.holder == .settingsReset else { return }
     // The ENGINE takes its own displays down first. `destroyAll` below
     // would otherwise release the synthesis slots behind the engine's back,
     // leaving its pairing table describing a departed virtual display and every
@@ -445,10 +486,9 @@ final class AppModel {
     // it already rebuilt. The engine's table is stale for the rest of the session
     // either way, so the log line is what a later report has to explain it by.
     //
-    // `force`: a claim held by another feature must not leave a set standing
-    // through a reset that rebuilds the controller which would take it down. It
-    // waits for the claim and only goes on unclaimed once the wait runs out.
-    if await synthesis.disengageAllForReset(force: true) == false {
+    // The reset owns the gate throughout teardown, HDR restoration and rebuild.
+    // This is its authorized nested teardown, not another display-mode claim.
+    if await synthesis.disengageAllForReset(underResetClaim: true) == false {
       log.error("reset: the synthesis engine refused its teardown; the virtual displays go down without it")
     }
     let host = virtualDisplays
@@ -479,16 +519,50 @@ final class AppModel {
 
   /// Claims the latch. False means a reset is already running and this one must
   /// not start.
-  func beginReset() -> Bool {
-    guard !isResetting else { return false }
+  func beginReset() async -> Bool {
+    resetRefusalMessage = nil
+    guard !Task.isCancelled else {
+      resetRefusalMessage = "The settings reset was cancelled."
+      return false
+    }
+    guard canResetSettings else {
+      resetRefusalMessage = isCheckupRunning
+        ? "Finish the display checkup before resetting settings."
+        : "Wait for the current HDR change or settings reset to finish."
+      return false
+    }
+    // Reserve the local latch before hopping to the shared gate. No hardware
+    // work may start until the gate also grants this reset its claim.
     isResetting = true
     resettingOffMain.withLock { $0 = true }
+    if await reconfigurationGate.claim(.settingsReset).refusedBy != nil {
+      resetRefusalMessage = "Finish the current display change before resetting settings."
+      isResetting = false
+      resettingOffMain.withLock { $0 = false }
+      return false
+    }
+    if Task.isCancelled {
+      await endReset()
+      resetRefusalMessage = "The settings reset was cancelled."
+      return false
+    }
     return true
   }
 
-  func endReset() {
+  func endReset() async {
+    guard isResetting else { return }
+    await reconfigurationGate.release(.settingsReset)
     isResetting = false
     resettingOffMain.withLock { $0 = false }
+  }
+
+  private(set) var resetRefusalMessage: String?
+
+  func withSettingsReset(_ operation: @MainActor () async -> Void) async -> Bool {
+    guard await beginReset() else { return false }
+    await operation()
+    await endReset()
+    return true
   }
 
   /// Per-display VCP 0x62 verdict, including known compatibility exceptions. Observable,

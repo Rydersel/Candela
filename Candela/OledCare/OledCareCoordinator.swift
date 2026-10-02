@@ -57,6 +57,11 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// pane's per-display section reads this ("paused while mirrored", etc.).
   private(set) var dimStates: [String: OledDimState] = [:]
 
+  /// Session-only wall-clock deadlines survive display disconnects and count sleep.
+  private var dimmingPauseDeadlines: [String: Date] = [:]
+  @ObservationIgnored private var dimmingResumePending: Set<String> = []
+  @ObservationIgnored private let now: () -> Date
+
   /// Built unconditionally in `start(model:)`, Safe Mode included, so the pane's
   /// global toggles always reflect real system state. Nil only before launch
   /// wiring runs.
@@ -108,6 +113,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     /// Detection dimming. Off by default, so an enrolled display that never opts
     /// in pays nothing past the flag test in `render`.
     var detectionDimmingEnabled = false
+    var dimmingPaused = false
     /// This tick's display-sleep assertion reading, carried so `render` can put
     /// detection dimming behind the same gate as idle dimming. The engine gates
     /// its own states on it, but `.active` never passes through `mayShow`, and
@@ -253,12 +259,14 @@ final class OledCareCoordinator: CheckupCareHolding {
       CGWindowListSource(displayID: $0).onScreenWindows()
     },
     lowBattery: @escaping () -> Bool = { OledCareSignalSources.onLowBattery() },
-    exposureCapture: OledExposureCapture = OledExposureCapture(prepare: LuminanceSampler.prepareWave)
+    exposureCapture: OledExposureCapture = OledExposureCapture(prepare: LuminanceSampler.prepareWave),
+    now: @escaping () -> Date = Date.init
   ) {
     self.wallpaper = wallpaper
     self.windowList = windowList
     self.lowBattery = lowBattery
     self.exposureCapture = exposureCapture
+    self.now = now
   }
 
   /// The most recent accepted reading, panel-native, for the hero's live
@@ -583,14 +591,94 @@ final class OledCareCoordinator: CheckupCareHolding {
     UserDefaults.standard.removeObject(forKey: Self.modelComparisonKeyName(persistenceKey))
   }
 
+  func dimmingPauseDeadline(for key: String) -> Date? {
+    guard let deadline = dimmingPauseDeadlines[key], deadline > now() else { return nil }
+    return deadline
+  }
+
+  func pauseDimming(for key: String, duration: TimeInterval) {
+    guard duration.isFinite, duration > 0, duration <= TimedControlDeadline.maximumInterval else { return }
+    pauseDimming(for: key, until: now().addingTimeInterval(duration))
+  }
+
+  @discardableResult
+  func pauseDimming(for key: String, until deadline: Date) -> Bool {
+    guard !resetting, TimedControlDeadline.isValid(deadline, now: now()) else { return false }
+    dimmingPauseDeadlines[key] = deadline
+    invalidateDimmingEvidence(for: key)
+    guard var state = states[key] else { return true }
+    state.dimmingPaused = true
+    state.unfocusedSince = nil
+    // Use the existing removal renderer so closing an overlay still receives
+    // bounded window-server verification on the following ticks.
+    if let display = model?.displays.first(where: { $0.display.persistenceKey == key }) {
+      endLockDim(&state, on: display.controller)
+      clearSkip(for: key)
+      render(.active, into: &state, on: display.id)
+    }
+    states[key] = state
+    if dimStates[key] != .suspended { dimStates[key] = .active }
+    if driver != nil { tick() }
+    return true
+  }
+
+  func resumeDimming(for key: String) {
+    clearDimmingPause(for: key)
+    if driver != nil { tick() }
+  }
+
+  private func clearDimmingPause(for key: String) {
+    guard dimmingPauseDeadlines.removeValue(forKey: key) != nil else { return }
+    dimmingResumePending.insert(key)
+    invalidateDimmingEvidence(for: key)
+  }
+
+  private func invalidateDimmingEvidence(for key: String) {
+    exposureCapture.invalidate(key: key)
+    forgetWindowObservation(for: key)
+    states[key]?.lastNominationRefreshAt = nil
+    states[key]?.unfocusedSince = nil
+  }
+
+  private func expireDimmingPauses() {
+    let instant = now()
+    for (key, deadline) in dimmingPauseDeadlines where deadline <= instant {
+      clearDimmingPause(for: key)
+    }
+  }
+
+  /// Kept separate from delivery: a user pause leaves the engine active so
+  /// measurement continues, while mirror and checkup suspensions still win.
+  func updateDimming(
+    for key: String, state: inout PerDisplay, signals: OledDimSignals
+  ) -> OledDimState {
+    expireDimmingPauses()
+    var signals = signals
+    signals.dimmingPaused = dimmingPauseDeadlines[key] != nil
+    let resuming = dimmingResumePending.remove(key) != nil
+    if resuming { state.engine.noteWake() }
+    if signals.dimmingPaused || state.dimmingPaused != signals.dimmingPaused || resuming {
+      state.nominatedMask = nil
+      state.lastNominationRefreshAt = nil
+      state.unfocusedSince = nil
+      signals.unfocusedSeconds = nil
+    }
+    state.dimmingPaused = signals.dimmingPaused
+    return state.engine.tick(signals)
+  }
+
   // MARK: - Entry points
 
   /// The reapply-after-pref-change shape: synchronous, main-actor, the ONLY pref entry point. Rebuilds
   /// each enrolled display's config from prefs; a display whose enrollment
-  /// turned off loses its overlay and its engine. `persistenceKey` scoping is
-  /// deliberately not exploited: the reconcile walks the whole (small) display
-  /// list either way, and `updateConfig` from prefs is idempotent.
-  func reapplyAfterPrefChange(persistenceKey _: String?) {
+  /// turned off loses its overlay and its engine. Pause cleanup also handles a
+  /// disconnected display; reconciliation walks the whole live display list.
+  func reapplyAfterPrefChange(persistenceKey: String?) {
+    let keys = persistenceKey.map { [$0] } ?? Array(dimmingPauseDeadlines.keys)
+    for key in keys where !DisplayPrefs(persistenceKey: key).oledCareEnrolled {
+      clearDimmingPause(for: key)
+      dimmingResumePending.remove(key)
+    }
     guard let model, !model.isSafeMode, !resetting else { return }
     reconcileEnrollment()
     if driver != nil { tick() }
@@ -624,6 +712,8 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// MUST pair this with `resetDidComplete()` after the wipe.
   func prepareForReset() {
     resetting = true
+    dimmingPauseDeadlines.removeAll()
+    dimmingResumePending.removeAll()
     // Before the state below is discarded, and before the domain is wiped: a
     // reset that clears the OLED prefs must not leave a display sitting at a dim
     // level whose owner it just deleted (the mute-strand rule's ordering, in the brightness
@@ -682,6 +772,8 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// every other display's dims, counters and overlays are untouched, which is
   /// why this is not `prepareForReset()`.
   func beginDisplayReset(_ key: String) {
+    clearDimmingPause(for: key)
+    dimmingResumePending.remove(key)
     resettingDisplays.insert(key)
     guard let model,
           var state = states[key],
@@ -753,6 +845,8 @@ final class OledCareCoordinator: CheckupCareHolding {
       seen.insert(key)
       let prefs = DisplayPrefs(persistenceKey: key)
       guard prefs.oledCareEnrolled else {
+        clearDimmingPause(for: key)
+        dimmingResumePending.remove(key)
         dropState(for: key)
         continue
       }
@@ -880,6 +974,7 @@ final class OledCareCoordinator: CheckupCareHolding {
   // MARK: - The tick
 
   private func tick() {
+    expireDimmingPauses()
     guard let model, !resetting else { return }
     // Drained independently of `states`: these entries outlive the state that
     // issued them by design (I-2), including across a reset.
@@ -980,7 +1075,7 @@ final class OledCareCoordinator: CheckupCareHolding {
       state.assertionHeld = assertionHeld
 
       let showingCheckupField = checkupFieldHolds.contains(key)
-      let newState = state.engine.tick(OledDimSignals(
+      let newState = updateDimming(for: key, state: &state, signals: OledDimSignals(
         idleSeconds: idleSeconds,
         assertionHeld: assertionHeld,
         isLocked: isLocked,
@@ -1066,7 +1161,7 @@ final class OledCareCoordinator: CheckupCareHolding {
       }
       // Pauses invalidate short-lived evidence, never cumulative exposure.
       // History cannot make a post-wake frame instantly count as static.
-      if newState != .active || !awake || isLocked || assertionHeld || hdrSettling {
+      if state.dimmingPaused || newState != .active || !awake || isLocked || assertionHeld || hdrSettling {
         adaptiveProtection.removeValue(forKey: key)
         state.nominatedMask = nil
         state.lastNominationRefreshAt = nil
@@ -1255,7 +1350,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     _ dimState: OledDimState, into state: inout PerDisplay,
     for key: String, on displayState: AppModel.DisplayState
   ) {
-    guard dimState == .lockDim else {
+    guard dimState == .lockDim, !state.dimmingPaused else {
       endLockDim(&state, on: displayState.controller)
       clearSkip(for: key)
       return
@@ -1380,8 +1475,8 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// render 0.075 in the region and ZERO everywhere else, deleting the uniform
   /// dim the user asked for.
   private func render(_ dimState: OledDimState, into state: inout PerDisplay, on id: CGDirectDisplayID) {
-    let stateAlpha = state.engine.alpha(for: dimState)
-    let blackout = dimState == .blackout
+    let stateAlpha = state.dimmingPaused ? nil : state.engine.alpha(for: dimState)
+    let blackout = !state.dimmingPaused && dimState == .blackout
     // `.active` DOES compose: detection dimming is the one care feature that
     // runs while the user is working, so it can require an overlay in a state
     // whose own alpha is nil. Four cases do not, each for its own reason:
@@ -1396,7 +1491,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     //     presentation holding a display-sleep assertion must not have its
     //     window dimmed under it, and `.active` never passes through the
     //     engine's own `mayShow`.
-    let excluded = blackout || dimState == .suspended || dimState == .lockDim
+    let excluded = state.dimmingPaused || blackout || dimState == .suspended || dimState == .lockDim
     let nomination =
       (state.detectionDimmingEnabled && !excluded && !state.assertionHeld)
       ? state.nominatedMask : nil
@@ -1459,7 +1554,7 @@ final class OledCareCoordinator: CheckupCareHolding {
   private func renominate(
     for key: String, grid: [Double], cols: Int, rows: Int, through transform: PanelSpaceTransform
   ) {
-    guard let state = states[key], state.detectionDimmingEnabled,
+    guard let state = states[key], !state.dimmingPaused, state.detectionDimmingEnabled,
       state.telemetryEnabled, state.windowObservationEnabled,
       !state.assertionHeld, let observation = latestObservations[key]
     else {
@@ -1637,7 +1732,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     for key: String, state: inout PerDisplay, on target: OledTelemetryTarget,
     at now: SuspendingClock.Instant
   ) {
-    guard state.detectionDimmingEnabled, state.telemetryEnabled,
+    guard !state.dimmingPaused, state.detectionDimmingEnabled, state.telemetryEnabled,
       state.windowObservationEnabled, var protection = adaptiveProtection[key]
     else {
       state.nominatedMask = nil

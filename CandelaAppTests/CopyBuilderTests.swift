@@ -566,6 +566,20 @@ struct CopyBuilderTests {
           width: 1920, height: 1080, refreshHz: 30, dialect: .resolution))
   }
 
+  @Test func scanoutFailureNamesTheWireTimingAndRecoveredDisplay() {
+    let error = DisplayConfigError(unhonouredCommit: .init(
+      requested: Self.mode, achieved: Self.mode,
+      scanoutTiming: ScanoutTiming(width: 2560, height: 1440, refreshHz: 120),
+      fallbackRestored: true))
+    let reason = DisplayModeCoordinator.StartFailure.Reason.failed(error)
+    #expect(DisplayModeCopy.achievedGeometry(error.unhonouredCommit!).contains("2560"))
+    #expect(render(DisplayModeCopy.startFailure(reason)).contains("previous resolution was restored"))
+    #expect(DisplayModeCopy.startFailureSubject(displayName: "External", reason: reason) == "External")
+    let reapply = render(DisplayModeCopy.reapply(requested: Self.descriptor, notice: .failed(error)))
+    #expect(reapply.contains("2560"))
+    #expect(reapply.contains("previous resolution was restored"))
+  }
+
   @Test func displayModeStartFailureStatesEitherReason() {
     #expect(render(DisplayModeCopy.startFailure).contains("could not switch this display"))
     // Nothing committed on this route, so the sentence says so instead of
@@ -1485,7 +1499,7 @@ struct CopyBuilderTests {
   private static let allSynthesisFailures: [SynthesisFailure] = [
     .unavailable, .noFreeSlot, .createFailed(.classFamilyUnavailable),
     .virtualModeNotAchieved, .mirrorRefused, .engageNotAchieved, .notEngaged,
-    .unwindIncomplete,
+    .unwindIncomplete, .scanoutMismatch(ScanoutTiming(width: 2560, height: 1440, refreshHz: 120)),
   ]
 
   private static func guardSynthesisFailure(_ failure: SynthesisFailure) -> Int {
@@ -1498,6 +1512,7 @@ struct CopyBuilderTests {
     case .engageNotAchieved: 5
     case .notEngaged: 6
     case .unwindIncomplete: 7
+    case .scanoutMismatch: 8
     }
   }
 
@@ -1559,7 +1574,7 @@ struct CopyBuilderTests {
     #expect(Set(Self.allModeReapplyNotices.map(Self.guardModeReapplyNotice)).count == 3)
     #expect(Set(Self.allStartFailureReasons.map(Self.guardStartFailureReason)).count == 2)
     #expect(Set(Self.allLockDimSkips.map(Self.guardLockDimSkip)).count == 4)
-    #expect(Set(Self.allSynthesisFailures.map(Self.guardSynthesisFailure)).count == 8)
+    #expect(Set(Self.allSynthesisFailures.map(Self.guardSynthesisFailure)).count == 9)
     #expect(Set(Self.allSynthesisRefusalReasons.map(Self.guardSynthesisRefusalReason)).count == 10)
   }
 }

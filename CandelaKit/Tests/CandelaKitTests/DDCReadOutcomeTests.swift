@@ -475,7 +475,7 @@ private func capabilityTrace(_ panel: ScriptedPanel) -> [String] {
 
 /// A refresh retires the service, so the replacement starts by assuming the bus
 /// was busy; otherwise its first packet could follow the retired service's traffic
-/// by microseconds, silently on the write-only MAG.
+/// by microseconds, violating the minimum interval between packets.
 @Test func aFreshServiceStartsOwingTheFullFloor() {
   let clock = FakeClock()
   let panel = ScriptedPanel([], clock: clock)

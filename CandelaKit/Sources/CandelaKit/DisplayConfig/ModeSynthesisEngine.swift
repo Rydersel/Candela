@@ -67,6 +67,8 @@ public enum SynthesisFailure: Error, Sendable, Equatable {
   /// The mirror stands and the panel did not follow it: the physical does not
   /// report the master's geometry, so the size is not on the glass.
   case engageNotAchieved
+  /// The framebuffer followed the master, but the controller drove a foreign timing.
+  case scanoutMismatch(ScanoutTiming)
   /// `disengage` was asked about a display that has no pairing.
   case notEngaged
   /// Something the unwind tried to take down is still standing: a virtual
@@ -177,6 +179,7 @@ public actor ModeSynthesisEngine {
     let free = VirtualDisplayIdentity.synthesisSlotRange.filter { !occupied.contains($0) }
     guard !free.isEmpty else { return .failure(.noFreeSlot) }
 
+    let nativePixels = configurator.nativePixels(for: displayID)
     let spec = VirtualDisplaySpec(
       name: Self.virtualDisplayName,
       logicalWidth: size.logicalWidth, logicalHeight: size.logicalHeight,
@@ -230,6 +233,24 @@ public actor ModeSynthesisEngine {
     guard engageLanded(pairing) else {
       log.error("synthesis.engage slot=\(slot): the panel did not take the master's geometry")
       return .failure(fail(.engageNotAchieved, unwinding: pairing))
+    }
+
+    // The physical rate is independent of the virtual master's 60 Hz and
+    // the app retimes it after engage. Check native geometry here, not that rate.
+    let requested = DisplayMode(ioModeID: DisplayMode.syntheticIoModeID(stopIndex: 0),
+      logicalWidth: size.logicalWidth, logicalHeight: size.logicalHeight,
+      pixelWidth: size.pixelWidth, pixelHeight: size.pixelHeight,
+      refreshHz: 0, isNative: false, provenance: .synthesized)
+    var timing: ScanoutTiming?
+    for attempt in 1...3 {
+      timing = configurator.scanoutTiming(for: displayID)
+      if ScanoutVerification.verdict(requested: requested, nativePixels: nativePixels,
+        timing: timing) == .verified { break }
+      if attempt < 3, readbackRetryDelay > 0 { Thread.sleep(forTimeInterval: readbackRetryDelay) }
+    }
+    if let timing, ScanoutVerification.verdict(requested: requested,
+      nativePixels: nativePixels, timing: timing) == .mismatch {
+      return .failure(fail(.scanoutMismatch(timing), unwinding: pairing))
     }
 
     table[displayID] = pairing

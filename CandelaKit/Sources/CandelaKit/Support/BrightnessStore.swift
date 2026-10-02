@@ -1,7 +1,8 @@
 import Foundation
 
-/// Persists last-known brightness per display. Needed because write-only DDC
-/// panels (e.g. the MAG341C) give no readback: last-written IS the truth.
+/// Persists the latest user or adopted hardware brightness per display.
+/// When readback is unavailable, the saved value preserves app intent; it does
+/// not prove that a write landed or that the monitor has not changed since.
 public protocol BrightnessStoring: Sendable {
   func savedBrightness(for key: String) -> Double?
   func saveBrightness(_ value: Double, for key: String)

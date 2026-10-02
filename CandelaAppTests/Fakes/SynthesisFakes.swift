@@ -132,6 +132,10 @@ final class FakeDisplayWorld: @unchecked Sendable {
     lock.withLock { currentByID[displayID] }
   }
 
+  func setCurrentMode(_ mode: DisplayMode, for displayID: CGDirectDisplayID) {
+    lock.withLock { currentByID[displayID] = mode }
+  }
+
   func nativePixels(for displayID: CGDirectDisplayID) -> (width: Int, height: Int)? {
     lock.withLock {
       guard let twin = masterTwinLocked(displayID) else { return nativeByID[displayID] ?? nil }
@@ -219,6 +223,9 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
   var onModeApply: (@Sendable () -> Void)?
   /// A committed mode failure for coordinator recovery tests, consumed once.
   var nextModeApplyFailure: DisplayConfigError?
+  var modeApplyFailures: [DisplayConfigError?] = []
+  var updatesCurrentModeOnApply = false
+  var scanoutRead: (@Sendable (CGDirectDisplayID) -> ScanoutTiming?)?
 
   init(_ world: FakeDisplayWorld) { self.world = world }
 
@@ -250,6 +257,10 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
     return world.nativePixels(for: displayID)
   }
 
+  func scanoutTiming(for displayID: CGDirectDisplayID) -> ScanoutTiming? {
+    scanoutRead?(displayID)
+  }
+
   /// Read from the world directly, not through the four methods above, so the
   /// recorded count is one call, as on the real configurator.
   func modeSnapshot(for displayID: CGDirectDisplayID) -> DisplayModeSnapshot {
@@ -271,16 +282,15 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
     onModeApply?()
     if refusesModeApplies { throw DisplayConfigError(cgErrorCode: CGError.failure.rawValue) }
     world.recordApply(mode, to: displayID)
-    if let failure = nextModeApplyFailure {
+    let scripted = modeApplyFailures.isEmpty ? nextModeApplyFailure : modeApplyFailures.removeFirst()
+    if let failure = scripted {
       nextModeApplyFailure = nil
-      if let achieved = failure.unhonouredCommit?.achieved,
-         let display = world.displays().first(where: { $0.id == displayID }) {
-        world.attach(
-          display, modes: world.modes(for: displayID), current: achieved,
-          nativePixels: world.nativePixels(for: displayID))
+      if let achieved = failure.unhonouredCommit?.achieved {
+        world.setCurrentMode(achieved, for: displayID)
       }
       throw failure
     }
+    if updatesCurrentModeOnApply { world.setCurrentMode(mode, for: displayID) }
   }
 
   func applyMirroring(_ changes: [MirrorChange], scope _: DisplayConfigScope) throws {
@@ -315,6 +325,8 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
 final class FakeSynthesisVirtualDisplayHost: VirtualDisplayAchievedModeReporting, @unchecked Sendable {
   let world: FakeDisplayWorld
   var isAvailable = true
+  var refusesDestroy = false
+  var onDestroy: (@Sendable () -> Void)?
   /// Report a mode the spec did not ask for, to reach `virtualModeNotAchieved`.
   var achieves2x = true
   /// Runs on the engine's executor at the top of `create`, before anything
@@ -372,8 +384,10 @@ final class FakeSynthesisVirtualDisplayHost: VirtualDisplayAchievedModeReporting
 
   @discardableResult
   func destroy(slot: Int, departureTimeout _: TimeInterval) -> Bool {
+    guard !refusesDestroy else { return false }
     guard let handle = lock.withLock({ handles.removeValue(forKey: slot) }) else { return false }
     world.detach(handle.displayID)
+    onDestroy?()
     return true
   }
 

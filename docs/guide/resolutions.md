@@ -60,6 +60,17 @@ letterboxed or cropped while macOS reports success throughout. The display's
 Diagnostics page reports how many modes are being withheld, and the guard can
 be turned off; see [advanced settings](advanced-settings.md).
 
+After a resolution change, Candela also reads the display controller's active
+scan-out timing when available. A revealed HiDPI mode must use the panel's
+native timing. A mismatch triggers an immediate attempt to restore the previous
+resolution and withholds that mode on that connection for the rest of the app
+session. If restoration fails, the recovery countdown remains available.
+Ordinary lower-resolution wire modes are allowed. Missing or ambiguous
+controller data is reported as "not verifiable", and the normal confirmation
+countdown remains in place. Diagnostics includes the active scan-out size and
+refresh rate. This reading is available only on controllers that expose the
+AppleCLCD2 timing record.
+
 ## The recommended size
 
 Where a display declares its physical size, Candela works out which logical

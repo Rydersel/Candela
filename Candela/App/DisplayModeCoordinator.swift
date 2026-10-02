@@ -803,49 +803,53 @@ final class DisplayModeCoordinator {
     // `dropPreviewOnDepartedDisplay`'s reason: the derived copy is nil for several
     // awaits after `begin()` succeeds, and reapplying over a live preview would
     // strand it, so the countdown would "revert" to a mode the display had left.
-    let previewed = await session.previewedMode?.displayID
-    if let previewed, displays.contains(where: { $0.id == previewed }) {
-      // An explicit choice the user is looking at RIGHT NOW outranks one they
-      // made some other day, but the claim goes back, so this is "not now" rather
-      // than "never": without the release, a display that was mid-preview when it
-      // arrived would go unreapplied for the rest of the connection. The retry
-      // needs no scheduler, since resolving the preview is itself a
-      // reconfiguration and the event it produces calls this again.
-      arrivals.release(previewed)
+    let hasModePreview = await session.previewedMode != nil
+    let hasSynthesisPreview = await synthesis?.session.previewedSynthesis != nil
+    if hasModePreview || hasSynthesisPreview {
+      // An unattended failure may need the one recovery countdown. Do not
+      // start another apply while either preview session already owns it.
+      for display in displays { arrivals.release(display.id) }
+      return
     }
     // Synchronous on the main actor, so an unhonoured commit blocks here for the
     // configurator's whole settle window. An honoured one returns on the first
     // read; the alternative is reporting a restore that did not happen.
-    for display in displays where display.id != previewed {
+    for (index, display) in displays.enumerated() {
       // Synthesis reapply runs AFTER the stored-mode decision for the same
       // display, never beside it: engaging makes the panel a mirror slave, and a
       // stored mode applied to a slave is the case `ModeReapplyPolicy` defers for.
       // That deferral is also why a display already carrying a synthesis set never
       // fights its own remembered resolution.
-      guard reapplyStoredMode(for: display) == .done else { continue }
+      let step = await reapplyStoredMode(for: display)
+      if step == .recovering {
+        for remaining in displays.dropFirst(index + 1) { arrivals.release(remaining.id) }
+        break
+      }
+      guard step == .done else { continue }
       await reapplySynthesis(for: display)
     }
-    // Reapply opens no preview, so its claim is spent when the loop ends, but it
-    // can run while a preview stands on ANOTHER display and releasing then would
-    // free the claim protecting that preview. The session is the authority on
-    // whether anything is outstanding; `preview` is not, being nil for several
-    // awaits after a `begin()` succeeds.
+    // A failed rollback retains a recovery preview and its gate claim. Ask the
+    // sessions rather than the UI snapshot, which lags their actor state.
     if await session.previewedMode == nil, await synthesis?.session.previewedSynthesis == nil {
       await gate.release(.displayModes)
     }
   }
 
   /// How far the stored-mode half of one display's reapply got. The synthesis
-  /// half runs only after `.done`: the other two mean the display is not in a
-  /// state to be reconfigured at all, and each has already given its arrival
-  /// claim back.
+  /// half runs only after `.done`. A recovery stops the remaining arrivals;
+  /// deferred or departed displays give their arrival claim back.
   private enum ModeReapplyStep {
     case done
     case deferred
     case gone
+    case recovering
   }
 
-  private func reapplyStoredMode(for display: ConfiguredDisplay) -> ModeReapplyStep {
+  private func reapplyStoredMode(for display: ConfiguredDisplay) async -> ModeReapplyStep {
+    guard configurator.displays().contains(where: { $0.id == display.id && $0.identity == display.identity }) else {
+      arrivals.release(display.id)
+      return .gone
+    }
     let identity = display.identity
     let stored = persistence.storedMode(for: identity)
     let isEnabled = persistence.isEnabled(for: identity)
@@ -878,17 +882,49 @@ final class DisplayModeCoordinator {
     else { return .done }
 
     var notice = decision.notice
+    var recovering = false
     if let mode = decision.modeToApply {
       do {
         try configurator.apply(mode, to: display.id, scope: .session)
+        guard configurator.displays().contains(where: { $0.id == display.id && $0.identity == identity }) else {
+          arrivals.release(display.id)
+          return .gone
+        }
         log.log("reapplied stored mode on display \(display.id): \(mode.logicalWidth)x\(mode.logicalHeight) @\(mode.refreshHz)Hz")
       } catch {
         // Not `try?`: that would report a successful restore over a refused
         // transaction, a reassigned `ioModeID`, or a commit the display did not
         // honour. Only the last one moved the display, so the notice claims
         // nothing about where it was left.
-        let configError = error as? DisplayConfigError
+        var configError = error as? DisplayConfigError
           ?? DisplayConfigError(cgErrorCode: -1)
+        if let commit = configError.unhonouredCommit, commit.scanoutTiming != nil,
+           let previous = snapshot.current {
+          guard configurator.displays().contains(where: { $0.id == display.id && $0.identity == identity }) else {
+            arrivals.release(display.id)
+            return .gone
+          }
+          do {
+            try configurator.apply(previous, to: display.id, scope: .session)
+            guard configurator.displays().contains(where: { $0.id == display.id && $0.identity == identity }) else {
+              arrivals.release(display.id)
+              return .gone
+            }
+            configError = DisplayConfigError(unhonouredCommit: .init(
+              requested: commit.requested, achieved: commit.achieved,
+              scanoutTiming: commit.scanoutTiming, fallbackRestored: true))
+          } catch {
+            log.error("Could not restore the prior mode after a scan-out mismatch on display \(display.id)")
+            recovering = await session.retainRecovery(
+              after: commit, previousMode: previous, on: display.id, identity: identity)
+            if recovering {
+              stopCountdown()
+              surfaces[display.id] = .floatingPanel
+              await adopt(.set(configError))
+              startCountdown()
+            }
+          }
+        }
         notice = .failed(configError)
       }
       refreshCatalog(for: display.id)
@@ -905,7 +941,7 @@ final class DisplayModeCoordinator {
     // because this one describes an attempt that never finished. The claim goes
     // back with it, so the display's return is an arrival again and that pass
     // writes a fresh outcome in place of this half-answer.
-    guard configurator.displays().contains(where: { $0.id == display.id }) else {
+    guard configurator.displays().contains(where: { $0.id == display.id && $0.identity == identity }) else {
       arrivals.release(display.id)
       return .gone
     }
@@ -914,7 +950,7 @@ final class DisplayModeCoordinator {
     )
     didReportReapply(display.id, notice)
     log.error("could not restore stored mode on display \(display.id): \(String(describing: notice), privacy: .public)")
-    return .done
+    return recovering ? .recovering : .done
   }
 
   /// The unattended synthesis half, through `SynthesisReapplyPolicy`.
@@ -925,6 +961,10 @@ final class DisplayModeCoordinator {
   /// genuinely stale descriptor from a caller that skipped the lookup.
   private func reapplySynthesis(for display: ConfiguredDisplay) async {
     guard let synthesis, !display.isBuiltIn else { return }
+    guard configurator.displays().contains(where: { $0.id == display.id && $0.identity == display.identity }) else {
+      arrivals.release(display.id)
+      return
+    }
     // Through `DisplayModeCatalog.full`, exactly as `refreshCatalog` feeds
     // `baseline()`: in the RAW list the native flag rides the HiDPI twin, the
     // ladder computes from that, and every stop lands under the minor-axis floor.
@@ -1756,6 +1796,10 @@ final class DisplayModeCoordinator {
       }
       await adopt(.clear)
     case let .failed(error):
+      if error.unhonouredCommit?.fallbackRestored == true {
+        await restoreStopAfterAFallenPick(on: answered.displayID)
+        startFailure = StartFailure(displayID: answered.displayID, reason: .failed(error))
+      }
       await adopt(.set(error))
     case .stale:
       // Nothing was resolved: the outstanding preview is not the one this answer

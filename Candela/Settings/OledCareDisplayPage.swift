@@ -114,6 +114,10 @@ struct OledCareDisplayPage: View {
         PanelDisplayTimeCard(summary: findings)
 
         SettingsCardSection(title: "Dimming") {
+          if !model.isSafeMode {
+            dimmingPauseControls
+            SettingsCardDivider()
+          }
           idleControls
           SettingsCardDivider()
           lockControls
@@ -387,6 +391,9 @@ struct OledCareDisplayPage: View {
   /// "paused" reading is the one state that must stay visible.
   private var statusText: LocalizedStringKey {
     if model.isSafeMode { return "Paused for this session (Safe Mode)" }
+    if let deadline = model.oledCare.dimmingPauseDeadline(for: persistenceKey) {
+      return "Dimming paused until \(EndTimeText.string(deadline))"
+    }
     // Exhaustive, so a new engine state is a compile error here rather than a
     // blank row.
     switch model.oledCare.dimStates[persistenceKey] {
@@ -407,6 +414,39 @@ struct OledCareDisplayPage: View {
     // Between enrolling and the first tick, and for a display the coordinator
     // has not reconciled yet.
     case nil: return "Starting"
+    }
+  }
+
+  private var dimmingPauseControls: some View {
+    let deadline = model.oledCare.dimmingPauseDeadline(for: persistenceKey)
+    return SettingRow("Pauses dimming for this display. Measuring and hours continue, and macOS can still put the display to sleep.") {
+      HStack(spacing: 12) {
+        if let deadline {
+          Text("Paused until \(EndTimeText.string(deadline))")
+            .fixedSize(horizontal: false, vertical: true)
+        } else {
+          Text("Pause dimming temporarily")
+        }
+        Spacer(minLength: 12)
+        if deadline != nil {
+          Button("Resume Now") { model.oledCare.resumeDimming(for: persistenceKey) }
+            .buttonStyle(SettingsSecondaryButtonStyle())
+            .accessibilityLabel("\(name), resume dimming now")
+        }
+        Menu(deadline == nil ? "Pause Dimming" : "Change Duration") {
+          Button("15 Minutes") {
+            model.oledCare.pauseDimming(for: persistenceKey, duration: 15 * 60)
+          }
+          Button("1 Hour") {
+            model.oledCare.pauseDimming(for: persistenceKey, duration: 60 * 60)
+          }
+          Button("Until…") {
+            model.chooseDimmingPauseEndTime(for: persistenceKey, name: name)
+          }
+        }
+        .fixedSize()
+        .accessibilityLabel("\(name), pause dimming duration")
+      }
     }
   }
 

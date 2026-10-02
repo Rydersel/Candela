@@ -687,7 +687,7 @@ case "caps":
   requireDDCDisplays()
   for entry in found {
     guard let capabilities = await entry.writer.readCapabilityString() else {
-      // Expected on the MAG 341C and every other write-only panel.
+      // An unavailable capabilities string does not prove a register is unreadable.
       print("\(entry.display.name): capabilities read FAILED -> unknown (volume slider stays enabled)")
       continue
     }

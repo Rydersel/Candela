@@ -18,7 +18,24 @@ struct PanelView: View {
   /// One disclosure open at a time keeps the display list compact.
   /// Keyed by (display, section): keyed by display alone,
   /// opening one of a display's sections opens the other underneath it.
-  @State private var expandedSection: PanelDisclosureID?
+  var controlledDisclosure: PanelDisclosureID? = nil
+  var changeDisclosure: ((PanelDisclosureID?) -> Void)? = nil
+  @State private var localDisclosure: PanelDisclosureID?
+
+  private var expandedSection: PanelDisclosureID? {
+    get { changeDisclosure == nil ? localDisclosure : controlledDisclosure }
+    nonmutating set {
+      if let changeDisclosure { changeDisclosure(newValue) }
+      else { localDisclosure = newValue }
+    }
+  }
+  @State private var awakeDuration = KeepAwakeDuration.untilTurnedOff
+
+  private var disclosureBinding: Binding<PanelDisclosureID?> {
+    Binding(get: { expandedSection }, set: { value in
+      expandedSection = value
+    })
+  }
 
   /// The menu drops the view hierarchy on close, so onAppear re-fires on every
   /// open and the settle plays each time.
@@ -75,12 +92,30 @@ struct PanelView: View {
         VStack(alignment: .leading, spacing: 8) {
           DisplayHeaderRow(
             controller: state.controller, displayName: name,
+            toggleHDR: {
+              PanelMenu.endTracking()
+              Task { @MainActor in
+                let result = await model.hdrAction.toggle(state)
+                model.hdrFeedback.show(result.message, on: OverlayWindow.screen(for: state.id))
+              }
+            },
             // Asked of the engine that owns the pairing: a catalog refresh
             // inside an engage window answers "not engaged" with the mirror
             // already up.
             isShowingSynthesizedSize: model.synthesis.isEngaged(displayID: state.display.id),
-            careLine: Self.careLine(for: state, model: model)
+            careLine: Self.careLine(for: state, model: model),
+            careIsExpanded: expandedSection == PanelDisclosureID(state.id, .care),
+            toggleCare: rowPrefs.oledCareEnrolled && !model.isSafeMode ? {
+              withAnimation(Motion.disclosure(reduceMotion: reduceMotion)) {
+                let disclosure = PanelDisclosureID(state.id, .care)
+                expandedSection = expandedSection == disclosure ? nil : disclosure
+              }
+            } : nil
           )
+          if rowPrefs.oledCareEnrolled, !model.isSafeMode,
+             expandedSection == PanelDisclosureID(state.id, .care) {
+            carePauseActions(for: state, name: name)
+          }
           DisplaySliderRow(
             controller: state.controller, displayName: name,
             snapsToStops: snapsToStops, showsPercent: showsPercent
@@ -125,7 +160,7 @@ struct PanelView: View {
             displayID: state.id,
             displayName: name,
             coordinator: model.displayModes,
-            expanded: $expandedSection
+            expanded: disclosureBinding
           )
           // Shares the expansion binding above: only one disclosure may be
           // open. On a single-display rig it must resolve to nothing rather
@@ -134,14 +169,14 @@ struct PanelView: View {
             displayID: state.id,
             displayName: name,
             coordinator: model.mirroring,
-            expanded: $expandedSection
+            expanded: disclosureBinding
           )
         }
       }
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 12)
-    VStack(spacing: 0) {
+    PanelLayout(maximumHeight: maximumHeight) {
       // Same predicate as the Keyboard pane's warning row, never a bare
       // `!isGranted`: an all-custom-shortcut rig needs no grant.
       if model.accessibility.isWarningWarranted {
@@ -158,9 +193,14 @@ struct PanelView: View {
       }
       // Keep the same hierarchy when a disclosure crosses the height limit.
       // The scroll view's ideal height still fits short lists to their content.
-      ScrollView(.vertical) { displayRows }
-        // No rubber-banding on short lists.
-        .scrollBounceBehavior(.basedOnSize)
+      ScrollView(.vertical) {
+        displayRows
+          // A transient overflow while a disclosure settles must not reserve
+          // a legacy scroll bar's width and shift the brightness knobs.
+          .background(OverlayScrollers())
+      }
+      .layoutValue(key: PanelDisplayViewport.self, value: true)
+      .scrollBounceBehavior(.basedOnSize)
       Divider()
       if Self.showsKeepAwake(appPrefs: appPrefs) {
         keepAwakeRow
@@ -170,7 +210,6 @@ struct PanelView: View {
       footer
     }
     .frame(width: 280)
-    .frame(maxHeight: maximumHeight)
     // The offset draws outside layout, so the entrance reflows nothing; the
     // menu window clips the first frames.
     .opacity(hasEntered ? 1 : 0)
@@ -181,7 +220,7 @@ struct PanelView: View {
     // The menu can close without a mouse-exit event and drops the view
     // hierarchy, so hasEntered re-arms here for the next open.
     .onDisappear {
-      expandedSection = nil
+      if changeDisclosure == nil { localDisclosure = nil }
       hasEntered = false
     }
   }
@@ -399,33 +438,103 @@ struct PanelView: View {
   /// Holds a power assertion for the app rather than touching a display, so it
   /// sits outside the per-display stack.
   ///
-  /// One line, and its height never changes with state: a caption that appeared
-  /// while the toggle was on grew the panel inside the already-open `NSMenu` and
-  /// clipped the footer off the bottom [MEASURED 2026-08-19].
-  ///
   /// OLED care's idle dim, blackout and unfocused dim cannot engage while this
   /// is on, which Settings > Menu Bar states next to the hide switch.
   private var keepAwakeRow: some View {
-    HStack(spacing: 0) {
-      // Label leading, control trailing, like the Resolution and Mirroring
-      // rows above it. A `Toggle` left to size itself centres label and switch
-      // as one group, matching nothing else in the panel [MEASURED 2026-08-19].
-      Label("Keep display awake", systemImage: "cup.and.saucer.fill")
-        .font(.system(size: 12))
-      Spacer(minLength: 8)
-      Toggle("", isOn: Binding(
-        get: { model.keepAwake.isOn },
-        set: { model.keepAwake.setOn($0) }
-      ))
-      .labelsHidden()
-      .toggleStyle(.switch)
-      .controlSize(.mini)
-      // `labelsHidden` detached the visible `Label` above, so without this the
-      // switch announces as unnamed.
-      .accessibilityLabel("Keep display awake")
+    let disclosure = PanelDisclosureID(0, .keepAwake)
+    let expanded = expandedSection == disclosure
+    let status = model.keepAwake.expiresAt.map {
+      "Awake until \(EndTimeText.string($0))"
+    } ?? (model.keepAwake.isOn ? "Until turned off" : "Off")
+    return VStack(alignment: .leading, spacing: 4) {
+      HStack(spacing: 0) {
+        Button {
+          if !expanded { synchronizeAwakeDuration() }
+          // The native window animates the size. Animating this layout too
+          // makes the flexible display viewport grow and then shrink again.
+          expandedSection = expanded ? nil : disclosure
+        } label: {
+          HStack(spacing: 5) {
+            Image(systemName: "cup.and.saucer.fill")
+            Text(model.keepAwake.expiresAt.map {
+              "Awake until \(EndTimeText.string($0))"
+            } ?? "Keep display awake")
+              .lineLimit(2)
+            Image(systemName: "chevron.down")
+              .font(.system(size: 8, weight: .semibold))
+              .rotationEffect(.degrees(expanded ? 180 : 0))
+              .animation(Motion.disclosure(reduceMotion: reduceMotion), value: expanded)
+          }
+          .font(.system(size: 12))
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Keep display awake duration")
+        .accessibilityValue("\(status), \(expanded ? "Expanded" : "Collapsed")")
+        Spacer(minLength: 8)
+        Toggle("", isOn: Binding(
+          get: { model.keepAwake.isOn },
+          set: { on in
+            if on { awakeDuration.apply(to: model.keepAwake) }
+            else { model.keepAwake.setOn(false) }
+          }))
+        .labelsHidden()
+        .toggleStyle(.switch)
+        .controlSize(.mini)
+        .accessibilityLabel("Keep display awake")
+      }
+      if expanded {
+        VStack(alignment: .leading, spacing: 6) {
+          HStack {
+            Text("Duration").foregroundStyle(.secondary)
+            Spacer()
+            Text(awakeDuration.title).monospacedDigit()
+          }
+          .font(.system(size: 11))
+          SelectionSlider(value: Binding(
+            get: { Double(awakeDuration.rawValue) },
+            set: { value in
+              guard let duration = KeepAwakeDuration(rawValue: Int(value.rounded())) else { return }
+              guard duration != awakeDuration || !model.keepAwake.isOn else { return }
+              awakeDuration = duration
+              duration.apply(to: model.keepAwake)
+            }), stopCount: KeepAwakeDuration.allCases.count)
+            .frame(height: 18)
+            .accessibilityLabel("Keep awake duration")
+            .accessibilityValue(awakeDuration.title)
+          HStack {
+            Text("15 min")
+            Spacer()
+            Image(systemName: "infinity")
+          }
+          .font(.system(size: 10))
+          .foregroundStyle(.secondary)
+          .accessibilityHidden(true)
+          Button("Custom end time…") {
+            expandedSection = nil
+            model.chooseKeepAwakeEndTime()
+          }
+          .buttonStyle(.plain)
+          .font(.system(size: 11))
+          .foregroundStyle(.secondary)
+          .frame(minHeight: 24, alignment: .leading)
+          .accessibilityLabel("Keep display awake, Custom end time…")
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+        .transition(.opacity.animation(Motion.disclosure(reduceMotion: reduceMotion)))
+      }
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 8)
+    .onAppear { synchronizeAwakeDuration() }
+  }
+
+  private func synchronizeAwakeDuration() {
+    guard model.keepAwake.isOn else { return }
+    awakeDuration = model.keepAwake.expiresAt.map {
+      KeepAwakeDuration.closest(to: $0.timeIntervalSinceNow)
+    } ?? .untilTurnedOff
   }
 
   /// Presentation only: hiding the row does not release an assertion an earlier
@@ -452,6 +561,45 @@ struct PanelView: View {
   }
 }
 
+/// The menu host can still propose its old height on the first disclosure
+/// frame. Measure against the screen budget, not that stale proposal, so the
+/// display viewport and controls above the disclosure keep their positions.
+private struct PanelLayout: Layout {
+  var maximumHeight: CGFloat?
+
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    let width = proposal.width ?? 280
+    return CGSize(width: width, height: heights(subviews, width: width).reduce(0, +))
+  }
+
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    let heights = heights(subviews, width: bounds.width)
+    var y = bounds.minY
+    for (subview, height) in zip(subviews, heights) {
+      subview.place(at: CGPoint(x: bounds.minX, y: y), anchor: .topLeading,
+        proposal: ProposedViewSize(width: bounds.width, height: height))
+      y += height
+    }
+  }
+
+  private func heights(_ subviews: Subviews, width: CGFloat) -> [CGFloat] {
+    var heights = subviews.map {
+      $0.sizeThatFits(ProposedViewSize(width: width, height: nil)).height
+    }
+    if let maximumHeight, let viewport = subviews.firstIndex(where: { $0[PanelDisplayViewport.self] }) {
+      let pinnedHeight = heights.enumerated().reduce(CGFloat.zero) {
+        $0 + ($1.offset == viewport ? 0 : $1.element)
+      }
+      heights[viewport] = min(heights[viewport], max(0, maximumHeight - pinnedHeight))
+    }
+    return heights
+  }
+}
+
+private struct PanelDisplayViewport: LayoutValueKey {
+  static let defaultValue = false
+}
+
 /// The panel's menu tracking session, so a control inside the panel can end it.
 /// Set once at launch by `StatusItemController`.
 ///
@@ -460,8 +608,68 @@ struct PanelView: View {
 @MainActor
 enum PanelMenu {
   static weak var menu: NSMenu?
+  private static var isClosing = false
+  private static weak var sizingWindow: NSWindow?
+  private static var verticalInsets: CGFloat = 0
+  private static var disclosureFrame: NSRect?
+
+  static func beginTracking() {
+    isClosing = false
+    sizingWindow = nil
+    disclosureFrame = nil
+  }
+
+  static func prepareForDisclosureChange() {
+    guard !isClosing, let view = menu?.items.first?.view, let window = view.window,
+          window.isVisible else { return }
+    disclosureFrame = window.frame
+    if sizingWindow !== window {
+      verticalInsets = max(0, window.frame.height - view.fittingSize.height)
+      sizingWindow = window
+    }
+  }
+
+  static func refitAfterDisclosureChange() {
+    // Called after the click changes state, outside SwiftUI's update callbacks.
+    // Reading the new layout here is safe and lets the host and native menu
+    // resize together before any intermediate frame is presented.
+    guard !isClosing, let menu, let item = menu.items.first, let view = item.view,
+          let window = view.window, window.isVisible else { return }
+    let fitted = view.fittingSize
+    guard fitted.width > 0, fitted.height > 0 else { return }
+    let before = disclosureFrame ?? window.frame
+    disclosureFrame = nil
+    view.setFrameSize(fitted)
+    menu.itemChanged(item)
+    var destination = before
+    destination.size.height = fitted.height + verticalInsets
+    destination.origin.y = before.maxY - destination.height
+    // AppKit lays the menu's scroll container out at the final height
+    // before the window animates. Its default bottom anchor would move
+    // every existing control by the disclosure's height during that resize.
+    // Pin that container to the content view's top edge instead.
+    var container = view
+    while let parent = container.superview, parent !== window.contentView {
+      container = parent
+    }
+    if let parent = container.superview, parent === window.contentView {
+      var mask = container.autoresizingMask
+      mask.remove([.minYMargin, .maxYMargin, .height])
+      mask.insert(parent.isFlipped ? .maxYMargin : .minYMargin)
+      container.autoresizingMask = mask
+    }
+    window.setFrame(before, display: false)
+    let duration = Motion.windowResize(reduceMotion: Motion.systemReduceMotion)
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = duration
+      if duration == 0 { window.setFrame(destination, display: true) }
+      else { window.animator().setFrame(destination, display: true) }
+    }
+  }
 
   static func endTracking() {
+    // A control closing the menu must also cancel a pending disclosure refit.
+    isClosing = true
     menu?.cancelTracking()
   }
 }
@@ -479,6 +687,35 @@ extension PanelView {
       care: model.oledCare, safeMode: model.isSafeMode)
   }
 
+  private func carePauseActions(for state: AppModel.DisplayState, name: String) -> some View {
+    VStack(alignment: .leading, spacing: 2) {
+      if model.oledCare.dimmingPauseDeadline(for: state.display.persistenceKey) != nil {
+        PanelActionRow(title: "Resume Now", accessibilityName: name) {
+          model.oledCare.resumeDimming(for: state.display.persistenceKey)
+          expandedSection = nil
+          PanelMenu.endTracking()
+        }
+      }
+      PanelActionRow(title: "Pause Dimming for 15 Minutes", accessibilityName: name) {
+        pauseDimming(for: state, duration: 15 * 60)
+      }
+      PanelActionRow(title: "Pause Dimming for 1 Hour", accessibilityName: name) {
+        pauseDimming(for: state, duration: 60 * 60)
+      }
+      PanelActionRow(title: "Pause Dimming Until…", accessibilityName: name) {
+        expandedSection = nil
+        model.chooseDimmingPauseEndTime(for: state.display.persistenceKey, name: name)
+      }
+      PanelCaption("Measuring and hours continue. Normal sleep is unchanged.", style: .secondary)
+    }
+  }
+
+  private func pauseDimming(for state: AppModel.DisplayState, duration: TimeInterval) {
+    model.oledCare.pauseDimming(for: state.display.persistenceKey, duration: duration)
+    expandedSection = nil
+    PanelMenu.endTracking()
+  }
+
   /// Reads the summary only when enrolled and not in Safe Mode. That leaves an
   /// un-enrolled display's history unstated, as the Health pane does, and keeps
   /// a store decode out of this view body.
@@ -487,6 +724,9 @@ extension PanelView {
     persistenceKey: String, prefs: DisplayPrefs, care: OledCareCoordinator, safeMode: Bool
   ) -> String? {
     let enrolled = prefs.oledCareEnrolled
+    if enrolled, !safeMode, let deadline = care.dimmingPauseDeadline(for: persistenceKey) {
+      return "Dimming paused until \(EndTimeText.string(deadline))"
+    }
     let hours = care.hoursTracker(for: persistenceKey).totalHours
     let summary = enrolled && !safeMode ? care.healthSummary(for: persistenceKey) : nil
     return PanelCareLine.text(
@@ -535,24 +775,21 @@ extension PanelView {
 private struct DisplayHeaderRow: View {
   let controller: BrightnessController
   let displayName: String
+  let toggleHDR: () -> Void
   let isShowingSynthesizedSize: Bool
   /// `PanelView.careLine`'s answer. Nil draws nothing, keeping the row one line tall.
   let careLine: String?
+  let careIsExpanded: Bool
+  let toggleCare: (() -> Void)?
 
   @State private var isHovering = false
+  @State private var isCareHovering = false
 
   /// Reads the state, not the `hdrMode` pref: the two diverge the moment HDR is
   /// toggled in System Settings, and the badge beside this button reads state,
   /// so a mode-sourced label put "HDR" next to "HDR Off".
   private var modeLabel: String {
     controller.isHDREngaged ? "HDR On" : "HDR Off"
-  }
-
-  /// Same source, so a click always moves away from what the label reports.
-  /// Both directions ask `setHDRMode` to act on a mode it nominally already
-  /// holds, which is what its state-aware guard is for.
-  private var nextMode: HDRMode {
-    controller.isHDREngaged ? .off : .alwaysOn
   }
 
   var body: some View {
@@ -576,14 +813,28 @@ private struct DisplayHeaderRow: View {
         hdrModeButton
       }
       if let careLine {
-        Text(verbatim: careLine)
-          .font(.system(size: 11))
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-          .truncationMode(.tail)
-          // The name above is hidden from VoiceOver (the slider carries it), so
-          // this line names its display and is read as one element.
-          .accessibilityLabel(Text(verbatim: "\(displayName), \(careLine)"))
+        if let toggleCare {
+          Button(action: toggleCare) {
+            HStack(spacing: 6) {
+              careStatus(careLine)
+              Spacer(minLength: 4)
+              Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .rotationEffect(.degrees(careIsExpanded ? 180 : 0))
+            }
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(PanelRowButtonStyle(isHovering: isCareHovering))
+          .onHover { isCareHovering = $0 }
+          .onDisappear { isCareHovering = false }
+          .accessibilityLabel(Text(verbatim: "\(displayName) dimming controls"))
+          .accessibilityValue(Text(verbatim: careLine))
+          .accessibilityHint(careIsExpanded ? "Hide pause options" : "Show pause options")
+        } else {
+          careStatus(careLine)
+            .accessibilityLabel(Text(verbatim: "\(displayName), \(careLine)"))
+        }
       }
     }
     // On the row, not the button: the caption draws in a leading-aligned column
@@ -593,6 +844,14 @@ private struct DisplayHeaderRow: View {
     // menu tracking and rebuilds the panel, so it cannot clip the footer the way
     // a height change inside an open panel does.
     .panelHoverReason(refusalReason)
+  }
+
+  private func careStatus(_ line: String) -> some View {
+    Text(verbatim: line)
+      .font(.system(size: 11))
+      .foregroundStyle(.secondary)
+      .lineLimit(1)
+      .truncationMode(.tail)
   }
 
   private var refusalReason: String? {
@@ -608,12 +867,7 @@ private struct DisplayHeaderRow: View {
   /// enclosing menu owns event tracking, so a nested SwiftUI `Menu` never opens
   /// (measured on hardware). Plain buttons do work; the label names the mode.
   private var hdrModeButton: some View {
-    Button {
-      Task { await controller.setHDRMode(nextMode) }
-      // Tracking starves the main-actor work queued above: without this the click
-      // looks dead until the panel closes, then every queued toggle fires at once.
-      PanelMenu.endTracking()
-    } label: {
+    Button(action: toggleHDR) {
       Text(modeLabel)
         .font(.system(size: 12))
     }

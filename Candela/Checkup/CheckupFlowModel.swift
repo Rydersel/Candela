@@ -78,6 +78,11 @@ final class CheckupFlowModel {
   /// is still the page the run left, and would name the wrong step.
   private var legInFlight: CheckupPage?
   private var finished = false
+  @ObservationIgnored private var configurationHeld = false
+  @ObservationIgnored private var acquiringConfiguration = false
+  @ObservationIgnored private var activeAdvances = 0
+  @ObservationIgnored private var advanceWaiters: [CheckedContinuation<Void, Never>] = []
+  @ObservationIgnored private var restorePending = false
 
   init(environment: CheckupEnvironment) {
     self.environment = environment
@@ -116,7 +121,17 @@ final class CheckupFlowModel {
   func advance() async {
     // A leg already in flight owns the page it will move to; a second advance
     // would run the next one over it and record both against the wrong step.
-    guard !finished, legInFlight == nil else { return }
+    guard !finished, legInFlight == nil, !acquiringConfiguration else { return }
+    activeAdvances += 1
+    defer {
+      activeAdvances -= 1
+      if activeAdvances == 0 {
+        let waiters = advanceWaiters
+        advanceWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+      }
+      releaseConfigurationIfFinished()
+    }
     // Advancing past the page it appeared on dismisses it.
     showFailureReason = nil
     switch page {
@@ -129,6 +144,35 @@ final class CheckupFlowModel {
       guard let display = selectedDisplay,
         selectableDisplays.contains(where: { $0.id == display.id })
       else { return }
+      acquiringConfiguration = true
+      running = true
+      defer {
+        acquiringConfiguration = false
+        running = false
+      }
+      if !configurationHeld {
+        let refusal = await environment.beginConfiguration(display)
+        if let refusal {
+          finish(.incomplete(reason: refusal))
+          return
+        }
+        configurationHeld = true
+        guard !finished else { return }
+      }
+      guard !Task.isCancelled else {
+        finish(.incomplete(reason: "The checkup was cancelled."))
+        return
+      }
+      let isCurrentTarget = await environment.isCurrentTarget(display)
+      guard !finished else { return }
+      guard !Task.isCancelled else {
+        finish(.incomplete(reason: "The checkup was cancelled."))
+        return
+      }
+      guard selectedDisplay == display, isCurrentTarget else {
+        finish(.incomplete(reason: "The display changed. Open the checkup again."))
+        return
+      }
       begin(with: display)
       page = .plan
 
@@ -215,11 +259,18 @@ final class CheckupFlowModel {
   }
 
   func back() {
-    guard !finished else { return }
+    guard !finished, !running else { return }
     switch page {
     case .displayPick:
       page = .scenario
     case .plan:
+      // No measured leg has run yet. The next selection must not inherit this
+      // display's pregraded claims, including a close on the picker itself.
+      runners = nil
+      plan.removeAll()
+      claims.removeAll()
+      startedAt = nil
+      generator = nil
       page = .displayPick
     // Everything from identity on has already touched the display or the
     // user's attestations; a step back there would rewrite a recorded claim.
@@ -634,10 +685,16 @@ final class CheckupFlowModel {
       let notify = !displayGone
       // The mode goes back on every exit path. Its outcome cannot change
       // a completion the user or the cable already decided, so it is not awaited.
+      restorePending = true
       Task {
+        // The HDR leg has its own restore. Let it finish before changing the
+        // mode underneath it; cancel() above still stops a sweep immediately.
+        await waitForActiveAdvances()
         let restored = await mode.restore()
         if !restored { Self.logRestoreNotAchieved() }
         settled(!restored && notify, target)
+        restorePending = false
+        releaseConfigurationIfFinished()
       }
     }
     finish(.incomplete(reason: reason))
@@ -651,8 +708,21 @@ final class CheckupFlowModel {
     )
   }
 
+  private func waitForActiveAdvances() async {
+    guard activeAdvances > 0 else { return }
+    await withCheckedContinuation { advanceWaiters.append($0) }
+  }
+
+  private func releaseConfigurationIfFinished() {
+    guard finished, configurationHeld, activeAdvances == 0, !restorePending else { return }
+    configurationHeld = false
+    let release = environment.endConfiguration
+    Task { await release() }
+  }
+
   private func finish(_ completion: CheckupCompletion) {
     guard !finished else { return }
+    defer { releaseConfigurationIfFinished() }
     finished = true
     let started = startedAt ?? environment.now()
     let report = CheckupReport(

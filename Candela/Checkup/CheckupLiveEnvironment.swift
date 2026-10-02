@@ -114,9 +114,11 @@ enum CheckupLiveEnvironment {
   static func current(
     model: AppModel,
     presenter: any CheckupFieldPresenting,
-    coordinator: OledCareCoordinator
+    coordinator: OledCareCoordinator,
+    readSource: (@MainActor (AppModel.DisplayState) -> Source)? = nil
   ) async -> CheckupEnvironment {
-    let configurator = CoreGraphicsDisplayConfigurator()
+    let configurator = model.displayConfigurator
+    let readSource = readSource ?? { source(for: $0, model: model, configurator: configurator) }
     let states = model.allControlledStates
     // Uniqued rather than trapping: two identical panels can share an EDID
     // UUID, a documented limit of the persistence key.
@@ -125,7 +127,7 @@ enum CheckupLiveEnvironment {
       uniquingKeysWith: { first, _ in first })
     let hdr = model.hdrToggling
     let sources = await readingLiveState(
-      into: states.map { source(for: $0, model: model, configurator: configurator) },
+      into: states.map { readSource($0) },
       writers: writers,
       hdr: hdr)
     let entries = entries(from: sources)
@@ -153,6 +155,26 @@ enum CheckupLiveEnvironment {
     let pixels = Dictionary(
       entries.map { ($0.identityKey, ($0.pixelWidth, $0.pixelHeight)) },
       uniquingKeysWith: { first, _ in first })
+
+    let hasCurrentIdentity: @MainActor (CheckupDisplayEntry) -> Bool = { [weak model] entry in
+      guard let model,
+            let captured = states.first(where: { $0.id == entry.id && $0.display.persistenceKey == entry.identityKey })
+      else { return false }
+      return model.allControlledStates.contains(where: { $0.id == entry.id && $0.controller === captured.controller })
+    }
+    let isCurrentTarget: @MainActor (CheckupDisplayEntry) async -> Bool = { [weak model] entry in
+      guard let model, hasCurrentIdentity(entry) else { return false }
+      // The picker can remain open while HDR or the display layout changes.
+      // Re-read after taking the gate, before building runners from its snapshot.
+      let hdrEngaged = entry.isBuiltIn ? false : await hdr.measuredHDREnabled(displayID: entry.id)
+      guard hasCurrentIdentity(entry), hdrEngaged == entry.hdrEngaged else { return false }
+      let current = Self.entries(from: model.allControlledStates.map { readSource($0) })
+      guard let live = current.first(where: { $0.id == entry.id && $0.identityKey == entry.identityKey })
+      else { return false }
+      return live.isBuiltIn == entry.isBuiltIn
+        && live.pixelWidth == entry.pixelWidth && live.pixelHeight == entry.pixelHeight
+        && live.pointHeight == entry.pointHeight && live.isOnlyDisplay == entry.isOnlyDisplay
+    }
 
     return CheckupEnvironment(
       displays: entries,
@@ -192,7 +214,19 @@ enum CheckupLiveEnvironment {
           seconds: seconds)
       },
       now: Date.init,
-      makeRNG: { SystemRandomNumberGenerator() })
+      makeRNG: { SystemRandomNumberGenerator() },
+      beginConfiguration: { [weak model] entry in
+        guard let model, hasCurrentIdentity(entry) else { return "The display changed. Open the checkup again." }
+        if let refusal = await model.beginCheckupConfiguration() { return refusal }
+        guard hasCurrentIdentity(entry) else {
+          await model.endCheckupConfiguration()
+          return "The display changed. Open the checkup again."
+        }
+        return nil
+      },
+      endConfiguration: { [weak model] in await model?.endCheckupConfiguration() },
+      isCurrentTarget: isCurrentTarget)
+
   }
 
   // MARK: - Sources

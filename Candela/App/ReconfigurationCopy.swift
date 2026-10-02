@@ -19,6 +19,9 @@ enum ReconfigurationCopy {
     case .displayModes: "Candela is already changing a display's resolution. Finish that first."
     case .mirroring: "Candela is already changing mirroring. Finish that first."
     case .rotation: "Candela is already rotating a display. Finish that first."
+    case .settingsReset: "Candela is already resetting settings. Finish that first."
+    case .checkup: "Candela is already running a display checkup. Finish that first."
+    case .hdr: "Candela is already switching HDR. Finish that first."
     case .arrangement: "Candela is already changing the display arrangement. Finish that first."
     }
   }

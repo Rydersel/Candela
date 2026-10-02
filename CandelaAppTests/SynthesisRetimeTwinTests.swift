@@ -13,7 +13,8 @@ import Testing
 @Suite("Synthesized sizes: the re-time target and its restore") @MainActor
 struct SynthesisRetimeTwinTests {
   private static let panelID = SynthesisFixture.panelID
-  private static let identityKey = "retime-twin-tests"
+  private static let identity = DisplayConfigIdentity(vendor: 0x3669, model: 1, serial: 1, isBuiltIn: false)
+  private static let identityKey = identity.key
 
   private func firstStop(_ fixture: SynthesisFixture) throws -> SyntheticSize {
     try #require(fixture.modes.catalogs[Self.panelID]?.syntheticStops.first)
@@ -112,7 +113,7 @@ struct SynthesisRetimeTwinTests {
       rig.stop, onPhysical: Self.panelID, identityKey: Self.identityKey)
 
     #expect(result.isFailure)
-    #expect(rig.driver.ownModes.mode(for: Self.panelID) == nil)
+    #expect(rig.driver.ownModes.entry(for: Self.panelID) == nil)
   }
 
   // MARK: - The rig
@@ -146,7 +147,7 @@ struct SynthesisRetimeTwinTests {
       world.attach(
         ConfiguredDisplay(
           id: SynthesisRetimeTwinTests.panelID,
-          identity: DisplayConfigIdentity(vendor: 0x3669, model: 1, serial: 1, isBuiltIn: false),
+          identity: SynthesisRetimeTwinTests.identity,
           name: "MAG341C", isBuiltIn: false
         ),
         modes: [native, twin], current: native,

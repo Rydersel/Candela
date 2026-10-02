@@ -4,7 +4,24 @@ import os
 
 /// The real `DisplayConfiguring`. Thin on purpose.
 public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
+  private let rejectedScanoutModes = RejectedScanoutModes()
+
   public init() {}
+
+  public func scanoutTiming(for displayID: CGDirectDisplayID) -> ScanoutTiming? {
+    ScanoutTimingReader.read(displayID: displayID)
+  }
+
+  private func scanoutDisplayKey(_ displayID: CGDirectDisplayID) -> String? {
+    guard let location = ScanoutTimingReader.displayLocation(displayID) else { return nil }
+    return "\(CGDisplayVendorNumber(displayID)):\(CGDisplayModelNumber(displayID)):\(CGDisplaySerialNumber(displayID)):\(location)"
+  }
+
+  private func allowedModes(_ pass: EnumerationPass, displayID: CGDirectDisplayID) -> [DisplayMode] {
+    let modes = Self.merged(pass)
+    guard let key = scanoutDisplayKey(displayID) else { return modes }
+    return modes.filter { !rejectedScanoutModes.contains($0, displayKey: key) }
+  }
 
   /// ONLINE, not ACTIVE, and the difference is not academic: a display asleep
   /// on the idle timer is still online but is NOT active.
@@ -66,7 +83,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// two computed nothing but `!isHiDPI`, which `DisplayMode` already derives.
   /// Neither list corresponds to what Displays settings shows.
   public func modes(for displayID: CGDirectDisplayID) -> [DisplayMode] {
-    Self.merged(enumerate(displayID))
+    allowedModes(enumerate(displayID), displayID: displayID)
   }
 
   public func modesWithheldByWireTimingGuard(for displayID: CGDirectDisplayID) -> Int {
@@ -146,7 +163,8 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// `kCGDisplayShowDuplicateLowResolutionModes`, measured on hardware at
   /// 132/132, 332/332 and 120/120 across three panels.
   public func currentMode(for displayID: CGDirectDisplayID) -> DisplayMode? {
-    Self.resolveCurrent(read: { achievedMode(for: displayID) }, in: modes(for: displayID))
+    // Quarantine limits new choices, not evidence of what is still running.
+    Self.resolveCurrent(read: { achievedMode(for: displayID) }, in: Self.merged(enumerate(displayID)))
   }
 
   /// Resolved rather than looked up: the display can be running a duplicate the
@@ -166,7 +184,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   }
 
   public func nativePixels(for displayID: CGDirectDisplayID) -> (width: Int, height: Int)? {
-    DisplayModeSnapshot.nativePixels(in: modes(for: displayID))
+    DisplayModeSnapshot.nativePixels(in: Self.merged(enumerate(displayID)))
   }
 
   /// One `enumerate` for all four answers where the default costs four.
@@ -177,11 +195,19 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// THIS list, not a call to `currentMode(for:)`, which would enumerate again.
   public func modeSnapshot(for displayID: CGDirectDisplayID) -> DisplayModeSnapshot {
     let pass = enumerate(displayID)
-    let modes = Self.merged(pass)
-    return DisplayModeSnapshot(
+    let modes = allowedModes(pass, displayID: displayID)
+    return Self.makeModeSnapshot(pass: pass, selectableModes: modes, readCurrent: { achievedMode(for: displayID) })
+  }
+
+  static func makeModeSnapshot(
+    pass: EnumerationPass, selectableModes modes: [DisplayMode], readCurrent: () -> DisplayMode?
+  ) -> DisplayModeSnapshot {
+    DisplayModeSnapshot(
       modes: modes,
-      current: Self.resolveCurrent(read: { achievedMode(for: displayID) }, in: modes),
-      nativePixels: DisplayModeSnapshot.nativePixels(in: modes),
+      current: Self.resolveCurrent(read: readCurrent, in: Self.merged(pass)),
+      // Quarantine changes selectable rows, never the panel geometry that
+      // subsequent scan-out checks and scaled-size policy depend on.
+      nativePixels: DisplayModeSnapshot.nativePixels(in: Self.merged(pass)),
       withheldByWireTimingGuard: Self.withheld(pass)
     )
   }
@@ -189,6 +215,16 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   public func apply(
     _ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope
   ) throws {
+    let key = scanoutDisplayKey(displayID)
+    if let key, rejectedScanoutModes.contains(mode, displayKey: key) {
+      throw DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue)
+    }
+    // Capture the panel's own dimensions before a reconfiguration can change
+    // the enumerated framebuffer. An unsupported reader never claims success.
+    let native = mode.isNative
+      ? (width: mode.pixelWidth, height: mode.pixelHeight)
+      : nativePixels(for: displayID)
+    let location = ScanoutTimingReader.displayLocation(displayID)
     switch mode.provenance {
     case .coreGraphics:
       try applyPublishedMode(mode, to: displayID, scope: scope)
@@ -206,6 +242,20 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
       // display".
       throw DisplayConfigError(cgErrorCode: CGError.invalidOperation.rawValue)
     }
+    guard let location else { return }
+    let timing = settled(read: {
+      ScanoutTimingReader.read(displayID: displayID, expectedLocation: location)
+    }) {
+      ScanoutVerification.verdict(requested: mode, nativePixels: native, timing: $0) == .verified
+    }
+    guard let timing,
+          ScanoutVerification.verdict(requested: mode, nativePixels: native, timing: timing) == .mismatch
+    else { return }
+    if let key, scanoutDisplayKey(displayID) == key {
+      rejectedScanoutModes.record(mode, displayKey: key)
+    }
+    throw DisplayConfigError(unhonouredCommit: .init(
+      requested: mode, achieved: achievedMode(for: displayID), scanoutTiming: timing))
   }
 
   /// The revealed path.

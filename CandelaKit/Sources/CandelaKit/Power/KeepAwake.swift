@@ -55,17 +55,83 @@ public final class KeepAwake {
   public static let assertionName = "Candela Keep Awake"
 
   public private(set) var isOn = false
+  public private(set) var expiresAt: Date?
 
+  /// Replace the current duration without taking a second system assertion.
+  public func start(for seconds: TimeInterval) {
+    guard seconds.isFinite, seconds > 0, seconds <= TimedControlDeadline.maximumInterval else { return }
+    start(until: now().addingTimeInterval(seconds))
+  }
+
+  /// Preserve the selected instant when replacing an existing hold.
+  @discardableResult
+  public func start(until deadline: Date) -> Bool {
+    guard TimedControlDeadline.isValid(deadline, now: now()) else { return false }
+    setOn(true)
+    guard isOn else { return false }
+    expiresAt = deadline
+    scheduleExpiryCheck()
+    return true
+  }
+
+  private func scheduleExpiryCheck() {
+    expiryTimer?.invalidate()
+    guard let expiresAt else { return }
+    // Timer waits for a relative interval. A forward wall-clock correction
+    // must expire or shorten that wait without waiting for its old fire date.
+    if clockObserver == nil {
+      clockObserver = clockNotifications.addObserver(
+        forName: .NSSystemClockDidChange, object: nil, queue: nil
+      ) { [weak self] _ in
+        Task { @MainActor [weak self] in
+          guard let self else { return }
+          self.expireIfNeeded(at: self.now())
+          if self.expiresAt != nil { self.scheduleExpiryCheck() }
+        }
+      }
+    }
+    let remaining = max(0.001, expiresAt.timeIntervalSince(now()))
+    let timer = Timer(timeInterval: remaining, repeats: false) { [weak self] _ in
+      MainActor.assumeIsolated {
+        guard let self else { return }
+        self.expireIfNeeded(at: self.now())
+        // A clock adjustment can make the callback early. Keep checking until
+        // the advertised wall-clock deadline instead of stranding the hold.
+        if self.expiresAt != nil { self.scheduleExpiryCheck() }
+      }
+    }
+    expiryTimer = timer
+    RunLoop.main.add(timer, forMode: .common)
+  }
+
+  /// Also checked after wake, when a sleeping Mac may have missed the timer.
+  public func expireIfNeeded(at date: Date = Date()) {
+    guard let expiresAt, date >= expiresAt else { return }
+    setOn(false)
+  }
+
+  @ObservationIgnored private let now: () -> Date
+  @ObservationIgnored private let clockNotifications: NotificationCenter
+  @ObservationIgnored private var clockObserver: (any NSObjectProtocol)?
   @ObservationIgnored private let holder: any PowerAssertionHolding
   @ObservationIgnored private var assertionID: UInt32?
+  @ObservationIgnored private var expiryTimer: Timer?
 
-  public init(holder: any PowerAssertionHolding = IOKitPowerAssertion()) {
+  public init(holder: any PowerAssertionHolding = IOKitPowerAssertion(), now: @escaping () -> Date = Date.init,
+              clockNotifications: NotificationCenter = .default) {
     self.holder = holder
+    self.now = now
+    self.clockNotifications = clockNotifications
   }
 
   /// Idempotent in both directions: a second `true` does not take a second
   /// assertion, which would leave one held after a single `false`.
   public func setOn(_ on: Bool) {
+    expiryTimer?.invalidate()
+    expiryTimer = nil
+    if let clockObserver { clockNotifications.removeObserver(clockObserver) }
+    clockObserver = nil
+    expiresAt = nil
     guard on != isOn else { return }
     if on {
       // `isOn` follows the SYSTEM, not the request: a refused assertion with the

@@ -214,6 +214,13 @@ struct KeyboardPane: View {
   /// hiding the way there.
   private var moreSection: some View {
     SettingsCardSection(title: "More") {
+      DisclosureGroup("Display Shortcuts") {
+        SettingRow("Toggles HDR on the external display under the pointer.") {
+          KeyboardShortcuts.Recorder("Toggle HDR:", name: .toggleHDR)
+        }
+        .padding(.top, 8)
+      }
+      SettingsCardDivider()
       NavigationRow(
         title: "Modifier Keys",
         value: KeyboardHeroModel.modifiersPreview,

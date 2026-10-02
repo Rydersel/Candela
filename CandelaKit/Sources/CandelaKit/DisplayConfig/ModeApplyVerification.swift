@@ -3,8 +3,8 @@ import Foundation
 /// The published mode path's post-commit verdict. `CGCompleteDisplayConfiguration`
 /// has been measured returning `.success` over a request it did not honour, so
 /// the mode read back decides, not the return code. Pure, so it tests without a
-/// display. It answers what the desktop scans out, not how it reaches the glass:
-/// a mode bound to the wrong wire timing reads clean here.
+/// display. It checks the desktop framebuffer; `ScanoutVerification` separately
+/// checks the controller timing when that reading is available.
 enum ModeApplyVerification {
   enum Verdict: Equatable {
     case honoured

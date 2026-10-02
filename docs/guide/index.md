@@ -4,6 +4,8 @@ Most display utilities stop at the slider. These pages cover the parts of
 Candela that keep a record of your display and act on it, plus the escape
 hatches for hardware that misbehaves.
 
+- [Everyday controls](everyday-controls.md). Temporary Keep Awake, pausing OLED
+  dimming, and an optional HDR shortcut.
 - [OLED care](oled-care.md). Enrolling a display, the dimming settings, the
   exposure heat map, panel hours, and what the permission-free path can and
   cannot see.

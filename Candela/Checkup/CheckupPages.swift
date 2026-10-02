@@ -190,6 +190,7 @@ struct CheckupDisplayPickPage: View {
             }
           }
           .buttonStyle(.plain)
+          .disabled(model.running)
           .accessibilityLabel(Text(verbatim: CheckupCopy.displayRowLabel(entry)))
           .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         }

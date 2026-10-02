@@ -30,6 +30,26 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
   private var _failWith: DisplayConfigError?
   private var _failOnlyDisplay: CGDirectDisplayID?
   private var _divergeNextApplyTo: DisplayMode?
+  private var _nextCommittedError: DisplayConfigError?
+  private var _failAfterCommittedError: DisplayConfigError?
+  private var _replacementAfterCommittedError: ConfiguredDisplay?
+  private var _replacementAfterSuccessfulApply: ConfiguredDisplay?
+  var replacementAfterSuccessfulApply: ConfiguredDisplay? {
+    get { lock.withLock { _replacementAfterSuccessfulApply } }
+    set { lock.withLock { _replacementAfterSuccessfulApply = newValue } }
+  }
+  var replacementAfterCommittedError: ConfiguredDisplay? {
+    get { lock.withLock { _replacementAfterCommittedError } }
+    set { lock.withLock { _replacementAfterCommittedError = newValue } }
+  }
+  var failAfterCommittedError: DisplayConfigError? {
+    get { lock.withLock { _failAfterCommittedError } }
+    set { lock.withLock { _failAfterCommittedError = newValue } }
+  }
+  var nextCommittedError: DisplayConfigError? {
+    get { lock.withLock { _nextCommittedError } }
+    set { lock.withLock { _nextCommittedError = newValue } }
+  }
   private var _available: [DisplayMode] = []
   private var _appliedMirroring: [AppliedMirroring] = []
   private var _configuredDisplays: [ConfiguredDisplay] = []
@@ -135,6 +155,19 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
           unhonouredCommit: .init(requested: mode, achieved: diverted))
       }
       _current = mode
+      if let error = _nextCommittedError {
+        _nextCommittedError = nil
+        _failWith = _failAfterCommittedError
+        if let replacement = _replacementAfterCommittedError {
+          _configuredDisplays = [replacement]
+          _replacementAfterCommittedError = nil
+        }
+        throw error
+      }
+      if let replacement = _replacementAfterSuccessfulApply {
+        _configuredDisplays = [replacement]
+        _replacementAfterSuccessfulApply = nil
+      }
     }
   }
 
@@ -922,5 +955,188 @@ extension ModePreviewSessionTests {
     fake.failWith = nil
     #expect(await session.tick() == .reverted)
     #expect(fake.current == mode(1))
+  }
+}
+
+@Suite("Scan-out preview recovery")
+struct ScanoutPreviewRecoveryTests {
+  private func mode(_ id: Int32) -> DisplayMode {
+    DisplayMode(ioModeID: id, logicalWidth: 3440, logicalHeight: 1440,
+      pixelWidth: id == 1 ? 3440 : 6880, pixelHeight: id == 1 ? 1440 : 2880,
+      refreshHz: id == 1 ? 144 : 120, isNative: id == 1,
+      provenance: id == 1 ? .coreGraphics : .coreGraphicsServices)
+  }
+
+  @Test(arguments: [false, true])
+  func immediateTimingRollbackNeverTargetsAReplacement(duringKeep: Bool) async throws {
+    let fake = FakeConfigurator()
+    let original = DisplayConfigIdentity(vendor: 1, model: 2, serial: 3, isBuiltIn: false)
+    let replacement = DisplayConfigIdentity(vendor: 1, model: 2, serial: 4, isBuiltIn: false)
+    fake.configuredDisplays = [ConfiguredDisplay(id: 42, identity: original, name: "Panel", isBuiltIn: false)]
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake)
+    if duringKeep { _ = await session.begin(mode: mode(2), on: 42) }
+    fake.nextCommittedError = DisplayConfigError(unhonouredCommit: .init(
+      requested: mode(2), achieved: mode(2),
+      scanoutTiming: ScanoutTiming(width: 1280, height: 1024, refreshHz: 120)))
+    fake.replacementAfterCommittedError = ConfiguredDisplay(
+      id: 42, identity: replacement, name: "Replacement", isBuiltIn: false)
+    let error: DisplayConfigError
+    if duringKeep {
+      let preview = try #require(await session.previewedMode)
+      guard case let .failed(failure) = await session.confirm(preview) else {
+        Issue.record("The departed panel's failed commit must remain a failure")
+        return
+      }
+      error = failure
+    } else {
+      guard case let .failure(failure) = await session.begin(mode: mode(2), on: 42) else {
+        Issue.record("The departed panel must not leave recovery on its replacement")
+        return
+      }
+      error = failure
+    }
+    #expect(error.unhonouredCommit?.fallbackRestored == false)
+    #expect(!fake.applied.contains { $0.modeID == 1 })
+    #expect(await !session.hasOutstandingPreview)
+  }
+
+  @Test func aSecondSelectionPreservesTheOriginalDisplayIdentity() async throws {
+    let fake = FakeConfigurator()
+    let original = DisplayConfigIdentity(vendor: 1, model: 2, serial: 3, isBuiltIn: false)
+    let replacement = DisplayConfigIdentity(vendor: 1, model: 2, serial: 4, isBuiltIn: false)
+    fake.configuredDisplays = [ConfiguredDisplay(id: 42, identity: original, name: "Panel", isBuiltIn: false)]
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake, countdownSeconds: 1)
+    _ = await session.begin(mode: mode(2), on: 42)
+    _ = await session.begin(mode: mode(3), on: 42)
+    fake.configuredDisplays = [ConfiguredDisplay(id: 42, identity: replacement, name: "Replacement", isBuiltIn: false)]
+    _ = await session.tick()
+    #expect(fake.applied.map(\.modeID) == [2, 3])
+    #expect(await !session.hasOutstandingPreview)
+  }
+
+  @Test(arguments: [false, true])
+  func aReplacementCannotReceiveACommittedOutcome(duringApply: Bool) async throws {
+    let fake = FakeConfigurator()
+    let original = DisplayConfigIdentity(vendor: 1, model: 2, serial: 3, isBuiltIn: false)
+    let replacement = ConfiguredDisplay(id: 42,
+      identity: DisplayConfigIdentity(vendor: 1, model: 2, serial: 4, isBuiltIn: false),
+      name: "Replacement", isBuiltIn: false)
+    fake.configuredDisplays = [ConfiguredDisplay(id: 42, identity: original, name: "Panel", isBuiltIn: false)]
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake)
+    _ = await session.begin(mode: mode(2), on: 42)
+    let preview = try #require(await session.previewedMode)
+    if duringApply { fake.replacementAfterSuccessfulApply = replacement }
+    else { fake.configuredDisplays = [replacement] }
+
+    #expect(await session.confirm(preview) == .stale)
+    #expect(await !session.hasOutstandingPreview)
+    #expect(await session.confirm(preview) == .stale)
+  }
+
+  @Test func failedImmediateRestoreKeepsRecoveryCountdownAndOriginalFallback() async throws {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    fake.nextCommittedError = DisplayConfigError(unhonouredCommit: .init(
+      requested: mode(2), achieved: mode(2),
+      scanoutTiming: ScanoutTiming(width: 2560, height: 1440, refreshHz: 120)))
+    fake.failAfterCommittedError = DisplayConfigError(cgErrorCode: 1001)
+    let session = ModePreviewSession(configurator: fake, countdownSeconds: 1)
+    guard case .success = await session.begin(mode: mode(2), on: 42) else {
+      Issue.record("A failed fallback must retain a recovery preview")
+      return
+    }
+    let preview = try #require(await session.previewedMode)
+    #expect(preview.unhonouredCommit?.scanoutTiming?.width == 2560)
+    #expect(await session.isCountingDown)
+    #expect(await session.confirm(preview) != .committed)
+    fake.failWith = nil
+    #expect(await session.tick() == .reverted)
+    #expect(fake.current == mode(1))
+  }
+
+  @Test func timingMismatchDuringKeepRestoresTheOriginalMode() async throws {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake)
+    _ = await session.begin(mode: mode(2), on: 42)
+    let preview = try #require(await session.previewedMode)
+    fake.nextCommittedError = DisplayConfigError(unhonouredCommit: .init(
+      requested: mode(2), achieved: mode(2),
+      scanoutTiming: ScanoutTiming(width: 2560, height: 1440, refreshHz: 120)))
+    guard case let .failed(error) = await session.confirm(preview) else {
+      Issue.record("A mismatched keep must report the timing failure")
+      return
+    }
+    #expect(error.unhonouredCommit?.fallbackRestored == true)
+    #expect(fake.current == mode(1))
+    #expect(await !session.hasOutstandingPreview)
+  }
+
+  @Test func wrongWireTimingRestoresCapturedModeImmediately() async throws {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    fake.nextCommittedError = DisplayConfigError(unhonouredCommit: .init(
+      requested: mode(2), achieved: mode(2),
+      scanoutTiming: ScanoutTiming(width: 2560, height: 1440, refreshHz: 120)))
+    let session = ModePreviewSession(configurator: fake)
+    let result = await session.begin(mode: mode(2), on: 42)
+    guard case let .failure(error) = result else {
+      Issue.record("A cropped timing must revert and report a failed selection immediately")
+      return
+    }
+    #expect(error.unhonouredCommit?.fallbackRestored == true)
+    #expect(error.unhonouredCommit?.scanoutTiming?.width == 2560)
+    #expect(fake.current == mode(1))
+    #expect(fake.applied.map(\.modeID) == [2, 1])
+    #expect(await !session.hasOutstandingPreview)
+  }
+
+  @Test func unattendedRecoveryExpiresOntoItsOriginalFallback() async throws {
+    let fake = FakeConfigurator()
+    let identity = DisplayConfigIdentity(vendor: 1, model: 2, serial: 3, isBuiltIn: false)
+    fake.configuredDisplays = [ConfiguredDisplay(id: 42, identity: identity, name: "Panel", isBuiltIn: false)]
+    fake.current = mode(2)
+    let session = ModePreviewSession(configurator: fake, countdownSeconds: 1)
+    let commit = DisplayConfigError.UnhonouredCommit(requested: mode(2), achieved: mode(2),
+      scanoutTiming: ScanoutTiming(width: 1280, height: 1024, refreshHz: 60))
+    #expect(await session.retainRecovery(after: commit, previousMode: mode(1), on: 42, identity: identity))
+    let recovery = try #require(await session.previewedMode)
+    #expect(await session.confirm(recovery) != .committed)
+    #expect(fake.applied.isEmpty)
+    #expect(await session.tick() == .reverted)
+    #expect(fake.current == mode(1))
+    #expect(await !session.hasOutstandingPreview)
+  }
+
+  @Test func unattendedRecoveryCannotOverwriteAnExistingPreview() async throws {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    let identity = DisplayConfigIdentity(vendor: 1, model: 2, serial: 3, isBuiltIn: false)
+    fake.configuredDisplays = [ConfiguredDisplay(id: 42, identity: identity, name: "Panel", isBuiltIn: false)]
+    let session = ModePreviewSession(configurator: fake)
+    _ = await session.begin(mode: mode(2), on: 42)
+    let preview = try #require(await session.previewedMode)
+    let commit = DisplayConfigError.UnhonouredCommit(requested: mode(3), achieved: mode(3))
+    #expect(await !session.retainRecovery(after: commit, previousMode: mode(3), on: 42, identity: identity))
+    #expect(await session.previewedMode == preview)
+    #expect(await session.revert(preview) == .reverted)
+    #expect(fake.current == mode(1))
+  }
+
+  @Test func unattendedRecoveryNeverAppliesToAReplacementDisplay() async throws {
+    let fake = FakeConfigurator()
+    let original = DisplayConfigIdentity(vendor: 1, model: 2, serial: 3, isBuiltIn: false)
+    let replacement = DisplayConfigIdentity(vendor: 1, model: 2, serial: 4, isBuiltIn: false)
+    fake.configuredDisplays = [ConfiguredDisplay(id: 42, identity: original, name: "Panel", isBuiltIn: false)]
+    let session = ModePreviewSession(configurator: fake, countdownSeconds: 1)
+    let commit = DisplayConfigError.UnhonouredCommit(requested: mode(2), achieved: mode(2))
+    #expect(await session.retainRecovery(after: commit, previousMode: mode(1), on: 42, identity: original))
+    fake.configuredDisplays = [ConfiguredDisplay(id: 42, identity: replacement, name: "Replacement", isBuiltIn: false)]
+    #expect(await session.tick() == .stale)
+    #expect(fake.applied.isEmpty)
+    #expect(await !session.hasOutstandingPreview)
   }
 }

@@ -137,6 +137,8 @@ enum SynthesisCopy {
       "macOS refused to show this display through the virtual display, so nothing was changed."
     case .engageNotAchieved:
       "This display did not take the new size, so it was put back."
+    case let .scanoutMismatch(timing):
+      "The display took \(timing.width) x \(timing.height) at \(DisplayModeCopy.refresh(timing.refreshHz)), so the rendered size was removed."
     case .notEngaged:
       "No size \(AppInfo.productName) renders is in use on this display."
     case .unwindIncomplete:

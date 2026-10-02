@@ -68,6 +68,7 @@ struct GeneralPane: View {
       Button("Cancel", role: .cancel) {}
         .keyboardShortcut(.defaultAction)
       Button("Reset All Settings", role: .destructive) { actions.performReset() }
+        .disabled(!model.canResetSettings)
     } message: {
       // Name what is destroyed, and what the reset DOES to the
       // hardware on the way there. `runSettingsReset` turns HDR off, unmutes,
@@ -185,13 +186,12 @@ struct GeneralPane: View {
           .accessibilityLabel(Text(verbatim: quit))
         // Trailing ellipsis: the click opens a confirmation rather than
         // destroying anything, and the `.destructive` role belongs on the button
-        // that performs the wipe. Disabled only WHILE a reset runs, per-display
-        // resets included: they share one latch, because the pair overlapping is
-        // what strands a display behind a controller the rebuild replaced.
+        // that performs the wipe. Resets, HDR changes and checkups share
+        // admission so the reset cannot replace a controller still in use.
         Button("Reset All Settings…") { confirmingReset = true }
           .buttonStyle(SettingsDangerButtonStyle())
           .accessibilityLabel("Reset All Settings…")
-          .disabled(model.isResetting)
+          .disabled(!model.canResetSettings)
         Spacer(minLength: 0)
       }
       .padding(.top, 8)

@@ -454,10 +454,11 @@ final class SynthesisCoordinator {
   /// BOTH keys (that ordering applies to reset paths too). Returns false
   /// when the teardown failed, in which case nothing was cleared.
   @discardableResult
-  func reset(_ display: ConfiguredDisplay) async -> Bool {
+  func reset(_ display: ConfiguredDisplay, underResetClaim: Bool = false) async -> Bool {
+    if underResetClaim, await gate.holder != .settingsReset { return false }
     guard let key = persistenceKey(display.id) else { return false }
     dismissRefusal()
-    guard await disengageForOptOut(display) else { return false }
+    guard await disengageForOptOut(display, underResetClaim: underResetClaim) else { return false }
     let prefs = DisplayPrefs(persistenceKey: key)
     prefs.setStoredSyntheticSize(nil)
     prefs.setOfferSyntheticSizes(false)
@@ -476,24 +477,12 @@ final class SynthesisCoordinator {
   /// down": the pairing table is empty for the whole of an engage, so a caller
   /// that reads the table to judge the teardown has to read this first.
   ///
-  /// `force` is for the whole-app reset only. It waits up to `forcedClaimWait`
-  /// for a refused gate rather than barging: a teardown staged behind a live
-  /// configuration produces a success nobody achieved. Past the wait it goes on
-  /// unclaimed, logging the holder, because the reset wipes and rebuilds anyway
-  /// and a set left standing would outlive everything that knows about it.
-  ///
-  /// The wait covers mirroring, rotation and arrangement only: synthesis and the
-  /// mode coordinator share the `.displayModes` claimant, so a mode preview or
-  /// apply is granted here, not refused. `isWorking` answers for those, re-read
-  /// after the claim because the first reading predates the awaits.
-  ///
-  /// The window and retry delay are parameters only so a test can collapse them.
+  /// A settings reset already owns the shared gate. Its explicit teardown
+  /// permission is accepted only while that parent claim is still held.
+  /// Ordinary safety unwinds continue to claim displayModes themselves.
   @discardableResult
-  func disengageAllForReset(
-    force: Bool = false,
-    forcedClaimWait: Duration = .seconds(2),
-    forcedClaimRetryDelay: Duration = .milliseconds(100)
-  ) async -> Bool {
+  func disengageAllForReset(underResetClaim: Bool = false) async -> Bool {
+    if underResetClaim, await gate.holder != .settingsReset { return false }
     // Checked FIRST: the snapshot below is empty for the whole multi-second
     // engage, so it answers "nothing is engaged" about a machine that is about
     // to have a synthesis set on it.
@@ -508,34 +497,17 @@ final class SynthesisCoordinator {
     // with nothing left that knows about it. The disengage below is the
     // teardown that matters.
     _ = await endOutstandingPreview()
-    var refusedBy = await gate.claim(.displayModes).refusedBy
-    // Another feature is mid-reconfiguration. Every other path refuses here;
-    // the reset waits, since holders usually clear well inside the window.
-    if refusedBy != nil, force {
-      let deadline = ContinuousClock.now.advanced(by: forcedClaimWait)
-      while refusedBy != nil, ContinuousClock.now < deadline {
-        try? await Task.sleep(for: forcedClaimRetryDelay)
-        refusedBy = await gate.claim(.displayModes).refusedBy
-      }
-    }
-    // Re-read: the first reading predates the stand-down, the claim hop and any
-    // wait, and the gate cannot cover this, since a mode preview or apply shares
-    // the `.displayModes` claimant and is granted alongside us.
-    //
-    // No release on this path: the running sequence shares the claim and hands
-    // the gate back through the funnel when it finishes.
-    guard !isWorking else {
-      log.error("synthesis: a hardware sequence started before the teardown could begin; nothing was taken down")
-      return false
-    }
-    let claimed = refusedBy == nil
-    guard claimed || force else {
+    if underResetClaim {
+      guard await gate.holder == .settingsReset else { return false }
+    } else if await gate.claim(.displayModes).refusedBy != nil {
       log.error("synthesis: the reconfiguration gate refused the teardown claim; nothing was taken down")
       return false
     }
-    if let holder = refusedBy {
-      // The only record that this teardown overlapped someone else's configuration.
-      log.error("synthesis reset: \(holder.rawValue, privacy: .public) still held the reconfiguration gate after the wait; the teardown goes ahead without the claim")
+    // A regular mode operation shares displayModes and may have started while
+    // this call awaited its claim. That running operation owns the release.
+    guard !isWorking else {
+      log.error("synthesis: a hardware sequence started before the teardown could begin; nothing was taken down")
+      return false
     }
     let engaged = pairings
     // Through the driver, so the panel comes back on the mode the user chose
@@ -549,10 +521,8 @@ final class SynthesisCoordinator {
         }
       }
     }
-    // Through the funnel, never `gate.release` from here: see
-    // `releaseClaimIfIdle`. Guarded on having been granted so a claim held by
-    // another feature is not reconciled away by this pass.
-    if claimed { await releaseClaimIfIdle() }
+    // The parent reset releases its own claim after every reset step settles.
+    if !underResetClaim { await releaseClaimIfIdle() }
     return true
   }
 
@@ -588,8 +558,9 @@ final class SynthesisCoordinator {
   /// keeps the persist-after-verify ordering honest: both callers write prefs only after this
   /// says the machine is clean.
   private func disengageForOptOut(
-    _ display: ConfiguredDisplay, fromQueueContext: Bool = false
+    _ display: ConfiguredDisplay, fromQueueContext: Bool = false, underResetClaim: Bool = false
   ) async -> Bool {
+    if underResetClaim, await gate.holder != .settingsReset { return false }
     // BEFORE the `isEngaged` question: that reads the snapshot, which is empty
     // for the whole of an engage, so an in-flight one would answer "nothing to
     // take down", let the prefs be written, and then land behind an opt-in that
@@ -607,7 +578,9 @@ final class SynthesisCoordinator {
     }
     // The reconfiguration gate, before the reconfiguration: a refusal has to cost nothing, and a
     // claim taken after the transaction is staged protects nobody.
-    if let holder = await gate.claim(.displayModes).refusedBy {
+    if underResetClaim {
+      guard await gate.holder == .settingsReset else { return false }
+    } else if let holder = await gate.claim(.displayModes).refusedBy {
       note(.blocked(by: holder), for: display.id)
       return false
     }
@@ -621,7 +594,7 @@ final class SynthesisCoordinator {
     // the same claimant. From the queue context the funnel would re-enter the
     // queue and hang with the claim held, so the calling select's own `adopt`
     // releases instead.
-    if !fromQueueContext { await releaseClaimIfIdle() }
+    if !fromQueueContext, !underResetClaim { await releaseClaimIfIdle() }
     switch result {
     case .success:
       return true

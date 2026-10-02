@@ -143,6 +143,9 @@ enum DisplayModeCopy {
   /// is display text down to the times sign and the "Hz" abbreviation, and both
   /// are read inconsistently. Same statement, said out loud.
   static func spokenAchievedGeometry(_ commit: DisplayConfigError.UnhonouredCommit) -> String {
+    if let timing = commit.scanoutTiming {
+      return "The display took \(timing.width) by \(timing.height) pixels at \(refresh(timing.refreshHz))."
+    }
     guard let achieved = commit.achieved else { return unreadableAchievedGeometry() }
     let spoken = ModeSpeech.spoken(
       logicalWidth: achieved.logicalWidth,
@@ -152,9 +155,11 @@ enum DisplayModeCopy {
     return "The display is showing \(spoken)."
   }
 
-  /// Latest achieved geometry beside the recovery instruction. Readback cannot
-  /// tell whether the display is using the correct wire timing.
+  /// Prefer the controller timing when it explains why the preview was rejected.
   static func achievedGeometry(_ commit: DisplayConfigError.UnhonouredCommit) -> String {
+    if let timing = commit.scanoutTiming {
+      return "The display took \(size(width: timing.width, height: timing.height)), \(refresh(timing.refreshHz))."
+    }
     guard let achieved = commit.achieved else { return unreadableAchievedGeometry() }
     return achievedGeometry(
       width: achieved.logicalWidth, height: achieved.logicalHeight,
@@ -204,7 +209,12 @@ enum DisplayModeCopy {
   /// no row here is a compile error, not surfaces quietly disagreeing.
   static func startFailure(_ reason: DisplayModeCoordinator.StartFailure.Reason) -> LocalizedStringKey {
     switch reason {
-    case let .failed(error): error.didCommit ? startFailureAfterACommit : startFailure
+    case let .failed(error):
+      if let commit = error.unhonouredCommit, commit.scanoutTiming != nil, commit.fallbackRestored {
+        LocalizedStringKey("\(achievedGeometry(commit)) The previous resolution was restored. This mode is withheld for this session.")
+      } else {
+        error.didCommit ? startFailureAfterACommit : startFailure
+      }
     case let .blocked(claimant): ReconfigurationCopy.blocked(by: claimant)
     }
   }
@@ -220,7 +230,8 @@ enum DisplayModeCopy {
   static func startFailureSubject(
     displayName: String, reason: DisplayModeCoordinator.StartFailure.Reason
   ) -> String {
-    guard case let .failed(error) = reason, error.didCommit else { return displayName }
+    guard case let .failed(error) = reason, error.didCommit,
+          error.unhonouredCommit?.fallbackRestored != true else { return displayName }
     return displayName.isEmpty
       ? "This display and another display"
       : "\(displayName) and another display"
@@ -236,7 +247,8 @@ enum DisplayModeCopy {
   static func startFailureDiagnostic(_ reason: DisplayModeCoordinator.StartFailure.Reason) -> String {
     switch reason {
     case let .failed(error):
-      error.didCommit ? "Another display: \(diagnostic(error))" : diagnostic(error)
+      error.didCommit && error.unhonouredCommit?.fallbackRestored != true
+        ? "Another display: \(diagnostic(error))" : diagnostic(error)
     case let .blocked(claimant): "Held by \(claimant.rawValue)"
     }
   }
@@ -247,6 +259,9 @@ enum DisplayModeCopy {
   static func diagnostic(_ error: DisplayConfigError) -> String {
     guard let unhonoured = error.unhonouredCommit else {
       return "CoreGraphics error \(error.cgErrorCode)"
+    }
+    if let timing = unhonoured.scanoutTiming {
+      return "Controller scan-out mismatch: \(timing.diagnosticDescription)"
     }
     let landed = unhonoured.achieved.map { "\(size($0)), \(refresh($0.refreshHz))" }
     return "CoreGraphics reported success; display shows \(landed ?? "an unreadable resolution")"
@@ -299,7 +314,16 @@ enum DisplayModeCopy {
     switch notice {
     case let .substituted(mode): reapplySubstituted(requested: requested, applied: mode)
     case .unavailable: reapplyUnavailable(requested: requested)
-    case .failed: reapplyFailed(requested: requested)
+    case let .failed(error):
+      if let commit = error.unhonouredCommit, commit.scanoutTiming != nil {
+        if commit.fallbackRestored {
+          LocalizedStringKey("\(achievedGeometry(commit)) The previous resolution was restored. This mode is withheld for this session.")
+        } else {
+          LocalizedStringKey("\(achievedGeometry(commit)) The previous resolution could not be restored. Choose another resolution for this display.")
+        }
+      } else {
+        reapplyFailed(requested: requested)
+      }
     }
   }
 }

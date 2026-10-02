@@ -33,7 +33,7 @@ struct StrandedMuteRecoveryTests {
   /// shared recorder would mix the brightness leg's traffic into the answer.
   @MainActor
   private final class Rig {
-    let volumeDDC = FakeDDC(readResult: nil) // write-only, MAG parity
+    let volumeDDC = FakeDDC(readResult: nil) // unavailable readback
     let harness: Harness
     let volume: DDCValueController
     let store = PathMemoryStore()

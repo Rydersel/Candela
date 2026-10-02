@@ -45,6 +45,25 @@ struct ModeSynthesisEngineTests {
     )
   }
 
+  @Test func foreignScanoutUnwindsEvenWhenMirroredGeometryLooksCorrect() async {
+    let world = world()
+    world.scanoutTimings = [Self.physical: ScanoutTiming(width: 2560, height: 1440, refreshHz: 100)]
+    let result = await engine(world).engage(size, onPhysical: Self.physical,
+      identityKey: world.identityKey(of: Self.physical))
+    #expect(result.failureValue != nil)
+    #expect(world.mirrors.isEmpty)
+    #expect(world.liveSlots.isEmpty)
+  }
+
+  @Test func nativeScanoutAtPhysicalRateAcceptsSynthesizedFramebuffer() async {
+    let world = world()
+    world.scanoutTimings = [Self.physical: ScanoutTiming(width: 3440, height: 1440, refreshHz: 100)]
+    let result = await engine(world).engage(size, onPhysical: Self.physical,
+      identityKey: world.identityKey(of: Self.physical))
+    #expect(result.failureValue == nil)
+    #expect(world.mirrors[Self.physical] != nil)
+  }
+
   private var size: SyntheticSize {
     SyntheticSize(logicalWidth: 3268, logicalHeight: 1368, percentOfNative: 95)
   }

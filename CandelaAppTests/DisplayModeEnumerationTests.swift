@@ -101,6 +101,119 @@ struct DisplayModeEnumerationTests {
     #expect(rig.world.applies.isEmpty)
   }
 
+  @Test func storedModeScanoutMismatchRestoresTheCapturedMode() async throws {
+    let rig = Self.rig()
+    rig.persistence.setEnabled(true, for: rig.identity)
+    rig.persistence.store(Self.smaller.descriptor, for: rig.identity)
+    rig.configurator.nextModeApplyFailure = DisplayConfigError(unhonouredCommit: .init(
+      requested: Self.smaller, achieved: Self.smaller,
+      scanoutTiming: ScanoutTiming(width: 1280, height: 1024, refreshHz: 175)))
+    await rig.modes.reapplyStoredModes()
+    #expect(rig.world.applies.map { $0.mode.ioModeID } == [2, 1])
+    let report = try #require(rig.modes.report(for: Self.panelID))
+    guard case let .failed(error) = report.notice else {
+      Issue.record("An unsafe scan-out must remain a reported failure after recovery")
+      return
+    }
+    #expect(error.unhonouredCommit?.fallbackRestored == true)
+  }
+
+  @Test func failedStoredModeRollbackRetainsAnActionableRecoveryPreview() async throws {
+    let rig = Self.rig()
+    rig.persistence.setEnabled(true, for: rig.identity)
+    rig.persistence.store(Self.smaller.descriptor, for: rig.identity)
+    rig.configurator.updatesCurrentModeOnApply = true
+    rig.configurator.modeApplyFailures = [
+      DisplayConfigError(unhonouredCommit: .init(
+        requested: Self.smaller, achieved: Self.smaller,
+        scanoutTiming: ScanoutTiming(width: 1280, height: 1024, refreshHz: 175))),
+      DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
+    ]
+
+    await rig.modes.reapplyStoredModes()
+
+    let recovery = try #require(rig.modes.preview)
+    #expect(recovery.isCountingDown)
+    #expect(recovery.unhonouredCommit?.scanoutTiming != nil)
+    #expect(await rig.modes.confirm(recovery) != .committed)
+    #expect(await rig.modes.revert(recovery) == .reverted)
+    #expect(rig.world.currentMode(for: Self.panelID) == Self.native)
+    #expect(rig.modes.preview == nil)
+  }
+
+  @Test func failedRollbackDefersOtherArrivalsUntilRecoveryEnds() async throws {
+    let rig = Self.rig()
+    let secondID: CGDirectDisplayID = 13
+    let secondIdentity = DisplayConfigIdentity(vendor: 0x3669, model: 9, serial: 10, isBuiltIn: false)
+    rig.world.attach(
+      ConfiguredDisplay(id: secondID, identity: secondIdentity, name: "Second panel", isBuiltIn: false),
+      modes: [Self.native, Self.smaller], current: Self.native,
+      nativePixels: (width: 3440, height: 1440))
+    for identity in [rig.identity, secondIdentity] {
+      rig.persistence.setEnabled(true, for: identity)
+      rig.persistence.store(Self.smaller.descriptor, for: identity)
+    }
+    rig.configurator.updatesCurrentModeOnApply = true
+    rig.configurator.modeApplyFailures = [
+      DisplayConfigError(unhonouredCommit: .init(
+        requested: Self.smaller, achieved: Self.smaller,
+        scanoutTiming: ScanoutTiming(width: 1280, height: 1024, refreshHz: 175))),
+      DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
+    ]
+
+    await rig.modes.reapplyStoredModes()
+    let recovery = try #require(rig.modes.preview)
+    #expect(rig.world.applies.allSatisfy { $0.displayID == Self.panelID })
+    await rig.modes.reapplyStoredModes()
+    #expect(rig.modes.preview?.displayID == Self.panelID)
+    #expect(rig.world.currentMode(for: secondID) == Self.native)
+
+    #expect(await rig.modes.revert(recovery) == .reverted)
+    await rig.modes.reapplyStoredModes()
+    #expect(rig.world.currentMode(for: secondID) == Self.smaller)
+    #expect(rig.world.applies.last?.displayID == secondID)
+  }
+
+  @Test(arguments: [false, true])
+  func replacementDuringReapplyStopsReportingAndSynthesis(duringRollback: Bool) async throws {
+    let suite = "app-tests-reapply-replacement-\(UUID().uuidString)"
+    defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+    let persistence = ModePersistence(defaults: UserDefaults(suiteName: suite)!)
+    let fixture = SynthesisFixture(modePersistence: persistence)
+    defer { fixture.forgetPrefs() }
+    let id = SynthesisFixture.panelID
+    let original = try fixture.configured(id)
+    let modes = fixture.world.modes(for: id)
+    let smaller = try #require(modes.first { $0.ioModeID == 2 })
+    let stop = try #require(fixture.modes.catalogs[id]?.syntheticStops.first)
+    persistence.setEnabled(true, for: original.identity)
+    persistence.store(smaller.descriptor, for: original.identity)
+    fixture.prefs.setStoredSyntheticSize(.init(logicalWidth: stop.logicalWidth, logicalHeight: stop.logicalHeight))
+    if duringRollback {
+      fixture.configurator.nextModeApplyFailure = DisplayConfigError(unhonouredCommit: .init(
+        requested: smaller, achieved: smaller,
+        scanoutTiming: ScanoutTiming(width: 1280, height: 1024, refreshHz: 175)))
+    }
+    let world = fixture.world
+    let replacement = ConfiguredDisplay(id: id,
+      identity: DisplayConfigIdentity(vendor: 0x3669, model: 1, serial: 99, isBuiltIn: false),
+      name: "Replacement", isBuiltIn: false)
+    fixture.configurator.onModeApply = {
+      if world.applies.count == (duringRollback ? 1 : 0) {
+        world.attach(replacement, modes: modes, current: smaller,
+          nativePixels: (width: 3440, height: 1440))
+      }
+    }
+    var notices: [ModeReapplyNotice] = []
+    fixture.modes.didReportReapply = { _, notice in notices.append(notice) }
+
+    await fixture.modes.reapplyStoredModes()
+
+    #expect(notices.isEmpty)
+    #expect(fixture.synthesis.pairings.isEmpty)
+    #expect(fixture.host.live().isEmpty)
+  }
+
   /// The shape the app runs: synthesis attached, so an arrival pays the
   /// synthesis half's enumeration even with nothing stored. Still one pass.
   @Test("An arrival with synthesis attached and nothing stored enumerates once")
