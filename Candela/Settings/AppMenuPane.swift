@@ -253,7 +253,7 @@ struct AppMenuPane: View {
             // `HUDStyle.pickerOrder`, not raw order: reading order differs
             // (vertical and ring, raws 6 and 7, precede the classic styles).
             ForEach(HUDStyle.pickerOrder, id: \.self) { style in
-              Text(label(for: style)).tag(style)
+              Text(verbatim: IndicatorStyleCopy.label(for: style)).tag(style)
             }
           }
           .prefIdentifier(.hudStyle)
@@ -261,7 +261,7 @@ struct AppMenuPane: View {
 
         SettingsCardDivider()
 
-        SettingRow("Contrast uses this position too.") {
+        SettingRow(LocalizedStringKey(IndicatorStyleCopy.positionCaption(for: prefs.hudStyle, kind: .brightness))) {
           ThemedChoiceRow(label: "Brightness indicator position:", selection: Binding(
             get: { prefs.hudPositionBrightness },
             set: { position in
@@ -277,10 +277,11 @@ struct AppMenuPane: View {
           }
           .prefIdentifier(.hudPositionBrightness)
         }
+        .disabled(!IndicatorStyleCopy.positionRowsApply(to: prefs.hudStyle))
 
         SettingsCardDivider()
 
-        SettingRow("Mute uses this position too. The indicator appears on the display the keys act on.") {
+        SettingRow(LocalizedStringKey(IndicatorStyleCopy.positionCaption(for: prefs.hudStyle, kind: .volume))) {
           ThemedChoiceRow(label: "Volume indicator position:", selection: Binding(
             get: { prefs.hudPositionVolume },
             set: { position in
@@ -294,6 +295,7 @@ struct AppMenuPane: View {
           }
           .prefIdentifier(.hudPositionVolume)
         }
+        .disabled(!IndicatorStyleCopy.positionRowsApply(to: prefs.hudStyle))
       }
       // The preview shows both kinds at once so both positions stay visible;
       // this line stops that picture reading as what the screen does.
@@ -303,18 +305,6 @@ struct AppMenuPane: View {
   }
 
   // MARK: - Labels
-
-  /// Reads as one sentence with the row label: "Indicator style: Match macOS".
-  /// Exhaustive, so a future `HUDStyle` case is a compile error
-  /// rather than a blank row.
-  private func label(for style: HUDStyle) -> LocalizedStringKey {
-    switch style {
-    case .system: "Match macOS"
-    case .segments: "Segmented"
-    case .compact: "Compact"
-    default: "Match macOS"  // Drawn properly by the style work that follows.
-    }
-  }
 
   /// Reads as one sentence with the row label: "Brightness indicator position:
   /// Top left". Exhaustive, so a future `HUDPosition` case is a compile error
