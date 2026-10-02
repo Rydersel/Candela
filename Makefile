@@ -22,6 +22,7 @@ APPTESTS := CandelaAppTests
 XCB      := xcodebuild -project $(PROJ) -quiet
 REL_APP  := $(DD)/Build/Products/Release/Candela.app
 REL_BIN  := $(REL_APP)/Contents/MacOS/Candela
+DEST     ?= /Applications
 
 # Keep the project's Developer ID settings unless local ad-hoc signing is
 # explicitly requested. Clearing Release's timestamp flag also avoids needing
@@ -35,7 +36,7 @@ else
 $(error Invalid SIGNING '$(SIGNING)'; use SIGNING=developer-id or SIGNING=adhoc)
 endif
 
-.PHONY: help build release test test-app check markers regen probe conform clean
+.PHONY: help build release test test-app check markers deploy regen probe conform clean
 
 help:
 	@echo "Candela targets            (DD=$(DD))"
@@ -46,6 +47,7 @@ help:
 	@echo "  make test-app    CandelaAppTests bundle       (host-free, safe with panels attached)"
 	@echo "  make check       Both suites"
 	@echo "  make markers     Release build + debug-marker gate with its positive control"
+	@echo "  make deploy      markers + signing check, then install to $(DEST) and relaunch"
 	@echo "  make probe A='list'      candela-probe (run with no A= for its usage)"
 	@echo "  make conform     Platform-conformance suite; the exit code is the verdict"
 	@echo "  make regen       Run xcodegen generate"
@@ -98,6 +100,11 @@ check: test test-app
 
 markers: release
 	@tools/build/check-release-markers.sh "$(REL_APP)"
+
+# Chained on markers so a failed build never installs the previous product under
+# a new commit's name. Contributors lack the signing check and stop at markers.
+deploy: markers
+	@tools/build/deploy-local.sh "$(REL_APP)" "$(DEST)"
 
 A ?=
 probe:
