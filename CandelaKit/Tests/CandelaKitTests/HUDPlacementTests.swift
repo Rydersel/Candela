@@ -127,4 +127,87 @@ struct HUDPlacementTests {
       #expect(origin(position, frame: tiny).y == 100, "\(position)")
     }
   }
+
+  // MARK: - Fixed anchors
+
+  private func origin(_ anchor: HUDAnchor, size: CGSize, frame: CGRect, visible: CGRect? = nil) -> CGPoint {
+    HUDPlacement.origin(
+      anchor, size: size, frame: frame, visibleFrame: visible ?? frame,
+      topInset: topInset, margin: margin
+    )
+  }
+
+  /// The Classic box: centred, 140 above the bottom edge of the FULL frame,
+  /// which is where macOS draws its own.
+  @Test func bottomCenterSitsAtTheMeasuredInsetAboveTheFullFrame() {
+    let box = CGSize(width: 200, height: 200)
+    let screen = CGRect(x: 0, y: 0, width: 1800, height: 1169)
+    let point = origin(.bottomCenter(inset: 140), size: box, frame: screen)
+    #expect(point == CGPoint(x: 800, y: 140))
+    // A Dock along the bottom shortens the visible frame; the box ignores it.
+    let docked = CGRect(x: 0, y: 70, width: 1800, height: 1099)
+    #expect(origin(.bottomCenter(inset: 140), size: box, frame: screen, visible: docked).y == 140)
+  }
+
+  @Test func centerIsTheFrameCentreRoundedToWholePoints() {
+    let box = CGSize(width: 200, height: 200)
+    let odd = CGRect(x: 0, y: 0, width: 1001, height: 801)
+    let point = origin(.center, size: box, frame: odd)
+    #expect(point == CGPoint(x: 401, y: 301))
+  }
+
+  /// The notch is centred on the glass, so the top edge uses the full frame even
+  /// when a side Dock narrows the visible one.
+  @Test func topEdgeIsFlushWithTheTopOnTheFullFrame() {
+    let island = CGSize(width: 660, height: 98)
+    let screen = CGRect(x: 0, y: 0, width: 1800, height: 1169)
+    let dockLeft = CGRect(x: 90, y: 0, width: 1710, height: 1169)
+    let point = origin(.topEdge, size: island, frame: screen, visible: dockLeft)
+    #expect(point == CGPoint(x: 570, y: 1071))
+  }
+
+  /// The Dell at 270 degrees: the box lands inside the rotated frame, 140 above
+  /// ITS bottom, never against the manufactured landscape.
+  @Test func fixedAnchorsFollowARotatedFrame() {
+    let portrait = CGRect(x: 3440, y: -1200, width: 2160, height: 3840)
+    let box = CGSize(width: 200, height: 200)
+    let bottom = origin(.bottomCenter(inset: 140), size: box, frame: portrait)
+    #expect(bottom == CGPoint(x: 3440 + 980, y: -1200 + 140))
+    #expect(portrait.contains(CGRect(origin: bottom, size: box)))
+    let top = origin(.topEdge, size: CGSize(width: 660, height: 98), frame: portrait)
+    #expect(top.y == CGFloat(-1200 + 3840 - 98))
+    #expect(top.x == CGFloat(3440 + 750))
+  }
+
+  /// The Vertical bar at either side of a laptop screen: 20 in from the edge,
+  /// centred on the height. 584.5 - 90 is 494.5, which rounds away from zero.
+  @Test func sideCenterSitsAtTheMiddleOfEitherEdge() {
+    let bar = CGSize(width: 56, height: 180)
+    let screen = CGRect(x: 0, y: 0, width: 1800, height: 1169)
+    #expect(origin(.sideCenter(leading: true, margin: 20), size: bar, frame: screen) == CGPoint(x: 20, y: 495))
+    #expect(origin(.sideCenter(leading: false, margin: 20), size: bar, frame: screen) == CGPoint(x: 1724, y: 495))
+  }
+
+  /// The edge comes from the visible frame, so a pinned left Dock pushes the bar
+  /// clear of it; the height still comes from the full frame.
+  @Test func sideCenterTakesItsEdgeFromTheVisibleFrame() {
+    let bar = CGSize(width: 56, height: 180)
+    let screen = CGRect(x: 0, y: 0, width: 1800, height: 1169)
+    let dockLeft = CGRect(x: 90, y: 0, width: 1710, height: 1100)
+    #expect(origin(.sideCenter(leading: true, margin: 20), size: bar, frame: screen, visible: dockLeft)
+      == CGPoint(x: 110, y: 495))
+  }
+
+  /// The Dell at 270 degrees: both sides land inside the rotated frame, at the
+  /// middle of ITS height.
+  @Test func sideCenterFollowsARotatedFrame() {
+    let portrait = CGRect(x: 3440, y: -1200, width: 2160, height: 3840)
+    let bar = CGSize(width: 56, height: 180)
+    let left = origin(.sideCenter(leading: true, margin: 20), size: bar, frame: portrait)
+    let right = origin(.sideCenter(leading: false, margin: 20), size: bar, frame: portrait)
+    #expect(left == CGPoint(x: 3460, y: 630))
+    #expect(right == CGPoint(x: 5524, y: 630))
+    #expect(portrait.contains(CGRect(origin: left, size: bar)))
+    #expect(portrait.contains(CGRect(origin: right, size: bar)))
+  }
 }

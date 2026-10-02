@@ -15,12 +15,20 @@ struct SettingsPageScaffold<Content: View>: View {
 
   private let source: Source
 
+  /// Never read; a fresh value per init forces a rebuilt scaffold to re-run its
+  /// reading closure. SwiftUI does not reliably count a new closure as a change
+  /// [MEASURED 2026-10-02]: the first scaffold of this type in a process re-ran,
+  /// every later one went stale. Plain form needs none; the parent builds it.
+  private let rebuild: UUID?
+
   init(@ViewBuilder content: () -> Content) {
     self.source = .plain(content())
+    self.rebuild = nil
   }
 
   init(@ViewBuilder reading: @escaping (ScrollViewProxy) -> Content) {
     self.source = .reading(reading)
+    self.rebuild = UUID()
   }
 
   var body: some View {

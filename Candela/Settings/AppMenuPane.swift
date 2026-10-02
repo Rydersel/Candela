@@ -23,7 +23,8 @@ struct AppMenuPane: View {
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
 
-  private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
+  /// Injectable so a hosted test never writes the process's standard defaults.
+  var prefs = DisplayPrefs(persistenceKey: "app")
 
   /// Scroll anchors for the preview's click-to-jump. On the section
   /// container, not a row: the jump should land the section heading at the top.
@@ -78,14 +79,17 @@ struct AppMenuPane: View {
   /// widgets, not this window's look; only the frame is this window's.
   private func preview(proxy: ScrollViewProxy) -> some View {
     VStack(alignment: .leading, spacing: 8) {
-      MenuBarPreviewView { target in
-        withAnimation {
-          switch target {
-          case .sliders: proxy.scrollTo(Self.slidersSectionID, anchor: .top)
-          case .indicators: proxy.scrollTo(Self.indicatorsSectionID, anchor: .top)
+      MenuBarPreviewView(
+        jump: { target in
+          withAnimation {
+            switch target {
+            case .sliders: proxy.scrollTo(Self.slidersSectionID, anchor: .top)
+            case .indicators: proxy.scrollTo(Self.indicatorsSectionID, anchor: .top)
+            }
           }
-        }
-      }
+        },
+        prefs: prefs
+      )
       SettingsCaption("A preview of the current settings; the controls below change it live. Click a widget to jump to its settings.")
     }
   }
@@ -250,11 +254,10 @@ struct AppMenuPane: View {
               actions.prefDidChange(.hudStyle)
             }
           )) {
-            // `HUDStyle.pickerOrder` even though it matches raw order today,
-            // so a future case slots into reading order without renumbering
-            // raws.
+            // `HUDStyle.pickerOrder`, not raw order: reading order differs
+            // (vertical and ring, raws 6 and 7, precede the classic styles).
             ForEach(HUDStyle.pickerOrder, id: \.self) { style in
-              Text(label(for: style)).tag(style)
+              Text(verbatim: IndicatorStyleCopy.label(for: style)).tag(style)
             }
           }
           .prefIdentifier(.hudStyle)
@@ -262,7 +265,7 @@ struct AppMenuPane: View {
 
         SettingsCardDivider()
 
-        SettingRow("Contrast uses this position too.") {
+        SettingRow(caption: SettingsCaption(verbatim: IndicatorStyleCopy.positionCaption(for: prefs.hudStyle, kind: .brightness))) {
           ThemedChoiceRow(label: "Brightness indicator position:", selection: Binding(
             get: { prefs.hudPositionBrightness },
             set: { position in
@@ -278,10 +281,11 @@ struct AppMenuPane: View {
           }
           .prefIdentifier(.hudPositionBrightness)
         }
+        .disabled(!IndicatorStyleCopy.positionRowsApply(to: prefs.hudStyle))
 
         SettingsCardDivider()
 
-        SettingRow("Mute uses this position too. The indicator appears on the display the keys act on.") {
+        SettingRow(caption: SettingsCaption(verbatim: IndicatorStyleCopy.positionCaption(for: prefs.hudStyle, kind: .volume))) {
           ThemedChoiceRow(label: "Volume indicator position:", selection: Binding(
             get: { prefs.hudPositionVolume },
             set: { position in
@@ -295,6 +299,7 @@ struct AppMenuPane: View {
           }
           .prefIdentifier(.hudPositionVolume)
         }
+        .disabled(!IndicatorStyleCopy.positionRowsApply(to: prefs.hudStyle))
       }
       // The preview shows both kinds at once so both positions stay visible;
       // this line stops that picture reading as what the screen does.
@@ -304,17 +309,6 @@ struct AppMenuPane: View {
   }
 
   // MARK: - Labels
-
-  /// Reads as one sentence with the row label: "Indicator style: Match macOS".
-  /// Exhaustive, so a future `HUDStyle` case is a compile error
-  /// rather than a blank row.
-  private func label(for style: HUDStyle) -> LocalizedStringKey {
-    switch style {
-    case .system: "Match macOS"
-    case .segments: "Segmented"
-    case .compact: "Compact"
-    }
-  }
 
   /// Reads as one sentence with the row label: "Brightness indicator position:
   /// Top left". Exhaustive, so a future `HUDPosition` case is a compile error

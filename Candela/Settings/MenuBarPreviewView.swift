@@ -51,7 +51,9 @@ struct MenuBarPreviewView: View {
   // legible inside one form row without dwarfing the controls below.
   private static let s: CGFloat = 0.5
 
-  private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
+  /// Injectable so a render test can choose a style without writing the
+  /// process's standard defaults.
+  var prefs = DisplayPrefs(persistenceKey: "app")
 
   var body: some View {
     // Prefs are plain UserDefaults: without this read a position change would
@@ -67,9 +69,21 @@ struct MenuBarPreviewView: View {
     ZStack(alignment: .top) {
       wallpaper
       menuBar(iconVisible: iconVisible)
+      // The Island styles live on the notch; the miniature grows one, 110 wide,
+      // flush with the bar's top, so the preview has somewhere to put them.
+      if prefs.hudStyle.isIsland {
+        UnevenRoundedRectangle(
+          bottomLeadingRadius: IslandGeometry.cornerRadius * Self.s,
+          bottomTrailingRadius: IslandGeometry.cornerRadius * Self.s)
+          .fill(.black)
+          .frame(width: IslandGeometry.fallbackNotchSize.width * Self.s, height: Self.menuBarHeight)
+          .accessibilityHidden(true)
+      }
+      fixedIndicatorLayer(externals: externals)
       anchorColumn(.topLeft, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
       anchorColumn(.topCenter, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
       anchorColumn(.topRight, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
+      sideIndicatorLayer(externals: externals)
     }
     // The system-appearance exception covers the INK as well as the grounds: every adaptive color inside a
     // widget resolves against the environment's color scheme, and this window
@@ -101,6 +115,9 @@ struct MenuBarPreviewView: View {
   /// The pills anchored at one position, in stack order (brightness
   /// above volume when they share an anchor).
   private func pillKinds(at position: HUDPosition) -> [HUDType] {
+    // A fixed style is drawn at its home below and a side-anchored one by the
+    // side layer; only the corner positions belong in the columns.
+    guard case .position = prefs.hudStyle.anchor(for: position) else { return [] }
     var kinds: [HUDType] = []
     if prefs.hudPositionBrightness == position { kinds.append(.brightness) }
     if prefs.hudPositionVolume == position { kinds.append(.volume) }
@@ -138,7 +155,7 @@ struct MenuBarPreviewView: View {
       .padding(.top, Self.menuBarHeight + (holdsPanel ? 5 : 8))
       .padding(.bottom, 8)
       .padding(.leading, position == .topLeft ? 14 : 0)
-      .padding(.trailing, position == .topRight ? 16 : 0)
+      .padding(.trailing, position == .topRight ? 16 + rightSideStripWidth : 0)
     }
   }
 
@@ -427,6 +444,239 @@ struct MenuBarPreviewView: View {
         .padding(.horizontal, 14 * Self.s)
         .frame(width: 220 * Self.s, height: 36 * Self.s)
         .modifier(PillChrome(radius: 18 * Self.s, ground: pillGround, hairline: pillHairline))
+    case .ring:
+      ZStack {
+        Circle().stroke(.quaternary, lineWidth: 3).frame(width: 40, height: 40)
+        Circle().trim(from: 0, to: subject.value).stroke(.primary, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+          .rotationEffect(.degrees(-90)).frame(width: 40, height: 40)
+        Image(systemName: shownKind.rightSymbolName).font(.system(size: 13, weight: .semibold))
+      }
+      .frame(width: RingDial.size.width * Self.s, height: RingDial.size.height * Self.s)
+      .modifier(PillChrome(radius: RingDial.cornerRadius * Self.s, ground: pillGround, hairline: pillHairline))
+    case .vertical:
+      EmptyView()  // drawn by the side layer
+    case .classic, .classicCentered, .sequoia, .islandDrop, .islandEdge, .islandEdgeCapsules:
+      EmptyView()  // drawn by the fixed layer
+    }
+  }
+
+  private func verticalMiniature(kind: HUDType, externals: [AppModel.DisplayState]) -> some View {
+    let subject = pillSubject(kind: kind, externals: externals)
+    let shownKind: HUDType = kind == .volume && subject.muted ? .volumeMuted : kind
+    return ZStack(alignment: .bottom) {
+      Rectangle().fill(.primary.opacity(0.9))
+        .frame(height: VerticalPill.fillHeight(value: subject.value) * Self.s)
+      Image(systemName: shownKind.rightSymbolName)
+        .font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+        .padding(.bottom, 9)
+    }
+    .frame(width: VerticalPill.size.width * Self.s, height: VerticalPill.size.height * Self.s)
+    .modifier(PillChrome(radius: VerticalPill.cornerRadius * Self.s, ground: pillGround, hairline: pillHairline))
+  }
+
+  // MARK: - Side miniatures
+
+  /// The kinds a side-anchored style puts on one edge, brightness nearer the edge
+  /// when both share it. The side comes from the Kit's rule so the miniature
+  /// cannot disagree with the real window.
+  private func sideKinds(leading: Bool) -> [HUDType] {
+    let style = prefs.hudStyle
+    func onThisSide(_ position: HUDPosition) -> Bool {
+      if case .sideCenter(let isLeading, _) = style.anchor(for: position) { return isLeading == leading }
+      return false
+    }
+    var kinds: [HUDType] = []
+    if onThisSide(prefs.hudPositionBrightness) { kinds.append(.brightness) }
+    if onThisSide(prefs.hudPositionVolume) { kinds.append(.volume) }
+    return leading ? kinds : kinds.reversed()
+  }
+
+  /// Keeps the top-right panel inward of the right-edge bars. The panel runs past
+  /// the card's middle at any realistic height, and the bars, drawn last, would take its clicks.
+  private var rightSideStripWidth: CGFloat {
+    CGFloat(sideKinds(leading: false).count) * (VerticalPill.size.width * Self.s + 6)
+  }
+
+  private func sideIndicatorLayer(externals: [AppModel.DisplayState]) -> some View {
+    ZStack {
+      sideColumn(leading: true, externals: externals)
+      sideColumn(leading: false, externals: externals)
+    }
+  }
+
+  @ViewBuilder
+  private func sideColumn(leading: Bool, externals: [AppModel.DisplayState]) -> some View {
+    let kinds = sideKinds(leading: leading)
+    if !kinds.isEmpty {
+      HStack(spacing: 6) {
+        ForEach(kinds, id: \.leftSymbolName) { kind in
+          LiftButton(label: sideAccessibilityLabel(kind: kind, leading: leading)) {
+            jump(.indicators)
+          } content: {
+            verticalMiniature(kind: kind, externals: externals)
+          }
+        }
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: leading ? .leading : .trailing)
+      .padding(leading ? .leading : .trailing, 7)
+    }
+  }
+
+  // MARK: - Fixed-placement miniatures
+
+  /// The fixed-placement styles at their homes on the miniature screen: both
+  /// kinds side by side for the boxes, one open Island on the notch.
+  @ViewBuilder
+  private func fixedIndicatorLayer(externals: [AppModel.DisplayState]) -> some View {
+    switch prefs.hudStyle.fixedAnchor {
+    case nil, .position, .sideCenter:
+      EmptyView()
+    case .bottomCenter(let inset):
+      HStack(spacing: 6) {
+        boxMiniature(kind: .brightness, externals: externals)
+        boxMiniature(kind: .volume, externals: externals)
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+      // Not to vertical scale: 300 pt of card stands for a 1169 pt screen, so the
+      // scaled inset would lift the box far above where macOS draws it. Half of
+      // it sits at the real 12% of the height.
+      .padding(.bottom, inset * Self.s * 0.5)
+    case .center:
+      HStack(spacing: 6) {
+        boxMiniature(kind: .brightness, externals: externals)
+        boxMiniature(kind: .volume, externals: externals)
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    case .topEdge:
+      islandMiniature(externals: externals)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+  }
+
+  private func boxMiniature(kind: HUDType, externals: [AppModel.DisplayState]) -> some View {
+    let subject = pillSubject(kind: kind, externals: externals)
+    let shownKind: HUDType = kind == .volume && subject.muted ? .volumeMuted : kind
+    let kindName = kind == .volume ? "Volume" : "Brightness"
+    return LiftButton(label: "\(kindName) indicator preview; opens the On-Screen Indicators settings below") {
+      jump(.indicators)
+    } content: {
+      if prefs.hudStyle == .sequoia {
+        VStack(spacing: 4) {
+          Image(systemName: shownKind.rightSymbolName).font(.system(size: 17, weight: .medium))
+          Capsule().fill(.quaternary).frame(width: 26, height: 2)
+            .overlay(alignment: .leading) {
+              Capsule().fill(.primary).frame(width: max(2, 26 * subject.value), height: 2)
+            }
+        }
+        .frame(width: SequoiaBox.size.width * Self.s, height: SequoiaBox.size.height * Self.s)
+        .modifier(PillChrome(radius: SequoiaBox.cornerRadius * Self.s, ground: pillGround, hairline: pillHairline))
+      } else {
+        VStack(spacing: 0) {
+          Image(systemName: shownKind.rightSymbolName)
+            .font(.system(size: 44, weight: .thin))
+            .foregroundStyle(.secondary)
+            .frame(maxHeight: .infinity)
+          HStack(spacing: 0.5) {
+            ForEach(0..<ClassicBox.chicletCount, id: \.self) { index in
+              Rectangle()
+                .fill(index < IndicatorSteps.filled(subject.value, of: ClassicBox.chicletCount)
+                  ? AnyShapeStyle(.secondary) : AnyShapeStyle(.clear))
+                .frame(maxWidth: .infinity)
+            }
+          }
+          .padding(0.5)
+          .frame(width: 80, height: 4)
+          .background(Rectangle().fill(.black.opacity(0.36)))
+          .padding(.bottom, 10)
+        }
+        .frame(width: ClassicBox.size.width * Self.s, height: ClassicBox.size.height * Self.s)
+        .background(Color(white: 0.3).opacity(0.9))
+        .clipShape(RoundedRectangle(cornerRadius: ClassicBox.cornerRadius * Self.s))
+      }
+    }
+  }
+
+  /// The drop-down open state for Island (drop); otherwise the trace along the
+  /// miniature's top edge with the information bare beside the notch, or on
+  /// capsules for Island (capsules).
+  private func islandMiniature(externals: [AppModel.DisplayState]) -> some View {
+    let subject = pillSubject(kind: .brightness, externals: externals)
+    let notchW = IslandGeometry.fallbackNotchSize.width * Self.s
+    let radius = IslandGeometry.cornerRadius * Self.s
+    // The miniature notch is the menu bar's height, not the real notch's halved.
+    let notchKitHeight = Self.menuBarHeight / Self.s
+    // The real widths halve to under what reads as a line at this size.
+    let dropTraceWidth = max(1.5, IslandGeometry.dropTraceWidth * Self.s)
+    let edgeTraceWidth = max(1.5, IslandGeometry.edgeTraceWidth * Self.s)
+    return LiftButton(label: "Island indicator preview on the notch; opens the On-Screen Indicators settings below") {
+      jump(.indicators)
+    } content: {
+      ZStack(alignment: .top) {
+        if prefs.hudStyle == .islandDrop {
+          let tab = CGRect(
+            x: 0, y: 0,
+            width: IslandGeometry.fallbackNotchSize.width + IslandGeometry.flare * 2,
+            height: notchKitHeight + IslandGeometry.drop)
+          UnevenRoundedRectangle(bottomLeadingRadius: radius, bottomTrailingRadius: radius)
+            .fill(.black)
+            .frame(width: tab.width * Self.s, height: tab.height * Self.s)
+            .overlay(alignment: .bottom) {
+              HStack {
+                Image(systemName: "sun.max.fill").font(.system(size: 7)).foregroundStyle(.white)
+                Text(subject.name).font(.system(size: 5.5)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
+                Spacer()
+                Text(SliderSnap.percentText(subject.value)).font(.system(size: 6.5, weight: .semibold).monospacedDigit()).foregroundStyle(.white)
+              }
+              .padding(.horizontal, 8)
+              .frame(height: IslandGeometry.drop * Self.s)
+            }
+            .overlay {
+              IslandTraceShape(
+                segments: IslandGeometry.outline(around: tab), kitHeight: tab.height, scale: Self.s)
+                .trim(from: 0, to: subject.value)
+                .stroke(.white, lineWidth: dropTraceWidth)
+                .shadow(color: .white, radius: 2)
+            }
+        } else {
+          HStack(spacing: 8) {
+            HStack(spacing: 4) {
+              Text(subject.name).font(.system(size: 5.5)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+              Image(systemName: "sun.max.fill").font(.system(size: 6.5)).foregroundStyle(.white)
+            }
+            .padding(.horizontal, prefs.hudStyle == .islandEdgeCapsules ? 5 : 0)
+            .padding(.vertical, 2)
+            .background(prefs.hudStyle == .islandEdgeCapsules ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: Capsule())
+            // Equal flexible sides keep the gap on the notch, which is centred
+            // on the card whatever the two texts measure.
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            Spacer().frame(width: notchW)
+            Text(SliderSnap.percentText(subject.value))
+              .font(.system(size: 6.5, weight: .semibold).monospacedDigit()).foregroundStyle(.white)
+              .padding(.horizontal, prefs.hudStyle == .islandEdgeCapsules ? 5 : 0)
+              .padding(.vertical, 2)
+              .background(prefs.hudStyle == .islandEdgeCapsules ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: Capsule())
+              .frame(maxWidth: .infinity, alignment: .leading)
+          }
+          .frame(height: Self.menuBarHeight)
+          .frame(maxWidth: .infinity)
+          .overlay {
+            GeometryReader { geo in
+              let panelWidth = geo.size.width / Self.s
+              let notch = CGRect(
+                x: (panelWidth - IslandGeometry.fallbackNotchSize.width) / 2, y: 0,
+                width: IslandGeometry.fallbackNotchSize.width, height: notchKitHeight)
+              // The top run sits a half line down so the card's clip keeps all of it.
+              let top = notchKitHeight - edgeTraceWidth / 2 / Self.s
+              IslandTraceShape(
+                segments: IslandGeometry.edgeOutline(panelWidth: panelWidth, top: top, around: notch),
+                kitHeight: notchKitHeight, scale: Self.s)
+                .trim(from: 0, to: subject.value)
+                .stroke(.white, lineWidth: edgeTraceWidth)
+                .shadow(color: .white, radius: 2)
+            }
+          }
+        }
+      }
     }
   }
 
@@ -489,13 +739,53 @@ struct MenuBarPreviewView: View {
   // MARK: - Accessibility
 
   private func pillAccessibilityLabel(kind: HUDType, position: HUDPosition) -> String {
-    let kindName = kind == .volume ? "volume" : "brightness"
     let positionName: String = switch position {
     case .topLeft: "top left"
     case .topCenter: "top center"
     case .topRight: "top right"
     }
-    return "\(kindName.capitalized) indicator preview at the \(positionName) of the screen; opens the On-Screen Indicators settings below"
+    return indicatorAccessibilityLabel(kind: kind, place: "the \(positionName) of the screen")
+  }
+
+  private func sideAccessibilityLabel(kind: HUDType, leading: Bool) -> String {
+    indicatorAccessibilityLabel(kind: kind, place: "the middle of the screen's \(leading ? "left" : "right") edge")
+  }
+
+  private func indicatorAccessibilityLabel(kind: HUDType, place: String) -> String {
+    let kindName = kind == .volume ? "Volume" : "Brightness"
+    return "\(kindName) indicator preview at \(place); opens the On-Screen Indicators settings below"
+  }
+}
+
+/// An Island trace from the Kit's own path, so `trim` runs the way the real
+/// trace runs. The Kit is y up in window points; SwiftUI is y down, so each
+/// point mirrors about `kitHeight` and scales. Internal, not private, for the
+/// arc-direction test.
+struct IslandTraceShape: Shape {
+  let segments: [IslandGeometry.PathSegment]
+  let kitHeight: CGFloat
+  let scale: CGFloat
+
+  func path(in rect: CGRect) -> Path {
+    func flipped(_ point: CGPoint) -> CGPoint {
+      CGPoint(x: point.x * scale, y: (kitHeight - point.y) * scale)
+    }
+    var path = Path()
+    for segment in segments {
+      switch segment {
+      case .move(let point):
+        path.move(to: flipped(point))
+      case .line(let point):
+        path.addLine(to: flipped(point))
+      case let .arc(center, radius, startDegrees, endDegrees, clockwise):
+        // Mirroring y negates every angle and reverses the turn.
+        path.addArc(
+          center: flipped(center), radius: radius * scale,
+          startAngle: .degrees(-startDegrees), endAngle: .degrees(-endDegrees),
+          clockwise: !clockwise)
+      }
+    }
+    return path
   }
 }
 
