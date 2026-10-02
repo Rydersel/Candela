@@ -81,7 +81,7 @@ struct EndTimePickerView: View {
     self.actionTitle = actionTitle
     self.cancel = cancel
     self.confirm = confirm
-    _draft = State(initialValue: EndTimeDraft(date: selection.deadline))
+    _draft = State(initialValue: EndTimeDraft(date: selection.deadline, calendar: EnglishDates.calendar()))
   }
 
   var body: some View {
@@ -97,7 +97,7 @@ struct EndTimePickerView: View {
           fieldLabel("Date")
           Button { showsCalendar.toggle() } label: {
             HStack(spacing: 12) {
-              Text(draft.day.formatted(date: .long, time: .omitted))
+              Text(draft.day.formatted(EnglishDates.style(date: .long, calendar: draft.calendar)))
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(SettingsTheme.titleColor)
               Spacer(minLength: 8)
@@ -115,7 +115,7 @@ struct EndTimePickerView: View {
           .buttonStyle(.plain)
           .onHover { dateHovered = $0 }
           .accessibilityLabel("End date")
-          .accessibilityValue(draft.day.formatted(date: .complete, time: .omitted))
+          .accessibilityValue(draft.day.formatted(EnglishDates.style(date: .complete, calendar: draft.calendar)))
           .popover(isPresented: $showsCalendar, arrowEdge: .bottom) {
             EndTimeCalendarView(day: $draft.day, calendar: draft.calendar) { showsCalendar = false }
               .environment(\.settingsAccent, accent)
@@ -141,7 +141,7 @@ struct EndTimePickerView: View {
       .background(RoundedRectangle(cornerRadius: SettingsTheme.cardRadius).fill(SettingsTheme.cardFill))
       .overlay(RoundedRectangle(cornerRadius: SettingsTheme.cardRadius).stroke(SettingsTheme.cardStroke, lineWidth: 1))
       VStack(alignment: .leading, spacing: 16) {
-        Text(validationMessage ?? "Ends \(EndTimeText.string(draft.date ?? selection.deadline, now: clock))")
+        Text(validationMessage ?? "Ends \(EndTimeText.string(draft.date ?? selection.deadline, now: clock, calendar: draft.calendar))")
           .font(.callout)
           .foregroundStyle(validationMessage == nil ? SettingsTheme.bodyColor : SettingsTheme.dangerTint)
           .fixedSize(horizontal: false, vertical: true)
@@ -274,7 +274,7 @@ struct EndTimeCalendarView: View {
   var body: some View {
     VStack(spacing: 16) {
       HStack {
-        Text(visibleMonth.formatted(.dateTime.month(.wide).year()))
+        Text(visibleMonth.formatted(EnglishDates.style(calendar: calendar).month(.wide).year()))
           .font(.system(size: 14, weight: .semibold)).foregroundStyle(SettingsTheme.titleColor)
         Spacer()
         monthButton("Previous month", symbol: "chevron.left", direction: -1)
@@ -362,7 +362,7 @@ struct EndTimeCalendarView: View {
     }
     .buttonStyle(.plain)
     .disabled(date < today || date > lastDay)
-    .accessibilityLabel(date.formatted(date: .complete, time: .omitted))
+    .accessibilityLabel(date.formatted(EnglishDates.style(date: .complete, calendar: calendar)))
     .accessibilityAddTraits(isSelected ? [.isSelected] : [])
   }
 }

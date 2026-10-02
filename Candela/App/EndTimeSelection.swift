@@ -55,9 +55,11 @@ final class EndTimeSelection {
 
 /// Distinguish a later date from the same clock time today.
 enum EndTimeText {
-  static func string(_ deadline: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
-    deadline.formatted(date: calendar.isDate(deadline, inSameDayAs: now) ? .omitted : .abbreviated,
-                       time: .shortened)
+  static func string(_ deadline: Date, now: Date = Date(), calendar: Calendar = .current,
+                     locale: Locale = .current) -> String {
+    deadline.formatted(EnglishDates.style(
+      date: calendar.isDate(deadline, inSameDayAs: now) ? .omitted : .abbreviated,
+      time: .shortened, calendar: calendar, clockFrom: locale))
   }
 }
 
@@ -71,7 +73,7 @@ extension AppModel {
   }
 
   func chooseDimmingPauseEndTime(for key: String, name: String) {
-    endTimePicker.present(title: "Pause Dimming", detail: name,
+    endTimePicker.present(title: "Pause Dimming", detail: "Choose when dimming resumes on \(name).",
                          actionTitle: "Pause Dimming", currentDeadline: oledCare.dimmingPauseDeadline(for: key)) { [weak self] deadline in
       guard let self else { return "Candela is no longer available." }
       return self.applyDimmingPause(until: deadline, for: key)

@@ -69,7 +69,7 @@ struct PanelSizingTests {
     let scroll = try #require(descendants(host).compactMap { $0 as? NSScrollView }.first)
     let originalViewport = scroll.contentView.bounds.height
     let disclosure = try #require(accessibilityNodes(host).first {
-      ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake duration"
+      ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake options"
     })
     #expect(disclosure.object.accessibilityPerformPress?() == true)
     try await Task.sleep(for: .milliseconds(300))
@@ -107,7 +107,7 @@ struct PanelSizingTests {
     let scroll = try #require(descendants(host).compactMap { $0 as? NSScrollView }.first)
     let viewportHeight = scroll.contentView.bounds.height
     let disclosure = try #require(accessibilityNodes(host).first {
-      ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake duration"
+      ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake options"
     })
     let headerFrame = try #require(disclosure.object.accessibilityFrame?())
     let brightness = try #require(accessibilityNodes(host).first {
@@ -122,7 +122,7 @@ struct PanelSizingTests {
     #expect(abs(scroll.contentView.bounds.height - viewportHeight) <= 1,
       "The old height proposal must not collapse the viewport")
     let current = try #require(accessibilityNodes(host).first {
-      ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake duration"
+      ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake options"
     })
     let currentHeader = try #require(current.object.accessibilityFrame?())
     let currentBrightness = try #require(brightness.object.accessibilityFrame?())
@@ -174,7 +174,7 @@ struct PanelSizingTests {
           if result.openedAt == nil { result.openedAt = Date(); return }
           guard Date().timeIntervalSince(result.openedAt!) >= 0.3 else { return }
           result.pinnedControlBaseline = Dictionary(uniqueKeysWithValues: accessibilityNodes(host).compactMap { node in
-            guard let label = node.object.accessibilityLabel?(), (label.hasSuffix(" brightness") || label == "Keep display awake duration" || label == "Keep display awake"),
+            guard let label = node.object.accessibilityLabel?(), (label.hasSuffix(" brightness") || label == "Keep display awake options" || label == "Keep display awake"),
                   let frame = node.object.accessibilityFrame?(), !frame.isEmpty else { return nil }
             return (label, frame)
           })
@@ -183,7 +183,7 @@ struct PanelSizingTests {
           result.originalTop = window.frame.maxY
           result.phase = 1
           guard let disclosure = accessibilityNodes(host).first(where: {
-            ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake duration"
+            ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake options"
           }) else {
             result.error = "The live menu did not publish its disclosure"
             result.didCheck = true
@@ -215,7 +215,7 @@ struct PanelSizingTests {
           result.phase = 2
           result.phaseStarted = Date()
           let disclosure = accessibilityNodes(host).first {
-            ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake duration"
+            ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake options"
           }
           _ = disclosure?.object.accessibilityPerformPress?()
         } else if result.phase == 2 {
@@ -228,7 +228,7 @@ struct PanelSizingTests {
           result.phase = 3
           result.phaseStarted = Date()
           let disclosure = accessibilityNodes(host).first {
-            ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake duration"
+            ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake options"
           }
           _ = disclosure?.object.accessibilityPerformPress?()
         } else if result.phase == 3 {
@@ -365,7 +365,7 @@ struct PanelSizingTests {
     host.layoutSubtreeIfNeeded()
     let nodes = accessibilityNodes(host)
     let button = try #require(nodes.first {
-      ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake duration"
+      ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake options"
     }?.object.accessibilityFrame?())
     let toggle = try #require(nodes.first {
       ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake"
@@ -453,7 +453,7 @@ struct PanelSizingTests {
     try await Task.sleep(for: .milliseconds(150))
     host.layoutSubtreeIfNeeded()
     let disclosure = try #require(accessibilityNodes(host).first {
-      ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake duration"
+      ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake options"
     })
     #expect((disclosure.object as? NSAccessibilityElementProtocol).flatMap {
       ($0 as AnyObject).accessibilityValue() as? String
@@ -688,17 +688,28 @@ struct PanelSizingTests {
 }
 
 /// Set so SwiftUI publishes its accessibility tree to the in-process walks
-/// these tests make. It is process-wide, and left on it changes how every later
-/// test's hosting views behave, so each site turns it off again in a `defer`.
+/// these tests make. It is one process-wide flag, and the walks sleep on the
+/// main actor while it is on, so another suite can run in that gap: enables
+/// are counted, and only the last disable puts the flag back as it was found.
 @MainActor enum EnhancedAccessibility {
   private static let attribute = NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface")
+  private static var holders = 0
+  private static var prior = false
 
   static func enable() {
     _ = NSApplication.shared
-    (NSApp as NSObject).accessibilitySetValue(true, forAttribute: attribute)
+    if holders == 0 {
+      prior = ((NSApp as NSObject).accessibilityAttributeValue(attribute) as? Bool) ?? false
+      (NSApp as NSObject).accessibilitySetValue(true, forAttribute: attribute)
+    }
+    holders += 1
   }
 
   static func disable() {
-    (NSApp as NSObject).accessibilitySetValue(false, forAttribute: attribute)
+    guard holders > 0 else { return }
+    holders -= 1
+    if holders == 0 {
+      (NSApp as NSObject).accessibilitySetValue(prior, forAttribute: attribute)
+    }
   }
 }

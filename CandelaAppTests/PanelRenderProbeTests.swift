@@ -100,7 +100,7 @@ struct PanelRenderProbeTests {
         ($0.accessibilityLabel?() ?? nil) == "Keep awake duration"
       }, "The duration slider must be absent while the row is collapsed")
       let awakeButton = try #require(accessibilityNodes(panel).first {
-        ($0.accessibilityLabel?() ?? nil) == "Keep display awake duration"
+        ($0.accessibilityLabel?() ?? nil) == "Keep display awake options"
       })
       #expect(awakeButton.accessibilityPerformPress?() == true)
       try await Task.sleep(for: .milliseconds(350))
@@ -112,7 +112,7 @@ struct PanelRenderProbeTests {
         ($0.accessibilityLabel?() ?? nil) == "Keep awake duration"
       }.count == 1)
       let collapse = try #require(accessibilityNodes(panel).first {
-        ($0.accessibilityLabel?() ?? nil) == "Keep display awake duration"
+        ($0.accessibilityLabel?() ?? nil) == "Keep display awake options"
       })
       #expect(collapse.accessibilityPerformPress?() == true)
       try await Task.sleep(for: .milliseconds(100))

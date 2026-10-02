@@ -160,7 +160,8 @@ enum DisplayModeCopy {
   /// Prefer the controller timing when it explains why the preview was rejected.
   static func achievedGeometry(_ commit: DisplayConfigError.UnhonouredCommit) -> String {
     if let timing = commit.scanoutTiming {
-      return "The display took \(size(width: timing.width, height: timing.height)), \(refresh(timing.refreshHz))."
+      // A measured rate carries float noise a published one does not.
+      return "The display took \(size(width: timing.width, height: timing.height)), \(refresh(DisplayMode.quantizedRefresh(timing.refreshHz)))."
     }
     guard let achieved = commit.achieved else { return unreadableAchievedGeometry() }
     return achievedGeometry(
@@ -207,13 +208,20 @@ enum DisplayModeCopy {
     "\(AppInfo.productName) could not switch this display to the resolution you picked, because another display could not be put back to the resolution it was on. Check that display before trying again."
   }
 
+  /// A mode whose signal came out wrong and was put back. The configurator
+  /// keeps it out of the lists until the app restarts; worded as the guide
+  /// words it.
+  static func scanoutRejected(_ commit: DisplayConfigError.UnhonouredCommit) -> String {
+    "\(achievedGeometry(commit)) The previous resolution was restored. \(AppInfo.productName) won't offer it again until it restarts."
+  }
+
   /// One sentence for each reason a selection took no effect: a new reason with
   /// no row here is a compile error, not surfaces quietly disagreeing.
   static func startFailure(_ reason: DisplayModeCoordinator.StartFailure.Reason) -> LocalizedStringKey {
     switch reason {
     case let .failed(error):
       if let commit = error.unhonouredCommit, commit.scanoutTiming != nil, commit.fallbackRestored {
-        LocalizedStringKey("\(achievedGeometry(commit)) The previous resolution was restored. This mode is withheld for this session.")
+        LocalizedStringKey(scanoutRejected(commit))
       } else {
         error.didCommit ? startFailureAfterACommit : startFailure
       }
@@ -277,7 +285,7 @@ enum DisplayModeCopy {
       return "CoreGraphics error \(error.cgErrorCode)"
     }
     if let timing = unhonoured.scanoutTiming {
-      return "Controller scan-out mismatch: \(timing.diagnosticDescription)"
+      return "The display received \(size(width: timing.width, height: timing.height)), \(refresh(DisplayMode.quantizedRefresh(timing.refreshHz)))"
     }
     let landed = unhonoured.achieved.map { "\(size($0)), \(refresh($0.refreshHz))" }
     return "CoreGraphics reported success; display shows \(landed ?? "an unreadable resolution")"
@@ -333,7 +341,7 @@ enum DisplayModeCopy {
     case let .failed(error):
       if let commit = error.unhonouredCommit, commit.scanoutTiming != nil {
         if commit.fallbackRestored {
-          LocalizedStringKey("\(achievedGeometry(commit)) The previous resolution was restored. This mode is withheld for this session.")
+          LocalizedStringKey(scanoutRejected(commit))
         } else {
           LocalizedStringKey("\(achievedGeometry(commit)) The previous resolution could not be restored. Choose another resolution for this display.")
         }

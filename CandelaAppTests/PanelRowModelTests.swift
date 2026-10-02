@@ -682,6 +682,30 @@ struct PanelRowModelTests {
     #expect(holder.held == 1)
   }
 
+  /// A custom hold no stop describes reads as Custom, never as the nearest
+  /// stop, which is the hold the switch would start if turned off and on.
+  @Test func theDurationRowNamesOnlyAStopThatDescribesTheHold() {
+    let clock = TimeSource()
+    let awake = KeepAwake(holder: Holder(), now: { clock.now }, clockNotifications: NotificationCenter())
+    defer { awake.setOn(false) }
+    #expect(KeepAwakeDuration.describing(awake, now: clock.now) == nil)
+
+    #expect(awake.start(until: clock.now.addingTimeInterval(3 * 86_400)))
+    #expect(KeepAwakeDuration.describing(awake, now: clock.now) == nil)
+    #expect(awake.start(until: clock.now.addingTimeInterval(7_200 + 30)))
+    #expect(KeepAwakeDuration.describing(awake, now: clock.now) == .twoHours)
+    #expect(awake.start(until: clock.now.addingTimeInterval(5_000)))
+    #expect(KeepAwakeDuration.describing(awake, now: clock.now) == nil)
+
+    // A stop's own hold keeps its name while the time left runs down.
+    KeepAwakeDuration.oneHour.apply(to: awake)
+    clock.now = clock.now.addingTimeInterval(40 * 60)
+    #expect(KeepAwakeDuration.describing(awake, now: clock.now) == .oneHour)
+
+    KeepAwakeDuration.untilTurnedOff.apply(to: awake)
+    #expect(KeepAwakeDuration.describing(awake, now: clock.now) == .untilTurnedOff)
+  }
+
   @Test func aValueOffTheStopsChangesNothing() {
     let awake = KeepAwake(holder: Holder(), clockNotifications: NotificationCenter())
     defer { awake.setOn(false) }

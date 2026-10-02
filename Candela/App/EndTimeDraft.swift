@@ -94,3 +94,30 @@ struct EndTimeCalendarMonth {
     Self(containing: calendar.date(byAdding: .month, value: months, to: start)!, calendar: calendar)
   }
 }
+
+/// Dates in English whatever the system language, because the app ships in
+/// English only and the words around them are English. The 12- or 24-hour
+/// clock and the first day of the week still follow the person's own settings.
+enum EnglishDates {
+  static func locale(clockFrom locale: Locale = .current) -> Locale {
+    var names = Locale.Components(locale: Locale(identifier: "en_US"))
+    names.hourCycle = locale.hourCycle
+    return Locale(components: names)
+  }
+
+  static func calendar(_ base: Calendar = .current, clockFrom locale: Locale = .current) -> Calendar {
+    var calendar = base
+    calendar.locale = self.locale(clockFrom: locale)
+    // A locale change resets the week's start to the new locale's.
+    calendar.firstWeekday = base.firstWeekday
+    return calendar
+  }
+
+  static func style(
+    date: Date.FormatStyle.DateStyle? = nil, time: Date.FormatStyle.TimeStyle? = nil,
+    calendar: Calendar = .current, clockFrom locale: Locale = .current
+  ) -> Date.FormatStyle {
+    Date.FormatStyle(date: date, time: time, locale: self.locale(clockFrom: locale),
+                     calendar: calendar, timeZone: calendar.timeZone)
+  }
+}

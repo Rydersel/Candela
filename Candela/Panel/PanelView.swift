@@ -30,6 +30,7 @@ struct PanelView: View {
     }
   }
   @State private var awakeDuration = KeepAwakeDuration.untilTurnedOff
+  @State private var awakeIsCustom = false
 
   private var disclosureBinding: Binding<PanelDisclosureID?> {
     Binding(get: { expandedSection }, set: { value in
@@ -475,12 +476,13 @@ struct PanelView: View {
           .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Keep display awake duration")
+        .accessibilityLabel("Keep display awake options")
         .accessibilityValue(Text(verbatim: Self.disclosureValue(status, expanded: expanded)))
         Spacer(minLength: 8)
         Toggle("", isOn: Binding(
           get: { model.keepAwake.isOn },
           set: { on in
+            awakeIsCustom = false
             if on { awakeDuration.apply(to: model.keepAwake) }
             else { model.keepAwake.setOn(false) }
           }))
@@ -494,7 +496,7 @@ struct PanelView: View {
           HStack {
             Text("Duration").foregroundStyle(.secondary)
             Spacer()
-            Text(awakeDuration.title).monospacedDigit()
+            Text(awakeIsCustom ? "Custom" : awakeDuration.title).monospacedDigit()
           }
           .font(.system(size: 11))
           SelectionSlider(value: Binding(
@@ -502,6 +504,7 @@ struct PanelView: View {
             set: { value in
               if let duration = Self.chooseAwakeDuration(value, keepAwake: model.keepAwake) {
                 awakeDuration = duration
+                awakeIsCustom = false
               }
             }), stopCount: KeepAwakeDuration.allCases.count,
             accessibilityLabel: "Keep awake duration",
@@ -574,9 +577,12 @@ struct PanelView: View {
 
   private func synchronizeAwakeDuration() {
     guard model.keepAwake.isOn else { return }
-    awakeDuration = model.keepAwake.expiresAt.map {
+    let named = KeepAwakeDuration.describing(model.keepAwake)
+    // The slider still needs a position; the label says the hold is custom.
+    awakeDuration = named ?? model.keepAwake.expiresAt.map {
       KeepAwakeDuration.closest(to: $0.timeIntervalSinceNow)
     } ?? .untilTurnedOff
+    awakeIsCustom = named == nil
   }
 
   /// Presentation only: hiding the row does not release an assertion an earlier
@@ -755,7 +761,7 @@ extension PanelView {
   }
 
   static let careActionsCaption =
-    "Measurement and display hours continue; macOS can still sleep the display."
+    "Hours and any Health measurement continue; macOS can still sleep the display."
 
   private func carePauseActions(for state: AppModel.DisplayState, name: String) -> some View {
     let key = state.display.persistenceKey
@@ -1099,18 +1105,12 @@ private struct FooterIconButtonStyle: ButtonStyle {
 /// An end time short enough for a one-line panel row: the time alone today,
 /// "tomorrow", a weekday within the week, a month and day further out, and the
 /// year only where a deadline a year out would otherwise read as today's date.
-///
-/// Names are English whatever the system language, because the app ships in
-/// English only and the words around them are English; only the 12- or 24-hour
-/// clock follows the person's own locale.
+/// Names are English whatever the system language (`EnglishDates`).
 enum CompactEndTimeText {
   static func string(
     _ deadline: Date, now: Date = Date(), calendar: Calendar = .current, locale: Locale = .current
   ) -> String {
-    var names = Locale.Components(locale: Locale(identifier: "en_US"))
-    names.hourCycle = locale.hourCycle
-    var style = Date.FormatStyle(
-      locale: Locale(components: names), calendar: calendar, timeZone: calendar.timeZone)
+    var style = EnglishDates.style(calendar: calendar, clockFrom: locale)
     let time = deadline.formatted(style.hour().minute())
     let days = calendar.dateComponents(
       [.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: deadline)

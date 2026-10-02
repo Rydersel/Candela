@@ -11,20 +11,19 @@ display under the pointer.
 
 Click the label or chevron beside the switch in the **Keep display awake** row
 to reveal the duration slider. During a timed hold that label shows when the
-hold ends, for example "Until 4:00 PM". Its stops are **15 minutes**, **30 minutes**, **1 hour**, **2 hours**,
+hold ends: the time alone for today, for example "Until 4:00 PM", then
+"tomorrow", a weekday within the coming week, or a month and day further out.
+The slider's stops are **15 minutes**, **30 minutes**, **1 hour**, **2 hours**,
 **4 hours**, **8 hours**, and **Until turned off**. Choosing a stop starts the
 hold for that long, and choosing another while it runs restarts it from now.
-Turning on the switch starts the hold with the duration shown. Turning the
-switch off ends it.
+During a hold set with a custom end time that no stop matches, the duration
+reads **Custom**. Turning on the switch starts the hold with the duration
+shown. Turning the switch off ends it.
 
 **Custom End Time…** opens the end-time window. Click the date to choose a day
 from the calendar, then edit the hour and minute fields. The time controls use
 your 12- or 24-hour clock preference. Choose a future end time within the next
 year and click **Keep Awake**; **Cancel** leaves the current hold unchanged.
-
-While a timed hold runs, the row shows when it ends: the time alone for today,
-then "tomorrow", a weekday within the coming week, or a month and day further
-out.
 
 Candela releases its display-sleep assertion when the timer ends, including after
 the Mac wakes from sleep. Quitting also ends the hold. It is never saved across
@@ -40,11 +39,12 @@ the current pause unchanged, and **Resume Now** ends it early. The same choices
 are on the display's OLED Care page under **Dimming**.
 
 A pause removes existing dimming and pauses idle, blackout, lock, unfocused and
-regional dimming on that display. Panel hours and exposure measurement continue,
-and macOS can still sleep the display. The pause follows that display through
-reconnects and counts time asleep. Quitting Candela, resetting its settings or
-turning off that display's enrollment ends it. Resuming starts a
-fresh idle period rather than immediately applying an old idle timeout.
+regional dimming on that display. Panel hours continue, and so does any
+measurement switched on in the Health pane; macOS can still sleep the display.
+The pause follows that display through reconnects and counts time asleep.
+Quitting Candela, resetting its settings or turning off that display's
+enrollment ends it. Resuming starts a fresh idle period rather than immediately
+applying an old idle timeout.
 
 ## Optional HDR shortcut
 
@@ -55,7 +55,9 @@ before pressing it. A brief message identifies the result or explains why HDR
 could not change.
 
 The shortcut does not choose another monitor when the pointer is on the built-in
-screen or an unsupported target. Finish an outstanding display preview, Checkup,
-or settings reset first. The panel HDR button follows the same coordination rules.
-Turn off a synthesized size before enabling HDR. Unsupported displays and an HDR
-transition that the display does not confirm receive explanatory feedback.
+screen or an unsupported target. During a Checkup or another display change,
+such as a resolution preview, it asks you to finish that first; during a
+settings reset or another HDR change, it asks you to wait for that to finish.
+The panel HDR button follows the same coordination rules. Turn off a size
+marked **Rendered by Candela** before enabling HDR. Unsupported displays and an
+HDR transition that the display does not confirm receive explanatory feedback.

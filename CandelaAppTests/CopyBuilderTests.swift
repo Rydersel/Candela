@@ -700,6 +700,30 @@ struct CopyBuilderTests {
     #expect(!unreadable.contains("CoreGraphics error"))
   }
 
+  /// A wrong signal is reported in the app's own size and refresh spelling,
+  /// and the session withholding is said the way the guide says it.
+  @Test func displayModeScanoutMismatchSpeaksPlainly() {
+    let commit = DisplayConfigError.UnhonouredCommit(
+      requested: Self.mode, achieved: Self.mode,
+      scanoutTiming: ScanoutTiming(width: 2560, height: 1440, refreshHz: 120.0004),
+      fallbackRestored: true)
+    let error = DisplayConfigError(unhonouredCommit: commit)
+    let tooltip = DisplayModeCopy.diagnostic(error)
+    #expect(tooltip == "The display received \(DisplayModeCopy.size(width: 2560, height: 1440)), 120 Hz")
+    #expect(!tooltip.contains("scan-out"))
+    #expect(!tooltip.contains(" x "))
+    #expect(!tooltip.contains(".000"))
+
+    let restart = "\(AppInfo.productName) won't offer it again until it restarts."
+    let sentence = DisplayModeCopy.scanoutRejected(commit)
+    #expect(sentence.hasPrefix("The display took \(DisplayModeCopy.size(width: 2560, height: 1440)), 120 Hz."))
+    #expect(sentence.hasSuffix(restart))
+    #expect(!sentence.contains("withheld"))
+    #expect(render(DisplayModeCopy.startFailure(.failed(error))).contains(sentence))
+    #expect(render(DisplayModeCopy.reapply(
+      requested: Self.mode.descriptor, notice: .failed(error))).contains(sentence))
+  }
+
   @Test func displayModeResolveFailuresInviteAnotherAttempt() {
     // The readback can fail on a commit that went through, so no claim about
     // what is showing.

@@ -110,4 +110,37 @@ struct EndTimeDraftTests {
     #expect(january.start == date(2027, 1, 1, 0))
     #expect(january.moving(by: -1).start == date(2026, 12, 1, 0))
   }
+
+  /// The dialog's copy is English, so the date inside it must be too; only the
+  /// clock follows the system's hour cycle.
+  @Test func endTimeTextIsEnglishOnAGermanSystem() {
+    var german = Calendar(identifier: .gregorian)
+    german.timeZone = TimeZone(identifier: "Europe/Berlin")!
+    german.locale = Locale(identifier: "de_DE")
+    let deadline = german.date(from: DateComponents(year: 2026, month: 10, day: 3, hour: 14))!
+    let now = german.date(from: DateComponents(year: 2026, month: 9, day: 30, hour: 9))!
+    let text = EndTimeText.string(deadline, now: now, calendar: german, locale: Locale(identifier: "de_DE"))
+    #expect(text.contains("Oct"))
+    #expect(!text.contains("Okt"))
+    #expect(text.contains("14:00"))
+    #expect(!text.contains("PM"))
+    let sameDay = EndTimeText.string(deadline, now: deadline.addingTimeInterval(-3_600),
+                                     calendar: german, locale: Locale(identifier: "de_DE"))
+    #expect(sameDay == "14:00")
+  }
+
+  /// The calendar popover's headers and spoken day names come from this
+  /// calendar, so it carries English names and keeps the week's first day.
+  @Test func englishCalendarKeepsTheFirstWeekday() {
+    var german = Calendar(identifier: .gregorian)
+    german.locale = Locale(identifier: "de_DE")
+    german.firstWeekday = 2
+    let english = EnglishDates.calendar(german, clockFrom: Locale(identifier: "de_DE"))
+    #expect(english.firstWeekday == 2)
+    let month = EndTimeCalendarMonth(containing: date(2026, 10, 3), calendar: english)
+    #expect(month.weekdaySymbols.first == "Mon")
+    #expect(english.monthSymbols[9] == "October")
+    let header = date(2026, 10, 3).formatted(EnglishDates.style(calendar: english).month(.wide).year())
+    #expect(header == "October 2026")
+  }
 }
