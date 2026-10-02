@@ -61,9 +61,8 @@ public enum IslandGeometry {
   }
 
   /// One point inside a real notch: the physical corners are rounded and
-  /// anything on the exact edge peeks out below them. Without a notch the tab
-  /// starts as nothing at the top edge, at the open width, and only grows down,
-  /// so no pretend notch is ever drawn.
+  /// anything on the exact edge peeks out below them. Without a notch: zero
+  /// height on the top edge at the open width, so it only grows down.
   public static func closedTab(notch: IslandNotch, panel: CGRect) -> CGRect {
     let g = glass(notch: notch, panel: panel)
     guard notch.isReal else {
@@ -126,7 +125,6 @@ public enum IslandGeometry {
     [.move(CGPoint(x: r.minX, y: r.maxY))] + sides(r) + [.line(CGPoint(x: r.maxX, y: r.maxY))]
   }
 
-  /// The whole top edge, corner to corner, with nothing to dip around.
   public static func straightEdge(panelWidth: CGFloat, top: CGFloat) -> [PathSegment] {
     [.move(CGPoint(x: 0, y: top)), .line(CGPoint(x: panelWidth, y: top))]
   }

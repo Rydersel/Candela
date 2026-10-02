@@ -48,8 +48,7 @@ struct IslandGeometryTests {
   let external = CGRect(x: -2560, y: -300, width: 2560, height: 1440)
 
   /// No notch, no pretend notch: the drop's tab starts as a flat line on the top
-  /// edge and opens only to the row's height plus headroom. The glass here is
-  /// (220, 60, 220, 38) in the panel.
+  /// edge and opens only to the row's height plus headroom.
   @Test func aDrawnNotchGivesAFlatClosedTabAndAShallowOpenOne() {
     let notch = IslandGeometry.notch(screen: external, auxiliaryTopLeft: nil, auxiliaryTopRight: nil)
     let panel = IslandGeometry.panelFrame(screen: external, notch: notch, fullWidth: false)
