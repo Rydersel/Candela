@@ -67,6 +67,15 @@ struct MenuBarPreviewView: View {
     ZStack(alignment: .top) {
       wallpaper
       menuBar(iconVisible: iconVisible)
+      // The Island styles live on the notch; the miniature grows one, 110 wide,
+      // flush with the bar's top, so the preview has somewhere to put them.
+      if prefs.hudStyle.isIsland {
+        UnevenRoundedRectangle(bottomLeadingRadius: 5, bottomTrailingRadius: 5)
+          .fill(.black)
+          .frame(width: IslandGeometry.fallbackNotchSize.width * Self.s, height: Self.menuBarHeight)
+          .accessibilityHidden(true)
+      }
+      fixedIndicatorLayer(externals: externals)
       anchorColumn(.topLeft, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
       anchorColumn(.topCenter, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
       anchorColumn(.topRight, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
@@ -101,6 +110,8 @@ struct MenuBarPreviewView: View {
   /// The pills anchored at one position, in stack order (brightness
   /// above volume when they share an anchor).
   private func pillKinds(at position: HUDPosition) -> [HUDType] {
+    // A fixed style is drawn at its home below, not in the columns.
+    if prefs.hudStyle.fixedAnchor != nil { return [] }
     var kinds: [HUDType] = []
     if prefs.hudPositionBrightness == position { kinds.append(.brightness) }
     if prefs.hudPositionVolume == position { kinds.append(.volume) }
@@ -412,8 +423,7 @@ struct MenuBarPreviewView: View {
     // The real HUD's muted anatomy: slashed speakers, empty bar.
     let shownKind: HUDType = kind == .volume && subject.muted ? .volumeMuted : kind
     switch prefs.hudStyle {
-    case .system, .segments, .classic, .classicCentered, .sequoia, .vertical, .ring,
-         .islandDrop, .islandEdge, .islandEdgeCapsules:  // Drawn properly by the style work that follows.
+    case .system, .segments:
       VStack(alignment: .leading, spacing: 4) {
         Text(subject.name)
           .font(.system(size: 12 * Self.s, weight: .semibold))
@@ -428,6 +438,161 @@ struct MenuBarPreviewView: View {
         .padding(.horizontal, 14 * Self.s)
         .frame(width: 220 * Self.s, height: 36 * Self.s)
         .modifier(PillChrome(radius: 18 * Self.s, ground: pillGround, hairline: pillHairline))
+    case .vertical:
+      ZStack(alignment: .bottom) {
+        Rectangle().fill(.primary.opacity(0.9))
+          .frame(height: VerticalPill.fillHeight(value: subject.value) * Self.s)
+        Image(systemName: shownKind.rightSymbolName)
+          .font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+          .padding(.bottom, 9)
+      }
+      .frame(width: VerticalPill.size.width * Self.s, height: VerticalPill.size.height * Self.s)
+      .modifier(PillChrome(radius: VerticalPill.cornerRadius * Self.s, ground: pillGround, hairline: pillHairline))
+    case .ring:
+      ZStack {
+        Circle().stroke(.quaternary, lineWidth: 3).frame(width: 40, height: 40)
+        Circle().trim(from: 0, to: subject.value).stroke(.primary, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+          .rotationEffect(.degrees(-90)).frame(width: 40, height: 40)
+        Image(systemName: shownKind.rightSymbolName).font(.system(size: 13, weight: .semibold))
+      }
+      .frame(width: RingDial.size.width * Self.s, height: RingDial.size.height * Self.s)
+      .modifier(PillChrome(radius: RingDial.cornerRadius * Self.s, ground: pillGround, hairline: pillHairline))
+    case .classic, .classicCentered, .sequoia, .islandDrop, .islandEdge, .islandEdgeCapsules:
+      EmptyView()  // drawn by the fixed layer
+    }
+  }
+
+  // MARK: - Fixed-placement miniatures
+
+  /// The fixed-placement styles at their homes on the miniature screen: both
+  /// kinds side by side for the boxes, one open Island on the notch.
+  @ViewBuilder
+  private func fixedIndicatorLayer(externals: [AppModel.DisplayState]) -> some View {
+    switch prefs.hudStyle.fixedAnchor {
+    case nil, .position:
+      EmptyView()
+    case .bottomCenter:
+      HStack(spacing: 6) {
+        boxMiniature(kind: .brightness, externals: externals)
+        boxMiniature(kind: .volume, externals: externals)
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+      // Not to vertical scale: 300 pt of card stands for a 1169 pt screen, so the
+      // scaled 70 pt inset would lift the box far above where macOS draws it.
+      // Half of it sits at the real 12% of the height.
+      .padding(.bottom, 140 * Self.s * 0.5)
+    case .center:
+      HStack(spacing: 6) {
+        boxMiniature(kind: .brightness, externals: externals)
+        boxMiniature(kind: .volume, externals: externals)
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    case .topEdge:
+      islandMiniature(externals: externals)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+  }
+
+  private func boxMiniature(kind: HUDType, externals: [AppModel.DisplayState]) -> some View {
+    let subject = pillSubject(kind: kind, externals: externals)
+    let shownKind: HUDType = kind == .volume && subject.muted ? .volumeMuted : kind
+    let kindName = kind == .volume ? "Volume" : "Brightness"
+    return LiftButton(label: "\(kindName) indicator preview; opens the On-Screen Indicators settings below") {
+      jump(.indicators)
+    } content: {
+      if prefs.hudStyle == .sequoia {
+        VStack(spacing: 4) {
+          Image(systemName: shownKind.rightSymbolName).font(.system(size: 17, weight: .medium))
+          Capsule().fill(.quaternary).frame(width: 26, height: 2)
+            .overlay(alignment: .leading) {
+              Capsule().fill(.primary).frame(width: max(2, 26 * subject.value), height: 2)
+            }
+        }
+        .frame(width: SequoiaBox.size.width * Self.s, height: SequoiaBox.size.height * Self.s)
+        .modifier(PillChrome(radius: SequoiaBox.cornerRadius * Self.s, ground: pillGround, hairline: pillHairline))
+      } else {
+        VStack(spacing: 0) {
+          Image(systemName: shownKind.rightSymbolName)
+            .font(.system(size: 44, weight: .thin))
+            .foregroundStyle(.secondary)
+            .frame(maxHeight: .infinity)
+          HStack(spacing: 0.5) {
+            ForEach(0..<16) { index in
+              Rectangle()
+                .fill(index < IndicatorSteps.filled(subject.value, of: 16) ? AnyShapeStyle(.secondary) : AnyShapeStyle(.clear))
+                .frame(maxWidth: .infinity)
+            }
+          }
+          .padding(0.5)
+          .frame(width: 80, height: 4)
+          .background(Rectangle().fill(.black.opacity(0.36)))
+          .padding(.bottom, 10)
+        }
+        .frame(width: ClassicBox.size.width * Self.s, height: ClassicBox.size.height * Self.s)
+        .background(Color(white: 0.3).opacity(0.9))
+        .clipShape(RoundedRectangle(cornerRadius: ClassicBox.cornerRadius * Self.s))
+      }
+    }
+  }
+
+  /// The drop-down open state for Island (drop); otherwise the trace along the
+  /// miniature's top edge with the information bare beside the notch, or on
+  /// capsules for Island (capsules).
+  private func islandMiniature(externals: [AppModel.DisplayState]) -> some View {
+    let subject = pillSubject(kind: .brightness, externals: externals)
+    let notchW = IslandGeometry.fallbackNotchSize.width * Self.s
+    return LiftButton(label: "Island indicator preview on the notch; opens the On-Screen Indicators settings below") {
+      jump(.indicators)
+    } content: {
+      ZStack(alignment: .top) {
+        if prefs.hudStyle == .islandDrop {
+          UnevenRoundedRectangle(bottomLeadingRadius: 5, bottomTrailingRadius: 5)
+            .fill(.black)
+            .frame(width: notchW + IslandGeometry.flare * 2 * Self.s,
+                   height: Self.menuBarHeight + IslandGeometry.drop * Self.s)
+            .overlay(alignment: .bottom) {
+              HStack {
+                Image(systemName: "sun.max.fill").font(.system(size: 7)).foregroundStyle(.white)
+                Text(subject.name).font(.system(size: 5.5)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
+                Spacer()
+                Text(SliderSnap.percentText(subject.value)).font(.system(size: 6.5, weight: .semibold).monospacedDigit()).foregroundStyle(.white)
+              }
+              .padding(.horizontal, 8)
+              .frame(height: IslandGeometry.drop * Self.s)
+            }
+            .overlay {
+              UnevenRoundedRectangle(bottomLeadingRadius: 5, bottomTrailingRadius: 5)
+                .trim(from: 0, to: subject.value)
+                .stroke(.white, lineWidth: 1.5)
+                .shadow(color: .white, radius: 2)
+            }
+        } else {
+          HStack(spacing: 8) {
+            HStack(spacing: 4) {
+              Text(subject.name).font(.system(size: 5.5)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+              Image(systemName: "sun.max.fill").font(.system(size: 6.5)).foregroundStyle(.white)
+            }
+            .padding(.horizontal, prefs.hudStyle == .islandEdgeCapsules ? 5 : 0)
+            .padding(.vertical, 2)
+            .background(prefs.hudStyle == .islandEdgeCapsules ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: Capsule())
+            Spacer().frame(width: notchW)
+            Text(SliderSnap.percentText(subject.value))
+              .font(.system(size: 6.5, weight: .semibold).monospacedDigit()).foregroundStyle(.white)
+              .padding(.horizontal, prefs.hudStyle == .islandEdgeCapsules ? 5 : 0)
+              .padding(.vertical, 2)
+              .background(prefs.hudStyle == .islandEdgeCapsules ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: Capsule())
+          }
+          .frame(height: Self.menuBarHeight)
+          .frame(maxWidth: .infinity)
+          .overlay(alignment: .top) {
+            GeometryReader { geo in
+              Rectangle().fill(.white)
+                .frame(width: geo.size.width * subject.value, height: 1.5)
+                .shadow(color: .white, radius: 2)
+            }
+          }
+        }
+      }
     }
   }
 
