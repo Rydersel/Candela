@@ -23,6 +23,34 @@ struct OledDimmingTests {
                    isCheckupFieldShowing: checkupField)
   }
 
+  @Test func explicitPauseExitsEveryDimAndKeepsSuspensionPrecedence() {
+    for entry in [signals(idle: 400), signals(idle: 2_000),
+                  signals(idle: 1, locked: true), signals(idle: 1, unfocused: 700)] {
+      var engine = IdleDimmingEngine(config: config(blackout: true, unfocused: true))
+      engine.noteLock(idleSeconds: entry.idleSeconds)
+      #expect(engine.tick(entry) != .active)
+      var paused = entry
+      paused.dimmingPaused = true
+      #expect(engine.tick(paused) == .active)
+      paused.isMirrored = true
+      #expect(engine.tick(paused) == .suspended)
+      paused.isMirrored = false
+      paused.isCheckupFieldShowing = true
+      #expect(engine.tick(paused) == .suspended)
+    }
+  }
+
+  @Test func resumeUsesFreshIdleFloorEvenWhenPauseExpiresDuringSleep() {
+    var engine = IdleDimmingEngine(config: config(blackout: true))
+    var paused = signals(idle: 2_000, locked: true)
+    paused.dimmingPaused = true
+    engine.noteLock(idleSeconds: 2_000)
+    #expect(engine.tick(paused) == .active)
+    #expect(engine.tick(signals(idle: 10_000, locked: true)) == .active)
+    #expect(engine.tick(signals(idle: 10_299, locked: true)) == .active)
+    #expect(engine.tick(signals(idle: 10_300, locked: true)) == .lockDim)
+  }
+
   @Test func idleThresholdDims() {
     var e = IdleDimmingEngine(config: config())
     #expect(e.tick(signals(idle: 299)) == .active)

@@ -172,9 +172,8 @@ struct LockDimTests {
   }
 
   /// The published value and the persisted store are the user's, never the dim's.
-  /// That is what makes the restore exact on a write-only panel (the MAG answers
-  /// no DDC read, so last-written IS the truth) and what keeps a process that
-  /// dies mid-dim from reopening dim forever.
+  /// The restore target survives unavailable readback and a process that
+  /// dies mid-dim, so the temporary multiplier cannot become the saved value.
   @Test func theDimNeverTouchesThePublishedValueOrTheStore() async {
     let rig = makeHardwareRig()
     rig.controller.setBrightness(0.8)

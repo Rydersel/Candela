@@ -46,6 +46,8 @@ public actor ModePreviewSession {
     /// Captured before the preview was applied. Survives failed resolutions.
     let previousMode: DisplayMode
     let previewedMode: DisplayMode
+    /// The fallback must not follow a reused display ID onto new hardware.
+    let displayIdentity: DisplayConfigIdentity
     /// Updated only after a committed failure; precommit refusals move nothing.
     var unhonouredCommit: DisplayConfigError.UnhonouredCommit?
   }
@@ -101,6 +103,24 @@ public actor ModePreviewSession {
   public func begin(
     mode: DisplayMode, on displayID: CGDirectDisplayID
   ) -> Result<Void, DisplayConfigError> {
+    if let outstanding, !displayStillMatches(outstanding.displayID, identity: outstanding.displayIdentity) {
+      discard(displayID: outstanding.displayID)
+      lastOutcome = .stale
+      // A request for the same display ID was composed for hardware that is no
+      // longer there. One for another display is still valid, and failing it
+      // would only cost a second pick.
+      if outstanding.displayID == displayID {
+        return .failure(DisplayConfigError(cgErrorCode: CGError.invalidOperation.rawValue))
+      }
+    }
+    // An unknown identity would make every later identity check pass, so a
+    // fallback could follow a reused display ID onto other hardware.
+    guard let displayIdentity = outstanding?.displayID == displayID
+      ? outstanding?.displayIdentity
+      : configurator.displays().first(where: { $0.id == displayID })?.identity
+    else {
+      return .failure(DisplayConfigError(cgErrorCode: CGError.invalidOperation.rawValue))
+    }
     let previous: DisplayMode
 
     if let outstanding {
@@ -132,6 +152,11 @@ public actor ModePreviewSession {
     }
 
     var unhonoured: DisplayConfigError.UnhonouredCommit?
+    guard displayStillMatches(displayID, identity: displayIdentity) else {
+      discard(displayID: displayID)
+      lastOutcome = .stale
+      return .failure(DisplayConfigError(cgErrorCode: CGError.invalidOperation.rawValue))
+    }
     do {
       try configurator.apply(mode, to: displayID, scope: .preview)
     } catch let error as DisplayConfigError {
@@ -141,13 +166,44 @@ public actor ModePreviewSession {
       // apply is still the way back, and the countdown takes it.
       guard let commit = error.unhonouredCommit else { return .failure(error) }
       unhonoured = commit
+      guard displayStillMatches(displayID, identity: displayIdentity) else {
+        discard(displayID: displayID)
+        lastOutcome = .stale
+        return .failure(error)
+      }
+      if commit.scanoutTiming != nil {
+        // A confirmed controller mismatch needs no visual vote. Try the
+        // captured fallback now; a failed restore keeps the countdown below.
+        do {
+          try configurator.restore(previous, to: displayID, scope: .session)
+          guard displayStillMatches(displayID, identity: displayIdentity) else {
+            discard(displayID: displayID)
+            lastOutcome = .stale
+            return .failure(error)
+          }
+          outstanding = nil
+          countdown.disarm()
+          lastOutcome = .reverted
+          return .failure(DisplayConfigError(unhonouredCommit: .init(
+            requested: commit.requested, achieved: commit.achieved,
+            scanoutTiming: commit.scanoutTiming, fallbackRestored: true)))
+        } catch {
+          // Retain the original failure and fallback for recovery and retry.
+        }
+      }
     } catch {
       return .failure(DisplayConfigError(cgErrorCode: -1))
+    }
+    guard displayStillMatches(displayID, identity: displayIdentity) else {
+      discard(displayID: displayID)
+      lastOutcome = .stale
+      return .failure(DisplayConfigError(cgErrorCode: CGError.invalidOperation.rawValue))
     }
     // Retain the requested mode to match answers, even when recovery is the
     // only available action.
     outstanding = OutstandingPreview(
       displayID: displayID, previousMode: previous, previewedMode: mode,
+      displayIdentity: displayIdentity,
       unhonouredCommit: unhonoured
     )
     // Cleared here, not on entry: a begin() that fails establishes nothing, so
@@ -155,6 +211,24 @@ public actor ModePreviewSession {
     lastOutcome = nil
     countdown.arm(seconds: countdownSeconds)
     return .success(())
+  }
+
+  /// Keep the original safe target when an unattended apply and its immediate
+  /// rollback both failed. It is recovery-only and cannot replace a live preview.
+  @discardableResult
+  public func retainRecovery(
+    after commit: DisplayConfigError.UnhonouredCommit, previousMode: DisplayMode,
+    on displayID: CGDirectDisplayID, identity: DisplayConfigIdentity
+  ) -> Bool {
+    guard outstanding == nil,
+          configurator.displays().contains(where: { $0.id == displayID && $0.identity == identity })
+    else { return false }
+    outstanding = OutstandingPreview(
+      displayID: displayID, previousMode: previousMode, previewedMode: commit.requested,
+      displayIdentity: identity, unhonouredCommit: commit)
+    lastOutcome = nil
+    countdown.arm(seconds: countdownSeconds)
+    return true
   }
 
   /// Commits the preview the caller was looking at.
@@ -176,7 +250,8 @@ public actor ModePreviewSession {
     }
     guard answered.unhonouredCommit == nil else { return .stale }
     return resolve(
-      applying: outstanding.previewedMode, to: outstanding.displayID, success: .committed
+      applying: outstanding.previewedMode, to: outstanding.displayID, success: .committed,
+      restoring: false
     )
   }
 
@@ -202,8 +277,16 @@ public actor ModePreviewSession {
   private func revertOutstanding() -> PreviewOutcome {
     guard let outstanding else { return lastOutcome ?? .reverted }
     return resolve(
-      applying: outstanding.previousMode, to: outstanding.displayID, success: .reverted
+      applying: outstanding.previousMode, to: outstanding.displayID, success: .reverted,
+      restoring: true
     )
+  }
+
+  private func displayStillMatches(_ displayID: CGDirectDisplayID, identity: DisplayConfigIdentity?) -> Bool {
+    guard let identity else { return false }
+    return configurator.displays().contains {
+      $0.id == displayID && $0.identity == identity
+    }
   }
 
   private func matches(_ answered: PreviewedMode, _ outstanding: OutstandingPreview) -> Bool {
@@ -218,13 +301,37 @@ public actor ModePreviewSession {
   /// could not be made permanent still falls back to one the user can see.
   private func resolve(
     applying mode: DisplayMode, to displayID: CGDirectDisplayID,
-    success: PreviewOutcome
+    success: PreviewOutcome, restoring: Bool
   ) -> PreviewOutcome {
+    let displayIdentity = outstanding?.displayIdentity
+    if let outstanding, !displayStillMatches(displayID, identity: displayIdentity) {
+      discard(displayID: outstanding.displayID)
+      lastOutcome = .stale
+      return .stale
+    }
     do {
-      try configurator.apply(mode, to: displayID, scope: .session)
+      if restoring {
+        try configurator.restore(mode, to: displayID, scope: .session)
+      } else {
+        try configurator.apply(mode, to: displayID, scope: .session)
+      }
     } catch let error as DisplayConfigError {
       if let commit = error.unhonouredCommit {
         outstanding?.unhonouredCommit = commit
+        guard displayStillMatches(displayID, identity: displayIdentity) else {
+          discard(displayID: displayID)
+          lastOutcome = .failed(error)
+          return .failed(error)
+        }
+        if commit.scanoutTiming != nil, success == .committed,
+           revertOutstanding() == .reverted,
+           displayStillMatches(displayID, identity: displayIdentity) {
+          let restored = DisplayConfigError(unhonouredCommit: .init(
+            requested: commit.requested, achieved: commit.achieved,
+            scanoutTiming: commit.scanoutTiming, fallbackRestored: true))
+          lastOutcome = .failed(restored)
+          return .failed(restored)
+        }
       }
       lastOutcome = .failed(error)
       return .failed(error)
@@ -232,6 +339,11 @@ public actor ModePreviewSession {
       let error = DisplayConfigError(cgErrorCode: -1)
       lastOutcome = .failed(error)
       return .failed(error)
+    }
+    guard displayStillMatches(displayID, identity: displayIdentity) else {
+      discard(displayID: displayID)
+      lastOutcome = .stale
+      return .stale
     }
     outstanding = nil
     countdown.disarm()

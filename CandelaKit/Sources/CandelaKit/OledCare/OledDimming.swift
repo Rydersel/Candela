@@ -110,6 +110,8 @@ public struct OledDimSignals: Equatable, Sendable {
   /// the same `CGShieldingWindowLevel()`, so a dim that won the ordering would
   /// be graded as part of the panel.
   public var isCheckupFieldShowing: Bool
+  /// Suppresses intervention only. Mirror/checkup suspension still takes precedence.
+  public var dimmingPaused: Bool = false
 
   public init(idleSeconds: Double, assertionHeld: Bool, isLocked: Bool,
               isMirrored: Bool, isHDRSettling: Bool, unfocusedSeconds: Double?,
@@ -138,6 +140,7 @@ public struct IdleDimmingEngine: Sendable {
   /// idle-driven row measures from this floor instead; input clears it.
   private var idleFloor: Double = 0
   private var idleFloorPending = false
+  private var wasDimmingPaused = false
 
   public init(config: OledDimConfig) { self.config = config }
 
@@ -169,6 +172,10 @@ public struct IdleDimmingEngine: Sendable {
     let inputOccurred = signals.idleSeconds < lastIdleSeconds
     let current = state
 
+    if wasDimmingPaused != signals.dimmingPaused {
+      noteWake()
+      wasDimmingPaused = signals.dimmingPaused
+    }
     if idleFloorPending {
       idleFloor = signals.idleSeconds
       idleFloorPending = false
@@ -180,6 +187,12 @@ public struct IdleDimmingEngine: Sendable {
     // field on a locked panel would be dimmed by a route no window ordering
     // could save.
     if signals.isMirrored || signals.isCheckupFieldShowing { state = .suspended; return state }
+
+    if signals.dimmingPaused {
+      lockDimArmed = false
+      state = .active
+      return state
+    }
 
     if signals.isLocked && config.lockDim {
       if inputOccurred { lockDimArmed = false }

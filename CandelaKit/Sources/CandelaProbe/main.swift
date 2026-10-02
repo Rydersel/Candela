@@ -40,7 +40,9 @@ usage: candela-probe [--display <id>] <subcommand>
   curated                                 what the default size picker shows, after curation
   modeapply <ioModeID> [holdSeconds=5] [session]
                                           apply one mode by id at preview scope, then revert;
-                                          "session" keeps the mode after exit, and you put the display back
+                                          "session" keeps the mode after exit, and you put the display back;
+                                          prints the scan-out reading and its raw timing id before the apply,
+                                          after it, and at the end of the hold
   identity                                EDID identity facts as the checkup reads them, as JSON
   refreshsweep                            apply every rate at the native size at preview scope, then restore
   checkup validate <file>                 verify an exported checkup report against its own hash
@@ -55,6 +57,8 @@ usage: candela-probe [--display <id>] <subcommand>
   gamma reset                             CGDisplayRestoreColorSyncSettings
   watch [seconds=10]                      100 ms native-brightness delta log
   topology                                online displays: kind, identity, virtual verdict, DDC pool
+  scanout                                 the wire timing the scan-out reader reports per online display,
+                                          with its registry location and every controller path it can match
   vd create <slot 1-3> <w> <h> [--hidpi] [--hold <s>]  create a virtual display, hold, destroy
   vd online <id>                          is that display in THIS process's online list
   conform [--apply]                       assert the private-API platform assumptions; run after every macOS update
@@ -283,6 +287,25 @@ case "topology":
   )
   print("ddc-pool=\(pool.map(String.init).joined(separator: ","))")
 
+case "scanout":
+  // The reader's positive control. A location matching no controller path is a
+  // reader that answers nil forever, and the app treats nil as "not
+  // verifiable", so that failure is silent everywhere but here. Read-only.
+  requireOnlineDisplays()
+  let controllers = ScanoutTimingReader.controllerPaths()
+  print("controllers=\(controllers.count)")
+  for path in controllers { print("controller \(path)") }
+  for display in online {
+    let location = ScanoutTimingReader.location(of: display.id)
+    let matches = location.map { location in controllers.filter { $0 == location }.count } ?? 0
+    let timing = ScanoutTimingReader.read(displayID: display.id)
+    print("""
+    display id=\(display.id) name=\(display.title) location=\(location ?? "none") \
+    matching-controllers=\(matches) \
+    timing=\(timing.map { "\($0.width)x\($0.height)@\(String(format: "%.3f", $0.refreshHz))Hz" } ?? "no record")
+    """)
+  }
+
 case "vd":
   // Exercises the shipping VirtualDisplayHost without the app: creation,
   // appearance, departure, and (with --hold plus an external kill -9) crash
@@ -484,7 +507,18 @@ case "modeapply":
     print("no mode with id \(wanted) on display \(target)")
     exit(3)
   }
+  // The reading has to MOVE with the mode for the scan-out check to mean
+  // anything; three readings show it moving, or lagging, in one run.
+  func printScanout(_ label: String) {
+    let reading = ScanoutTimingReader.diagnosticRead(displayID: target)
+    print("""
+    scanout \(label): \(reading.timing.map { "\($0.width)x\($0.height)@\(String(format: "%.3f", $0.refreshHz))Hz" } ?? "no record") \
+    timing-id \(reading.timingModeID.map(String.init) ?? "none")
+    """)
+  }
   let before = configurator.currentMode(for: target)
+  let timingBefore = configurator.scanoutTiming(for: target)
+  printScanout("before")
   print("before: \(before.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID) \(String(format: "%g", $0.refreshHz)) Hz" } ?? "unknown")")
   print("applying: \(mode.logicalWidth)x\(mode.logicalHeight) fb \(mode.pixelWidth)x\(mode.pixelHeight) id \(mode.ioModeID) provenance \(mode.provenance) \(String(format: "%g", mode.refreshHz)) Hz")
   // Run for an unhonoured commit too: that apply MOVED the display, so what it
@@ -492,16 +526,26 @@ case "modeapply":
   func reportAchievedThenHold() {
     let after = configurator.currentMode(for: target)
     print("after:  \(after.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID) \(String(format: "%g", $0.refreshHz)) Hz" } ?? "unknown")")
+    printScanout("after")
     print("scope: \(applyScope); holding \(holdSeconds)s...")
     sleep(holdSeconds)
+    printScanout("end of hold")
     print(
       applyScope == .session
         ? "exiting: session scope keeps the mode; put the display back."
         : "exiting: preview scope reverts now."
     )
   }
+  let enforced = ScanoutVerification.isEnforced(mode)
   do {
     try configurator.apply(mode, to: target, scope: applyScope)
+    // The guard returned without withholding, so its verdict was not a steady
+    // mismatch. Recomputed from one reading against the panel's own size: what
+    // the guard saw after its settle may be a later reading than this one.
+    let verdict = ScanoutVerification.verdict(
+      requested: mode, nativePixels: configurator.nativePixels(for: target),
+      before: timingBefore, after: configurator.scanoutTiming(for: target))
+    print("scan-out guard: passed (\(enforced ? "enforced" : "not enforced") mode); verdict on a fresh reading: \(verdict)")
     reportAchievedThenHold()
   } catch let error as DisplayConfigError where error.didCommit {
     // Not a refusal: the commit went through and the display took something
@@ -511,6 +555,13 @@ case "modeapply":
     print("""
     apply UNHONOURED: the commit went through and the display did not take it; it reports \(landed.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) \(String(format: "%g", $0.refreshHz)) Hz" } ?? "nothing readable")
     """)
+    // A scan-out timing on the error means the guard withheld the mode on a
+    // steady mismatch; none means the framebuffer readback itself disagreed.
+    if let timing = error.unhonouredCommit?.scanoutTiming {
+      print("scan-out guard: mismatch, mode withheld for the session; the wire read \(timing.diagnosticDescription)")
+    } else {
+      print("scan-out guard: not the cause (no scan-out timing on the error); the framebuffer readback disagreed")
+    }
     reportAchievedThenHold()
     exit(4)
   } catch {
@@ -687,7 +738,7 @@ case "caps":
   requireDDCDisplays()
   for entry in found {
     guard let capabilities = await entry.writer.readCapabilityString() else {
-      // Expected on the MAG 341C and every other write-only panel.
+      // An unavailable capabilities string does not prove a register is unreadable.
       print("\(entry.display.name): capabilities read FAILED -> unknown (volume slider stays enabled)")
       continue
     }

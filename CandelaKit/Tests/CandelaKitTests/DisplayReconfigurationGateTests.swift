@@ -22,11 +22,10 @@ struct DisplayReconfigurationGateTests {
     #expect(await gate.holder == nil)
   }
 
-  /// The reconfiguration gate's substance is the fourth claimant. Deleting the `arrangement` case
-  /// would leave every other test here passing over a three-way gate.
-  @Test func allFourReconfiguringFeaturesAreClaimants() {
+  /// Every display-changing feature must participate in exclusion.
+  @Test func allReconfiguringFeaturesAreClaimants() {
     #expect(Set(ReconfigurationClaimant.allCases) == [
-      .displayModes, .mirroring, .rotation, .arrangement,
+      .displayModes, .mirroring, .rotation, .arrangement, .hdr, .checkup, .settingsReset,
     ])
   }
 
@@ -165,6 +164,6 @@ struct DisplayReconfigurationGateTests {
     let holder = await gate.holder
     #expect(holder != nil)
     #expect(outcomes.compactMap(\.refusedBy).allSatisfy { $0 == holder })
-    #expect(outcomes.compactMap(\.refusedBy).count == 3)
+    #expect(outcomes.compactMap(\.refusedBy).count == ReconfigurationClaimant.allCases.count - 1)
   }
 }

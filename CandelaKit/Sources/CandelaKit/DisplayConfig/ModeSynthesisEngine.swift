@@ -67,6 +67,8 @@ public enum SynthesisFailure: Error, Sendable, Equatable {
   /// The mirror stands and the panel did not follow it: the physical does not
   /// report the master's geometry, so the size is not on the glass.
   case engageNotAchieved
+  /// The framebuffer followed the master, but the controller drove a foreign timing.
+  case scanoutMismatch(ScanoutTiming)
   /// `disengage` was asked about a display that has no pairing.
   case notEngaged
   /// Something the unwind tried to take down is still standing: a virtual
@@ -232,6 +234,9 @@ public actor ModeSynthesisEngine {
       return .failure(fail(.engageNotAchieved, unwinding: pairing))
     }
 
+    // No scan-out check here: with no pre-apply reading the record can still
+    // describe the pre-mirror timing, and the engage tail judges the wire after
+    // it re-times the slave onto the timing it chose.
     table[displayID] = pairing
     log.info("synthesis.engage slot=\(slot) physical=\(displayID) vd=\(handle.displayID) \(size.logicalWidth)x\(size.logicalHeight)")
     return .success(pairing)

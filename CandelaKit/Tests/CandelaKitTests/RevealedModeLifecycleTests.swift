@@ -28,7 +28,7 @@ struct RevealedModeLifecycleTests {
   // MARK: - Preview
 
   @Test func previewingARevealedModeUsesPreviewScope() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(3)
     fake.current = published()
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: revealed(), on: 3)
@@ -36,7 +36,7 @@ struct RevealedModeLifecycleTests {
   }
 
   @Test func confirmingARevealedModeCommitsAtSessionScope() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(3)
     fake.current = published()
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: revealed(), on: 3)
@@ -48,7 +48,7 @@ struct RevealedModeLifecycleTests {
   /// The safety property, on the path that has no pre-commit geometry guard:
   /// reverting must put back the mode that was on screen BEFORE the preview.
   @Test func revertingARevealedModeRestoresThePublishedMode() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(3)
     fake.current = published()
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: revealed(), on: 3)
@@ -60,7 +60,7 @@ struct RevealedModeLifecycleTests {
   /// A revealed mode the display refuses must not be recorded as applied: the
   /// caller reverts on a throw, and there is no other signal.
   @Test func aFailedRevealedPreviewSurfacesTheError() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(3)
     fake.current = published()
     fake.failWith = DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
     let session = ModePreviewSession(configurator: fake)

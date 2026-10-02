@@ -232,6 +232,8 @@ extension AppModel {
           revealed: catalog.all.count(where: \.isRevealed), revealsHiddenModes: displayModes.revealsHiddenModes)),
         .init("wire timing check", displayModes.guardsWireTiming ? "on" : "off"),
         .init("withheld by wire timing check", String(catalog.withheldForWireTiming)),
+        .init("active scan-out timing", ScanoutTimingReader.read(displayID: state.id)?
+          .diagnosticDescription ?? "not verifiable"),
       ]))
     } else {
       sections.append(.init("resolution inventory", [.init("status", "not enumerated yet")]))

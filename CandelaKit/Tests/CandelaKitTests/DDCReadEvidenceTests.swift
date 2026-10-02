@@ -101,7 +101,7 @@ struct BrightnessReadEvidenceCallSiteTests {
     #expect(Self.make(writer: FakeDDC()).controller.readEvidence == .notAttempted)
   }
 
-  /// The MAG 341C's signature, at the site that detects it.
+  /// An unusable zero response, at the site that detects it.
   @Test func azerosAnswerIsPublishedAsAllZeros() async {
     let (controller, _) = Self.make(writer: FakeDDC(readResult: (current: 0, max: 0)))
     await controller.refreshFromHardware()

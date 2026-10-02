@@ -46,6 +46,12 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     /// display in HDR for twice as long as the sequence the eyes verification
     /// watched.
     var hdrHeld: Duration
+    /// The configurator's scan-out settle: poll until two readings agree, then
+    /// read once more after `timingSettle`. The record lags the re-time, so one
+    /// read would bounce or unwind a good link. Zero by default so tests pay no
+    /// wall clock.
+    var timingPoll: Duration = .zero
+    var timingSettle: Duration = .zero
 
     /// Worst case is about 25 seconds: the re-time, the bounce settle, then
     /// three settled attempts per HDR leg with a wait BETWEEN attempts rather
@@ -54,7 +60,8 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     /// armed yet.
     static let production = Durations(
       beforeRetime: .seconds(2), beforeBounce: .seconds(3), hdrSettle: .seconds(2),
-      betweenAttempts: .seconds(2), hdrHeld: .zero
+      betweenAttempts: .seconds(2), hdrHeld: .zero,
+      timingPoll: .milliseconds(50), timingSettle: .milliseconds(750)
     )
   }
 
@@ -81,20 +88,82 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     // put the twin back rather than the mode the user chose. A stale capture is
     // rejected by the apply's own descriptor cross-check, so the tail falls to
     // the bounce rather than putting a wrong mode on the glass.
-    let ownMode = ownModes.remember(configurator.currentMode(for: displayID), for: displayID)
+    let original = ownModes.remember(
+      configurator.currentMode(for: displayID),
+      nativePixels: configurator.nativePixels(for: displayID),
+      identityKey: identityKey, for: displayID)
+    let ownMode = original.mode
+    let nativePixels = original.nativePixels
     let result = await engine.engage(size, onPhysical: displayID, identityKey: identityKey)
     switch result {
     case let .success(pairing):
       let target = retimeTarget(
         for: displayID, ownMode: ownMode, master: pairing.virtualDisplayID)
-      if await retime(displayID, to: target) == false { await bounce(displayID) }
+      // The target twins the panel's own mode, which need not be native, so its
+      // framebuffer is a correct wire too. A wrong timing goes to the bounce,
+      // which can renegotiate the link; the check below judges what it left.
+      var landed = await retime(displayID, to: target)
+      if !landed {
+        await bounce(displayID)
+      } else if let timing = await steadyMismatch(
+        on: displayID, retimedOnto: target, landed: landed, nativePixels: nativePixels) {
+        Self.log.info("synthesis.retime display \(displayID) landed on the wrong timing (\(timing.diagnosticDescription, privacy: .public)); bouncing")
+        // The HDR round trip can drop the re-time, leaving a target-sized wire
+        // on the mirror's mode: the measured crop. A bounce that issued no leg
+        // keeps the landing; after one that did, only a read of the target does.
+        if await bounce(displayID), await stillOn(target, displayID) != true {
+          landed = false
+          Self.log.info("synthesis.retime display \(displayID) is not confirmed on its re-time target after the bounce")
+        }
+      }
+      if let timing = await steadyMismatch(
+        on: displayID, retimedOnto: target, landed: landed, nativePixels: nativePixels) {
+        return await rejectTiming(.scanoutMismatch(timing), on: displayID)
+      }
     case .failure:
-      // Nothing of ours stands, so nothing is owed a restore. A left record
-      // would have a later disengage reassert a mode the user has since
-      // changed.
-      ownModes.forget(displayID)
+      // A failed unwind retains its pairing and still owes the original mode
+      // restore. Drop the capture only once nothing of ours stands.
+      if await engine.pairing(forPhysical: displayID) == nil { ownModes.forget(displayID) }
     }
     return result
+  }
+
+  /// A mismatch only when it holds: two agreeing readings, then the same one
+  /// after `timingSettle`. The controller record lags a reconfiguration, so
+  /// anything less judges the link on a timing that was still landing.
+  private func steadyMismatch(
+    on displayID: CGDirectDisplayID, retimedOnto target: DisplayMode?, landed: Bool,
+    nativePixels: (width: Int, height: Int)?
+  ) async -> ScanoutTiming? {
+    let mismatched = { () -> ScanoutTiming? in
+      guard let timing = configurator.scanoutTiming(for: displayID),
+            ScanoutVerification.retimeVerdict(retimedOnto: target, landed: landed,
+              nativePixels: nativePixels, timing: timing) == .mismatch
+      else { return nil }
+      return timing
+    }
+    guard var previous = mismatched() else { return nil }
+    // Ten polls is the configurator's half-second window at its 50 ms poll.
+    var steady = false
+    for _ in 0..<10 {
+      try? await Task.sleep(for: durations.timingPoll)
+      guard let next = mismatched() else { return nil }
+      if next == previous { steady = true; break }
+      previous = next
+    }
+    guard steady else { return nil }
+    try? await Task.sleep(for: durations.timingSettle)
+    guard let later = mismatched(), later == previous else { return nil }
+    return later
+  }
+
+  private func rejectTiming(
+    _ failure: SynthesisFailure, on displayID: CGDirectDisplayID
+  ) async -> Result<SynthesisPairing, SynthesisFailure> {
+    switch await disengage(fromPhysical: displayID) {
+    case .success: return .failure(failure)
+    case let .failure(unwind): return .failure(unwind)
+    }
   }
 
   /// **The re-time lands on the HiDPI TWIN of the display's own mode, not on the
@@ -160,8 +229,10 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     guard let target else { return false }
     try? await Task.sleep(for: durations.beforeRetime)
     do {
-      // Session scope, matching the engine's own applies.
-      try configurator.apply(target, to: displayID, scope: .session)
+      // Session scope, matching the engine's own applies. `restore`, because
+      // the target is the panel's own mode (its native-flagged twin on the
+      // MAG): a timing reading taken mid-mirror must never withhold it.
+      try configurator.restore(target, to: displayID, scope: .session)
     } catch {
       // "Did not land": the apply also throws on a commit the display did not honour.
       Self.log.info("synthesis.retime did not land on display \(displayID): \(String(describing: error), privacy: .public)")
@@ -172,14 +243,7 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     // for the commit, which has been measured returning success over a request
     // it did not honour. Reporting a coerced re-time as landed skips the bounce
     // in exactly the situation the bounce exists for.
-    guard let achieved = configurator.currentMode(for: displayID),
-          achieved.logicalWidth == target.logicalWidth,
-          achieved.logicalHeight == target.logicalHeight,
-          achieved.pixelWidth == target.pixelWidth,
-          achieved.pixelHeight == target.pixelHeight,
-          DisplayMode.quantizedRefresh(achieved.refreshHz)
-          == DisplayMode.quantizedRefresh(target.refreshHz)
-    else {
+    guard isOn(target, displayID) else {
       Self.log.info(
         "synthesis.retime did not take on display \(displayID): the apply reported success and the display did not follow it"
       )
@@ -187,6 +251,31 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     }
     Self.log.info("synthesis.retime display \(displayID) onto \(target.logicalWidth)x\(target.logicalHeight) (framebuffer \(target.pixelWidth)x\(target.pixelHeight)) @\(target.refreshHz)Hz")
     return true
+  }
+
+  /// nil when no mode can be read, which the caller treats as off target: an
+  /// unreadable mode cannot rule out the measured crop. One retry is enough
+  /// because the off leg has already waited out its settle.
+  private func stillOn(_ target: DisplayMode?, _ displayID: CGDirectDisplayID) async -> Bool? {
+    if isOn(target, displayID) { return true }
+    try? await Task.sleep(for: durations.timingPoll)
+    if isOn(target, displayID) { return true }
+    guard configurator.currentMode(for: displayID) != nil else {
+      Self.log.info("synthesis.retime display \(displayID) has no readable mode after the bounce")
+      return nil
+    }
+    return false
+  }
+
+  /// Geometry and quantized refresh, never `ioModeID`, which is positional.
+  private func isOn(_ target: DisplayMode?, _ displayID: CGDirectDisplayID) -> Bool {
+    guard let target, let achieved = configurator.currentMode(for: displayID) else { return false }
+    return achieved.logicalWidth == target.logicalWidth
+      && achieved.logicalHeight == target.logicalHeight
+      && achieved.pixelWidth == target.pixelWidth
+      && achieved.pixelHeight == target.pixelHeight
+      && DisplayMode.quantizedRefresh(achieved.refreshHz)
+      == DisplayMode.quantizedRefresh(target.refreshHz)
   }
 
   /// Takes the set down, then puts the panel back on the mode the user chose.
@@ -209,11 +298,11 @@ struct BouncingSynthesisDriver: SynthesisDriving {
   func disengage(fromPhysical displayID: CGDirectDisplayID) async -> Result<Void, SynthesisFailure> {
     // Read, not taken: a disengage that fails leaves the set standing, and the
     // panel still owes the restore.
-    let ownMode = ownModes.mode(for: displayID)
+    let original = ownModes.entry(for: displayID)
     let result = await engine.disengage(fromPhysical: displayID)
     if case .success = result {
       ownModes.forget(displayID)
-      await restoreOwnMode(displayID, to: ownMode)
+      await restoreOwnMode(displayID, to: original)
     }
     return result
   }
@@ -229,15 +318,18 @@ struct BouncingSynthesisDriver: SynthesisDriving {
   /// opposite of the HDR legs' rule in this file: their write can leave DDC
   /// dead, while the only thing this can put on the glass is the mode the user
   /// picked.
-  private func restoreOwnMode(_ displayID: CGDirectDisplayID, to ownMode: DisplayMode?) async {
-    guard let ownMode else { return }
+  private func restoreOwnMode(_ displayID: CGDirectDisplayID, to original: SynthesisOwnModeLedger.Entry?) async {
+    guard let original, let ownMode = original.mode else { return }
     // The mirror break is a reconfiguration and the window server lags it, so a
     // mode read taken inline would describe the world before it.
     try? await Task.sleep(for: durations.beforeRetime)
+    guard configurator.displays().contains(where: {
+      $0.id == displayID && $0.identity.key == original.identityKey
+    }) else { return }
     let achieved = configurator.currentMode(for: displayID)
     if let achieved, achieved.isHiDPI == ownMode.isHiDPI { return }
     do {
-      try configurator.apply(ownMode, to: displayID, scope: .session)
+      try configurator.restore(ownMode, to: displayID, scope: .session)
     } catch {
       // "Did not put back": the apply also throws on a commit the display did not honour.
       Self.log.error("""
@@ -268,8 +360,11 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     await engine.pairing(forPhysical: displayID)
   }
 
-  private func bounce(_ displayID: CGDirectDisplayID) async {
-    guard await hdr.supportsHDR(displayID) else { return }
+  /// Returns whether the round trip ran: false when HDR is unsupported, or
+  /// live or unvouched for, and nothing was written.
+  @discardableResult
+  private func bounce(_ displayID: CGDirectDisplayID) async -> Bool {
+    guard await hdr.supportsHDR(displayID) else { return false }
     // The engage's reconfigure is still settling when this runs, and the
     // MonitorPanel access lock is non-blocking: the first write straight after
     // the engage was measured refused. Settle FIRST, then read the guard.
@@ -283,7 +378,7 @@ struct BouncingSynthesisDriver: SynthesisDriving {
       Self.log.info(
         "synthesis.bounce skipped on display \(displayID): HDR is live, or its state is nobody's to vouch for"
       )
-      return
+      return false
     }
     var wentOn = false
     for attempt in 1...3 {
@@ -314,6 +409,7 @@ struct BouncingSynthesisDriver: SynthesisDriving {
         "synthesis.bounce finished on display \(displayID): HDR is measured off (round trip \(wentOn, privacy: .public))"
       )
     }
+    return true
   }
 
   /// The OFF discipline, and the one hard rule in this file: HDR left standing
@@ -360,23 +456,33 @@ struct BouncingSynthesisDriver: SynthesisDriving {
 /// follows it, and a record stranded by a replug is dropped by the engage that
 /// claims the ID next.
 final class SynthesisOwnModeLedger: Sendable {
-  private let stored = OSAllocatedUnfairLock<[CGDirectDisplayID: DisplayMode]>(
+  struct Entry: Sendable {
+    let mode: DisplayMode?
+    let nativePixels: (width: Int, height: Int)?
+    let identityKey: String
+  }
+
+  private let stored = OSAllocatedUnfairLock<[CGDirectDisplayID: Entry]>(
     initialState: [:]
   )
 
-  /// Records `mode` unless something is already on record for this display, and
-  /// answers with whatever now stands.
+  /// Capture before the first mirror. Later stops may publish the virtual
+  /// master's dimensions, so neither mode nor native geometry may be replaced.
+  /// A new hardware identity cannot inherit a departed panel's capture.
   @discardableResult
-  func remember(_ mode: DisplayMode?, for displayID: CGDirectDisplayID) -> DisplayMode? {
-    stored.withLock { modes in
-      if let existing = modes[displayID] { return existing }
-      guard let mode else { return nil }
-      modes[displayID] = mode
-      return mode
+  func remember(
+    _ mode: DisplayMode?, nativePixels: (width: Int, height: Int)?,
+    identityKey: String, for displayID: CGDirectDisplayID
+  ) -> Entry {
+    stored.withLock { entries in
+      if let existing = entries[displayID], existing.identityKey == identityKey { return existing }
+      let entry = Entry(mode: mode, nativePixels: nativePixels, identityKey: identityKey)
+      entries[displayID] = entry
+      return entry
     }
   }
 
-  func mode(for displayID: CGDirectDisplayID) -> DisplayMode? {
+  func entry(for displayID: CGDirectDisplayID) -> Entry? {
     stored.withLock { $0[displayID] }
   }
 

@@ -8,11 +8,10 @@
 /// answered with nothing. Wiring it up needs a decision about what a truncated
 /// string proves.
 ///
-/// [MEASURED] No DDC read of the MAG 341C returns anything usable: verified
-/// across 13 timing/buffer combinations and 5 VCP codes, into a zero-filled
-/// buffer that could not tell "answered zeros" from "wrote nothing". Which of the
-/// two verdicts below it earns is the transport's call, not assumed here.
-/// Silence about the failure is what let the fork clobber saved values to 0.
+/// Evidence belongs to the attempted register on the current connection.
+/// A failed read must not replace saved brightness with zero or classify a
+/// monitor model permanently. Earlier MAG 341C failures came from an incorrect
+/// request checksum; corrected requests returned usable values.
 ///
 /// Deliberately a pure value, not state on a controller-owner:
 /// `AppModel.DisplayState` holds `controller`, `volume` and `contrast` as

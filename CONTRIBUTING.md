@@ -39,10 +39,15 @@ Use `make release SIGNING=adhoc` for a Release build, or `make markers
 SIGNING=adhoc` to also check it for debug markers. Build products and the
 incremental build cache stay in `DerivedData/` within each checkout.
 
-Ad-hoc builds are for local testing only. Rebuilding can require granting
-Accessibility permission again. These commands only build the app; they do
-not install or launch it. The default, `SIGNING=developer-id`, preserves the
-project's maintainer Developer ID certificate and team settings.
+These commands only build the app; they do not install or launch it. An
+ad-hoc Release build can pass the marker and signature checks but still fail
+at launch: on macOS 26.7, hardened-runtime library validation rejected the
+ad-hoc Sparkle framework because it had no team identity. For a runnable
+Release hardware-test candidate, use `make markers SIGNING=developer-id` with
+the configured signing identity available. Keep hardened runtime and library
+validation enabled. The default, `SIGNING=developer-id`, preserves the project's
+maintainer certificate and team settings. Rebuilding with a different identity
+can require granting Accessibility permission again.
 
 `make test-app` runs the app suite without launching the app, so it is safe
 with monitors attached. The engine suite is fast whole; do not filter it.

@@ -11,8 +11,8 @@ struct CapabilityProbePolicyTests {
   }
 
   @Test func anyCachedVerdictEndsProbingForTheSession() {
-    // Including a cached `.unknown`: the MAG answers nothing, and re-asking on
-    // every menu close would be a DDC storm for a verdict that cannot change.
+    // Cache `.unknown` too, so every menu close does not repeat an unanswered
+    // capabilities probe. Reconnection clears the cache for another attempt.
     for cached in [VCPSupport.supported, .unsupported, .unknown] {
       #expect(!CapabilityProbePolicy.shouldProbe(cached: cached, inFlight: false, hdrEngaged: false),
               "\(cached)")

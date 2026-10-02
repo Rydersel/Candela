@@ -1,11 +1,132 @@
 import CandelaKit
 import CoreGraphics
+import Foundation
 import Testing
 
 /// The decision-bearing half of the live builder; what is left reads the app's
 /// own objects and is covered by the hardware pass.
 @Suite("Checkup live environment")
 struct CheckupLiveEnvironmentTests {
+  /// The dock-cycle sequence: the panel leaves mid-leg and another takes its
+  /// display ID, so the leg's final write would land on the newcomer.
+  @Test func theHDRLegWritesNothingOnceItsDisplayIsReplaced() async {
+    let base = RecordingHDR()
+    let present = PresenceFlag()
+    let checked = IdentityCheckedHDRToggling(base: base, isPresent: { present.value })
+    await base.onSet { present.value = false }
+    let runner = CheckupLiveHDRRunner(
+      hdr: checked, displayID: 7,
+      identity: CheckupDisplayIdentity(
+        identityKey: "k1", vendorID: 1, modelID: 2, serial: nil, manufactureWeek: nil,
+        manufactureYear: nil, nativePixelWidth: 3440, nativePixelHeight: 1440,
+        maxRefreshHz: 175, supportsPQEOTF: true, supportsHDRGammaEOTF: false,
+        productName: "MAG"),
+      settleDelay: .zero, restoreDelay: .zero)
+
+    _ = await runner.run()
+
+    // The toggle away went out while the panel was there; the restore did not.
+    #expect(await base.writes == [true])
+    // Latched: a display back under the same ID is not trusted again.
+    present.value = true
+    #expect(await !checked.setHDR(displayID: 7, enabled: false))
+    #expect(await base.writes == [true])
+  }
+
+  @Test func theHDRLegWritesThroughWhileItsDisplayStays() async {
+    let base = RecordingHDR()
+    let checked = IdentityCheckedHDRToggling(base: base, isPresent: { true })
+    #expect(await checked.setHDR(displayID: 7, enabled: true))
+    #expect(await checked.setHDR(displayID: 7, enabled: false))
+    #expect(await base.writes == [true, false])
+  }
+
+  @Test @MainActor func anUnchangedTargetCanStartUnderTheConfigurationClaim() async throws {
+    let discovery = ScriptedDiscovery([(id: 7, key: "checkup-unchanged-\(UUID())", name: "Test Display")])
+    let model = TestFixtures.appModel(discovery: discovery, safeMode: true)
+    await model.refresh()
+    let environment = await CheckupLiveEnvironment.current(
+      model: model, presenter: CheckupFlowModelTests.FakePresenter(), coordinator: OledCareCoordinator(),
+      readSource: { state in
+        self.source(id: state.id, key: state.display.persistenceKey, name: state.display.name,
+                    isVirtual: state.id != 7, capabilities: "(vcp(10 12 62))", hasDDCService: true,
+                    pixelWidth: 3840, pixelHeight: 2160, pointHeight: 2160)
+      })
+    let entry = try #require(environment.displays.first(where: { $0.id == 7 }))
+    #expect(await environment.beginConfiguration(entry) == nil)
+    #expect(await environment.isCurrentTarget(entry))
+    #expect(await model.reconfigurationGate.holder == .checkup)
+    await environment.endConfiguration()
+    #expect(await model.reconfigurationGate.holder == nil)
+  }
+
+  @Test @MainActor func aChangedHDRStateRefusesTheCapturedPlanBeforeRunnersAreBuilt() async throws {
+    let hdr = AdmissionHDR()
+    let discovery = ScriptedDiscovery([(id: 7, key: "checkup-admission-\(UUID())", name: "Test Display")])
+    let model = AppModel(shade: FakeShade(), gamma: FakeGamma(), hdrToggling: hdr,
+                         audioDevices: FakeAudio(), safeMode: true,
+                         discoverDisplays: { discovery.discover($0) })
+    await model.refresh()
+    var environment = await CheckupLiveEnvironment.current(
+      model: model, presenter: CheckupFlowModelTests.FakePresenter(), coordinator: OledCareCoordinator(),
+      readSource: { state in
+        self.source(id: state.id, key: state.display.persistenceKey, name: state.display.name,
+               isVirtual: state.id != 7, capabilities: "(vcp(10 12 62))", hasDDCService: true,
+               pixelWidth: 3840, pixelHeight: 2160, pointHeight: 2160)
+      })
+    let entry = try #require(environment.displays.first(where: { $0.id == 7 }))
+    var builds = 0
+    environment.runners = { _ in
+      builds += 1
+      return CheckupRunnerSet(identity: { nil }, capabilities: CheckupFlowModelTests.FakeCaps(),
+                             mode: CheckupFlowModelTests.FakeMode(), hdr: CheckupFlowModelTests.FakeHDR())
+    }
+    await hdr.setMeasured(true)
+    let flow = CheckupFlowModel(environment: environment)
+    await flow.advance()
+    flow.selectedDisplay = entry
+    await flow.advance()
+    #expect(flow.page == .summary)
+    #expect(builds == 0)
+    for _ in 0..<200 where model.isCheckupRunning { await Task.yield() }
+    #expect(!model.isCheckupRunning)
+    #expect(await model.reconfigurationGate.holder == nil)
+    flow.abandon(reason: "test ended")
+  }
+
+  @Test @MainActor func aDisplayThatBecameMirroredRefusesTheCapturedPlan() async throws {
+    let discovery = ScriptedDiscovery([(id: 7, key: "checkup-mirroring-\(UUID())", name: "Test Display")])
+    let model = TestFixtures.appModel(discovery: discovery, safeMode: true)
+    await model.refresh()
+    var isMirroring = false
+    var environment = await CheckupLiveEnvironment.current(
+      model: model, presenter: CheckupFlowModelTests.FakePresenter(), coordinator: OledCareCoordinator(),
+      readSource: { state in
+        self.source(id: state.id, key: state.display.persistenceKey, name: state.display.name,
+               isVirtual: state.id != 7, isMirroring: isMirroring,
+               capabilities: "(vcp(10 12 62))", hasDDCService: true,
+               pixelWidth: 3840, pixelHeight: 2160, pointHeight: 2160)
+      })
+    let entry = try #require(environment.displays.first(where: { $0.id == 7 }))
+    var builds = 0
+    environment.runners = { _ in
+      builds += 1
+      return CheckupRunnerSet(identity: { nil }, capabilities: CheckupFlowModelTests.FakeCaps(),
+                             mode: CheckupFlowModelTests.FakeMode(), hdr: CheckupFlowModelTests.FakeHDR())
+    }
+    isMirroring = true
+    let flow = CheckupFlowModel(environment: environment)
+    await flow.advance()
+    flow.selectedDisplay = entry
+    await flow.advance()
+    #expect(flow.page == .summary)
+    #expect(builds == 0)
+    for _ in 0..<200 where model.isCheckupRunning { await Task.yield() }
+    #expect(!model.isCheckupRunning)
+    #expect(await model.reconfigurationGate.holder == nil)
+    flow.abandon(reason: "test ended")
+  }
+
   @Test @MainActor func theLiveBuilderNamesAnExcludedDisplayWithoutABrightnessController() async {
     let model = AppModel(safeMode: true)
     model.mirrorTopology.update(MirrorTopology([
@@ -322,4 +443,42 @@ private struct MeasuredHDR: HDRToggling {
   @discardableResult
   func setHDR(displayID _: CGDirectDisplayID, enabled _: Bool) async -> Bool { false }
   func displaysReconfigured() async {}
+}
+
+private actor AdmissionHDR: HDRToggling {
+  private var measured = false
+  func setMeasured(_ value: Bool) { measured = value }
+  func supportsHDR(displayID: CGDirectDisplayID) async -> Bool { true }
+  func isHDREnabled(displayID: CGDirectDisplayID) async -> Bool { false }
+  func measuredHDREnabled(displayID: CGDirectDisplayID) async -> Bool { measured }
+  func setHDR(displayID: CGDirectDisplayID, enabled: Bool) async -> Bool { false }
+  func displaysReconfigured() async {}
+}
+
+private actor RecordingHDR: HDRToggling {
+  private(set) var writes: [Bool] = []
+  private var enabled = false
+  private var afterSet: (@Sendable () -> Void)?
+  func onSet(_ action: @escaping @Sendable () -> Void) { afterSet = action }
+  func supportsHDR(displayID _: CGDirectDisplayID) async -> Bool { true }
+  func isHDREnabled(displayID _: CGDirectDisplayID) async -> Bool { enabled }
+  func measuredHDREnabled(displayID _: CGDirectDisplayID) async -> Bool { enabled }
+  @discardableResult
+  func setHDR(displayID _: CGDirectDisplayID, enabled: Bool) async -> Bool {
+    writes.append(enabled)
+    self.enabled = enabled
+    afterSet?()
+    return true
+  }
+  func displaysReconfigured() async {}
+}
+
+/// `@unchecked Sendable`: the one stored var is behind `lock`.
+private final class PresenceFlag: @unchecked Sendable {
+  private let lock = NSLock()
+  private var _value = true
+  var value: Bool {
+    get { lock.withLock { _value } }
+    set { lock.withLock { _value = newValue } }
+  }
 }

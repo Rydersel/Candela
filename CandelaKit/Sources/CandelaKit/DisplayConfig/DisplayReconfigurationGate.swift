@@ -3,13 +3,8 @@ import Foundation
 /// The things in this app that reconfigure displays, and therefore the things
 /// that must not do it at the same time.
 ///
-/// **Four cases, not three.** All four open a
-/// `CGBeginDisplayConfiguration`-shaped transaction or its `SkyLight` equivalent,
-/// and all four leave an unanswered preview standing for up to thirty seconds.
-/// The pairing the fourth case exists for is the least obvious one: a resolution
-/// change during an arrangement preview alters the very tile sizes the layout was
-/// computed from, so the layout on screen stops being the layout that was asked
-/// about.
+/// Previews retain their claim until answered or reverted. HDR transitions,
+/// checkups and settings resets retain theirs through verification and cleanup.
 ///
 /// `CaseIterable` so the exclusion suite enumerates every ordered pair rather than
 /// listing them by hand, which makes a case added without a test tested anyway.
@@ -18,6 +13,9 @@ public enum ReconfigurationClaimant: String, Sendable, CaseIterable {
   case mirroring
   case rotation
   case arrangement
+  case hdr
+  case checkup
+  case settingsReset
 }
 
 /// The gate's whole answer. `.refused` names the holder rather than saying "no",
@@ -40,9 +38,8 @@ public enum ReconfigurationClaimOutcome: Sendable, Equatable {
 
 /// At most one display reconfiguration is outstanding at a time.
 ///
-/// **The decision lives here, in the engine, because there is no app test
-/// target.** An exclusion rule that only exists as `if` statements spread across
-/// four `@MainActor` coordinators cannot be tested at all, and the failure it
+/// **The decision lives here, in the engine, so exclusion can be tested independently of UI.** An exclusion rule that only exists as `if` statements spread across
+/// the app's coordinators cannot be tested at all, and the failure it
 /// guards against, a stranded claim, deadlocks every display feature in the app at
 /// once. What stays in the app target is the wiring: who claims, when, and what
 /// the refusal says.
@@ -51,7 +48,7 @@ public enum ReconfigurationClaimOutcome: Sendable, Equatable {
 ///
 /// - One holder. A second claimant is refused and told who holds it.
 /// - **A claimant is never refused its own claim.** Superseding is supported in
-///   three of the four (`ModePreviewSession.begin` on a second display ends the
+///   preview coordinators (`ModePreviewSession.begin` on a second display ends the
 ///   first display's preview), so a gate that refused the holder would break the
 ///   feature it is protecting, silently.
 /// - **A claimant can only release its own claim.** Without that check, the
@@ -69,12 +66,13 @@ public enum ReconfigurationClaimOutcome: Sendable, Equatable {
 /// wedges is worse than no gate. The obligation sits on the claimant and is
 /// discharged structurally rather than by discipline: **every claimant releases
 /// from the same funnel that writes its preview state** (`adopt`, documented in
-/// all four coordinators as the only writer of `preview`). A claim is then a
+/// preview coordinators as the only writer of `preview`). Other operations use
+/// a body/cleanup wrapper. A claim is then a
 /// projection of "something is outstanding", and the paths that end a preview
 /// without anyone answering it (a failed `begin`, an expiry, a display departing
 /// mid-hold) all run through that funnel already.
 ///
-/// An actor rather than a `@MainActor` type even though all four claimants are
+/// An actor rather than a `@MainActor` type even though the UI claimants are
 /// main-actor coordinators: the countdown drivers are deliberately detached so a
 /// wedged main thread cannot stop an expiry, which means the state a resolution
 /// reconciles from is not main-actor-confined in the first place.

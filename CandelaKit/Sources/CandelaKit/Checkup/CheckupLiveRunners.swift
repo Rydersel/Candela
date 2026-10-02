@@ -260,7 +260,10 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
     // Nothing ran, so the display is where it was; a failed restore here would
     // tell someone a checkup that never touched the mode left it elsewhere.
     guard let before else { return true }
-    try? configurator.apply(before, to: displayID, scope: Self.scope)
+    // A put-back is never refused or withheld: the mode the checkup started on
+    // may already sit on the session's withheld list, and refusing it would
+    // leave the display on a sweep rung.
+    try? configurator.restore(before, to: displayID, scope: Self.scope)
     guard let achieved = configurator.currentMode(for: displayID) else { return false }
     return Self.sameMode(achieved, before)
   }

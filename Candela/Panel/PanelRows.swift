@@ -10,7 +10,7 @@ import SwiftUI
 /// pair is what makes "at most one disclosure is open anywhere in the panel"
 /// hold across displays AND across sections of one display.
 struct PanelDisclosureID: Hashable {
-  enum Section: Hashable { case resolution, mirroring }
+  enum Section: Hashable { case resolution, mirroring, care, keepAwake }
 
   let displayID: CGDirectDisplayID
   let section: Section

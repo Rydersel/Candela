@@ -1614,8 +1614,8 @@ struct ReapplyAfterPrefChangeTests {
 
 /// Achieved output for a register value under a gamma scale, on a panel that
 /// still emits `floor` of its maximum at register 0. Everything below is
-/// asserted for SEVERAL floors, because the panel's real curve is unknown (the
-/// MAG answers no reads at all) and the ordering claim must not depend on it:
+/// asserted for SEVERAL floors, because DDC readback does not measure the
+/// panel's luminance curve and the ordering claim must not depend on it:
 /// the only property used is that the curve is monotone increasing.
 private func achieved(ddc raw: UInt16, gamma: Double, floor: Double) -> Double {
   (floor + (1 - floor) * Double(raw) / 100) * gamma

@@ -186,15 +186,14 @@ public enum CGSModeRevelation {
       //    with the rightmost ~880 logical columns cropped off the desktop, the
       //    75 Hz rung at 1280x1024.
       //
-      //    CoreGraphics cannot see this. `CGDisplayCopyDisplayMode`, the
-      //    capture size, `CGDisplayBounds`, `backingScaleFactor` and the
-      //    post-commit achieved-state check all read clean while broken.
-      //    Measured with a camera on the MAG 341C, 2026-08-07. The IORegistry
-      //    does record it (measured 2026-09-09): `DPTimingModeId` on the
-      //    display's `AppleCLCD2` node is the driven `TimingElements` id, with
-      //    positive controls on both externals. Nothing here reads it yet, so
-      //    prediction stays the defence and the keep/revert countdown stays
-      //    mandatory for revealed modes.
+      //    CoreGraphics geometry reads clean while this is broken, and the
+      //    AppleCLCD2 active timing does NOT reliably catch it either. Applying
+      //    this very rung from a published 2560x1440 at 120 Hz leaves the record
+      //    at 2560x1440 before and after, and an unchanged record is judged not
+      //    verifiable rather than wrong. That check catches a timing that moves
+      //    to the wrong size, and only on controllers that publish the record.
+      //    So this prediction and the visual keep/revert countdown stay the
+      //    guards for the measured crop.
       if guardsWireTiming, !nativeRefreshes.contains(refresh) {
         counts.noNativeParentTiming += 1
         continue
