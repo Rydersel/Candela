@@ -127,4 +127,61 @@ struct HUDPlacementTests {
       #expect(origin(position, frame: tiny).y == 100, "\(position)")
     }
   }
+
+  // MARK: - Fixed anchors
+
+  private func origin(_ anchor: HUDAnchor, size: CGSize, frame: CGRect, visible: CGRect? = nil) -> CGPoint {
+    HUDPlacement.origin(
+      anchor, size: size, frame: frame, visibleFrame: visible ?? frame,
+      topInset: topInset, margin: margin
+    )
+  }
+
+  /// The Classic box: centred, 140 above the bottom edge of the FULL frame,
+  /// which is where macOS draws its own.
+  @Test func bottomCenterSitsAtTheMeasuredInsetAboveTheFullFrame() {
+    let box = CGSize(width: 200, height: 200)
+    let screen = CGRect(x: 0, y: 0, width: 1800, height: 1169)
+    let point = origin(.bottomCenter(inset: 140), size: box, frame: screen)
+    #expect(point == CGPoint(x: 800, y: 140))
+    // A Dock along the bottom shortens the visible frame; the box ignores it.
+    let docked = CGRect(x: 0, y: 70, width: 1800, height: 1099)
+    #expect(origin(.bottomCenter(inset: 140), size: box, frame: screen, visible: docked).y == 140)
+  }
+
+  @Test func centerIsTheFrameCentreRoundedToWholePoints() {
+    let box = CGSize(width: 200, height: 200)
+    let odd = CGRect(x: 0, y: 0, width: 1001, height: 801)
+    let point = origin(.center, size: box, frame: odd)
+    #expect(point == CGPoint(x: 401, y: 301))
+  }
+
+  /// The notch is centred on the glass, so top centre uses the full frame even
+  /// when a side Dock narrows the visible one.
+  @Test func topCenterIsFlushWithTheTopEdgeOnTheFullFrame() {
+    let island = CGSize(width: 660, height: 98)
+    let screen = CGRect(x: 0, y: 0, width: 1800, height: 1169)
+    let dockLeft = CGRect(x: 90, y: 0, width: 1710, height: 1169)
+    let point = origin(.topCenter, size: island, frame: screen, visible: dockLeft)
+    #expect(point == CGPoint(x: 570, y: 1071))
+  }
+
+  @Test func positionAnchorsMatchTheOriginalForm() {
+    for position in HUDPosition.allCases {
+      #expect(origin(.position(position), size: pill, frame: landscape) == origin(position, frame: landscape), "\(position)")
+    }
+  }
+
+  /// The Dell at 270 degrees: the box lands inside the rotated frame, 140 above
+  /// ITS bottom, never against the manufactured landscape.
+  @Test func fixedAnchorsFollowARotatedFrame() {
+    let portrait = CGRect(x: 3440, y: -1200, width: 2160, height: 3840)
+    let box = CGSize(width: 200, height: 200)
+    let bottom = origin(.bottomCenter(inset: 140), size: box, frame: portrait)
+    #expect(bottom == CGPoint(x: 3440 + 980, y: -1200 + 140))
+    #expect(portrait.contains(CGRect(origin: bottom, size: box)))
+    let top = origin(.topCenter, size: CGSize(width: 660, height: 98), frame: portrait)
+    #expect(top.y == CGFloat(-1200 + 3840 - 98))
+    #expect(top.x == CGFloat(3440 + 750))
+  }
 }
