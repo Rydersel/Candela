@@ -55,103 +55,9 @@ enum HUDType {
 /// from prefs at announce time; the island holds no judgement.
 @MainActor
 final class BrightnessHUD: BrightnessHUDPresenting {
-  private struct HUD {
+  private struct Window {
     let panel: NSPanel
-    let effectView: NSVisualEffectView
-    /// nil where the style draws no name (`.compact`).
-    let nameLabel: NSTextField?
-    let leftIcon: NSImageView
-    let rightIcon: NSImageView
-    /// The continuous bar's fill; nil for `.segments`.
-    let fillBox: NSBox?
-    /// The track's interval dots (continuous-bar styles only). Held so a show
-    /// can hide the ones the fill has passed: `labelColor` is translucent in
-    /// dark appearance, so a covered dot would ghost through.
-    let tickBoxes: [NSBox]
-    /// The chiclets; empty for the continuous-bar styles.
-    let segmentBoxes: [NSBox]
-    let style: HUDStyle
-  }
-
-  /// Per-style geometry. The Menu Bar preview's miniature implements
-  /// the same numbers from the spec, so a change here must travel there.
-  private struct Metrics {
-    let size: NSSize
-    let cornerRadius: CGFloat
-    let margin: CGFloat
-    let barY: CGFloat
-    let hasName: Bool
-
-    static let leftIconSize: CGFloat = 14
-    static let rightIconSize: CGFloat = 17
-    static let barHeight: CGFloat = 4
-
-    var barX: CGFloat { self.margin + Self.leftIconSize + 9 }
-    var barWidth: CGFloat {
-      self.size.width - self.barX - Self.rightIconSize - self.margin - 9
-    }
-
-    init(style: HUDStyle) {
-      switch style {
-      case .system, .segments:
-        self.size = NSSize(width: 314, height: 62)
-        self.cornerRadius = 22
-        self.margin = 18
-        self.barY = 19
-        self.hasName = true
-      case .compact:
-        self.size = NSSize(width: 220, height: 36)
-        self.cornerRadius = 18
-        self.margin = 14
-        self.barY = 16
-        self.hasName = false
-      default:  // Drawn properly by the style work that follows.
-        self.size = NSSize(width: 314, height: 62)
-        self.cornerRadius = 22
-        self.margin = 18
-        self.barY = 19
-        self.hasName = true
-      }
-    }
-  }
-
-  // Fidelity knobs, one line each so a side-by-side pass against the
-  // native pill can tune them without archaeology.
-  /// `.popover` blends lighter and brighter than `.hudWindow` in both
-  /// appearances; the sheen below pushes it the rest of the way.
-  private static let material: NSVisualEffectView.Material = .popover
-  /// White wash over the material, the "bright glass" half of the fix.
-  private static let sheenAlpha: CGFloat = 0.07
-  /// The native edge reads as a LIGHT inner hairline in both appearances, so
-  /// this is constant white rather than a semantic color: `separatorColor`
-  /// resolved near-black and drew a visible outline. Static, so no per-show
-  /// appearance refresh.
-  private static let hairlineColor = NSColor.white.withAlphaComponent(0.25)
-  private static let hairlineWidth: CGFloat = 0.75
-  /// The native pill keeps a soft shadow; the heaviness came from the dark
-  /// border plus the dark material, not from this.
-  private static let panelHasShadow = true
-  /// Matches the native name label.
-  private static let nameFontSize: CGFloat = 13
-  /// Interval dots at the sixteenths, covered by the fill exactly as the native
-  /// track shows them.
-  private static let tickCount = 15
-  private static let tickDiameter: CGFloat = 2
-
-  private static let segmentCount = 16
-  private static let segmentGap: CGFloat = 2
-  private static let segmentHeight: CGFloat = 8
-  private static let segmentCornerRadius: CGFloat = 2
-
-  private static let screenMargin: CGFloat = 20
-  /// Extra clearance on top of the menu-bar allowance so the pill sits clearly
-  /// below the bar rather than hugging it. Eyeballed against the native OSD.
-  private static let menuBarClearance: CGFloat = 10
-
-  /// Vertical space to keep free at the top of `screen`: the menu bar, plus
-  /// clearance that applies whether the bar is showing or auto-hidden.
-  private static func menuBarAllowance(for screen: NSScreen) -> CGFloat {
-    screen.menuBarAllowance + self.menuBarClearance
+    let renderer: any HUDRenderer
   }
 
   /// ONE window per display, shared by every pill kind: a show reuses the
@@ -163,7 +69,7 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   /// A window built for one STYLE is torn down and rebuilt when a show arrives
   /// with another: the anatomies differ structurally, so
   /// reconfiguring in place would leave orphaned subviews.
-  private var huds: [CGDirectDisplayID: HUD] = [:]
+  private var windows: [CGDirectDisplayID: Window] = [:]
   private var fadeTimers: [CGDirectDisplayID: Timer] = [:]
   /// Monotonic per display, bumped by every `showHUD` and by `cleanupDisplay`.
   /// A fade's completion handler compares the generation it captured against
@@ -174,8 +80,8 @@ final class BrightnessHUD: BrightnessHUDPresenting {
 
   func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double,
                       nameSuffix: String?, position: HUDPosition, style: HUDStyle) {
-    self.showHUD(displayID: displayID, type: .brightness, name: name, value: Float(value),
-                 nameSuffix: nameSuffix, position: position, style: style)
+    showHUD(displayID: displayID, type: .brightness, name: name, value: Float(value),
+            nameSuffix: nameSuffix, position: position, style: style)
   }
 
   // MARK: - Presentation
@@ -185,9 +91,9 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   /// `NSScreen.screens`, so an unresolved ID lands in the guard below and shows
   /// nothing at all, silently, while the write still reaches the panel.
   ///
-  /// `menuBarAllowance(for:)` therefore measures the MASTER's menu bar for a
-  /// mirror set, which is correct: the set's menu bar is the master's. Not a
-  /// thing to "fix" back.
+  /// The renderer's menu-bar allowance therefore measures the MASTER's menu bar
+  /// for a mirror set, which is correct: the set's menu bar is the master's. Not
+  /// a thing to "fix" back.
   ///
   /// The name is not resolved here either, and that costs the CALLER: the
   /// windows are keyed by `displayID`, so every member of a mirror set addresses
@@ -197,243 +103,103 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String, value: Float,
                maxValue: Float = 1, nameSuffix: String? = nil,
                position: HUDPosition, style: HUDStyle) {
-    guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
-      return
-    }
-    let hud: HUD
-    if let existing = self.huds[displayID], existing.style == style {
-      hud = existing
+    guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else { return }
+    let window: Window
+    if let existing = windows[displayID], existing.renderer.style == style {
+      window = existing
     } else {
-      // Style changed (or first show): the old window's subview tree belongs
-      // to the old anatomy, so it closes rather than reconfigures.
-      self.huds[displayID]?.panel.close()
-      hud = self.createHUD(style: style)
-      self.huds[displayID] = hud
+      // A window built for one style closes rather than reconfigures: the
+      // renderers' view trees have nothing in common.
+      windows[displayID]?.panel.close()
+      window = Self.makeWindow(style: style)
+      windows[displayID] = window
     }
-    let metrics = Metrics(style: style)
-    let title = name.isEmpty ? screen.localizedName : name
-    hud.nameLabel?.stringValue = title + (nameSuffix ?? "")
-    hud.leftIcon.image = Self.symbolImage(type.leftSymbolName, pointSize: Metrics.leftIconSize - 3)
-    hud.rightIcon.image = Self.symbolImage(type.rightSymbolName, pointSize: Metrics.rightIconSize - 3)
+    let title = (name.isEmpty ? screen.localizedName : name) + (nameSuffix ?? "")
     let normalized = CGFloat(min(max(maxValue > 0 ? value / maxValue : 0, 0), 1))
-    if let fillBox = hud.fillBox {
-      var fillFrame = fillBox.frame
-      fillFrame.size.width = max(Metrics.barHeight, metrics.barWidth * normalized)
-      fillBox.frame = fillFrame
-      // Being UNDER the fill is not enough: `labelColor` is translucent in dark
-      // appearance, so a covered dot ghosts through. Hide what the fill passed.
-      for tick in hud.tickBoxes {
-        tick.isHidden = tick.frame.midX <= fillFrame.maxX
-      }
-    }
-    if !hud.segmentBoxes.isEmpty {
-      // Filled count rounds, so a half step lights the nearer chiclet.
-      let filled = Int((normalized * CGFloat(Self.segmentCount)).rounded())
-      for (index, box) in hud.segmentBoxes.enumerated() {
-        box.fillColor = index < filled ? .labelColor : .quaternaryLabelColor
-      }
-    }
-    // The arithmetic lives in the Kit, where a rotated display's bounds can be
-    // tested. `screen.frame` is already the EFFECTIVE geometry, so a
-    // display mounted at 270° needs nothing special here.
-    hud.panel.setFrameOrigin(HUDPlacement.origin(
-      position,
-      size: metrics.size,
-      frame: screen.frame,
-      visibleFrame: screen.visibleFrame,
-      topInset: Self.menuBarAllowance(for: screen),
-      margin: Self.screenMargin
-    ))
-    self.fadeTimers[displayID]?.invalidate()
-    self.fadeGenerations[displayID, default: 0] &+= 1
+    let reduceMotion = Motion.systemReduceMotion
+    // Frame before show: the island's trace is laid out against its panel.
+    window.panel.setFrame(window.renderer.frame(on: screen, position: position), display: false)
+    window.renderer.show(HUDContent(kind: type, value: normalized, title: title), reduceMotion: reduceMotion)
+    fadeTimers[displayID]?.invalidate()
+    fadeGenerations[displayID, default: 0] &+= 1
     // A bare `alphaValue = 1` loses to an in-flight fade: NSWindow's animator
     // keeps driving alpha toward 0 and would then order the panel out mid-show.
     // A zero-duration group replaces that animation and lands on 1 immediately.
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0
-      hud.panel.animator().alphaValue = 1
+      window.panel.animator().alphaValue = 1
     }
-    hud.panel.orderFrontRegardless()
+    window.panel.orderFrontRegardless()
     // `@Sendable`-typed but provably on the main run loop (added to `RunLoop.main`
     // below), so hopping actors would only add latency to the fade.
     let timer = Timer(timeInterval: 1.5, repeats: false) { [weak self] _ in
-      MainActor.assumeIsolated {
-        self?.fadeOut(displayID: displayID)
-      }
+      MainActor.assumeIsolated { self?.dismiss(displayID: displayID) }
     }
-    self.fadeTimers[displayID] = timer
+    fadeTimers[displayID] = timer
     // `.common` matters: the fade has to fire while a menu tracking session is running, otherwise
     // the pill stays on screen for as long as the menu-bar panel is open.
     RunLoop.main.add(timer, forMode: .common)
   }
 
-  private static func symbolImage(_ name: String, pointSize: CGFloat) -> NSImage? {
-    let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .semibold)
-    return NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(config)
-  }
-
-  private func createHUD(style: HUDStyle) -> HUD {
-    let metrics = Metrics(style: style)
-    let size = metrics.size
-    let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+  private static func makeWindow(style: HUDStyle) -> Window {
+    let renderer: any HUDRenderer = switch style {
+    case .system, .segments, .compact: PillHUDRenderer(style: style)
+    default: PillHUDRenderer(style: .system)  // replaced by the renderer tasks that follow
+    }
+    let size = renderer.contentView.frame.size
+    let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
+                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
     panel.level = .screenSaver
     panel.isFloatingPanel = true
     panel.hidesOnDeactivate = false
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
     panel.isOpaque = false
     panel.backgroundColor = .clear
-    panel.hasShadow = Self.panelHasShadow
+    // The native pill keeps a soft shadow; the heaviness came from the dark
+    // border plus the dark material, not from this.
+    panel.hasShadow = !style.isIsland && style != .classic && style != .classicCentered
     panel.isMovable = false
     panel.ignoresMouseEvents = true
-
-    let rootView = NSView(frame: NSRect(origin: .zero, size: size))
-    rootView.wantsLayer = true
-    rootView.layer?.backgroundColor = NSColor.clear.cgColor
-
-    let effectView = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
-    effectView.material = Self.material
-    effectView.blendingMode = .behindWindow
-    effectView.state = .active
-    // DIVERGENCE from the fork, which forces `.vibrantDark`: the native pill
-    // adapts to the system appearance and so does this one, with dynamic
-    // semantic colors. The hairline is a constant white glass highlight, so
-    // nothing here needs an appearance refresh at show time.
-    effectView.wantsLayer = true
-    effectView.layer?.cornerRadius = metrics.cornerRadius
-    effectView.layer?.masksToBounds = true
-    effectView.layer?.borderWidth = Self.hairlineWidth
-    effectView.layer?.borderColor = Self.hairlineColor.cgColor
-    rootView.addSubview(effectView)
-
-    // The bright-glass sheen: first subview, so every control draws
-    // above it. Constant white; the alpha is the whole design.
-    let sheen = NSView(frame: NSRect(origin: .zero, size: size))
-    sheen.wantsLayer = true
-    sheen.layer?.backgroundColor = NSColor.white.withAlphaComponent(Self.sheenAlpha).cgColor
-    effectView.addSubview(sheen)
-
-    var nameLabel: NSTextField?
-    if metrics.hasName {
-      let label = NSTextField(labelWithString: "")
-      label.frame = NSRect(x: metrics.margin, y: size.height - 28, width: size.width - metrics.margin * 2, height: 18)
-      label.font = NSFont.systemFont(ofSize: Self.nameFontSize, weight: .semibold)
-      label.textColor = .labelColor
-      label.lineBreakMode = .byTruncatingTail
-      effectView.addSubview(label)
-      nameLabel = label
-    }
-
-    let leftIcon = NSImageView(frame: NSRect(x: metrics.margin, y: metrics.barY - (Metrics.leftIconSize - Metrics.barHeight) / 2, width: Metrics.leftIconSize, height: Metrics.leftIconSize))
-    leftIcon.imageScaling = .scaleProportionallyDown
-    leftIcon.contentTintColor = .secondaryLabelColor
-    effectView.addSubview(leftIcon)
-
-    let rightIcon = NSImageView(frame: NSRect(x: size.width - metrics.margin - Metrics.rightIconSize, y: metrics.barY - (Metrics.rightIconSize - Metrics.barHeight) / 2, width: Metrics.rightIconSize, height: Metrics.rightIconSize))
-    rightIcon.imageScaling = .scaleProportionallyDown
-    rightIcon.contentTintColor = .secondaryLabelColor
-    effectView.addSubview(rightIcon)
-
-    var fillBox: NSBox?
-    var tickBoxes: [NSBox] = []
-    var segmentBoxes: [NSBox] = []
-    switch style {
-    case .system, .compact, .classic, .classicCentered, .sequoia, .vertical, .ring,
-         .islandDrop, .islandEdge, .islandEdgeCapsules:  // Drawn properly by the style work that follows.
-      let barBackground = NSBox(frame: NSRect(x: metrics.barX, y: metrics.barY, width: metrics.barWidth, height: Metrics.barHeight))
-      barBackground.boxType = .custom
-      // DIVERGENCE from the fork's `borderType = .noBorder`, which is deprecated
-      // and applies only to the old-style box. `borderWidth = 0` is the
-      // custom-box equivalent; Apple's suggested `transparent` would also
-      // suppress the fill, the only thing drawn here.
-      barBackground.borderWidth = 0
-      barBackground.fillColor = .quaternaryLabelColor
-      barBackground.cornerRadius = Metrics.barHeight / 2
-      effectView.addSubview(barBackground)
-
-      // Interval dots at the sixteenths. Added BEFORE the fill so the
-      // filled side covers its dots, as the native track reads.
-      for index in 1 ... Self.tickCount {
-        let centerX = metrics.barX + metrics.barWidth * CGFloat(index) / CGFloat(Self.tickCount + 1)
-        let tick = NSBox(frame: NSRect(
-          x: centerX - Self.tickDiameter / 2,
-          y: metrics.barY + Metrics.barHeight / 2 - Self.tickDiameter / 2,
-          width: Self.tickDiameter, height: Self.tickDiameter
-        ))
-        tick.boxType = .custom
-        tick.borderWidth = 0
-        tick.fillColor = .tertiaryLabelColor
-        tick.cornerRadius = Self.tickDiameter / 2
-        effectView.addSubview(tick)
-        tickBoxes.append(tick)
-      }
-
-      let fill = NSBox(frame: NSRect(x: metrics.barX, y: metrics.barY, width: Metrics.barHeight, height: Metrics.barHeight))
-      fill.boxType = .custom
-      fill.borderWidth = 0
-      fill.fillColor = .labelColor
-      fill.cornerRadius = Metrics.barHeight / 2
-      effectView.addSubview(fill)
-      fillBox = fill
-
-    case .segments:
-      // Pinned geometry: chiclets across the system bar rect, centered
-      // on the bar's line.
-      let segmentWidth = (metrics.barWidth - CGFloat(Self.segmentCount - 1) * Self.segmentGap) / CGFloat(Self.segmentCount)
-      let segmentY = metrics.barY + Metrics.barHeight / 2 - Self.segmentHeight / 2
-      for index in 0 ..< Self.segmentCount {
-        let segment = NSBox(frame: NSRect(
-          x: metrics.barX + CGFloat(index) * (segmentWidth + Self.segmentGap),
-          y: segmentY, width: segmentWidth, height: Self.segmentHeight
-        ))
-        segment.boxType = .custom
-        segment.borderWidth = 0
-        segment.fillColor = .quaternaryLabelColor
-        segment.cornerRadius = Self.segmentCornerRadius
-        effectView.addSubview(segment)
-        segmentBoxes.append(segment)
-      }
-    }
-
     // Do not drop this line: without it the panel has no content view and the
     // HUD is invisible.
-    panel.contentView = rootView
-
-    return HUD(panel: panel, effectView: effectView, nameLabel: nameLabel, leftIcon: leftIcon,
-               rightIcon: rightIcon, fillBox: fillBox, tickBoxes: tickBoxes,
-               segmentBoxes: segmentBoxes, style: style)
+    panel.contentView = renderer.contentView
+    return Window(panel: panel, renderer: renderer)
   }
 
-  private func fadeOut(displayID: CGDirectDisplayID) {
-    guard let panel = self.huds[displayID]?.panel else {
-      return
+  private func dismiss(displayID: CGDirectDisplayID) {
+    guard let window = windows[displayID] else { return }
+    let generation = fadeGenerations[displayID] ?? 0
+    let panel = window.panel
+    let orderOut: @MainActor () -> Void = { [weak self] in
+      // A show that arrived mid-exit already bumped the generation; ordering
+      // out here would hide a visible indicator.
+      guard let self, self.fadeGenerations[displayID] == generation else { return }
+      panel.orderOut(nil)
     }
-    let generation = self.fadeGenerations[displayID] ?? 0
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = Motion.windowFadeOut(reduceMotion: Motion.systemReduceMotion)
-      panel.animator().alphaValue = 0
-    } completionHandler: { [weak self] in
-      // `@Sendable`-typed but fires on the main thread, where the panel it
-      // orders out already lives.
-      MainActor.assumeIsolated {
-        // A show that arrived mid-fade already restored alpha and bumped the
-        // generation; ordering out here would hide a visible HUD.
-        guard let self, self.fadeGenerations[displayID] == generation else {
-          return
-        }
-        panel.orderOut(nil)
+    switch window.renderer.hide(reduceMotion: Motion.systemReduceMotion) {
+    case .fade(let duration):
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = duration
+        panel.animator().alphaValue = 0
+      } completionHandler: {
+        // `@Sendable`-typed but fires on the main thread, where the panel it
+        // orders out already lives.
+        MainActor.assumeIsolated { orderOut() }
       }
+    case .selfAnimated(let duration):
+      DispatchQueue.main.asyncAfter(deadline: .now() + duration) { orderOut() }
     }
   }
 
   func cleanupDisplay(_ displayID: CGDirectDisplayID) {
-    self.fadeTimers[displayID]?.invalidate()
-    self.fadeTimers.removeValue(forKey: displayID)
+    fadeTimers[displayID]?.invalidate()
+    fadeTimers.removeValue(forKey: displayID)
     // Kept (not removed) so generations never repeat for a display that comes
     // back, which would let a stale completion match a fresh show.
-    self.fadeGenerations[displayID, default: 0] &+= 1
-    if let hud = self.huds[displayID] {
-      hud.panel.close()
-      self.huds.removeValue(forKey: displayID)
+    fadeGenerations[displayID, default: 0] &+= 1
+    if let window = windows[displayID] {
+      window.panel.close()
+      windows.removeValue(forKey: displayID)
     }
   }
 }
