@@ -9,14 +9,15 @@ display under the pointer.
 
 ## Keep display awake
 
-Click the label or chevron beside **Keep display awake** to reveal the duration
-slider. Its stops are **15 minutes**, **30 minutes**, **1 hour**, **2 hours**,
+Click the label or chevron beside the switch in the **Keep display awake** row
+to reveal the duration slider. During a timed hold that label shows when the
+hold ends, for example "Until 4:00 PM". Its stops are **15 minutes**, **30 minutes**, **1 hour**, **2 hours**,
 **4 hours**, **8 hours**, and **Until turned off**. Choosing a stop starts the
 hold for that long, and choosing another while it runs restarts it from now.
 Turning on the switch starts the hold with the duration shown. Turning the
 switch off ends it.
 
-**Custom end time…** opens the end-time window. Click the date to choose a day
+**Custom End Time…** opens the end-time window. Click the date to choose a day
 from the calendar, then edit the hour and minute fields. The time controls use
 your 12- or 24-hour clock preference. Choose a future end time within the next
 year and click **Keep Awake**; **Cancel** leaves the current hold unchanged.
@@ -41,7 +42,8 @@ are on the display's OLED Care page under **Dimming**.
 A pause removes existing dimming and pauses idle, blackout, lock, unfocused and
 regional dimming on that display. Panel hours and exposure measurement continue,
 and macOS can still sleep the display. The pause follows that display through
-reconnects, counts time asleep, and ends when Candela quits. Resuming starts a
+reconnects and counts time asleep. Quitting Candela, resetting its settings or
+turning off that display's enrollment ends it. Resuming starts a
 fresh idle period rather than immediately applying an old idle timeout.
 
 ## Optional HDR shortcut

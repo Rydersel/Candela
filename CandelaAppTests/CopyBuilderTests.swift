@@ -573,6 +573,16 @@ struct CopyBuilderTests {
       fallbackRestored: true))
     let reason = DisplayModeCoordinator.StartFailure.Reason.failed(error)
     #expect(DisplayModeCopy.achievedGeometry(error.unhonouredCommit!).contains("2560"))
+    #expect(DisplayModeCopy.spokenAchievedGeometry(error.unhonouredCommit!)
+      == "The display took 2,560 by 1,440 at 120 hertz.")
+    // The synthesized-size sentence writes the size the way every other size
+    // is written, and names the feature by its one user-facing name.
+    let synthesis = render(SynthesisCopy.engineFailure(.scanoutMismatch(
+      ScanoutTiming(width: 2560, height: 1440, refreshHz: 120))))
+    #expect(synthesis.contains(DisplayModeCopy.size(width: 2560, height: 1440)))
+    #expect(!synthesis.contains(" x "))
+    #expect(synthesis.contains("renders was removed"))
+    #expect(!synthesis.contains("rendered size"))
     #expect(render(DisplayModeCopy.startFailure(reason)).contains("previous resolution was restored"))
     #expect(DisplayModeCopy.startFailureSubject(displayName: "External", reason: reason) == "External")
     let reapply = render(DisplayModeCopy.reapply(requested: Self.descriptor, notice: .failed(error)))
@@ -596,7 +606,11 @@ struct CopyBuilderTests {
     #expect(
       DisplayModeCopy.startFailureDiagnostic(.failed(DisplayConfigError(cgErrorCode: 1001)))
         == "CoreGraphics error 1001")
-    #expect(DisplayModeCopy.startFailureDiagnostic(.blocked(by: .rotation)) == "Held by rotation")
+    #expect(DisplayModeCopy.startFailureDiagnostic(.blocked(by: .rotation)) == "Held by a rotation")
+    // The tooltip never shows the claimant's internal name.
+    #expect(DisplayModeCopy.startFailureDiagnostic(.blocked(by: .settingsReset))
+      == "Held by a settings reset")
+    #expect(DisplayModeCopy.startFailureDiagnostic(.blocked(by: .hdr)) == "Held by an HDR switch")
 
     // No code to print for an unhonoured commit. Achieved differs from requested
     // so the assertions can tell which one the sentence names.
@@ -843,10 +857,12 @@ struct CopyBuilderTests {
     let rendered = ReconfigurationClaimant.allCases.map { render(ReconfigurationCopy.blocked(by: $0)) }
     #expect(rendered.count == ReconfigurationClaimant.allCases.count)
     #expect(Set(rendered).count == rendered.count)
-    for sentence in rendered {
+    for (claimant, sentence) in zip(ReconfigurationClaimant.allCases, rendered) {
       // The reconfiguration gate: name the holder and hand the user their
-      // next move.
-      #expect(sentence.contains("Finish that first."))
+      // next move. HDR and a reset finish on their own, so those two wait.
+      let waits = [.hdr, .settingsReset].contains(claimant)
+      #expect(sentence.contains("Wait for it to finish.") == waits, "\(claimant): \(sentence)")
+      #expect(sentence.contains("Finish that first.") == !waits, "\(claimant): \(sentence)")
       #expect(sentence.contains(AppInfo.productName))
     }
     #expect(render(ReconfigurationCopy.blocked(by: .displayModes)).contains("changing a display's resolution"))

@@ -60,16 +60,19 @@ letterboxed or cropped while macOS reports success throughout. The display's
 Diagnostics page reports how many modes are being withheld, and the guard can
 be turned off; see [advanced settings](advanced-settings.md).
 
-After a resolution change, Candela checks the signal the display controller is
-actually driving. For a revealed HiDPI size or a synthesized size, that signal
-has to be the panel's full native resolution at the chosen refresh rate. If it
-is not, the previous resolution comes back on its own (a synthesized size is
-taken down), a message says what the display actually received, and that choice
-is kept out of the size list until Candela restarts. If the previous resolution
-cannot be put back, the usual recovery countdown takes over. When the
-controller does not report its signal, nothing changes and the usual countdown
-applies. A display's Diagnostics page shows the signal's size and refresh rate
-when the controller reports them.
+After a change to a revealed HiDPI size or a synthesized size, Candela checks
+the signal the display controller is actually driving. Its refresh rate has to
+match the one chosen. For a synthesized size, the signal also has to be the
+panel's full native resolution. For a revealed HiDPI size it passes at the
+native resolution or at the size's own pixel count, and fails when it is smaller
+than that pixel count, which would crop the desktop. If the signal fails, the
+previous resolution comes back on its own (a synthesized size is taken down), a
+message says what the display actually received, and that choice is kept out
+of the size list until Candela restarts. If the previous resolution cannot be
+put back, the usual recovery countdown takes over. When the controller does not
+report its signal, nothing changes and the usual countdown applies. The copied
+or exported diagnostics report includes the signal's size and refresh rate when
+the controller reports them.
 
 ## The recommended size
 

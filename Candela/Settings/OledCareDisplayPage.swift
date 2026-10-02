@@ -250,7 +250,7 @@ struct OledCareDisplayPage: View {
       .accessibilityLabel("Heat Map")
 
       VStack(alignment: .leading, spacing: 10) {
-        heroStat("Status") { Text(statusText) }
+        heroStat("Status") { statusText }
         heroStat("Hours of use") {
           Text(verbatim: hoursLine(tracker))
             .monospacedDigit()
@@ -386,17 +386,66 @@ struct OledCareDisplayPage: View {
     return Date().timeIntervalSince(last) < OledCareCadence.livenessWindowSeconds
   }
 
+  /// What outranks the engine's own state on the Status line.
+  enum StatusSource: Equatable {
+    case safeMode
+    case paused(String)
+    case engine
+  }
+
+  /// Safe Mode first, then the engine's suspension, then the user's pause. A
+  /// suspension wins over the pause as it does in the engine: a mirror or a
+  /// checkup field keeps its reason on screen for the whole of a user's pause.
+  static func statusSource(
+    enrolled: Bool, safeMode: Bool, suspended: Bool, pausedUntil: Date?,
+    now: Date = Date(), calendar: Calendar = .current, locale: Locale = .current
+  ) -> StatusSource {
+    if safeMode { return .safeMode }
+    if enrolled, !suspended, let pausedUntil {
+      return .paused("Dimming paused until \(CompactEndTimeText.string(pausedUntil, now: now, calendar: calendar, locale: locale))")
+    }
+    return .engine
+  }
+
+  /// The Dimming section's first row: the pause's state, Resume Now while one
+  /// runs, and a menu named for what it does to the pause.
+  struct PauseRow: Equatable {
+    let label: String
+    let menuTitle: String
+    let offersResume: Bool
+  }
+
+  /// Nil wherever there is no dimming to pause: an un-enrolled display, or a
+  /// Safe Mode session, where the care loop never runs.
+  static func pauseRow(
+    enrolled: Bool, safeMode: Bool, pausedUntil: Date?,
+    now: Date = Date(), calendar: Calendar = .current, locale: Locale = .current
+  ) -> PauseRow? {
+    guard enrolled, !safeMode else { return nil }
+    guard let pausedUntil else {
+      return PauseRow(label: "Pause dimming temporarily", menuTitle: "Pause Dimming", offersResume: false)
+    }
+    let end = CompactEndTimeText.string(pausedUntil, now: now, calendar: calendar, locale: locale)
+    return PauseRow(label: "Paused until \(end)", menuTitle: "Change Duration", offersResume: true)
+  }
+
   /// What the engine is doing right now. `dimStates` is the coordinator's own
   /// published state, never a second opinion computed here; a mirrored display's
   /// "paused" reading is the one state that must stay visible.
-  private var statusText: LocalizedStringKey {
-    if model.isSafeMode { return "Paused for this session (Safe Mode)" }
+  private var statusText: Text {
     let dimState = model.oledCare.dimStates[persistenceKey]
-    // After the suspension, as in the engine: a mirror or a checkup field keeps
-    // its reason on screen for the whole of a user's pause.
-    if dimState != .suspended, let deadline = model.oledCare.dimmingPauseDeadline(for: persistenceKey) {
-      return "Dimming paused until \(CompactEndTimeText.string(deadline))"
+    switch Self.statusSource(
+      enrolled: prefs.oledCareEnrolled, safeMode: model.isSafeMode,
+      suspended: dimState == .suspended,
+      pausedUntil: model.oledCare.dimmingPauseDeadline(for: persistenceKey)
+    ) {
+    case .safeMode: return Text("Paused for this session (Safe Mode)")
+    case let .paused(line): return Text(verbatim: line)
+    case .engine: return Text(engineStatus(dimState))
     }
+  }
+
+  private func engineStatus(_ dimState: OledDimState?) -> LocalizedStringKey {
     // Exhaustive, so a new engine state is a compile error here rather than a
     // blank row.
     switch dimState {
@@ -420,38 +469,37 @@ struct OledCareDisplayPage: View {
     }
   }
 
-  private var dimmingPauseControls: some View {
-    let deadline = model.oledCare.dimmingPauseDeadline(for: persistenceKey)
-    let menuTitle = deadline == nil ? "Pause Dimming" : "Change Duration"
-    return SettingRow("Measurement and display hours continue; macOS can still sleep the display.") {
-      HStack(spacing: 12) {
-        if let deadline {
-          Text("Paused until \(CompactEndTimeText.string(deadline))")
+  @ViewBuilder private var dimmingPauseControls: some View {
+    if let row = Self.pauseRow(
+      enrolled: prefs.oledCareEnrolled, safeMode: model.isSafeMode,
+      pausedUntil: model.oledCare.dimmingPauseDeadline(for: persistenceKey)
+    ) {
+      SettingRow(caption: SettingsCaption(verbatim: PanelView.careActionsCaption)) {
+        HStack(spacing: 12) {
+          Text(verbatim: row.label)
             .fixedSize(horizontal: false, vertical: true)
-        } else {
-          Text("Pause dimming temporarily")
-        }
-        Spacer(minLength: 12)
-        if deadline != nil {
-          Button("Resume Now") { model.oledCare.resumeDimming(for: persistenceKey) }
-            .buttonStyle(SettingsSecondaryButtonStyle())
-            .accessibilityLabel("\(name), resume dimming now")
-        }
-        // A platform menu: these are actions, and the theme's choice controls
-        // (segments, pop-up row) draw a selected state there is none of.
-        Menu(menuTitle) {
-          Button("15 Minutes") {
-            model.oledCare.pauseDimming(for: persistenceKey, duration: 15 * 60)
+          Spacer(minLength: 12)
+          if row.offersResume {
+            Button("Resume Now") { model.oledCare.resumeDimming(for: persistenceKey) }
+              .buttonStyle(SettingsSecondaryButtonStyle())
+              .accessibilityLabel("\(name), resume dimming now")
           }
-          Button("1 Hour") {
-            model.oledCare.pauseDimming(for: persistenceKey, duration: 60 * 60)
+          // A platform menu: these are actions, and the theme's choice controls
+          // (segments, pop-up row) draw a selected state there is none of.
+          Menu(row.menuTitle) {
+            Button("15 Minutes") {
+              model.oledCare.pauseDimming(for: persistenceKey, duration: 15 * 60)
+            }
+            Button("1 Hour") {
+              model.oledCare.pauseDimming(for: persistenceKey, duration: 60 * 60)
+            }
+            Button("Until…") {
+              model.chooseDimmingPauseEndTime(for: persistenceKey, name: name)
+            }
           }
-          Button("Until…") {
-            model.chooseDimmingPauseEndTime(for: persistenceKey, name: name)
-          }
+          .fixedSize()
+          .accessibilityLabel(Text(verbatim: "\(name), \(row.menuTitle)"))
         }
-        .fixedSize()
-        .accessibilityLabel(Text(verbatim: "\(name), \(menuTitle)"))
       }
     }
   }

@@ -86,9 +86,8 @@ visible menu movement requires a separate interactive observation.
 ### Result of the full-suite probe
 
 The September 27 run on macOS 26.7, build 25G229, produced four 280 by 243
-captures. The opt-in test ran in the full app suite, which executed 814 tests
-and had nine expected assertions fail in the unfinished HDR shortcut tests.
-The renderer probe and its positive control passed.
+captures. The opt-in test ran in the full app suite, and the renderer probe
+and its positive control passed.
 
 | Pair | Maximum channel difference | Changed pixels |
 | --- | ---: | ---: |
@@ -105,18 +104,14 @@ Translating the first glyph crops down 85 pixels made each byte-identical to
 the second capture's corresponding crop. The large channel difference again
 came from placement, not a changed glyph or color.
 
-The artifacts are `panel-0.png` through `panel-3.png` and `report.json` in the
-run's `/tmp/candela-release-render-probe` directory. These are diagnostic
-captures, not native menu screenshots. The varying displacement leaves the
+The captures are diagnostic renders, not native menu screenshots. The varying displacement leaves the
 framework trigger unresolved and provides no basis for a fixed offset,
 warm-up count, relaxed tolerance, or shipping UI change.
 
 ### Native pause-control capture
 
-A later integrated run passed 2,697 engine tests and 817 app tests with the
-probe enabled. The offscreen native captures in
-`/tmp/candela-release-ui-capture` show the paused OLED status and expanded
-pause actions in light and dark appearances. The closed panel is 280 by 468
+Offscreen native captures show the paused OLED status and expanded pause
+actions in light and dark appearances. The closed panel is 280 by 468
 points and the expanded panel is 280 by 570 points, rendered at scale 2.
 The deadline, all three pause actions and the explanatory caption fit. The
 brightness and volume sliders remain prominent, and the footer is not clipped.
@@ -133,20 +128,20 @@ action. It does not activate Keep Awake, and it does not exercise live NSMenu
 tracking or physical monitor output. Timed Keep Awake presentation and the
 interactive menu remain part of the manual pass.
 
-Final diagnostic rerun: 817 app tests passed (exit 0), with artifacts in
-`/tmp/candela-release-ui-final`. Both Keep Awake disclosure captures fit their
-three choices and footer; the test confirms opening the disclosure does not
-activate Keep Awake. OLED settings were captured in the supported dark
+The test also confirms that opening the Keep Awake disclosure does not
+activate Keep Awake. OLED settings are captured in the supported dark
 appearance only. No product code changed for these fixture corrections.
 
 ## Keep Awake slider and native menu sizing, September 30
 
 Keep Awake now exposes a stepped duration slider only after expansion. The
 compact row retains its on/off toggle. The seven stops are 15 minutes, 30
-minutes, 1 hour, 2 hours, 4 hours, 8 hours and Until turned off. Selecting a
-duration while off does not start a session. Changing it while on replaces the
-deadline from the current time. Custom end time opens the shared picker, now
-styled with the same dark window, card and button tokens as Settings.
+minutes, 1 hour, 2 hours, 4 hours, 8 hours and Until turned off. Choosing a
+stop starts a hold for that long whether Keep Awake was off or on, and choosing
+one while on, the stop already shown included, replaces the deadline from the
+current time. Opening the disclosure alone starts nothing. Custom End Time
+opens the shared picker, styled with the same dark window, card and button
+tokens as Settings.
 
 The one-display report reproduced a native tracking defect. SwiftUI's host grew
 while AppKit retained the compact menu window height, squeezing the display
@@ -159,23 +154,21 @@ transition, and the normal menu-close hardware refresh is skipped during the
 refit. Explicit closing actions cancel pending refits so the custom-time picker
 does not reopen the compact menu behind it.
 
-The opt-in native tracking regression first failed with the original geometry
-and later caught the picker reopening the menu. The final run passed all seven
-Panel sizing tests, including sustained expanded tracking, footer containment
-and menu dismissal for the picker. Run it with
+The opt-in native tracking regression reproduces both the original geometry
+defect and the picker reopening the menu, and passes on the fix, covering
+sustained expanded tracking, footer containment and menu dismissal for the
+picker. Run it with
 `TEST_RUNNER_CANDELA_NATIVE_MENU_TEST=1 xcodebuild -project Candela.xcodeproj
 -scheme CandelaAppTests -destination 'platform=macOS' -derivedDataPath DerivedData
--only-testing:CandelaAppTests/PanelSizingTests test`. The log is
-`/tmp/candela-tracking-picker-settled.log`.
+-only-testing:CandelaAppTests/PanelSizingTests test`.
 
-The complete app suite passed 858 tests in 85 suites after the final closure fix.
-The earlier capture-enabled run also passed 858 tests; its light/dark expanded
-menu and valid/invalid picker images are in `/tmp/candela-panel-refit-final`.
-The actual running candidate's one-display menu grew from 154 to 257 points.
-Live slider actions selected one hour while off without activating a session,
-then started one hour, replaced it with 15 minutes and switched to indefinite.
-All three states reused the same Candela Keep Awake assertion; switching off
-removed it.
+The capture-enabled probe writes the expanded menu in light and dark and the
+end-time picker in its valid and invalid states. The picker is captured dark
+only: `EndTimePickerView` pins the dark scheme itself, so a light capture would
+show the same window. The running candidate's one-display menu grew from 154 to
+257 points. Live actions started a one-hour hold, replaced it with 15 minutes
+and switched to indefinite; all three states reused the same Candela Keep Awake
+assertion, and switching off removed it.
 
 
 ## Anchored menu animation, September 30
@@ -202,15 +195,14 @@ animation. The final native test samples brightness control position and size
 every 16 ms through expansion, collapse and another expansion. It waits for the
 initial menu entrance to finish before recording its baseline.
 
-The final full app run passed **868 tests in 86 suites**, with the native menu
-checks enabled. Both the Color LCD-only fixture and the fixture with a scripted
+With the native menu checks enabled, both the Color LCD-only fixture and the fixture with a scripted
 external display measured **0 points of brightness-control movement**. Their
 window heights were 239 → 342 → 239 and 416 → 519 → 416 points respectively.
 These fixtures include an accessibility warning banner, so their heights differ
 from the user's ordinary compact menu. The test also verifies the same window,
 a stationary top edge, intermediate resize frames, complete footer visibility,
 the duration slider disappearing on collapse and dismissal before the custom
-picker opens. Log: `/tmp/candela-slider-anchor-full-app.log`.
+picker opens.
 
 This verifies real native menu tracking and control geometry on the built-in
 screen. The external display in the second case is scripted; it adds no physical
@@ -234,17 +226,15 @@ animation, opacity transition and Reduce Motion behavior remain in use.
 
 The final live recording contains 81 captured frames across two expansions and
 two collapses. The Keep Awake cup remained at the same vertical position in every
-frame; the brightness slider also remained stationary. Recording:
-`/tmp/candela-awake-owned.mov`; extracted frames and position measurements:
-`/tmp/candela-awake-owned-raw/`. This is a variable-frame-rate recording of actual
-rendered changes, not a claim of continuous fixed-rate sampling.
+frame; the brightness slider also remained stationary. This is a
+variable-frame-rate recording of actual rendered changes, not a claim of
+continuous fixed-rate sampling.
 
 The native regression now includes the exact no-banner compact case and samples
 both brightness and Keep Awake controls. All three fixtures measured zero points
 of existing-control movement: 154 → 257 → 154 points without a banner,
 239 → 342 → 239 with a banner, and 416 → 519 → 416 with a scripted external
 screen and banner. A separate regression checks disclosure layout while the
-host still has its old height. The full app run passed **869 tests in 86 suites**.
-Log: `/tmp/candela-awake-owned-full-app.log`.
+host still has its old height.
 
 The scripted display does not add physical external-display verification.

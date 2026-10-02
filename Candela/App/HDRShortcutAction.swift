@@ -69,7 +69,7 @@ final class HDRShortcutAction {
     let controller = state.controller
     if !controller.isHDREngaged {
       if isSynthesized(state.id) {
-        return .refused("Turn off the synthesized display size before switching HDR on.")
+        return .refused(SynthesisCopy.hdrBlockedBySynthesizedSize)
       }
       guard controller.hdrCapabilityProbed else {
         return .refused("HDR support is still being checked. Try again shortly.")

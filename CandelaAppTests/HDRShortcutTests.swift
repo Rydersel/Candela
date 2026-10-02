@@ -11,7 +11,7 @@ struct HDRShortcutTests {
     let state = TestFixtures.displayState(hdr: hdr)
     let action = HDRShortcutAction(gate: .init(), target: { _ in state })
     let outcome = await action.toggle(on: nil)
-    #expect(outcome.message.contains("pointer"))
+    #expect(outcome == .refused("Move the pointer to an external display to switch HDR."))
     #expect(await hdr.writes.isEmpty)
   }
 
@@ -48,8 +48,10 @@ struct HDRShortcutTests {
     let second = TestFixtures.displayState(hdr: supported)
     await second.controller.noteHDRStateMayHaveChanged()
     let blocked = HDRShortcutAction(gate: .init(), target: { _ in second }, isSynthesized: { _ in true })
+    // The panel's own sentence, so the shortcut and the button say one thing.
     #expect(await blocked.toggle(on: second.id)
-      == .refused("Turn off the synthesized display size before switching HDR on."))
+      == .refused(SynthesisCopy.hdrBlockedBySynthesizedSize))
+    #expect(SynthesisCopy.hdrBlockedBySynthesizedSize == "Turn off the size Candela renders to use HDR.")
     #expect(await supported.writes.isEmpty)
   }
 
@@ -60,7 +62,8 @@ struct HDRShortcutTests {
     let gate = DisplayReconfigurationGate()
     _ = await gate.claim(.rotation)
     let action = HDRShortcutAction(gate: gate, target: { _ in state })
-    #expect(await action.toggle(on: state.id).message.contains("Finish"))
+    #expect(await action.toggle(on: state.id)
+      == .refused("Finish the current display change before switching HDR."))
     #expect(await hdr.writes.isEmpty)
     #expect(await gate.holder == .rotation)
   }
@@ -69,7 +72,8 @@ struct HDRShortcutTests {
     let hdr = ShortcutHDR()
     let state = TestFixtures.displayState(hdr: hdr)
     let action = HDRShortcutAction(gate: .init(), target: { _ in state }, isBlocked: { true })
-    #expect(await action.toggle(on: state.id).message.contains("reset"))
+    #expect(await action.toggle(on: state.id)
+      == .refused("Wait for the settings reset to finish before switching HDR."))
     #expect(await hdr.writes.isEmpty)
   }
 
@@ -96,7 +100,7 @@ struct HDRShortcutTests {
     #expect(await !model.beginReset())
     #expect(!model.isResetting)
     let panel = await model.hdrAction.toggle(state)
-    #expect(panel.message.contains("finish"))
+    #expect(panel == .refused("Wait for the current HDR change to finish."))
     #expect(await hdr.writes == [true])
     #expect(await model.reconfigurationGate.holder == .hdr)
     await hdr.releaseWrite()
@@ -113,7 +117,7 @@ struct HDRShortcutTests {
     let replacement = TestFixtures.displayState(hdr: hdr)
     await replacement.controller.noteHDRStateMayHaveChanged()
     let action = HDRShortcutAction(gate: .init(), target: { _ in replacement })
-    #expect(await action.toggle(original).message.contains("changed"))
+    #expect(await action.toggle(original) == .refused("The display changed. Try again."))
     #expect(await hdr.writes.isEmpty)
   }
 

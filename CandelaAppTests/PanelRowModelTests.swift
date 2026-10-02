@@ -1,7 +1,8 @@
-import CandelaKit
 import CoreGraphics
 import Foundation
 import Testing
+
+@testable import CandelaKit
 
 /// A prefs domain a test can write to and hand back to a derivation, which the
 /// per-call `TestFixtures.prefs` suite cannot do: the factory has to answer
@@ -540,6 +541,55 @@ struct PanelRowModelTests {
     #expect(line == "OLED Care on · 178 h")
   }
 
+  static func measuredSummary(hottest: Double) -> PanelHealthSummary {
+    PanelHealthSummary(
+      confidence: .measured, observationEnabled: true,
+      cells: [Double](repeating: 0, count: PanelGrid.cellCount),
+      hottestRelative: hottest, hottestOwner: nil, sampleCount: 500,
+      lastSample: nil, dominantOwnerByCell: nil, topOwnersByHours: [])
+  }
+
+  /// The form the coordinator reads through. A suspended display that is also
+  /// paused shows its ordinary line, so the summary has to be read for it: the
+  /// pause existing used to skip the read and drop the hottest-area segment.
+  @Test func aSuspendedAndPausedDisplayKeepsItsHottestArea() {
+    let (now, calendar, locale) = Self.clock
+    var reads = 0
+    let line = PanelView.careLine(
+      enrolled: true, hours: 178.4, safeMode: false, suspended: true,
+      pausedUntil: Self.deadline(days: 0, hour: 15, minute: 45),
+      summary: { reads += 1; return Self.measuredSummary(hottest: 2.49) },
+      now: now, calendar: calendar, locale: locale)
+    #expect(line == "OLED Care on · 178 h · hottest area 2.5×")
+    #expect(reads == 1)
+  }
+
+  /// The control: an unsuspended pause says only the pause, and its line never
+  /// pays for a store decode it would not show.
+  @Test func aPausedLineDoesNotReadTheSummary() {
+    let (now, calendar, locale) = Self.clock
+    var reads = 0
+    let line = PanelView.careLine(
+      enrolled: true, hours: 178.4, safeMode: false, suspended: false,
+      pausedUntil: Self.deadline(days: 0, hour: 15, minute: 45),
+      summary: { reads += 1; return Self.measuredSummary(hottest: 2.49) },
+      now: now, calendar: calendar, locale: locale).map(Self.plainSpaces)
+    #expect(line == "Dimming paused until 3:45 PM")
+    #expect(reads == 0)
+  }
+
+  @Test func safeModeAndAnUnenrolledDisplayNeverReadTheSummary() {
+    var reads = 0
+    let summary: () -> PanelHealthSummary? = { reads += 1; return Self.measuredSummary(hottest: 2.49) }
+    #expect(PanelView.careLine(
+      enrolled: true, hours: 178.4, safeMode: true, suspended: false, pausedUntil: nil,
+      summary: summary) == "178 h")
+    #expect(PanelView.careLine(
+      enrolled: false, hours: 178.4, safeMode: false, suspended: false, pausedUntil: nil,
+      summary: summary) == "178 h")
+    #expect(reads == 0)
+  }
+
   @Test func safeModeAndAnUnenrolledDisplayIgnoreAPause() {
     let deadline = Self.deadline(days: 0, hour: 15, minute: 45)
     #expect(Self.pausedLine(until: deadline, safeMode: true) == "178 h")
@@ -557,6 +607,22 @@ struct PanelRowModelTests {
     #expect(text(Self.deadline(days: 6, hour: 9, minute: 0)) == "Wed, 9:00 AM")
     #expect(text(Self.deadline(days: 7, hour: 9, minute: 0)) == "Oct 8, 9:00 AM")
     #expect(text(Self.deadline(days: 364, hour: 9, minute: 0)) == "Sep 30, 9:00 AM")
+    // A year out lands on today's month and day, which alone would read as today.
+    #expect(text(Self.deadline(days: 365, hour: 9, minute: 0)) == "Oct 1, 2027, 9:00 AM")
+  }
+
+  /// English names whatever the system language, because the words around them
+  /// are English; only the clock follows the person's locale.
+  @Test func theCompactEndTimeKeepsEnglishNamesAndTheLocalesClock() {
+    let (now, calendar, _) = Self.clock
+    let german = Locale(identifier: "de_DE")
+    func text(_ date: Date) -> String {
+      Self.plainSpaces(CompactEndTimeText.string(date, now: now, calendar: calendar, locale: german))
+    }
+    #expect(text(Self.deadline(days: 0, hour: 14, minute: 0)) == "14:00")
+    #expect(text(Self.deadline(days: 1, hour: 9, minute: 5)) == "tomorrow, 09:05")
+    #expect(text(Self.deadline(days: 3, hour: 14, minute: 0)) == "Sun, 14:00")
+    #expect(text(Self.deadline(days: 7, hour: 14, minute: 0)) == "Oct 8, 14:00")
   }
 
   @Test func theKeepAwakeTitleUsesTheCompactEndTime() {
@@ -565,6 +631,84 @@ struct PanelRowModelTests {
     #expect(Self.plainSpaces(PanelView.keepAwakeTitle(
       expiresAt: Self.deadline(days: 1, hour: 4, minute: 0),
       now: now, calendar: calendar, locale: locale)) == "Until tomorrow, 4:00 AM")
+  }
+
+  // MARK: - Keep Awake duration slider
+
+  private final class Holder: PowerAssertionHolding {
+    private(set) var created = 0
+    private(set) var held = 0
+    func createPreventDisplaySleep(named name: String) -> UInt32? {
+      created += 1; held += 1; return UInt32(created)
+    }
+    func release(_ id: UInt32) { held -= 1 }
+  }
+
+  private final class TimeSource {
+    var now = Date(timeIntervalSince1970: 1_000)
+  }
+
+  /// The guide's promise: choosing a stop starts the hold for that long.
+  @Test func movingTheSliderWhileOffStartsAHold() {
+    let holder = Holder()
+    let clock = TimeSource()
+    let awake = KeepAwake(holder: holder, now: { clock.now }, clockNotifications: NotificationCenter())
+    defer { awake.setOn(false) }
+    let chosen = PanelView.chooseAwakeDuration(
+      Double(KeepAwakeDuration.oneHour.rawValue), keepAwake: awake)
+    #expect(chosen == .oneHour)
+    #expect(awake.isOn)
+    #expect(awake.expiresAt == Date(timeIntervalSince1970: 4_600))
+    #expect(holder.held == 1)
+  }
+
+  /// The slider opens on the stop nearest the time left, so clicking that stop
+  /// must restart it from now; ignoring it made the click do nothing.
+  @Test func reChoosingTheCurrentStopResetsTheDeadline() {
+    let holder = Holder()
+    let clock = TimeSource()
+    let awake = KeepAwake(holder: holder, now: { clock.now }, clockNotifications: NotificationCenter())
+    defer { awake.setOn(false) }
+    KeepAwakeDuration.oneHour.apply(to: awake)
+    clock.now = Date(timeIntervalSince1970: 1_000 + 40 * 60)
+    let shown = KeepAwakeDuration.closest(to: awake.expiresAt!.timeIntervalSince(clock.now))
+    #expect(shown == .fifteenMinutes)
+    PanelView.chooseAwakeDuration(Double(shown.rawValue), keepAwake: awake)
+    #expect(awake.expiresAt == clock.now.addingTimeInterval(15 * 60))
+    clock.now = clock.now.addingTimeInterval(5 * 60)
+    PanelView.chooseAwakeDuration(Double(shown.rawValue), keepAwake: awake)
+    #expect(awake.expiresAt == clock.now.addingTimeInterval(15 * 60))
+    #expect(holder.created == 1, "A restart replaces the deadline on the one assertion")
+    #expect(holder.held == 1)
+  }
+
+  @Test func aValueOffTheStopsChangesNothing() {
+    let awake = KeepAwake(holder: Holder(), clockNotifications: NotificationCenter())
+    defer { awake.setOn(false) }
+    #expect(PanelView.chooseAwakeDuration(99, keepAwake: awake) == nil)
+    #expect(!awake.isOn)
+  }
+
+  // MARK: - The care disclosure
+
+  @Test func theCareDisclosureOpensOnlyForAnEnrolledDisplayOutsideSafeMode() {
+    #expect(PanelView.offersCareActions(enrolled: true, safeMode: false))
+    #expect(!PanelView.offersCareActions(enrolled: false, safeMode: false))
+    #expect(!PanelView.offersCareActions(enrolled: true, safeMode: true))
+    #expect(PanelView.careActions(enrolled: false, safeMode: false, paused: true).isEmpty)
+    #expect(PanelView.careActions(enrolled: true, safeMode: true, paused: true).isEmpty)
+  }
+
+  @Test func resumeNowLeadsTheRowsOnlyWhileAPauseRuns() {
+    let idle = PanelView.careActions(enrolled: true, safeMode: false, paused: false)
+    #expect(idle.map(\.title) == [
+      "Pause Dimming for 15 Minutes", "Pause Dimming for 1 Hour", "Pause Dimming Until…",
+    ])
+    let paused = PanelView.careActions(enrolled: true, safeMode: false, paused: true)
+    #expect(paused.map(\.title) == [
+      "Resume Now", "Pause Dimming for 15 Minutes", "Pause Dimming for 1 Hour",
+      "Pause Dimming Until…",
+    ])
   }
 
   /// This form reads the app's own prefs domain, so the key is one nothing has
@@ -708,5 +852,72 @@ struct PanelEmptyStateTests {
     let hint = PanelView.unhideHint(builtInHidden: true, externalsHidden: true)
     #expect(hint.contains("Menu Bar"))
     #expect(hint.contains("Displays"))
+  }
+}
+
+/// The OLED Care page's Status line and pause row, derived where the panel's
+/// care line is, so the two surfaces agree on what outranks what.
+@Suite("OLED Care page row model")
+@MainActor
+struct OledCarePageRowModelTests {
+  private static let clock = PanelRowModelTests.clock
+
+  private static func status(
+    enrolled: Bool = true, safeMode: Bool = false, suspended: Bool = false, pausedUntil: Date?
+  ) -> OledCareDisplayPage.StatusSource {
+    let (now, calendar, locale) = clock
+    let source = OledCareDisplayPage.statusSource(
+      enrolled: enrolled, safeMode: safeMode, suspended: suspended, pausedUntil: pausedUntil,
+      now: now, calendar: calendar, locale: locale)
+    if case let .paused(line) = source { return .paused(PanelRowModelTests.plainSpaces(line)) }
+    return source
+  }
+
+  private static let deadline = PanelRowModelTests.deadline(days: 0, hour: 15, minute: 45)
+
+  @Test func aPauseNamesItsEndOnTheStatusLine() {
+    #expect(Self.status(pausedUntil: Self.deadline) == .paused("Dimming paused until 3:45 PM"))
+    #expect(Self.status(pausedUntil: nil) == .engine)
+  }
+
+  /// The engine suspends before it checks the pause, so a mirror or a checkup
+  /// field keeps its own reason on screen for the whole pause.
+  @Test func aSuspensionOutranksThePause() {
+    #expect(Self.status(suspended: true, pausedUntil: Self.deadline) == .engine)
+  }
+
+  @Test func safeModeOutranksEverything() {
+    #expect(Self.status(safeMode: true, suspended: true, pausedUntil: Self.deadline) == .safeMode)
+    #expect(Self.status(safeMode: true, pausedUntil: nil) == .safeMode)
+  }
+
+  @Test func anUnenrolledDisplayIgnoresAPause() {
+    #expect(Self.status(enrolled: false, pausedUntil: Self.deadline) == .engine)
+  }
+
+  private static func row(
+    enrolled: Bool = true, safeMode: Bool = false, pausedUntil: Date?
+  ) -> OledCareDisplayPage.PauseRow? {
+    let (now, calendar, locale) = clock
+    return OledCareDisplayPage.pauseRow(
+      enrolled: enrolled, safeMode: safeMode, pausedUntil: pausedUntil,
+      now: now, calendar: calendar, locale: locale)
+  }
+
+  @Test func withNoPauseTheRowOffersOneAndNoResume() {
+    #expect(Self.row(pausedUntil: nil) == .init(
+      label: "Pause dimming temporarily", menuTitle: "Pause Dimming", offersResume: false))
+  }
+
+  @Test func aRunningPauseOffersResumeAndAChangeOfDuration() {
+    let row = Self.row(pausedUntil: Self.deadline)
+    #expect(row.map { PanelRowModelTests.plainSpaces($0.label) } == "Paused until 3:45 PM")
+    #expect(row?.menuTitle == "Change Duration")
+    #expect(row?.offersResume == true)
+  }
+
+  @Test func thereIsNoPauseRowWhereNothingDims() {
+    #expect(Self.row(enrolled: false, pausedUntil: nil) == nil)
+    #expect(Self.row(safeMode: true, pausedUntil: Self.deadline) == nil)
   }
 }

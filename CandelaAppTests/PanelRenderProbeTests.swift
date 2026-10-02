@@ -72,9 +72,8 @@ struct PanelRenderProbeTests {
     let state = try #require(model.displays.first)
     model.oledCare.pauseDimming(for: key, duration: 15 * 60)
     defer { model.oledCare.resumeDimming(for: key) }
-    _ = NSApplication.shared
-    (NSApp as NSObject).accessibilitySetValue(
-      true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+    EnhancedAccessibility.enable()
+    defer { EnhancedAccessibility.disable() }
 
     for (scheme, suffix) in [(ColorScheme.light, "light"), (.dark, "dark")] {
       let background = scheme == .light ? Color.white : Color(white: 0.12)
@@ -142,43 +141,35 @@ struct PanelRenderProbeTests {
     }
   }
 
-  /// Gated on `CANDELA_RENDER_PROBE_DIR`: opens the end-time dialog in both
-  /// appearances and writes its captures there. Run by hand before a release.
+  /// Gated on `CANDELA_RENDER_PROBE_DIR`: opens the end-time dialog and writes
+  /// its captures there. Dark only: `EndTimePickerView` pins the dark scheme
+  /// itself, so a light capture would show the same window. Run by hand before
+  /// a release. Its accessibility labels are checked in every run by
+  /// `EndTimePickerAccessibilityTests`.
   @Test(.enabled(if: ProcessInfo.processInfo.environment["CANDELA_RENDER_PROBE_DIR"] != nil))
   func captureCustomEndTimeDialogs() async throws {
     let directory = URL(fileURLWithPath: try #require(
       ProcessInfo.processInfo.environment["CANDELA_RENDER_PROBE_DIR"]))
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    _ = NSApplication.shared
-    (NSApp as NSObject).accessibilitySetValue(true,
-      forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
-    for (scheme, suffix) in [(ColorScheme.light, "light"), (.dark, "dark")] {
-      for invalid in [false, true] {
-        let now = Date()
-        let selection = EndTimeSelection(currentDeadline: nil, now: { now }) { _ in
-          Issue.record("Capturing a dialog must not apply its action")
-          return nil
-        }
-        if invalid { selection.deadline = now.addingTimeInterval(-60) }
-        let host = NSHostingView(rootView: EndTimePickerView(
-          selection: selection, detail: "OLED Display", actionTitle: "Pause Dimming",
-          cancel: { selection.cancel() }, confirm: { _ = selection.confirm() })
-          .environment(\.colorScheme, scheme))
-        host.setFrameSize(host.fittingSize)
-        let window = mount(host, scheme: scheme)
-        defer { window.contentView = nil; window.close() }
-        try await Task.sleep(for: .milliseconds(100))
-        host.layoutSubtreeIfNeeded()
-        try save(nativeImage(host), to: directory.appendingPathComponent(
-          "end-time-\(suffix)-\(invalid ? "invalid" : "valid").png"))
-        for label in ["End date", "End time hour", "End time minute"] {
-          #expect(accessibilityNodes(host).contains {
-            ($0.accessibilityLabel?() ?? nil) == label
-          })
-        }
-        #expect(host.fittingSize.width == 420)
-        #expect(host.fittingSize.height < 400)
+    for invalid in [false, true] {
+      let now = Date()
+      let selection = EndTimeSelection(currentDeadline: nil, now: { now }) { _ in
+        Issue.record("Capturing a dialog must not apply its action")
+        return nil
       }
+      if invalid { selection.deadline = now.addingTimeInterval(-60) }
+      let host = NSHostingView(rootView: EndTimePickerView(
+        selection: selection, detail: "OLED Display", actionTitle: "Pause Dimming",
+        cancel: { selection.cancel() }, confirm: { _ = selection.confirm() }))
+      host.setFrameSize(host.fittingSize)
+      let window = mount(host, scheme: .dark)
+      defer { window.contentView = nil; window.close() }
+      try await Task.sleep(for: .milliseconds(100))
+      host.layoutSubtreeIfNeeded()
+      try save(nativeImage(host), to: directory.appendingPathComponent(
+        "end-time-dark-\(invalid ? "invalid" : "valid").png"))
+      #expect(host.fittingSize.width == 420)
+      #expect(host.fittingSize.height < 400)
     }
   }
 
@@ -272,5 +263,43 @@ struct PanelRenderProbeTests {
       context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
     }
     return bytes
+  }
+}
+
+/// The end-time dialog's spoken names, checked in every run: the probe above
+/// asserts them too, but only when it is capturing.
+@Suite("End-time picker accessibility") @MainActor
+struct EndTimePickerAccessibilityTests {
+  @Test func theDialogNamesItsDateAndTimeFields() async throws {
+    EnhancedAccessibility.enable()
+    defer { EnhancedAccessibility.disable() }
+    let now = Date()
+    let selection = EndTimeSelection(currentDeadline: nil, now: { now }) { _ in
+      Issue.record("Reading the dialog must not apply its action")
+      return nil
+    }
+    let host = NSHostingView(rootView: EndTimePickerView(
+      selection: selection, detail: "OLED Display", actionTitle: "Pause Dimming",
+      cancel: { selection.cancel() }, confirm: { _ = selection.confirm() }))
+    host.setFrameSize(host.fittingSize)
+    let window = NSWindow(
+      contentRect: NSRect(origin: NSPoint(x: -10000, y: -10000), size: host.frame.size),
+      styleMask: [.borderless], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = host
+    defer { window.contentView = nil; window.close() }
+    try await Task.sleep(for: .milliseconds(100))
+    host.layoutSubtreeIfNeeded()
+    let labels = Set(Self.nodes(host).compactMap { $0.accessibilityLabel?() ?? nil })
+    for label in ["End date", "End time hour", "End time minute", "Pause Dimming", "Cancel"] {
+      #expect(labels.contains(label), "\(label) is missing from \(labels.sorted())")
+    }
+  }
+
+  private static func nodes(_ element: Any, depth: Int = 0) -> [AnyObject] {
+    guard depth < 30 else { return [] }
+    let object = element as AnyObject
+    let children = (object.accessibilityChildren?() ?? nil) ?? []
+    return [object] + children.flatMap { nodes($0, depth: depth + 1) }
   }
 }

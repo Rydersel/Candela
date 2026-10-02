@@ -105,16 +105,18 @@ struct PanelView: View {
             isShowingSynthesizedSize: model.synthesis.isEngaged(displayID: state.display.id),
             careLine: Self.careLine(for: state, model: model),
             careIsExpanded: expandedSection == PanelDisclosureID(state.id, .care),
-            toggleCare: rowPrefs.oledCareEnrolled && !model.isSafeMode ? {
-              withAnimation(Motion.disclosure(reduceMotion: reduceMotion)) {
-                let disclosure = PanelDisclosureID(state.id, .care)
-                expandedSection = expandedSection == disclosure ? nil : disclosure
-              }
+            // No layout animation: the native window animates the resize, and
+            // a second one here moved the controls around it (see Keep Awake).
+            toggleCare: Self.offersCareActions(
+              enrolled: rowPrefs.oledCareEnrolled, safeMode: model.isSafeMode) ? {
+              let disclosure = PanelDisclosureID(state.id, .care)
+              expandedSection = expandedSection == disclosure ? nil : disclosure
             } : nil
           )
-          if rowPrefs.oledCareEnrolled, !model.isSafeMode,
+          if Self.offersCareActions(enrolled: rowPrefs.oledCareEnrolled, safeMode: model.isSafeMode),
              expandedSection == PanelDisclosureID(state.id, .care) {
             carePauseActions(for: state, name: name)
+              .transition(.opacity.animation(Motion.disclosure(reduceMotion: reduceMotion)))
           }
           DisplaySliderRow(
             controller: state.controller, displayName: name,
@@ -498,10 +500,9 @@ struct PanelView: View {
           SelectionSlider(value: Binding(
             get: { Double(awakeDuration.rawValue) },
             set: { value in
-              guard let duration = KeepAwakeDuration(rawValue: Int(value.rounded())) else { return }
-              guard duration != awakeDuration || !model.keepAwake.isOn else { return }
-              awakeDuration = duration
-              duration.apply(to: model.keepAwake)
+              if let duration = Self.chooseAwakeDuration(value, keepAwake: model.keepAwake) {
+                awakeDuration = duration
+              }
             }), stopCount: KeepAwakeDuration.allCases.count,
             accessibilityLabel: "Keep awake duration",
             valueDescription: Self.keepAwakeStopTitle)
@@ -514,7 +515,7 @@ struct PanelView: View {
           .font(.system(size: 10))
           .foregroundStyle(.secondary)
           .accessibilityHidden(true)
-          Button("Custom end time…") {
+          Button("Custom End Time…") {
             expandedSection = nil
             model.chooseKeepAwakeEndTime()
           }
@@ -522,7 +523,7 @@ struct PanelView: View {
           .font(.system(size: 11))
           .foregroundStyle(.secondary)
           .frame(minHeight: 24, alignment: .leading)
-          .accessibilityLabel("Keep display awake, Custom end time…")
+          .accessibilityLabel("Keep display awake, Custom End Time…")
         }
         .padding(.top, 8)
         .padding(.bottom, 4)
@@ -545,6 +546,17 @@ struct PanelView: View {
     expiresAt.map {
       "Until \(CompactEndTimeText.string($0, now: now, calendar: calendar, locale: locale))"
     } ?? "Keep display awake"
+  }
+
+  /// A choice on the slider always starts the hold, the current stop included:
+  /// the stop shown is only the one nearest the time left, so re-choosing it is
+  /// how a person asks for that full duration from now. `start(for:)` replaces
+  /// the deadline on the one assertion, so a repeat never takes a second.
+  @discardableResult
+  static func chooseAwakeDuration(_ value: Double, keepAwake: KeepAwake) -> KeepAwakeDuration? {
+    guard let duration = KeepAwakeDuration(rawValue: Int(value.rounded())) else { return nil }
+    duration.apply(to: keepAwake)
+    return duration
   }
 
   /// What the native slider speaks for a stop. The `NSSlider` is its own
@@ -717,26 +729,56 @@ extension PanelView {
       care: model.oledCare, safeMode: model.isSafeMode)
   }
 
+  /// The rows the care disclosure opens to, in order.
+  enum CareAction: CaseIterable {
+    case resume, pauseQuarterHour, pauseHour, pauseUntil
+
+    var title: String {
+      switch self {
+      case .resume: "Resume Now"
+      case .pauseQuarterHour: "Pause Dimming for 15 Minutes"
+      case .pauseHour: "Pause Dimming for 1 Hour"
+      case .pauseUntil: "Pause Dimming Until…"
+      }
+    }
+  }
+
+  /// No disclosure while the care loop is not running (Safe Mode) or the
+  /// display is not enrolled: there is no dimming to pause.
+  static func offersCareActions(enrolled: Bool, safeMode: Bool) -> Bool {
+    enrolled && !safeMode
+  }
+
+  static func careActions(enrolled: Bool, safeMode: Bool, paused: Bool) -> [CareAction] {
+    guard offersCareActions(enrolled: enrolled, safeMode: safeMode) else { return [] }
+    return CareAction.allCases.filter { $0 != .resume || paused }
+  }
+
+  static let careActionsCaption =
+    "Measurement and display hours continue; macOS can still sleep the display."
+
   private func carePauseActions(for state: AppModel.DisplayState, name: String) -> some View {
-    VStack(alignment: .leading, spacing: 2) {
-      if model.oledCare.dimmingPauseDeadline(for: state.display.persistenceKey) != nil {
-        PanelActionRow(title: "Resume Now", accessibilityName: name) {
-          model.oledCare.resumeDimming(for: state.display.persistenceKey)
-          expandedSection = nil
-          PanelMenu.endTracking()
+    let key = state.display.persistenceKey
+    let actions = Self.careActions(
+      enrolled: true, safeMode: false,
+      paused: model.oledCare.dimmingPauseDeadline(for: key) != nil)
+    return VStack(alignment: .leading, spacing: 2) {
+      ForEach(actions, id: \.self) { action in
+        PanelActionRow(title: LocalizedStringKey(action.title), accessibilityName: name) {
+          switch action {
+          case .resume:
+            model.oledCare.resumeDimming(for: key)
+            expandedSection = nil
+            PanelMenu.endTracking()
+          case .pauseQuarterHour: pauseDimming(for: state, duration: 15 * 60)
+          case .pauseHour: pauseDimming(for: state, duration: 60 * 60)
+          case .pauseUntil:
+            expandedSection = nil
+            model.chooseDimmingPauseEndTime(for: key, name: name)
+          }
         }
       }
-      PanelActionRow(title: "Pause Dimming for 15 Minutes", accessibilityName: name) {
-        pauseDimming(for: state, duration: 15 * 60)
-      }
-      PanelActionRow(title: "Pause Dimming for 1 Hour", accessibilityName: name) {
-        pauseDimming(for: state, duration: 60 * 60)
-      }
-      PanelActionRow(title: "Pause Dimming Until…", accessibilityName: name) {
-        expandedSection = nil
-        model.chooseDimmingPauseEndTime(for: state.display.persistenceKey, name: name)
-      }
-      PanelCaption("Measurement and display hours continue; macOS can still sleep the display.", style: .secondary)
+      PanelCaption(LocalizedStringKey(Self.careActionsCaption), style: .secondary)
     }
   }
 
@@ -746,25 +788,40 @@ extension PanelView {
     PanelMenu.endTracking()
   }
 
-  /// Reads the summary only when enrolled and not in Safe Mode. That leaves an
-  /// un-enrolled display's history unstated, as the Health pane does, and keeps
-  /// a store decode out of this view body.
+  /// Reads the summary only where the line will show it, so an un-enrolled
+  /// display's history stays unstated, as on the Health pane, and a paused
+  /// line costs no store decode in this view body.
   @MainActor
   static func careLine(
     persistenceKey: String, prefs: DisplayPrefs, care: OledCareCoordinator, safeMode: Bool
   ) -> String? {
     let enrolled = prefs.oledCareEnrolled
-    let hours = care.hoursTracker(for: persistenceKey).totalHours
     let pausedUntil = enrolled && !safeMode ? care.dimmingPauseDeadline(for: persistenceKey) : nil
-    let summary = enrolled && !safeMode && pausedUntil == nil
-      ? care.healthSummary(for: persistenceKey) : nil
     return careLine(
-      enrolled: enrolled, hours: hours, summary: summary, safeMode: safeMode,
-      suspended: care.dimStates[persistenceKey] == .suspended, pausedUntil: pausedUntil)
+      enrolled: enrolled, hours: care.hoursTracker(for: persistenceKey).totalHours,
+      safeMode: safeMode, suspended: care.dimStates[persistenceKey] == .suspended,
+      pausedUntil: pausedUntil, summary: { care.healthSummary(for: persistenceKey) })
   }
 
-  /// A suspension outranks the user's pause, as it does in the engine: a
-  /// mirrored display or a checkup field keeps its own line for the whole pause.
+  /// The decision half of the coordinator form above, with the summary read
+  /// deferred so the test can see whether the line asked for it.
+  static func careLine(
+    enrolled: Bool, hours: Double, safeMode: Bool, suspended: Bool, pausedUntil: Date?,
+    summary: () -> PanelHealthSummary?,
+    now: Date = Date(), calendar: Calendar = .current, locale: Locale = .current
+  ) -> String? {
+    let showsPause = enrolled && !safeMode && !suspended && pausedUntil != nil
+    let summary = enrolled && !safeMode && !showsPause ? summary() : nil
+    return careLine(
+      enrolled: enrolled, hours: hours, summary: summary, safeMode: safeMode,
+      suspended: suspended, pausedUntil: pausedUntil,
+      now: now, calendar: calendar, locale: locale)
+  }
+
+  /// A suspension outranks the user's pause, as it does in the engine, so a
+  /// mirrored display or one showing a checkup field gets the ordinary care
+  /// line rather than a pause that is not what holds dimming off. The line has
+  /// no room for the suspension's reason; the display's OLED Care page states it.
   /// The paused form stands alone because it is the one thing the row has to
   /// say, and with the hours beside it the widest end time no longer fit one
   /// line (`PanelSizingTests` pins the width). The hours return with the dimming.
@@ -831,6 +888,7 @@ private struct DisplayHeaderRow: View {
 
   @State private var isHovering = false
   @State private var isCareHovering = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   /// Reads the state, not the `hdrMode` pref: the two diverge the moment HDR is
   /// toggled in System Settings, and the badge beside this button reads state,
@@ -869,6 +927,7 @@ private struct DisplayHeaderRow: View {
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .rotationEffect(.degrees(careIsExpanded ? 180 : 0))
+                .animation(Motion.disclosure(reduceMotion: reduceMotion), value: careIsExpanded)
             }
             .contentShape(Rectangle())
           }
@@ -1034,14 +1093,20 @@ private struct FooterIconButtonStyle: ButtonStyle {
 }
 
 /// An end time short enough for a one-line panel row: the time alone today,
-/// "tomorrow", a weekday within the week, a month and day further out. Never a
-/// year: a deadline is at most a year away, so the month and day already name
-/// one date.
+/// "tomorrow", a weekday within the week, a month and day further out, and the
+/// year only where a deadline a year out would otherwise read as today's date.
+///
+/// Names are English whatever the system language, because the app ships in
+/// English only and the words around them are English; only the 12- or 24-hour
+/// clock follows the person's own locale.
 enum CompactEndTimeText {
   static func string(
     _ deadline: Date, now: Date = Date(), calendar: Calendar = .current, locale: Locale = .current
   ) -> String {
-    var style = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+    var names = Locale.Components(locale: Locale(identifier: "en_US"))
+    names.hourCycle = locale.hourCycle
+    var style = Date.FormatStyle(
+      locale: Locale(components: names), calendar: calendar, timeZone: calendar.timeZone)
     let time = deadline.formatted(style.hour().minute())
     let days = calendar.dateComponents(
       [.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: deadline)
@@ -1054,6 +1119,9 @@ enum CompactEndTimeText {
       return "\(deadline.formatted(style)), \(time)"
     default:
       style = style.month(.abbreviated).day()
+      let sameDate = calendar.dateComponents([.month, .day], from: deadline)
+        == calendar.dateComponents([.month, .day], from: now)
+      if sameDate { style = style.year() }
       return "\(deadline.formatted(style)), \(time)"
     }
   }

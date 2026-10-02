@@ -144,7 +144,9 @@ enum DisplayModeCopy {
   /// are read inconsistently. Same statement, said out loud.
   static func spokenAchievedGeometry(_ commit: DisplayConfigError.UnhonouredCommit) -> String {
     if let timing = commit.scanoutTiming {
-      return "The display took \(timing.width) by \(timing.height) pixels at \(refresh(timing.refreshHz))."
+      let spoken = ModeSpeech.spoken(
+        logicalWidth: timing.width, logicalHeight: timing.height, refreshHz: timing.refreshHz)
+      return "The display took \(spoken)."
     }
     guard let achieved = commit.achieved else { return unreadableAchievedGeometry() }
     let spoken = ModeSpeech.spoken(
@@ -249,7 +251,21 @@ enum DisplayModeCopy {
     case let .failed(error):
       error.didCommit && error.unhonouredCommit?.fallbackRestored != true
         ? "Another display: \(diagnostic(error))" : diagnostic(error)
-    case let .blocked(claimant): "Held by \(claimant.rawValue)"
+    case let .blocked(claimant): "Held by \(heldBy(claimant))"
+    }
+  }
+
+  /// A plain phrase for the gate's holder: the claimant's raw value is an
+  /// internal name and would put `settingsReset` on screen.
+  static func heldBy(_ claimant: ReconfigurationClaimant) -> String {
+    switch claimant {
+    case .displayModes: "a resolution change"
+    case .mirroring: "a mirroring change"
+    case .rotation: "a rotation"
+    case .arrangement: "an arrangement change"
+    case .hdr: "an HDR switch"
+    case .checkup: "a display checkup"
+    case .settingsReset: "a settings reset"
     }
   }
 

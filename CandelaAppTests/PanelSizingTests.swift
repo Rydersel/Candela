@@ -57,9 +57,8 @@ struct PanelSizingTests {
     let discovery = ScriptedDiscovery([(id: 7, key: "short-panel-sizing", name: "Single Display")])
     let model = TestFixtures.appModel(discovery: discovery)
     await model.refresh()
-    _ = NSApplication.shared
-    (NSApp as NSObject).accessibilitySetValue(true,
-      forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+    EnhancedAccessibility.enable()
+    defer { EnhancedAccessibility.disable() }
     let host = PanelHostingView(rootView: PanelView(maximumHeight: 700).environment(model))
     host.setFrameSize(host.fittingSize)
     let window = mount(host)
@@ -93,9 +92,8 @@ struct PanelSizingTests {
     let model = TestFixtures.appModel(discovery: ScriptedDiscovery([
       (id: 7, key: "stale-host-proposal", name: "Single Display")]))
     await model.refresh()
-    _ = NSApplication.shared
-    (NSApp as NSObject).accessibilitySetValue(true,
-      forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+    EnhancedAccessibility.enable()
+    defer { EnhancedAccessibility.disable() }
     // A plain host deliberately keeps its old frame, reproducing the interval
     // between SwiftUI's state change and the native menu window's resize.
     let host = NSHostingView(rootView: PanelView(maximumHeight: 700).environment(model))
@@ -147,9 +145,8 @@ struct PanelSizingTests {
     let model = TestFixtures.appModel(discovery: ScriptedDiscovery(withExternal ? [
       (id: 7, key: "native-disclosure-sizing", name: "Single Display")] : []))
     await model.refresh()
-    _ = NSApplication.shared
-    (NSApp as NSObject).accessibilitySetValue(true,
-      forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+    EnhancedAccessibility.enable()
+    defer { EnhancedAccessibility.disable() }
     #expect(model.accessibility.isWarningWarranted == withBanner)
     let host = PanelHostingView(rootView: PanelRoot(model: model, updater: nil, maximumHeight: 700))
     host.configureDisclosures()
@@ -238,7 +235,7 @@ struct PanelSizingTests {
           result.samplePinnedControls(nodes: accessibilityNodes(host))
           guard Date().timeIntervalSince(result.phaseStarted!) >= 0.35 else { return }
           guard let custom = accessibilityNodes(host).first(where: {
-            ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake, Custom end time…"
+            ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake, Custom End Time…"
           }) else {
             result.error = "The expanded menu did not publish its custom end-time action"
             result.didCheck = true
@@ -358,9 +355,8 @@ struct PanelSizingTests {
   /// The column is measured from the laid-out row, not assumed.
   @Test func theWidestKeepAwakeLabelFitsOneLine() async throws {
     let model = TestFixtures.appModel()
-    _ = NSApplication.shared
-    (NSApp as NSObject).accessibilitySetValue(true,
-      forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+    EnhancedAccessibility.enable()
+    defer { EnhancedAccessibility.disable() }
     let host = PanelHostingView(rootView: PanelView(maximumHeight: 700).environment(model))
     host.setFrameSize(host.fittingSize)
     let window = mount(host)
@@ -395,9 +391,8 @@ struct PanelSizingTests {
     let name = "Paused Width"
     let model = TestFixtures.appModel(discovery: ScriptedDiscovery([(id: 7, key: key, name: name)]))
     await model.refresh()
-    _ = NSApplication.shared
-    (NSApp as NSObject).accessibilitySetValue(true,
-      forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+    EnhancedAccessibility.enable()
+    defer { EnhancedAccessibility.disable() }
     let host = PanelHostingView(rootView: PanelView(maximumHeight: 700).environment(model))
     host.setFrameSize(host.fittingSize)
     let window = mount(host)
@@ -449,9 +444,8 @@ struct PanelSizingTests {
 
   @Test func theOpenedKeepAwakeRowPublishesOneSpokenSlider() async throws {
     let model = TestFixtures.appModel()
-    _ = NSApplication.shared
-    (NSApp as NSObject).accessibilitySetValue(true,
-      forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+    EnhancedAccessibility.enable()
+    defer { EnhancedAccessibility.disable() }
     let host = PanelHostingView(rootView: PanelView(maximumHeight: 700).environment(model))
     host.setFrameSize(host.fittingSize)
     let window = mount(host)
@@ -476,6 +470,71 @@ struct PanelSizingTests {
     #expect((sliders.first?.object.accessibilityValueDescription?() ?? nil)
       == KeepAwakeDuration.untilTurnedOff.title)
     #expect(!model.keepAwake.isOn, "Opening the duration choices must not start a hold")
+  }
+
+  // MARK: - The care disclosure
+
+  private func carePanel(
+    enrolled: Bool, safeMode: Bool, paused: Bool = false
+  ) async throws -> (nodes: () -> [Node], host: NSView, model: AppModel, close: () -> Void) {
+    let key = "care-disclosure-\(UUID().uuidString)"
+    if enrolled { VolatilePrefs.set(["oledCareEnrolled.\(key)": true]) }
+    let model = TestFixtures.appModel(
+      discovery: ScriptedDiscovery([(id: 7, key: key, name: Self.careName)]), safeMode: safeMode)
+    await model.refresh()
+    if paused { model.oledCare.pauseDimming(for: key, duration: 15 * 60) }
+    let host = PanelHostingView(rootView: PanelView(maximumHeight: 700).environment(model))
+    host.setFrameSize(host.fittingSize)
+    let window = mount(host)
+    try await Task.sleep(for: .milliseconds(150))
+    host.layoutSubtreeIfNeeded()
+    return ({ self.accessibilityNodes(host) }, host, model, {
+      model.oledCare.resumeDimming(for: key)
+      VolatilePrefs.remove(["oledCareEnrolled.\(key)"])
+      window.contentView = nil
+      window.close()
+    })
+  }
+
+  private static let careName = "Care Rows"
+
+  private static func labels(_ nodes: [Node]) -> Set<String> {
+    Set(nodes.compactMap { $0.object.accessibilityLabel?() ?? nil })
+  }
+
+  @Test(arguments: [false, true])
+  func anEnrolledDisplaysCareLineOpensToItsPauseRows(paused: Bool) async throws {
+    EnhancedAccessibility.enable()
+    defer { EnhancedAccessibility.disable() }
+    let panel = try await carePanel(enrolled: true, safeMode: false, paused: paused)
+    defer { panel.close() }
+    let rows = PanelView.careActions(enrolled: true, safeMode: false, paused: paused)
+      .map { "\(Self.careName), \($0.title)" }
+    #expect(Self.labels(panel.nodes()).isDisjoint(with: rows), "Closed, the rows are absent")
+    let disclosure = try #require(panel.nodes().first {
+      ($0.object.accessibilityLabel?() ?? nil) == "\(Self.careName) dimming controls"
+    })
+    #expect(disclosure.object.accessibilityPerformPress?() == true)
+    try await Task.sleep(for: .milliseconds(300))
+    panel.host.setFrameSize(panel.host.fittingSize)
+    panel.host.layoutSubtreeIfNeeded()
+    let open = Self.labels(panel.nodes())
+    for row in rows { #expect(open.contains(row), "\(row) is missing") }
+    #expect(open.contains("\(Self.careName), Resume Now") == paused)
+  }
+
+  /// No disclosure where there is no dimming to pause. Safe Mode leaves the
+  /// line itself to the hours, which a fresh key has none of.
+  @Test(arguments: [(false, false), (true, true)])
+  func theCareLineIsNotAControlWhereNothingDims(enrolled: Bool, safeMode: Bool) async throws {
+    EnhancedAccessibility.enable()
+    defer { EnhancedAccessibility.disable() }
+    let panel = try await carePanel(enrolled: enrolled, safeMode: safeMode)
+    defer { panel.close() }
+    let labels = Self.labels(panel.nodes())
+    #expect(!labels.contains("\(Self.careName) dimming controls"))
+    #expect(!labels.contains { $0.hasPrefix("\(Self.careName), Pause Dimming") })
+    #expect(labels.contains("\(Self.careName) brightness"), "The display's section rendered")
   }
 
   @Test func aShortPanelKeepsItsNaturalHeight() {
@@ -504,9 +563,8 @@ struct PanelSizingTests {
   @Test(arguments: [false, true])
   func scrollingLeavesFooterAndPersistentControlsInPlace(withReminder: Bool) async throws {
     let model = await populatedModel()
-    _ = NSApplication.shared
-    (NSApp as NSObject).accessibilitySetValue(
-      true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+    EnhancedAccessibility.enable()
+    defer { EnhancedAccessibility.disable() }
     let reminder = UpdateReminderState()
     let host = PanelHostingView(rootView: PanelView(maximumHeight: 400)
       .environment(model).environment(reminder))
@@ -626,5 +684,21 @@ struct PanelSizingTests {
     change(&domain)
     defaults.removeVolatileDomain(forName: name)
     defaults.setVolatileDomain(domain, forName: name)
+  }
+}
+
+/// Set so SwiftUI publishes its accessibility tree to the in-process walks
+/// these tests make. It is process-wide, and left on it changes how every later
+/// test's hosting views behave, so each site turns it off again in a `defer`.
+@MainActor enum EnhancedAccessibility {
+  private static let attribute = NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface")
+
+  static func enable() {
+    _ = NSApplication.shared
+    (NSApp as NSObject).accessibilitySetValue(true, forAttribute: attribute)
+  }
+
+  static func disable() {
+    (NSApp as NSObject).accessibilitySetValue(false, forAttribute: attribute)
   }
 }

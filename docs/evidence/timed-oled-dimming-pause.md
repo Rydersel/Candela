@@ -20,13 +20,10 @@ resume. Obsolete captures are rejected without claiming the replacement
 reservation. Engine tests cover idle, blackout, lock and unfocused dimming,
 and a fresh idle interval after a pause expires during sleep.
 
-The initial app run executed 807 tests and reported 30 expected issues
-against inert pause APIs. The initial combined engine run executed 2,691 tests
-and reported seven expected OLED issues across the two new engine tests.
-After implementation, the integrated host-free run executed 814 tests. All
-OLED pause tests passed; the run's nine failures were expected assertions
-against the separate HDR shortcut stubs. Final integrated suite results are
-recorded in the release plan.
+All of these pass in the host-free app suite and the engine suite. The panel's
+care line, the OLED Care page's Status line and its pause row are derived in
+tested functions, which pin that a mirror or checkup suspension outranks a
+pause on both surfaces.
 
 ## Manual verification still required
 
