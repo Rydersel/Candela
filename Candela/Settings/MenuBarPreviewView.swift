@@ -412,7 +412,8 @@ struct MenuBarPreviewView: View {
     // The real HUD's muted anatomy: slashed speakers, empty bar.
     let shownKind: HUDType = kind == .volume && subject.muted ? .volumeMuted : kind
     switch prefs.hudStyle {
-    case .system, .segments:
+    case .system, .segments, .classic, .classicCentered, .sequoia, .vertical, .ring,
+         .islandDrop, .islandEdge, .islandEdgeCapsules:  // Drawn properly by the style work that follows.
       VStack(alignment: .leading, spacing: 4) {
         Text(subject.name)
           .font(.system(size: 12 * Self.s, weight: .semibold))

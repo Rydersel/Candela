@@ -313,6 +313,7 @@ struct AppMenuPane: View {
     case .system: "Match macOS"
     case .segments: "Segmented"
     case .compact: "Compact"
+    default: "Match macOS"  // Drawn properly by the style work that follows.
     }
   }
 

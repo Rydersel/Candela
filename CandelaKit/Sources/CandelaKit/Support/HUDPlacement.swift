@@ -11,6 +11,20 @@ public enum HUDPosition: Int, Sendable, CaseIterable {
   case topCenter = 2
 }
 
+/// Where a style's window sits: at the user's chosen position, or at one home
+/// the style owns. Fixed homes exist because some looks belong somewhere: the
+/// Classic box sat at the bottom of every Mac that drew it, and the Island is
+/// the notch.
+public enum HUDAnchor: Equatable, Sendable {
+  case position(HUDPosition)
+  /// Horizontally centred, `inset` points above the bottom edge of the full frame.
+  case bottomCenter(inset: CGFloat)
+  case center
+  /// Flush with the top edge, centred on the FULL frame: the notch is centred on
+  /// the glass, not on the visible frame.
+  case topCenter
+}
+
 /// The pill's origin on one display: screen geometry in, a point out.
 ///
 /// Pure and in the Kit like `HUDGrouping`, because rotation needs

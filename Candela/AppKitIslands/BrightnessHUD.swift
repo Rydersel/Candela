@@ -105,6 +105,12 @@ final class BrightnessHUD: BrightnessHUDPresenting {
         self.margin = 14
         self.barY = 16
         self.hasName = false
+      default:  // Drawn properly by the style work that follows.
+        self.size = NSSize(width: 314, height: 62)
+        self.cornerRadius = 22
+        self.margin = 18
+        self.barY = 19
+        self.hasName = true
       }
     }
   }
@@ -331,7 +337,8 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     var tickBoxes: [NSBox] = []
     var segmentBoxes: [NSBox] = []
     switch style {
-    case .system, .compact:
+    case .system, .compact, .classic, .classicCentered, .sequoia, .vertical, .ring,
+         .islandDrop, .islandEdge, .islandEdgeCapsules:  // Drawn properly by the style work that follows.
       let barBackground = NSBox(frame: NSRect(x: metrics.barX, y: metrics.barY, width: metrics.barWidth, height: Metrics.barHeight))
       barBackground.boxType = .custom
       // DIVERGENCE from the fork's `borderType = .noBorder`, which is deprecated
