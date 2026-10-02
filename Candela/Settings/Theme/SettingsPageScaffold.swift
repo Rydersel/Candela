@@ -22,6 +22,7 @@ struct SettingsPageScaffold<Content: View>: View {
   /// re-ran its body when its page re-rendered, every later one skipped it. A
   /// page whose closure reads plain defaults then kept showing stale values.
   /// The plain form needs nothing, because its content is built by the parent.
+  /// Never read: its inequality between initialisations is the whole point.
   private let rebuild: UUID?
 
   init(@ViewBuilder content: () -> Content) {

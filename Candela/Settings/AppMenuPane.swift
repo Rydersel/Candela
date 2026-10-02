@@ -80,14 +80,17 @@ struct AppMenuPane: View {
   /// widgets, not this window's look; only the frame is this window's.
   private func preview(proxy: ScrollViewProxy) -> some View {
     VStack(alignment: .leading, spacing: 8) {
-      MenuBarPreviewView { target in
-        withAnimation {
-          switch target {
-          case .sliders: proxy.scrollTo(Self.slidersSectionID, anchor: .top)
-          case .indicators: proxy.scrollTo(Self.indicatorsSectionID, anchor: .top)
+      MenuBarPreviewView(
+        jump: { target in
+          withAnimation {
+            switch target {
+            case .sliders: proxy.scrollTo(Self.slidersSectionID, anchor: .top)
+            case .indicators: proxy.scrollTo(Self.indicatorsSectionID, anchor: .top)
+            }
           }
-        }
-      }
+        },
+        prefs: prefs
+      )
       SettingsCaption("A preview of the current settings; the controls below change it live. Click a widget to jump to its settings.")
     }
   }
