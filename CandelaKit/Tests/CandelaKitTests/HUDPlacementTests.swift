@@ -178,4 +178,36 @@ struct HUDPlacementTests {
     #expect(top.y == CGFloat(-1200 + 3840 - 98))
     #expect(top.x == CGFloat(3440 + 750))
   }
+
+  /// The Vertical bar at either side of a laptop screen: 20 in from the edge,
+  /// centred on the height. 584.5 - 90 is 494.5, which rounds away from zero.
+  @Test func sideCenterSitsAtTheMiddleOfEitherEdge() {
+    let bar = CGSize(width: 56, height: 180)
+    let screen = CGRect(x: 0, y: 0, width: 1800, height: 1169)
+    #expect(origin(.sideCenter(leading: true, margin: 20), size: bar, frame: screen) == CGPoint(x: 20, y: 495))
+    #expect(origin(.sideCenter(leading: false, margin: 20), size: bar, frame: screen) == CGPoint(x: 1724, y: 495))
+  }
+
+  /// The edge comes from the visible frame, so a pinned left Dock pushes the bar
+  /// clear of it; the height still comes from the full frame.
+  @Test func sideCenterTakesItsEdgeFromTheVisibleFrame() {
+    let bar = CGSize(width: 56, height: 180)
+    let screen = CGRect(x: 0, y: 0, width: 1800, height: 1169)
+    let dockLeft = CGRect(x: 90, y: 0, width: 1710, height: 1100)
+    #expect(origin(.sideCenter(leading: true, margin: 20), size: bar, frame: screen, visible: dockLeft)
+      == CGPoint(x: 110, y: 495))
+  }
+
+  /// The Dell at 270 degrees: both sides land inside the rotated frame, at the
+  /// middle of ITS height.
+  @Test func sideCenterFollowsARotatedFrame() {
+    let portrait = CGRect(x: 3440, y: -1200, width: 2160, height: 3840)
+    let bar = CGSize(width: 56, height: 180)
+    let left = origin(.sideCenter(leading: true, margin: 20), size: bar, frame: portrait)
+    let right = origin(.sideCenter(leading: false, margin: 20), size: bar, frame: portrait)
+    #expect(left == CGPoint(x: 3460, y: 630))
+    #expect(right == CGPoint(x: 5524, y: 630))
+    #expect(portrait.contains(CGRect(origin: left, size: bar)))
+    #expect(portrait.contains(CGRect(origin: right, size: bar)))
+  }
 }

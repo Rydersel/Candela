@@ -186,7 +186,7 @@ final class PillHUDRenderer: HUDRenderer {
     // tested. `screen.frame` is already the EFFECTIVE geometry, so a
     // display mounted at 270° needs nothing special here.
     let origin = HUDPlacement.origin(
-      .position(position), size: metrics.size, frame: screen.frame, visibleFrame: screen.visibleFrame,
+      style.anchor(for: position), size: metrics.size, frame: screen.frame, visibleFrame: screen.visibleFrame,
       topInset: screen.menuBarAllowance + Self.menuBarClearance, margin: Self.screenMargin)
     return CGRect(origin: origin, size: metrics.size)
   }

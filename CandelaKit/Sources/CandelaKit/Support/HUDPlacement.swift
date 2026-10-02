@@ -23,6 +23,10 @@ public enum HUDAnchor: Equatable, Sendable {
   /// Flush with the top edge, centred on the FULL frame: the notch is centred on
   /// the glass, not on the visible frame.
   case topEdge
+  /// Against the left or right edge of the visible frame, centred vertically on
+  /// the FULL frame. A tall bar reads as the screen's own gauge at the side and
+  /// would hang awkwardly off a top corner.
+  case sideCenter(leading: Bool, margin: CGFloat)
 }
 
 /// The pill's origin on one display: screen geometry in, a point out.
@@ -68,6 +72,10 @@ public enum HUDPlacement {
   ///
   /// Fixed homes use the full frame throughout, because a Dock has never moved the
   /// Classic box and the notch is centred on the glass.
+  ///
+  /// The side anchor takes its edge from the visible frame, so a pinned side Dock
+  /// never sits on top of the bar, and its height from the full frame, where the
+  /// middle of the glass is.
   public static func origin(
     _ anchor: HUDAnchor,
     size: CGSize,
@@ -95,9 +103,12 @@ public enum HUDPlacement {
     case .topEdge:
       x = frame.midX - size.width / 2
       y = frame.maxY - size.height
+    case .sideCenter(let leading, let sideMargin):
+      x = leading ? visibleFrame.minX + sideMargin : visibleFrame.maxX - size.width - sideMargin
+      y = frame.midY - size.height / 2
     }
     let horizontalBounds: CGRect = switch anchor {
-    case .position: visibleFrame
+    case .position, .sideCenter: visibleFrame
     default: frame
     }
     // Whole points: a centred pill on an odd-width screen otherwise starts on a

@@ -27,7 +27,7 @@ final class VerticalHUDRenderer: HUDRenderer {
 
   func frame(on screen: NSScreen, position: HUDPosition) -> CGRect {
     let origin = HUDPlacement.origin(
-      .position(position), size: VerticalPill.size, frame: screen.frame, visibleFrame: screen.visibleFrame,
+      style.anchor(for: position), size: VerticalPill.size, frame: screen.frame, visibleFrame: screen.visibleFrame,
       topInset: screen.menuBarAllowance + PillHUDRenderer.menuBarClearance, margin: PillHUDRenderer.screenMargin)
     return CGRect(origin: origin, size: VerticalPill.size)
   }

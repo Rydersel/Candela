@@ -48,6 +48,14 @@ public enum HUDStyle: Int, Sendable, CaseIterable {
     }
   }
 
+  /// Where this style's window goes for a chosen position. A vertical bar has
+  /// no centre side, so Top center joins Top right on the right edge.
+  public func anchor(for position: HUDPosition) -> HUDAnchor {
+    if let fixedAnchor { return fixedAnchor }
+    if self == .vertical { return .sideCenter(leading: position == .topLeft, margin: 20) }
+    return .position(position)
+  }
+
   public var isIsland: Bool {
     switch self {
     case .islandDrop, .islandEdge, .islandEdgeCapsules: true

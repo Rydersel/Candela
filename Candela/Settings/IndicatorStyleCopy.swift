@@ -29,7 +29,16 @@ enum IndicatorStyleCopy {
   /// Each row's caption describes ITS OWN control: it is republished as the
   /// control's accessibility hint.
   static func positionCaption(for style: HUDStyle, kind: Kind) -> String {
-    switch style.fixedAnchor {
+    // The rows still apply to Vertical, but they pick a side rather than a corner.
+    if style == .vertical {
+      return switch kind {
+      case .brightness: "Left or right picks the side; Vertical sits at its middle. Contrast uses this position too."
+      case .volume:
+        "Left or right picks the side; Vertical sits at its middle. Mute uses this position too. "
+          + "The indicator appears on the display the keys act on."
+      }
+    }
+    return switch style.fixedAnchor {
     case nil:
       switch kind {
       case .brightness: "Contrast uses this position too."
@@ -38,7 +47,7 @@ enum IndicatorStyleCopy {
     case .bottomCenter: "\(label(for: style)) sits where macOS put it."
     case .center: "This style sits at the center of the screen."
     case .topEdge: "The Island lives on the notch."
-    case .position: positionCaption(for: .system, kind: kind)
+    case .position, .sideCenter: positionCaption(for: .system, kind: kind)
     }
   }
 }

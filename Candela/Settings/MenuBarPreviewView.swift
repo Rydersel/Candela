@@ -83,6 +83,7 @@ struct MenuBarPreviewView: View {
       anchorColumn(.topLeft, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
       anchorColumn(.topCenter, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
       anchorColumn(.topRight, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
+      sideIndicatorLayer(externals: externals)
     }
     // The system-appearance exception covers the INK as well as the grounds: every adaptive color inside a
     // widget resolves against the environment's color scheme, and this window
@@ -114,8 +115,9 @@ struct MenuBarPreviewView: View {
   /// The pills anchored at one position, in stack order (brightness
   /// above volume when they share an anchor).
   private func pillKinds(at position: HUDPosition) -> [HUDType] {
-    // A fixed style is drawn at its home below, not in the columns.
-    if prefs.hudStyle.fixedAnchor != nil { return [] }
+    // A fixed style is drawn at its home below and a side-anchored one by the
+    // side layer; only the corner positions belong in the columns.
+    guard case .position = prefs.hudStyle.anchor(for: position) else { return [] }
     var kinds: [HUDType] = []
     if prefs.hudPositionBrightness == position { kinds.append(.brightness) }
     if prefs.hudPositionVolume == position { kinds.append(.volume) }
@@ -442,16 +444,6 @@ struct MenuBarPreviewView: View {
         .padding(.horizontal, 14 * Self.s)
         .frame(width: 220 * Self.s, height: 36 * Self.s)
         .modifier(PillChrome(radius: 18 * Self.s, ground: pillGround, hairline: pillHairline))
-    case .vertical:
-      ZStack(alignment: .bottom) {
-        Rectangle().fill(.primary.opacity(0.9))
-          .frame(height: VerticalPill.fillHeight(value: subject.value) * Self.s)
-        Image(systemName: shownKind.rightSymbolName)
-          .font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
-          .padding(.bottom, 9)
-      }
-      .frame(width: VerticalPill.size.width * Self.s, height: VerticalPill.size.height * Self.s)
-      .modifier(PillChrome(radius: VerticalPill.cornerRadius * Self.s, ground: pillGround, hairline: pillHairline))
     case .ring:
       ZStack {
         Circle().stroke(.quaternary, lineWidth: 3).frame(width: 40, height: 40)
@@ -461,8 +453,66 @@ struct MenuBarPreviewView: View {
       }
       .frame(width: RingDial.size.width * Self.s, height: RingDial.size.height * Self.s)
       .modifier(PillChrome(radius: RingDial.cornerRadius * Self.s, ground: pillGround, hairline: pillHairline))
+    case .vertical:
+      EmptyView()  // drawn by the side layer
     case .classic, .classicCentered, .sequoia, .islandDrop, .islandEdge, .islandEdgeCapsules:
       EmptyView()  // drawn by the fixed layer
+    }
+  }
+
+  private func verticalMiniature(kind: HUDType, externals: [AppModel.DisplayState]) -> some View {
+    let subject = pillSubject(kind: kind, externals: externals)
+    let shownKind: HUDType = kind == .volume && subject.muted ? .volumeMuted : kind
+    return ZStack(alignment: .bottom) {
+      Rectangle().fill(.primary.opacity(0.9))
+        .frame(height: VerticalPill.fillHeight(value: subject.value) * Self.s)
+      Image(systemName: shownKind.rightSymbolName)
+        .font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+        .padding(.bottom, 9)
+    }
+    .frame(width: VerticalPill.size.width * Self.s, height: VerticalPill.size.height * Self.s)
+    .modifier(PillChrome(radius: VerticalPill.cornerRadius * Self.s, ground: pillGround, hairline: pillHairline))
+  }
+
+  // MARK: - Side miniatures
+
+  /// The kinds a side-anchored style puts on one edge, brightness nearer the edge
+  /// when both share it. The side comes from the Kit's rule so the miniature
+  /// cannot disagree with the real window.
+  private func sideKinds(leading: Bool) -> [HUDType] {
+    let style = prefs.hudStyle
+    func onThisSide(_ position: HUDPosition) -> Bool {
+      if case .sideCenter(let isLeading, _) = style.anchor(for: position) { return isLeading == leading }
+      return false
+    }
+    var kinds: [HUDType] = []
+    if onThisSide(prefs.hudPositionBrightness) { kinds.append(.brightness) }
+    if onThisSide(prefs.hudPositionVolume) { kinds.append(.volume) }
+    return leading ? kinds : kinds.reversed()
+  }
+
+  private func sideIndicatorLayer(externals: [AppModel.DisplayState]) -> some View {
+    ZStack {
+      sideColumn(leading: true, externals: externals)
+      sideColumn(leading: false, externals: externals)
+    }
+  }
+
+  @ViewBuilder
+  private func sideColumn(leading: Bool, externals: [AppModel.DisplayState]) -> some View {
+    let kinds = sideKinds(leading: leading)
+    if !kinds.isEmpty {
+      HStack(spacing: 6) {
+        ForEach(kinds, id: \.leftSymbolName) { kind in
+          LiftButton(label: sideAccessibilityLabel(kind: kind, leading: leading)) {
+            jump(.indicators)
+          } content: {
+            verticalMiniature(kind: kind, externals: externals)
+          }
+        }
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: leading ? .leading : .trailing)
+      .padding(leading ? .leading : .trailing, 7)
     }
   }
 
@@ -473,7 +523,7 @@ struct MenuBarPreviewView: View {
   @ViewBuilder
   private func fixedIndicatorLayer(externals: [AppModel.DisplayState]) -> some View {
     switch prefs.hudStyle.fixedAnchor {
-    case nil, .position:
+    case nil, .position, .sideCenter:
       EmptyView()
     case .bottomCenter(let inset):
       HStack(spacing: 6) {
@@ -683,13 +733,21 @@ struct MenuBarPreviewView: View {
   // MARK: - Accessibility
 
   private func pillAccessibilityLabel(kind: HUDType, position: HUDPosition) -> String {
-    let kindName = kind == .volume ? "volume" : "brightness"
     let positionName: String = switch position {
     case .topLeft: "top left"
     case .topCenter: "top center"
     case .topRight: "top right"
     }
-    return "\(kindName.capitalized) indicator preview at the \(positionName) of the screen; opens the On-Screen Indicators settings below"
+    return indicatorAccessibilityLabel(kind: kind, place: "the \(positionName) of the screen")
+  }
+
+  private func sideAccessibilityLabel(kind: HUDType, leading: Bool) -> String {
+    indicatorAccessibilityLabel(kind: kind, place: "the middle of the screen's \(leading ? "left" : "right") edge")
+  }
+
+  private func indicatorAccessibilityLabel(kind: HUDType, place: String) -> String {
+    let kindName = kind == .volume ? "Volume" : "Brightness"
+    return "\(kindName) indicator preview at \(place); opens the On-Screen Indicators settings below"
   }
 }
 

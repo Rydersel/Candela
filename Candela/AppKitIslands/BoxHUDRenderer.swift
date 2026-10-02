@@ -96,7 +96,7 @@ final class BoxHUDRenderer: HUDRenderer {
   func frame(on screen: NSScreen, position: HUDPosition) -> CGRect {
     let size = contentView.frame.size
     let origin = HUDPlacement.origin(
-      style.fixedAnchor ?? .position(position), size: size, frame: screen.frame,
+      style.anchor(for: position), size: size, frame: screen.frame,
       visibleFrame: screen.visibleFrame, topInset: screen.menuBarAllowance, margin: 20)
     return CGRect(origin: origin, size: size)
   }

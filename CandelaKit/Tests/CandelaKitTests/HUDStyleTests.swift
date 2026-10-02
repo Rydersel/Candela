@@ -40,4 +40,18 @@ struct HUDStyleTests {
     }
     #expect(!HUDStyle.classic.isIsland)
   }
+
+  /// Vertical goes to a side: Top left is the left edge, and Top center joins
+  /// Top right on the right edge because a vertical bar has no centre side.
+  @Test func anchorForAPositionFollowsTheStyle() {
+    #expect(HUDStyle.vertical.anchor(for: .topLeft) == .sideCenter(leading: true, margin: 20))
+    #expect(HUDStyle.vertical.anchor(for: .topCenter) == .sideCenter(leading: false, margin: 20))
+    #expect(HUDStyle.vertical.anchor(for: .topRight) == .sideCenter(leading: false, margin: 20))
+    #expect(HUDStyle.classic.anchor(for: .topLeft) == .bottomCenter(inset: 140))
+    #expect(HUDStyle.islandEdge.anchor(for: .topRight) == .topEdge)
+    for position in HUDPosition.allCases {
+      #expect(HUDStyle.system.anchor(for: position) == .position(position), "\(position)")
+      #expect(HUDStyle.ring.anchor(for: position) == .position(position), "\(position)")
+    }
+  }
 }

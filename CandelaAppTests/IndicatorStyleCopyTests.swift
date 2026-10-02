@@ -26,4 +26,15 @@ struct IndicatorStyleCopyTests {
     #expect(IndicatorStyleCopy.positionRowsApply(to: .vertical))
     #expect(!IndicatorStyleCopy.positionRowsApply(to: .islandEdge))
   }
+
+  /// Vertical keeps the position rows, but they choose a side: Top left is the
+  /// left edge and both other positions the right.
+  @Test func verticalCaptionsSayTheRowsPickASide() {
+    #expect(IndicatorStyleCopy.positionRowsApply(to: .vertical))
+    #expect(IndicatorStyleCopy.positionCaption(for: .vertical, kind: .brightness)
+      == "Left or right picks the side; Vertical sits at its middle. Contrast uses this position too.")
+    #expect(IndicatorStyleCopy.positionCaption(for: .vertical, kind: .volume)
+      == "Left or right picks the side; Vertical sits at its middle. Mute uses this position too. "
+        + "The indicator appears on the display the keys act on.")
+  }
 }
