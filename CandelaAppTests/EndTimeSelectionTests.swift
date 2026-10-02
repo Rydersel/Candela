@@ -116,4 +116,19 @@ struct EndTimeSelectionTests {
     available = true
     #expect(selection.confirm())
   }
+
+  @Test func aNewChoiceClearsARefusalSoLiveValidationShowsThrough() {
+    let now = Date(timeIntervalSince1970: 1_000)
+    var refusal: String? = "Wait for the settings reset to finish."
+    let selection = EndTimeSelection(currentDeadline: now.addingTimeInterval(600), now: { now }) { _ in
+      refusal
+    }
+    #expect(!selection.confirm())
+    #expect(selection.errorMessage == "Wait for the settings reset to finish.")
+    selection.deadline = now.addingTimeInterval(900)
+    #expect(selection.errorMessage == nil)
+    #expect(selection.canConfirm)
+    refusal = nil
+    #expect(selection.confirm())
+  }
 }

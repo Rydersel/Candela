@@ -4,7 +4,9 @@ import Observation
 
 @MainActor @Observable
 final class EndTimeSelection {
-  var deadline: Date
+  // A refused apply's error describes the moment it was refused; a new choice
+  // falls back to live validation rather than keeping a stale refusal.
+  var deadline: Date { didSet { errorMessage = nil } }
   private(set) var errorMessage: String?
   private var finished = false
   @ObservationIgnored private let now: () -> Date

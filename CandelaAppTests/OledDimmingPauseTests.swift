@@ -78,6 +78,8 @@ struct OledDimmingPauseTests {
   @Test func deadlinesAreIndependentReplaceableAndSessionOnly() {
     let clock = TimeSource()
     let coordinator = OledCareCoordinator(now: { clock.now })
+    let store = InMemoryDefaults()
+    coordinator.prefsDefaults = store
     coordinator.pauseDimming(for: "one", duration: 900)
     coordinator.pauseDimming(for: "two", duration: 3_600)
     #expect(coordinator.dimmingPauseDeadline(for: "one") == Date(timeIntervalSince1970: 1_900))
@@ -89,7 +91,8 @@ struct OledDimmingPauseTests {
     coordinator.resumeDimming(for: "two")
     #expect(coordinator.dimmingPauseDeadline(for: "two") == nil)
     #expect(coordinator.dimmingPauseDeadline(for: "one") != nil)
-    #expect(OledCareCoordinator().dimmingPauseDeadline(for: "one") == nil)
+    // Session-only: the pause wrote nothing to the store prefs persist in.
+    #expect(store.dictionaryRepresentation().isEmpty)
     clock.now = Date(timeIntervalSince1970: 4_700)
     #expect(coordinator.dimmingPauseDeadline(for: "one") == nil)
   }
@@ -206,6 +209,21 @@ struct OledDimmingPauseTests {
     #expect(paused.dimmingPaused)
     #expect(paused.lastAppliedAlpha == nil)
     #expect(care.dimStates[rig.key] == .active)
+  }
+
+  @Test func aPauseCannotBeSetWhileItsDisplayIsResetting() {
+    let clock = TimeSource()
+    let care = OledCareCoordinator(now: { clock.now })
+    let deadline = clock.now.addingTimeInterval(600)
+    care.beginDisplayReset("panel")
+    #expect(!care.pauseDimming(for: "panel", until: deadline))
+    care.pauseDimming(for: "panel", duration: 900)
+    #expect(care.dimmingPauseDeadline(for: "panel") == nil)
+    // Scoped to the display being reset.
+    #expect(care.pauseDimming(for: "other", until: deadline))
+    care.displayResetDidComplete("panel")
+    #expect(care.pauseDimming(for: "panel", until: deadline))
+    #expect(care.dimmingPauseDeadline(for: "panel") == deadline)
   }
 
   @Test func aPauseThatExpiresWhileDisconnectedResumesWithFreshIdleTime() {

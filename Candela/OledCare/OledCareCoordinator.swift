@@ -621,7 +621,10 @@ final class OledCareCoordinator: CheckupCareHolding {
 
   @discardableResult
   func pauseDimming(for key: String, until deadline: Date) -> Bool {
-    guard !resetting, TimedControlDeadline.isValid(deadline, now: now()) else { return false }
+    // A per-display reset clears the pause when it begins, so one set before it
+    // completes would outlive the reset meant to clear it.
+    guard !resetting, !resettingDisplays.contains(key),
+          TimedControlDeadline.isValid(deadline, now: now()) else { return false }
     dimmingPauseDeadlines[key] = deadline
     invalidateDimmingEvidence(for: key)
     guard var state = states[key] else { return true }
