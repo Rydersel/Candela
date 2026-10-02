@@ -674,6 +674,42 @@ struct CheckupFlowModelTests {
     #expect(releases == 2)
   }
 
+  /// A quick re-pick after Back must wait for the release still in flight
+  /// rather than be refused by it and end the run as incomplete.
+  @Test func aQuickRePickAfterBackWaitsForTheRelease() async {
+    let releasing = CheckupLegGate()
+    var env = environment(presenter: FakePresenter(), entry: entry())
+    var held = false
+    var acquires = 0
+    env.beginConfiguration = { _ in
+      guard !held else { return "Wait for the previous checkup to finish restoring the display." }
+      held = true
+      acquires += 1
+      return nil
+    }
+    env.endConfiguration = { await releasing.wait(); held = false }
+    let flow = CheckupFlowModel(environment: env)
+    await flow.advance()
+    flow.selectedDisplay = entry()
+    await flow.advance()
+    #expect(flow.page == .plan)
+
+    flow.back()
+    let repick = Task { await flow.advance() }
+    for _ in 0..<200 {
+      if await releasing.entered { break }
+      await Task.yield()
+    }
+    #expect(await releasing.entered)
+    await releasing.open()
+    await repick.value
+
+    #expect(flow.page == .plan, "the re-pick ran once the claim was back")
+    #expect(acquires == 2)
+    #expect(held)
+    flow.abandon(reason: "closed")
+  }
+
   /// A standing notice describes a run that is over, and the run being wired now
   /// reports its own outcome. No display is picked yet, so this is not about the
   /// same display twice.

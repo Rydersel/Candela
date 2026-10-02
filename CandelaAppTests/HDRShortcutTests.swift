@@ -6,6 +6,37 @@ import Testing
 
 @Suite("HDR shortcut") @MainActor
 struct HDRShortcutTests {
+  /// With a synthesized size engaged, the screen under the pointer is the
+  /// virtual master, and the panel the person is looking at mirrors it.
+  @Test func thePointersScreenMapsThroughAMirrorToThePhysicalPanel() {
+    let mirrors: (CGDirectDisplayID) -> CGDirectDisplayID = { $0 == 3 ? 79 : kCGNullDirectDisplay }
+    #expect(HDRShortcutAction.physicalDisplay(underScreen: 79, among: [1, 3], mirrorsDisplay: mirrors) == 3)
+    // A known display is its own target, mirrored or not.
+    #expect(HDRShortcutAction.physicalDisplay(underScreen: 3, among: [1, 3], mirrorsDisplay: mirrors) == 3)
+    #expect(HDRShortcutAction.physicalDisplay(underScreen: 1, among: [1, 3], mirrorsDisplay: mirrors) == 1)
+    // Nothing under the pointer, or a screen nothing mirrors, names no display.
+    #expect(HDRShortcutAction.physicalDisplay(underScreen: nil, among: [1, 3], mirrorsDisplay: mirrors) == nil)
+    #expect(HDRShortcutAction.physicalDisplay(underScreen: 80, among: [1, 3], mirrorsDisplay: mirrors) == nil)
+    // Two panels mirroring one surface: neither is THE display under the pointer.
+    let both: (CGDirectDisplayID) -> CGDirectDisplayID = { $0 == 3 || $0 == 4 ? 79 : kCGNullDirectDisplay }
+    #expect(HDRShortcutAction.physicalDisplay(underScreen: 79, among: [3, 4], mirrorsDisplay: both) == nil)
+  }
+
+  /// The mapped panel reaches the synthesized-size refusal, which the
+  /// pointer's own screen never could.
+  @Test func aShortcutOverASynthesizedSizeReachesItsRefusal() async {
+    let hdr = ShortcutHDR()
+    let state = TestFixtures.displayState(hdr: hdr)
+    await state.controller.noteHDRStateMayHaveChanged()
+    let master: CGDirectDisplayID = 79
+    let action = HDRShortcutAction(gate: .init(), target: { $0 == state.id ? state : nil },
+      isSynthesized: { $0 == state.id })
+    let mapped = HDRShortcutAction.physicalDisplay(underScreen: master, among: [state.id],
+      mirrorsDisplay: { $0 == state.id ? master : kCGNullDirectDisplay })
+    #expect(await action.toggle(on: mapped) == .refused(SynthesisCopy.hdrBlockedBySynthesizedSize))
+    #expect(await hdr.writes.isEmpty)
+  }
+
   @Test func aMissingPointerTargetDoesNotToggleAnotherDisplay() async {
     let hdr = ShortcutHDR()
     let state = TestFixtures.displayState(hdr: hdr)

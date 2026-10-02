@@ -106,7 +106,12 @@ public actor ModePreviewSession {
     if let outstanding, !displayStillMatches(outstanding.displayID, identity: outstanding.displayIdentity) {
       discard(displayID: outstanding.displayID)
       lastOutcome = .stale
-      return .failure(DisplayConfigError(cgErrorCode: CGError.invalidOperation.rawValue))
+      // A request for the same display ID was composed for hardware that is no
+      // longer there. One for another display is still valid, and failing it
+      // would only cost a second pick.
+      if outstanding.displayID == displayID {
+        return .failure(DisplayConfigError(cgErrorCode: CGError.invalidOperation.rawValue))
+      }
     }
     // An unknown identity would make every later identity check pass, so a
     // fallback could follow a reused display ID onto other hardware.
@@ -209,7 +214,9 @@ public actor ModePreviewSession {
   }
 
   /// Keep the original safe target when an unattended apply and its immediate
-  /// rollback both failed. It is recovery-only and cannot replace a live preview.
+  /// rollback both failed. It is recovery-only and cannot replace a live preview;
+  /// a caller refused for that reason holds the recovery until the preview
+  /// resolves (`DisplayModeCoordinator` queues it).
   @discardableResult
   public func retainRecovery(
     after commit: DisplayConfigError.UnhonouredCommit, previousMode: DisplayMode,

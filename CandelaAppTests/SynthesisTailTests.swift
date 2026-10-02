@@ -1,6 +1,7 @@
 import CandelaKit
 import CoreGraphics
 import Foundation
+import os
 import Testing
 
 /// The engage tail and the coordinator decisions around a synthesized size,
@@ -100,6 +101,35 @@ struct SynthesisTailTests {
     #expect(!result.isFailure, "\(result)")
     #expect(fixture.configurator.restores.first?.mode == twin)
     #expect(hdr.legs.isEmpty, "a landed re-time on its own target needs no bounce")
+    #expect(fixture.synthesis.pairings.count == 1)
+    #expect(await fixture.synthesis.disengageForModeChange(display))
+  }
+
+  /// The record can lag the re-time: a wrong timing that holds across the
+  /// short poll and gives way at the extra read is the previous timing still
+  /// landing, not a link the bounce has to renegotiate.
+  @Test func aLaggingTimingAfterALandedRetimeNeitherBouncesNorUnwinds() async throws {
+    let hdr = FakeSynthesisHDR()
+    let fixture = Fixture(hdr: hdr)
+    defer { fixture.forgetPrefs() }
+    let display = try fixture.configured(Self.panelID)
+    let stop = try firstStop(fixture)
+    let world = fixture.world
+    let own = ScanoutTiming(width: 3440, height: 1440, refreshHz: Fixture.nativeHz)
+    let wrong = ScanoutTiming(width: 1280, height: 1024, refreshHz: Fixture.nativeHz)
+    let readsAfterRetime = OSAllocatedUnfairLock(initialState: 0)
+    fixture.configurator.updatesCurrentModeOnApply = true
+    fixture.configurator.scanoutRead = { _ in
+      guard !world.applies.isEmpty else { return own }
+      let count = readsAfterRetime.withLock { $0 += 1; return $0 }
+      return count <= 2 ? wrong : own
+    }
+
+    let result = await fixture.synthesis.engage(stop, on: display)
+
+    #expect(!result.isFailure, "\(result)")
+    #expect(hdr.legs.isEmpty, "a timing that settled onto the panel's own needs no bounce")
+    #expect(readsAfterRetime.withLock { $0 } >= 3, "the extra read was taken")
     #expect(fixture.synthesis.pairings.count == 1)
     #expect(await fixture.synthesis.disengageForModeChange(display))
   }

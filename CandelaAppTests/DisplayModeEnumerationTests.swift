@@ -143,6 +143,50 @@ struct DisplayModeEnumerationTests {
     #expect(rig.configurator.withheld(on: Self.panelID) == [Self.smaller.descriptor])
   }
 
+  /// A revealed HiDPI mode the controller drives on a foreign timing, judged by
+  /// the kit's own guard rather than a scripted failure: the stored mode is
+  /// withheld and the display goes back to the mode it was on.
+  @Test(arguments: [false, true])
+  func theRealGuardDecidesAStoredRevealedMode(timingGivesWay: Bool) async throws {
+    let revealed = DisplayMode(
+      ioModeID: 3, logicalWidth: 1280, logicalHeight: 540,
+      pixelWidth: 2560, pixelHeight: 1080, refreshHz: 175, isNative: false,
+      provenance: .coreGraphicsServices)
+    let rig = Self.rig()
+    rig.world.attach(
+      ConfiguredDisplay(id: Self.panelID, identity: rig.identity, name: "MAG341C", isBuiltIn: false),
+      modes: [Self.native, Self.smaller, revealed], current: Self.native,
+      nativePixels: (width: 3440, height: 1440))
+    rig.persistence.setEnabled(true, for: rig.identity)
+    rig.persistence.store(revealed.descriptor, for: rig.identity)
+    rig.configurator.usesRealScanoutGuard = true
+    rig.configurator.updatesCurrentModeOnApply = true
+    let world = rig.world
+    let configurator = rig.configurator
+    let own = ScanoutTiming(width: 3440, height: 1440, refreshHz: 175)
+    let crop = ScanoutTiming(width: 1280, height: 1024, refreshHz: 175)
+    // Foreign through the guard's half-second window; when the timing gives
+    // way, the extra read after the further settle finds the panel's own.
+    configurator.scanoutRead = { id in
+      guard world.currentMode(for: id) == revealed else { return own }
+      return timingGivesWay && configurator.scanoutClock > 0.6 ? own : crop
+    }
+
+    await rig.modes.reapplyStoredModes()
+
+    #expect(rig.modes.preview == nil)
+    #expect(await rig.gate.holder == nil)
+    if timingGivesWay {
+      #expect(rig.world.currentMode(for: Self.panelID) == revealed)
+      #expect(rig.configurator.restores.isEmpty)
+      #expect(rig.configurator.withheld(on: Self.panelID).isEmpty)
+    } else {
+      #expect(rig.world.currentMode(for: Self.panelID) == Self.native)
+      #expect(rig.configurator.restores.map(\.mode) == [Self.native])
+      #expect(rig.configurator.withheld(on: Self.panelID) == [revealed.descriptor])
+    }
+  }
+
   @Test func aMismatchReadingOnThePreviewFallbackCannotStrandTheGate() async throws {
     let fixture = SynthesisFixture()
     defer { fixture.forgetPrefs() }
@@ -255,6 +299,70 @@ struct DisplayModeEnumerationTests {
     #expect(rig.modes.preview == nil)
     #expect(await rig.gate.claim(.settingsReset) == .granted)
     await rig.gate.release(.settingsReset)
+  }
+
+  /// A recovery the person started, whose countdown would have reverted it, is
+  /// reverted by the reset rather than dropped: dropping it left the display on
+  /// the unhonoured mode with no countdown.
+  @Test func theResetRevertsARecoveryWhoseRevertStillWorks() async throws {
+    let rig = Self.rig()
+    rig.configurator.updatesCurrentModeOnApply = true
+    rig.configurator.nextModeApplyFailure = DisplayConfigError(unhonouredCommit: .init(
+      requested: Self.smaller, achieved: Self.smaller))
+    rig.modes.select(Self.smaller, on: Self.panelID, from: .settings, surface: .settingsBanner)
+    for _ in 0 ..< 2000 where rig.modes.isApplying {
+      try? await Task.sleep(for: .milliseconds(1))
+    }
+    let recovery = try #require(rig.modes.preview)
+    #expect(recovery.unhonouredCommit != nil)
+    #expect(recovery.unhonouredCommit?.scanoutTiming == nil)
+    #expect(rig.world.currentMode(for: Self.panelID) == Self.smaller)
+
+    await rig.modes.discardRecoveryForReset()
+
+    #expect(rig.modes.preview == nil)
+    #expect(rig.world.currentMode(for: Self.panelID) == Self.native)
+    #expect(await rig.gate.claim(.settingsReset) == .granted)
+    await rig.gate.release(.settingsReset)
+  }
+
+  /// A display whose rollback failed beside a live preview on another display
+  /// gets its recovery once that preview resolves, rather than none at all.
+  @Test func aRecoveryRefusedBesideALivePreviewIsRetainedWhenThePreviewEnds() async throws {
+    let rig = Self.rig()
+    let secondID: CGDirectDisplayID = 13
+    let secondIdentity = DisplayConfigIdentity(vendor: 0x10AC, model: 9, serial: 13, isBuiltIn: false)
+    rig.world.attach(
+      ConfiguredDisplay(id: secondID, identity: secondIdentity, name: "Second panel", isBuiltIn: false),
+      modes: [Self.native, Self.smaller], current: Self.native,
+      nativePixels: (width: 3440, height: 1440))
+    rig.persistence.setEnabled(true, for: secondIdentity)
+    rig.persistence.store(Self.smaller.descriptor, for: secondIdentity)
+    rig.configurator.updatesCurrentModeOnApply = true
+    rig.modes.select(Self.smaller, on: Self.panelID, from: .settings, surface: .settingsBanner)
+    for _ in 0 ..< 2000 where rig.modes.isApplying {
+      try? await Task.sleep(for: .milliseconds(1))
+    }
+    let live = try #require(rig.modes.preview)
+    rig.configurator.modeApplyFailures = [
+      DisplayConfigError(unhonouredCommit: .init(
+        requested: Self.smaller, achieved: Self.smaller,
+        scanoutTiming: ScanoutTiming(width: 1280, height: 1024, refreshHz: 175))),
+      DisplayConfigError(cgErrorCode: CGError.failure.rawValue),
+    ]
+
+    await rig.modes.reapplyStoredModes()
+    #expect(rig.modes.preview?.displayID == Self.panelID, "the live preview keeps the countdown")
+    #expect(rig.world.currentMode(for: secondID) == Self.smaller)
+
+    #expect(await rig.modes.revert(live) == .reverted)
+
+    let recovery = try #require(rig.modes.preview)
+    #expect(recovery.displayID == secondID)
+    #expect(recovery.unhonouredCommit?.scanoutTiming != nil)
+    #expect(await rig.modes.revert(recovery) == .reverted)
+    #expect(rig.world.currentMode(for: secondID) == Self.native)
+    #expect(rig.modes.preview == nil)
   }
 
   /// An ordinary preview is not a recovery, so the reset discard leaves it.

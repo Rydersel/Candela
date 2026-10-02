@@ -201,6 +201,38 @@ struct ScanoutTimingTests {
       requested: requested, nativePixels: (3440, 1440)))
   }
 
+  // MARK: - The re-time's own verdict
+
+  /// The re-time target's framebuffer is a correct wire only once the re-time
+  /// landed. Unlanded, the slave sits on whatever the mirror chose, and a
+  /// 2560x1440 wire on a 3440x1440 panel is the measured crop.
+  @Test func theRetimeTargetsFramebufferCountsOnlyOnceTheRetimeLanded() {
+    let target = mode(.coreGraphics, pixels: (2560, 1440), logical: (1280, 720), hz: 175)
+    let crop = ScanoutTiming(width: 2560, height: 1440, refreshHz: 175)
+    func verdict(_ timing: ScanoutTiming?, landed: Bool,
+                 native: (width: Int, height: Int)? = (3440, 1440),
+                 target: DisplayMode? = target) -> ScanoutVerification.Verdict {
+      ScanoutVerification.retimeVerdict(
+        retimedOnto: target, landed: landed, nativePixels: native, timing: timing)
+    }
+    #expect(verdict(crop, landed: true) == .verified)
+    #expect(verdict(crop, landed: false) == .mismatch)
+    let native = ScanoutTiming(width: 3440, height: 1440, refreshHz: 175)
+    #expect(verdict(native, landed: true) == .verified)
+    #expect(verdict(native, landed: false) == .verified)
+    #expect(verdict(ScanoutTiming(width: 3440, height: 1440, refreshHz: 100), landed: false) == .verified,
+      "unlanded, the rate is the mirror's to choose")
+    #expect(verdict(ScanoutTiming(width: 3440, height: 1440, refreshHz: 100), landed: true) == .mismatch)
+    let smaller = ScanoutTiming(width: 1920, height: 1080, refreshHz: 175)
+    #expect(verdict(smaller, landed: true) == .mismatch)
+    #expect(verdict(smaller, landed: false) == .mismatch)
+    #expect(verdict(nil, landed: true) == .notVerifiable)
+    // Nothing to judge against: no native size, and no landed target.
+    #expect(verdict(crop, landed: false, native: nil) == .notVerifiable)
+    #expect(verdict(crop, landed: true, native: nil, target: nil) == .notVerifiable)
+    #expect(verdict(crop, landed: true, native: nil) == .verified)
+  }
+
   // MARK: - The real configurator's guard, driven through its probe seam
 
   private let previous = ScanoutTiming(width: 3440, height: 1440, refreshHz: 175)
@@ -219,13 +251,14 @@ struct ScanoutTimingTests {
   }
 
   @Test func aSteadyForeignTimingWithholdsAndRefusesTheMode() throws {
-    let script = ScriptedScanout([previous, foreign, foreign])
+    let script = ScriptedScanout([previous, foreign, foreign], afterWindow: [foreign])
     let configurator = CoreGraphicsDisplayConfigurator(scanout: script.probe)
     let error = try #require(throws: DisplayConfigError.self) {
       try configurator.guardedApply(self.mode(), to: 42, enforcesScanout: true,
         nativePixels: { (3440, 1440) }, achieved: { self.mode() }) {}
     }
     #expect(error.unhonouredCommit?.scanoutTiming == foreign)
+    #expect(script.sleepDurations.last == CoreGraphicsDisplayConfigurator.scanoutMismatchSettle)
     var committed = false
     let refused = try #require(throws: DisplayConfigError.self) {
       try configurator.guardedApply(self.mode(id: 9), to: 42, enforcesScanout: true,
@@ -236,15 +269,76 @@ struct ScanoutTimingTests {
   }
 
   @Test func theWayBackNeitherRefusesNorWithholds() throws {
-    let script = ScriptedScanout([previous, foreign, foreign])
+    let script = ScriptedScanout([previous, foreign, foreign], afterWindow: [foreign])
     let configurator = CoreGraphicsDisplayConfigurator(scanout: script.probe)
     _ = try? configurator.guardedApply(mode(), to: 42, enforcesScanout: true,
       nativePixels: { (3440, 1440) }, achieved: { nil }) {}
-    script.reset([previous, foreign, foreign])
+    script.reset([previous, foreign, foreign], afterWindow: [foreign])
     var committed = false
     try configurator.guardedApply(mode(), to: 42, enforcesScanout: false,
       nativePixels: { (3440, 1440) }, achieved: { nil }) { committed = true }
     #expect(committed)
+  }
+
+  /// The previous apply's late timing can still be landing when the window
+  /// closes, steady across two polls. The extra read after a further settle is
+  /// what tells it from a mode that really drives the wrong wire.
+  @Test func aSteadyForeignTimingThatGivesWayAtTheExtraReadIsNotWithheld() throws {
+    let landed = ScanoutTiming(width: 3440, height: 1440, refreshHz: 120)
+    let script = ScriptedScanout([previous, foreign, foreign], afterWindow: [landed])
+    let configurator = CoreGraphicsDisplayConfigurator(scanout: script.probe)
+    try configurator.guardedApply(mode(), to: 42, enforcesScanout: true,
+      nativePixels: { (3440, 1440) }, achieved: { nil }) {}
+    #expect(script.sleepDurations.last == CoreGraphicsDisplayConfigurator.scanoutMismatchSettle)
+    var committed = false
+    try configurator.guardedApply(mode(), to: 42, enforcesScanout: true,
+      nativePixels: { (3440, 1440) }, achieved: { nil }) { committed = true }
+    #expect(committed, "the mode was not withheld")
+  }
+
+  @Test func aSteadyForeignTimingThatMovesAgainIsNotVerifiableRatherThanWithheld() {
+    let other = ScanoutTiming(width: 1280, height: 1024, refreshHz: 120)
+    let script = ScriptedScanout([previous, foreign, foreign], afterWindow: [other])
+    let configurator = CoreGraphicsDisplayConfigurator(scanout: script.probe)
+    let result = configurator.settledScanout(
+      requested: mode(), nativePixels: (3440, 1440), before: script.next()) { script.next() }
+    #expect(result.verdict == .notVerifiable)
+    #expect(result.timing == other)
+  }
+
+  @Test func theExtraSettleIsPaidOnlyOnAMismatch() {
+    let script = ScriptedScanout([previous, previous, previous])
+    let configurator = CoreGraphicsDisplayConfigurator(scanout: script.probe)
+    _ = configurator.settledScanout(
+      requested: mode(), nativePixels: (3440, 1440), before: script.next()) { script.next() }
+    #expect(!script.sleepDurations.contains(CoreGraphicsDisplayConfigurator.scanoutMismatchSettle))
+  }
+
+  /// The way back's verdict is never acted on, so it costs one read for the
+  /// log and no poll on the calling thread.
+  @Test func theWayBackTakesOneReadAndDoesNotPoll() throws {
+    let script = ScriptedScanout([previous, previous, previous, foreign])
+    let configurator = CoreGraphicsDisplayConfigurator(scanout: script.probe)
+    try configurator.guardedApply(mode(), to: 42, enforcesScanout: false,
+      nativePixels: { (3440, 1440) }, achieved: { nil }) {}
+    #expect(script.reads == 2, "one before the commit, one after")
+    #expect(script.sleeps == 0)
+  }
+
+  /// No record to judge against means the panel's geometry is never needed, so
+  /// it is never enumerated.
+  @Test func noScanoutRecordSkipsTheNativeLookup() throws {
+    let script = ScriptedScanout([])
+    let configurator = CoreGraphicsDisplayConfigurator(scanout: script.probe)
+    var looked = false
+    try configurator.guardedApply(mode(), to: 42, enforcesScanout: true,
+      nativePixels: { looked = true; return (3440, 1440) }, achieved: { nil }) {}
+    #expect(!looked)
+    // Control: with a record, the lookup runs.
+    script.reset([previous, ScanoutTiming(width: 3440, height: 1440, refreshHz: 120)])
+    try configurator.guardedApply(mode(), to: 42, enforcesScanout: true,
+      nativePixels: { looked = true; return (3440, 1440) }, achieved: { nil }) {}
+    #expect(looked)
   }
 
   @Test func aModeThatVerifiesStopsTheSettleAtOnce() throws {
@@ -268,19 +362,40 @@ struct ScanoutTimingTests {
 /// window closes the moment the last scripted reading has been taken.
 ///
 /// `@unchecked Sendable`: every stored var is behind `lock`.
+///
+/// `afterWindow` is what the record says once the window has closed, which is
+/// where the extra read on a steady mismatch lands.
 final class ScriptedScanout: @unchecked Sendable {
   private let lock = NSLock()
   private var readings: [ScanoutTiming?]
-  private var _sleeps = 0
+  private var afterWindow: [ScanoutTiming?]
+  private var _sleeps: [TimeInterval] = []
+  private var _reads = 0
 
-  init(_ readings: [ScanoutTiming?]) { self.readings = readings }
+  init(_ readings: [ScanoutTiming?], afterWindow: [ScanoutTiming?] = []) {
+    self.readings = readings
+    self.afterWindow = afterWindow
+  }
 
-  var sleeps: Int { lock.withLock { _sleeps } }
+  var sleeps: Int { lock.withLock { _sleeps.count } }
+  var sleepDurations: [TimeInterval] { lock.withLock { _sleeps } }
+  var reads: Int { lock.withLock { _reads } }
 
-  func reset(_ readings: [ScanoutTiming?]) { lock.withLock { self.readings = readings } }
+  func reset(_ readings: [ScanoutTiming?], afterWindow: [ScanoutTiming?] = []) {
+    lock.withLock {
+      self.readings = readings
+      self.afterWindow = afterWindow
+      _sleeps = []
+      _reads = 0
+    }
+  }
 
   func next() -> ScanoutTiming? {
-    lock.withLock { readings.isEmpty ? nil : readings.removeFirst() }
+    lock.withLock {
+      _reads += 1
+      if !readings.isEmpty { return readings.removeFirst() }
+      return afterWindow.isEmpty ? nil : afterWindow.removeFirst()
+    }
   }
 
   var probe: CoreGraphicsDisplayConfigurator.ScanoutProbe {
@@ -291,6 +406,6 @@ final class ScriptedScanout: @unchecked Sendable {
       now: { [self] in
         Date(timeIntervalSince1970: lock.withLock { readings.isEmpty } ? 1_000 : 0)
       },
-      sleep: { [self] _ in lock.withLock { _sleeps += 1 } })
+      sleep: { [self] interval in lock.withLock { _sleeps.append(interval) } })
   }
 }

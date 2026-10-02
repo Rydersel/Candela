@@ -358,6 +358,47 @@ struct ModePreviewSessionTests {
     PreviewedMode(displayID: displayID, mode: mode(id))
   }
 
+  /// A preview on a display that has since gone is dropped, and the request
+  /// for a different display carries on rather than costing a second pick.
+  @Test func aStalePreviewOnAnotherDisplayDoesNotFailTheNextRequest() async throws {
+    let fake = FakeConfigurator.online(7, 42)
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake)
+    guard case .success = await session.begin(mode: mode(2), on: 7) else {
+      Issue.record("the first preview must begin")
+      return
+    }
+    fake.configuredDisplays = fake.configuredDisplays.filter { $0.id != 7 }
+    fake.current = mode(1)
+
+    guard case .success = await session.begin(mode: mode(3), on: 42) else {
+      Issue.record("a stale preview on another display must not fail this request")
+      return
+    }
+    let preview = try #require(await session.previewedMode)
+    #expect(preview.displayID == 42)
+    #expect(preview.mode == mode(3))
+    #expect(fake.appliedDisplayIDs == [7, 42], "nothing was applied to the departed display")
+    #expect(await session.revert(preview) == .reverted)
+    #expect(fake.current == mode(1))
+  }
+
+  /// Control: the same display's stale preview still fails, since the request
+  /// was composed for hardware that is no longer there.
+  @Test func aStalePreviewOnTheSameDisplayStillFailsTheRequest() async {
+    let fake = FakeConfigurator.online(7)
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake)
+    _ = await session.begin(mode: mode(2), on: 7)
+    fake.configuredDisplays = [ConfiguredDisplay(id: 7, identity: DisplayConfigIdentity(
+      vendor: 1, model: 2, serial: 99, isBuiltIn: false), name: "Replacement", isBuiltIn: false)]
+    guard case .failure = await session.begin(mode: mode(3), on: 7) else {
+      Issue.record("a replaced display must not inherit the request")
+      return
+    }
+    #expect(await !session.hasOutstandingPreview)
+  }
+
   @Test func aDisplayWhoseIdentityCannotBeReadIsNotPreviewed() async {
     let fake = FakeConfigurator()
     fake.current = mode(1)

@@ -517,6 +517,7 @@ case "modeapply":
     """)
   }
   let before = configurator.currentMode(for: target)
+  let timingBefore = configurator.scanoutTiming(for: target)
   printScanout("before")
   print("before: \(before.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID) \(String(format: "%g", $0.refreshHz)) Hz" } ?? "unknown")")
   print("applying: \(mode.logicalWidth)x\(mode.logicalHeight) fb \(mode.pixelWidth)x\(mode.pixelHeight) id \(mode.ioModeID) provenance \(mode.provenance) \(String(format: "%g", mode.refreshHz)) Hz")
@@ -535,8 +536,16 @@ case "modeapply":
         : "exiting: preview scope reverts now."
     )
   }
+  let enforced = ScanoutVerification.isEnforced(mode)
   do {
     try configurator.apply(mode, to: target, scope: applyScope)
+    // The guard returned without withholding, so its verdict was not a steady
+    // mismatch. Recomputed from one reading against the panel's own size: what
+    // the guard saw after its settle may be a later reading than this one.
+    let verdict = ScanoutVerification.verdict(
+      requested: mode, nativePixels: configurator.nativePixels(for: target),
+      before: timingBefore, after: configurator.scanoutTiming(for: target))
+    print("scan-out guard: passed (\(enforced ? "enforced" : "not enforced") mode); verdict on a fresh reading: \(verdict)")
     reportAchievedThenHold()
   } catch let error as DisplayConfigError where error.didCommit {
     // Not a refusal: the commit went through and the display took something
@@ -546,6 +555,13 @@ case "modeapply":
     print("""
     apply UNHONOURED: the commit went through and the display did not take it; it reports \(landed.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) \(String(format: "%g", $0.refreshHz)) Hz" } ?? "nothing readable")
     """)
+    // A scan-out timing on the error means the guard withheld the mode on a
+    // steady mismatch; none means the framebuffer readback itself disagreed.
+    if let timing = error.unhonouredCommit?.scanoutTiming {
+      print("scan-out guard: mismatch, mode withheld for the session; the wire read \(timing.diagnosticDescription)")
+    } else {
+      print("scan-out guard: not the cause (no scan-out timing on the error); the framebuffer readback disagreed")
+    }
     reportAchievedThenHold()
     exit(4)
   } catch {

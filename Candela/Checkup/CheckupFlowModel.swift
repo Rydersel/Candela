@@ -83,6 +83,9 @@ final class CheckupFlowModel {
   @ObservationIgnored private var activeAdvances = 0
   @ObservationIgnored private var advanceWaiters: [CheckedContinuation<Void, Never>] = []
   @ObservationIgnored private var restorePending = false
+  /// Back's release, still in flight. The next pick waits for it: claiming
+  /// before it lands is refused by the claim being given back.
+  @ObservationIgnored private var pendingRelease: Task<Void, Never>?
 
   init(environment: CheckupEnvironment) {
     self.environment = environment
@@ -149,6 +152,11 @@ final class CheckupFlowModel {
       defer {
         acquiringConfiguration = false
         running = false
+      }
+      if let release = pendingRelease {
+        await release.value
+        pendingRelease = nil
+        guard !finished else { return }
       }
       if !configurationHeld {
         let refusal = await environment.beginConfiguration(display)
@@ -276,7 +284,7 @@ final class CheckupFlowModel {
       if configurationHeld {
         configurationHeld = false
         let release = environment.endConfiguration
-        Task { await release() }
+        pendingRelease = Task { await release() }
       }
     // Everything from identity on has already touched the display or the
     // user's attestations; a step back there would rewrite a recorded claim.

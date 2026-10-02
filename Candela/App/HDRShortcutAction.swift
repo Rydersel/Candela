@@ -34,6 +34,20 @@ final class HDRShortcutAction {
     self.isSynthesized = isSynthesized
   }
 
+  /// The display a press over `screenID` is about. A screen that is not one of
+  /// `candidates` can be a surface a panel mirrors, the virtual master of a
+  /// synthesized size among them, so the panel showing it is the target. More
+  /// than one panel showing it names none: the press has to be about one.
+  static func physicalDisplay(
+    underScreen screenID: CGDirectDisplayID?, among candidates: [CGDirectDisplayID],
+    mirrorsDisplay: (CGDirectDisplayID) -> CGDirectDisplayID
+  ) -> CGDirectDisplayID? {
+    guard let screenID else { return nil }
+    if candidates.contains(screenID) { return screenID }
+    let showing = candidates.filter { mirrorsDisplay($0) == screenID }
+    return showing.count == 1 ? showing[0] : nil
+  }
+
   func toggle(on displayID: CGDirectDisplayID?) async -> Outcome {
     guard let displayID, let state = target(displayID) else {
       return .refused("Move the pointer to an external display to switch HDR.")

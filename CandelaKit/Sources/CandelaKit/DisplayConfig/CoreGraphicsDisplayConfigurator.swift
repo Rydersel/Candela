@@ -206,8 +206,14 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     return DisplayModeList.resolve(mode, in: modes())
   }
 
+  /// From the CoreGraphics list alone: the native-flagged mode is always
+  /// published there (see `enumerate`), and every native-flagged mode carries
+  /// the panel's pixels, so the CGS descriptor walk and revelation pass would
+  /// buy nothing here.
   public func nativePixels(for displayID: CGDirectDisplayID) -> (width: Int, height: Int)? {
-    DisplayModeSnapshot.nativePixels(in: Self.merged(enumerate(displayID)))
+    DisplayModeSnapshot.nativePixels(in: copyModes(displayID).map { ioID, mode in
+      Self.displayMode(ioModeID: ioID, mode: mode)
+    })
   }
 
   /// One `enumerate` for all four answers where the default costs four.
@@ -291,22 +297,31 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     if enforcesScanout, let key, rejectedScanoutModes.contains(mode, displayKey: key) {
       throw DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue)
     }
-    // Capture the panel's own dimensions before a reconfiguration can change
-    // the enumerated framebuffer. An unsupported reader never claims success.
-    let native = nativePixels()
     let location = scanout.location(displayID)
     // Before the apply, so a record still describing the outgoing timing after
     // CoreGraphics already reports the new mode reads as stale, not as wrong.
     let before = location.flatMap { scanout.read(displayID, $0) }
+    // Captured before a reconfiguration can change the enumerated framebuffer,
+    // and only when there is a record to judge: the lookup is an enumeration.
+    let native = before == nil ? nil : nativePixels()
     try commit()
     // No record before means none after: a location the reader cannot match
     // (behind a hub, for one) would otherwise cost every apply the full
     // settle, each poll a recursive registry walk, on the calling thread.
     guard let location, before != nil else { return }
+    guard enforcesScanout else {
+      // The way back is never withheld, so its verdict is for the log alone
+      // and is not worth a poll on the calling thread.
+      let timing = scanout.read(displayID, location)
+      let verdict = ScanoutVerification.verdict(
+        requested: mode, nativePixels: native, before: before, after: timing)
+      if verdict != .verified { logScanout(verdict, mode: mode, displayID: displayID, timing: timing) }
+      return
+    }
     let (timing, verdict) = settledScanout(
       requested: mode, nativePixels: native, before: before
     ) { scanout.read(displayID, location) }
-    guard verdict == .mismatch, enforcesScanout, let timing else {
+    guard verdict == .mismatch, let timing else {
       if verdict != .verified { logScanout(verdict, mode: mode, displayID: displayID, timing: timing) }
       return
     }
@@ -326,6 +341,10 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// apply starts from the old timing, and the PREVIOUS apply's late timing can
   /// then land inside this window. Stopping at the first moved reading judged
   /// the new mode on its predecessor's timing and withheld it for the session.
+  ///
+  /// Two agreeing polls 50 ms apart do not rule that out either, so a steady
+  /// mismatch waits `scanoutMismatchSettle` and reads once more, and withholds
+  /// only when that reading has not moved.
   func settledScanout(
     requested: DisplayMode, nativePixels: (width: Int, height: Int)?,
     before: ScanoutTiming?, read: () -> ScanoutTiming?
@@ -349,8 +368,16 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     }
     let verdict = ScanoutVerification.verdict(
       requested: requested, nativePixels: nativePixels, before: before, after: timing)
-    let steady = timing != nil && earlier == timing
-    return (timing, verdict == .mismatch && !steady ? .notVerifiable : verdict)
+    guard verdict == .mismatch else { return (timing, verdict) }
+    guard timing != nil, earlier == timing else { return (timing, .notVerifiable) }
+    scanout.sleep(Self.scanoutMismatchSettle)
+    let later = read()
+    guard later == timing else {
+      let moved = ScanoutVerification.verdict(
+        requested: requested, nativePixels: nativePixels, before: before, after: later)
+      return (later, moved == .verified ? .verified : .notVerifiable)
+    }
+    return (timing, verdict)
   }
 
   /// Stop polling once there is no record (nothing more will come of it), the
@@ -504,6 +531,10 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// Half a second, because a change not landed by then is not landing.
   static let modeSettleWindow: TimeInterval = 0.5
   static let modeSettlePoll: TimeInterval = 0.05
+  /// The further wait before a steady mismatch may withhold a mode. Paid only
+  /// on that path: a record still landing the previous apply's timing can hold
+  /// steady across two polls and still be about to move.
+  static let scanoutMismatchSettle: TimeInterval = 0.75
 
   /// Re-reads the achieved state until it matches or the window closes, and
   /// hands back the LAST reading either way, so the caller reports what the

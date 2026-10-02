@@ -99,7 +99,11 @@ final class ShortcutManager {
   private func toggleHDR() {
     let point = NSEvent.mouseLocation
     let screen = NSScreen.screens.first { NSMouseInRect(point, $0.frame, false) }
-    let id = screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+    let screenID = screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+    // A mirroring panel has no screen of its own, so the pointer finds the
+    // surface it shows (a synthesized size's virtual master, for one).
+    let id = HDRShortcutAction.physicalDisplay(
+      underScreen: screenID, among: model.displays.map(\.id), mirrorsDisplay: CGDisplayMirrorsDisplay)
     let state = id.flatMap { id in model.displays.first(where: { $0.id == id }) }
     PanelMenu.endTracking()
     Task { @MainActor [weak self] in
@@ -110,7 +114,8 @@ final class ShortcutManager {
       } else {
         result = await model.hdrAction.toggle(on: nil)
       }
-      model.hdrFeedback.show(result.message, on: id.flatMap { OverlayWindow.screen(for: $0) })
+      // The pointer's screen: a mirroring panel has none of its own to show it on.
+      model.hdrFeedback.show(result.message, on: screen)
     }
   }
 

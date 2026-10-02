@@ -216,9 +216,12 @@ public enum ScanoutVerification {
   /// `retimedOnto`, the twin of a mode the panel publishes for itself. That
   /// mode need not be native (a person running 2560x1440 on a 3440x1440 panel
   /// is re-timed onto 2560x1440), so its framebuffer is a correct wire as well
-  /// as the native size; anything else is the wrong timing. The refresh is
-  /// checked only when the re-time is known to have landed: otherwise the
-  /// slave sits on a rate of the mirror's choosing.
+  /// as the native size; anything else is the wrong timing.
+  ///
+  /// The target's framebuffer and its refresh count only when the re-time is
+  /// known to have landed. Otherwise the slave sits on a mode and rate of the
+  /// mirror's choosing, and a target-sized wire there is the measured crop
+  /// (2560x1440 on a 3440x1440 panel), not the re-time.
   public static func retimeVerdict(
     retimedOnto target: DisplayMode?, landed: Bool,
     nativePixels: (width: Int, height: Int)?, timing: ScanoutTiming?
@@ -229,10 +232,11 @@ public enum ScanoutVerification {
     if let nativePixels, sameSize(timing, width: nativePixels.width, height: nativePixels.height) {
       return .verified
     }
-    if let target, sameSize(timing, width: target.pixelWidth, height: target.pixelHeight) {
+    let landedTarget = landed ? target : nil
+    if let landedTarget, sameSize(timing, width: landedTarget.pixelWidth, height: landedTarget.pixelHeight) {
       return .verified
     }
-    return nativePixels == nil && target == nil ? .notVerifiable : .mismatch
+    return nativePixels == nil && landedTarget == nil ? .notVerifiable : .mismatch
   }
 
   private static func sameSize(_ timing: ScanoutTiming, width: Int, height: Int) -> Bool {

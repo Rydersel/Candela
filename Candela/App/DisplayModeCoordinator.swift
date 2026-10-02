@@ -417,6 +417,18 @@ final class DisplayModeCoordinator {
   /// Armed only after a teardown that succeeded, dropped the moment the pick
   /// lands.
   @ObservationIgnored private var restoreStopIfPickFalls: [CGDirectDisplayID: SyntheticSize] = [:]
+  /// Unattended recoveries `retainRecovery` refused because a preview was
+  /// standing, which owns the one countdown. Retained, oldest first, when
+  /// nothing is outstanding any more (`adopt`), so a display whose apply and
+  /// rollback both failed beside a live preview still gets its way back.
+  @ObservationIgnored private var queuedRecoveries: [QueuedRecovery] = []
+  private struct QueuedRecovery {
+    let commit: DisplayConfigError.UnhonouredCommit
+    let previousMode: DisplayMode
+    let displayID: CGDirectDisplayID
+    let identity: DisplayConfigIdentity
+    let error: DisplayConfigError
+  }
   /// Which displays count as having just arrived: the "launch and reconnect, never
   /// continuously" rule. It lives in `CandelaKit` under test because both
   /// failure directions are timing and both are invisible from here, too eager
@@ -857,6 +869,8 @@ final class DisplayModeCoordinator {
   }
 
   private func reapplyStoredMode(for display: ConfiguredDisplay) async -> ModeReapplyStep {
+    // A fresh pass is a newer answer for this display than a queued recovery.
+    queuedRecoveries.removeAll { $0.displayID == display.id }
     guard configurator.displays().contains(where: { $0.id == display.id && $0.identity == display.identity }) else {
       arrivals.release(display.id)
       return .gone
@@ -937,6 +951,13 @@ final class DisplayModeCoordinator {
               surfaces[display.id] = .floatingPanel
               await adopt(.set(configError))
               startCountdown()
+            } else {
+              // Waits for the standing preview to resolve rather than going
+              // without a way back.
+              queuedRecoveries.removeAll { $0.displayID == display.id }
+              queuedRecoveries.append(QueuedRecovery(
+                commit: commit, previousMode: previous, displayID: display.id,
+                identity: identity, error: configError))
             }
           }
         }
@@ -1289,6 +1310,7 @@ final class DisplayModeCoordinator {
   /// select paths call it from a queued operation, where re-entering the queue
   /// would wait on the operation doing the waiting.
   private func endOutstandingModePreview() async -> Bool {
+    dropQueuedRecoveries()
     guard let outstanding = await session.previewedMode else { return true }
     // Built FROM the session, so the intent check inside `performResolve` cannot
     // see it as stale. `secondsRemaining: 0` and `isCountingDown: false` describe
@@ -1312,6 +1334,7 @@ final class DisplayModeCoordinator {
   /// The same for a synthesized size: disengage, and report whether the panel
   /// is back on its own desktop.
   private func endOutstandingSynthesisPreview() async -> Bool {
+    dropQueuedRecoveries()
     guard let synthesis, let outstanding = await synthesis.session.previewedSynthesis
     else { return true }
     let answered = Preview(
@@ -1330,6 +1353,32 @@ final class DisplayModeCoordinator {
     return await performResolve(answered, keeping: false, intent: .standDown) == .reverted
   }
 
+  /// Ends a recovery preview, one standing on a commit the display did not
+  /// honour, so a settings reset can claim the gate. A recovery whose restore
+  /// keeps failing would otherwise hold the claim, and block the reset, until
+  /// the display is unplugged.
+  ///
+  /// Reverts first: that is what the recovery's own countdown would have done,
+  /// and dropping it unreverted left the display on the unhonoured mode with no
+  /// countdown. Only a revert that fails discards, and then the display stays
+  /// where the failed rollback left it, since nothing here can move it back.
+  /// An ordinary preview is left alone; it refuses the reset by its claim.
+  func discardRecoveryForReset() async {
+    await queue.enqueueReturning {
+      guard let outstanding = await self.session.previewedMode,
+            outstanding.unhonouredCommit != nil else { return }
+      if await self.endOutstandingModePreview() { return }
+      guard let still = await self.session.previewedMode,
+            still.displayID == outstanding.displayID else {
+        await self.adopt(.keep)
+        return
+      }
+      await self.session.discard(displayID: still.displayID)
+      self.log.error("discarded a recovery preview on display \(still.displayID) for a settings reset: its revert failed")
+      await self.adopt(.clear)
+    }
+  }
+
   /// Reconciles both preview sessions and gives the reconfiguration-gate claim back if nothing
   /// is outstanding.
   ///
@@ -1342,21 +1391,6 @@ final class DisplayModeCoordinator {
   ///
   /// Enters the queue, so it must not be called from inside one of its
   /// operations.
-  /// Drops a recovery preview, one standing on a commit the display did not
-  /// honour, without applying anything, so Reset All Settings can claim the
-  /// gate. A recovery whose restore keeps failing would otherwise hold the
-  /// claim, and block the reset, until the display is unplugged. The display
-  /// stays where the failed rollback left it; nothing here can move it back.
-  func discardRecoveryForReset() async {
-    await queue.enqueueReturning {
-      guard let outstanding = await self.session.previewedMode,
-            outstanding.unhonouredCommit != nil else { return }
-      await self.session.discard(displayID: outstanding.displayID)
-      self.log.error("discarded a recovery preview on display \(outstanding.displayID) for a settings reset")
-      await self.adopt(.clear)
-    }
-  }
-
   func releaseReconfigurationClaimIfIdle() async {
     await queue.enqueueReturning { await self.adopt(.keep, synthesis: .keep) }
   }
@@ -1382,6 +1416,8 @@ final class DisplayModeCoordinator {
     // was still DECIDED at the click; this is only where it is filed.
     origins[displayID] = origin
     surfaces[displayID] = surface
+    // The person's own pick on this display supersedes a recovery queued for it.
+    queuedRecoveries.removeAll { $0.displayID == displayID }
     // A new pick supersedes any standing intent to put a torn-down stop back.
     // CONSUMED rather than dropped, so the stored stop goes with it: the previous
     // pick's preview resolves inside `ModePreviewSession.begin`'s revert-first,
@@ -1559,6 +1595,8 @@ final class DisplayModeCoordinator {
     }
     origins[displayID] = origin
     surfaces[displayID] = surface
+    // The person's own pick on this display supersedes a recovery queued for it.
+    queuedRecoveries.removeAll { $0.displayID == displayID }
     // Superseded for `performSelect`'s reason, and consumed for the same one.
     dropFallenPickRestore(on: displayID, explain: false)
     // Sampled BEFORE the engage, while the panel still shows its own desktop:
@@ -1952,6 +1990,7 @@ final class DisplayModeCoordinator {
       return
     }
     guard let outstanding = await session.previewedMode else {
+      if await retainQueuedRecovery() { return }
       preview = nil
       stopCountdown()
       // THE release (the reconfiguration gate), here rather than at each call site: this funnel
@@ -1988,6 +2027,49 @@ final class DisplayModeCoordinator {
     )
     if !counting { stopCountdown() }
     syncConfirmation()
+  }
+
+  /// Retains the oldest queued recovery that still applies, with its countdown,
+  /// and reports whether one now stands. One applies only while its display is
+  /// still the same panel on the mode the failed rollback left it on: anything
+  /// else means the display has moved on, and a countdown would undo that.
+  private func retainQueuedRecovery() async -> Bool {
+    while !queuedRecoveries.isEmpty {
+      let queued = queuedRecoveries.removeFirst()
+      if let left = queued.commit.achieved {
+        guard let now = configurator.achievedMode(for: queued.displayID),
+              Self.sameGeometry(now, left) else { continue }
+      }
+      guard await session.retainRecovery(
+        after: queued.commit, previousMode: queued.previousMode,
+        on: queued.displayID, identity: queued.identity)
+      else { continue }
+      log.error("retained a queued recovery on display \(queued.displayID) once the standing preview resolved")
+      stopCountdown()
+      surfaces[queued.displayID] = .floatingPanel
+      await adopt(.set(queued.error))
+      startCountdown()
+      return true
+    }
+    return false
+  }
+
+  /// A stand-down's caller is about to reconfigure displays itself and needs
+  /// nothing outstanding afterwards, so a queued recovery is dropped rather
+  /// than retained underneath it. That display is left where its failed
+  /// rollback put it, as it was before recoveries queued at all.
+  private func dropQueuedRecoveries() {
+    for queued in queuedRecoveries {
+      log.error("dropped a queued recovery on display \(queued.displayID): a stand-down ended the preview it waited on")
+    }
+    queuedRecoveries.removeAll()
+  }
+
+  /// Geometry and quantized refresh, never `ioModeID`, which is positional.
+  private static func sameGeometry(_ lhs: DisplayMode, _ rhs: DisplayMode) -> Bool {
+    lhs.logicalWidth == rhs.logicalWidth && lhs.logicalHeight == rhs.logicalHeight
+      && lhs.pixelWidth == rhs.pixelWidth && lhs.pixelHeight == rhs.pixelHeight
+      && DisplayMode.quantizedRefresh(lhs.refreshHz) == DisplayMode.quantizedRefresh(rhs.refreshHz)
   }
 
   /// Points the standalone surface at whatever the coordinator now has to say,

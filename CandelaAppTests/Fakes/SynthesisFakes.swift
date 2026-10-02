@@ -1,4 +1,4 @@
-import CandelaKit
+@testable import CandelaKit
 import CoreGraphics
 import Foundation
 
@@ -231,6 +231,15 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
   /// refused. `restore` neither refuses nor withholds, and a scripted timing
   /// failure it consumes moves the world without throwing, as the real one does.
   var withholdsScanoutMismatches = false
+  /// Route every apply through the kit's own scan-out guard, the one the real
+  /// configurator runs, reading `scanoutRead` on a virtual clock. The verdict,
+  /// the settle and the quarantine are then the shipped ones rather than this
+  /// fake's model of them, which scripted failures stand in for otherwise.
+  var usesRealScanoutGuard = false
+  /// The real guard's clock, advanced only by its own sleeps.
+  var scanoutClock: TimeInterval { quarantineLock.withLock { _scanoutClock } }
+  private var _scanoutClock: TimeInterval = 0
+  private var realGuard: CoreGraphicsDisplayConfigurator!
 
   /// Written mid-operation from whichever executor applies, so locked.
   private let quarantineLock = NSLock()
@@ -243,7 +252,19 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
     quarantineLock.withLock { _restores }
   }
 
-  init(_ world: FakeDisplayWorld) { self.world = world }
+  init(_ world: FakeDisplayWorld) {
+    self.world = world
+    realGuard = CoreGraphicsDisplayConfigurator(scanout: .init(
+      location: { [unowned self] _ in scanoutRead == nil ? nil : "IOService:/fake/AppleCLCD2" },
+      read: { [unowned self] displayID, _ in scanoutRead?(displayID) },
+      hardwareIdentity: { [unowned self] displayID in
+        world.displays().first { $0.id == displayID }?.identity.key ?? "\(displayID)"
+      },
+      now: { [unowned self] in
+        Date(timeIntervalSince1970: quarantineLock.withLock { _scanoutClock })
+      },
+      sleep: { [unowned self] interval in quarantineLock.withLock { _scanoutClock += interval } }))
+  }
 
   /// Every mode apply, in order. Forwarded from the world so a test asserting
   /// on the engage tail reads it off the object it configured.
@@ -304,6 +325,28 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
   }
 
   private func performApply(
+    _ mode: DisplayMode, to displayID: CGDirectDisplayID, enforcesScanout: Bool
+  ) throws {
+    guard usesRealScanoutGuard else {
+      try performModelledApply(mode, to: displayID, enforcesScanout: enforcesScanout)
+      return
+    }
+    do {
+      try realGuard.guardedApply(
+        mode, to: displayID, enforcesScanout: enforcesScanout,
+        nativePixels: { [world] in world.nativePixels(for: displayID) },
+        achieved: { [world] in world.currentMode(for: displayID) }
+      ) {
+        try performModelledApply(mode, to: displayID, enforcesScanout: enforcesScanout)
+      }
+    } catch let error as DisplayConfigError where error.unhonouredCommit?.scanoutTiming != nil {
+      // Mirrors the real guard's quarantine so `withheld(on:)` reads it.
+      quarantineLock.withLock { _ = _withheld[displayID, default: []].insert(mode.descriptor) }
+      throw error
+    }
+  }
+
+  private func performModelledApply(
     _ mode: DisplayMode, to displayID: CGDirectDisplayID, enforcesScanout: Bool
   ) throws {
     onModeApply?()

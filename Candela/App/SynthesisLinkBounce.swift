@@ -46,6 +46,13 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     /// display in HDR for twice as long as the sequence the eyes verification
     /// watched.
     var hdrHeld: Duration
+    /// The scan-out check's settle, the configurator's shape: polls this far
+    /// apart until two readings agree, then one further `timingSettle` and a
+    /// last read before a mismatch counts. The record can lag the re-time, and
+    /// a single read of it would bounce or unwind a link that was fine. Zero
+    /// unless set, so a test pays no wall clock; `production` sets both.
+    var timingPoll: Duration = .zero
+    var timingSettle: Duration = .zero
 
     /// Worst case is about 25 seconds: the re-time, the bounce settle, then
     /// three settled attempts per HDR leg with a wait BETWEEN attempts rather
@@ -54,7 +61,8 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     /// armed yet.
     static let production = Durations(
       beforeRetime: .seconds(2), beforeBounce: .seconds(3), hdrSettle: .seconds(2),
-      betweenAttempts: .seconds(2), hdrHeld: .zero
+      betweenAttempts: .seconds(2), hdrHeld: .zero,
+      timingPoll: .milliseconds(50), timingSettle: .milliseconds(750)
     )
   }
 
@@ -96,25 +104,19 @@ struct BouncingSynthesisDriver: SynthesisDriving {
       // pre-mirror panel size: the target is the twin of the panel's own mode,
       // which need not be native, and the bounce cannot move a timing the
       // re-time chose on purpose.
-      var landed = false
-      let mismatchedTiming = { () -> ScanoutTiming? in
-        guard let timing = configurator.scanoutTiming(for: displayID),
-              ScanoutVerification.retimeVerdict(retimedOnto: target, landed: landed,
-                nativePixels: nativePixels, timing: timing) == .mismatch
-        else { return nil }
-        return timing
-      }
       // A wrong timing after the re-time is a link the bounce can renegotiate,
       // so it takes the bounce rather than ending the engagement here. The
       // check below judges what the bounce left.
-      landed = await retime(displayID, to: target)
+      let landed = await retime(displayID, to: target)
       if !landed {
         await bounce(displayID)
-      } else if let timing = mismatchedTiming() {
+      } else if let timing = await steadyMismatch(
+        on: displayID, retimedOnto: target, landed: landed, nativePixels: nativePixels) {
         Self.log.info("synthesis.retime display \(displayID) landed on the wrong timing (\(timing.diagnosticDescription, privacy: .public)); bouncing")
         await bounce(displayID)
       }
-      if let timing = mismatchedTiming() {
+      if let timing = await steadyMismatch(
+        on: displayID, retimedOnto: target, landed: landed, nativePixels: nativePixels) {
         return await rejectTiming(.scanoutMismatch(timing), on: displayID)
       }
     case .failure:
@@ -123,6 +125,36 @@ struct BouncingSynthesisDriver: SynthesisDriving {
       if await engine.pairing(forPhysical: displayID) == nil { ownModes.forget(displayID) }
     }
     return result
+  }
+
+  /// A mismatch only when it holds: two agreeing readings, then the same
+  /// reading again after `timingSettle`. The controller record lags a
+  /// reconfiguration, so anything less judges the link on a timing that was
+  /// still landing. A reading that moves, or stops mismatching, is no verdict.
+  private func steadyMismatch(
+    on displayID: CGDirectDisplayID, retimedOnto target: DisplayMode?, landed: Bool,
+    nativePixels: (width: Int, height: Int)?
+  ) async -> ScanoutTiming? {
+    let mismatched = { () -> ScanoutTiming? in
+      guard let timing = configurator.scanoutTiming(for: displayID),
+            ScanoutVerification.retimeVerdict(retimedOnto: target, landed: landed,
+              nativePixels: nativePixels, timing: timing) == .mismatch
+      else { return nil }
+      return timing
+    }
+    guard var previous = mismatched() else { return nil }
+    // Ten polls is the configurator's half-second window at its 50 ms poll.
+    var steady = false
+    for _ in 0..<10 {
+      try? await Task.sleep(for: durations.timingPoll)
+      guard let next = mismatched() else { return nil }
+      if next == previous { steady = true; break }
+      previous = next
+    }
+    guard steady else { return nil }
+    try? await Task.sleep(for: durations.timingSettle)
+    guard let later = mismatched(), later == previous else { return nil }
+    return later
   }
 
   private func rejectTiming(
