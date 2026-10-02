@@ -7,14 +7,14 @@ import AppKit
 @MainActor
 enum ClassicGlyphs {
   private static let resources = "/System/Library/CoreServices/OSDUIHelper.app/Contents/Resources/"
-  private static var cache: [String: NSImage] = [:]
+  private static var cache: [HUDType: NSImage] = [:]
 
   static func image(for kind: HUDType) -> NSImage {
     let name = fileName(for: kind)
-    if let cached = cache[name] { return cached }
+    if let cached = cache[kind] { return cached }
     let image = (name.isEmpty ? nil : NSImage(contentsOfFile: resources + name)) ?? fallbackImage(for: kind) ?? NSImage()
     image.isTemplate = true
-    cache[name] = image
+    cache[kind] = image
     return image
   }
 

@@ -2,13 +2,13 @@ import AppKit
 import CandelaKit
 
 /// Classic, Classic (centered) and Sequoia: a box with a glyph over a bar.
-/// Classic's colours are the vibrant semantic ones the system box composites
-/// with; plain whites were measured and do not match.
+/// Classic's glyph composites through the material's vibrancy, while its
+/// chiclets are flat boxes in `secondaryLabelColor`; that pairing measured
+/// within 2% of the system box, where plain whites did not.
 @MainActor
 final class BoxHUDRenderer: HUDRenderer {
   let style: HUDStyle
   let contentView: NSView
-  private let effectView: NSVisualEffectView
   private let glyph: NSImageView
   private let chiclets: [NSBox]
   private let fill: NSBox?
@@ -19,30 +19,39 @@ final class BoxHUDRenderer: HUDRenderer {
   init(style: HUDStyle) {
     self.style = style
     let isClassic = style != .sequoia
-    let size = isClassic ? ClassicBox.size : SequoiaBox.size
-    let root = NSView(frame: NSRect(origin: .zero, size: size))
-    root.wantsLayer = true
-    let effect = NSVisualEffectView(frame: root.bounds)
-    effect.material = isClassic ? .hudWindow : .popover
-    effect.blendingMode = .behindWindow
-    effect.state = .active
-    effect.wantsLayer = true
-    effect.layer?.cornerRadius = isClassic ? ClassicBox.cornerRadius : SequoiaBox.cornerRadius
-    effect.layer?.masksToBounds = true
-    if !isClassic {
-      // Sequoia shares the pills' glass: hairline and sheen.
-      effect.layer?.borderWidth = 0.75
-      effect.layer?.borderColor = NSColor.white.withAlphaComponent(0.25).cgColor
-      let sheen = NSView(frame: root.bounds)
-      sheen.wantsLayer = true
-      sheen.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.07).cgColor
-      effect.addSubview(sheen)
+    let root: NSView
+    let effect: NSVisualEffectView
+    if isClassic {
+      root = NSView(frame: NSRect(origin: .zero, size: ClassicBox.size))
+      root.wantsLayer = true
+      effect = NSVisualEffectView(frame: root.bounds)
+      effect.material = .hudWindow
+      effect.blendingMode = .behindWindow
+      effect.state = .active
+      effect.wantsLayer = true
+      effect.layer?.cornerRadius = ClassicBox.cornerRadius
+      effect.layer?.masksToBounds = true
+      root.addSubview(effect)
+    } else {
+      (root, effect) = makePillChrome(size: SequoiaBox.size, cornerRadius: SequoiaBox.cornerRadius)
     }
-    root.addSubview(effect)
 
-    let glyph = NSImageView(frame: isClassic ? ClassicBox.glyphRect : SequoiaBox.glyphRect)
-    glyph.imageScaling = .scaleProportionallyUpOrDown
-    glyph.contentTintColor = isClassic ? Self.chicletColor : .labelColor
+    let glyph: NSImageView
+    if isClassic {
+      glyph = NSImageView(frame: ClassicBox.glyphRect)
+      glyph.imageScaling = .scaleProportionallyUpOrDown
+      glyph.contentTintColor = Self.chicletColor
+    } else {
+      // Natural size, centred on the glyph rect's centre: scaling into the rect
+      // would shrink the wide speaker symbols and change size between kinds.
+      // The frame spans the box so no symbol at 34 pt is clipped.
+      let midY = SequoiaBox.glyphRect.midY
+      let halfHeight = SequoiaBox.size.height - midY
+      glyph = NSImageView(frame: NSRect(x: 0, y: midY - halfHeight, width: SequoiaBox.size.width, height: halfHeight * 2))
+      glyph.imageScaling = .scaleNone
+      glyph.imageAlignment = .alignCenter
+      glyph.contentTintColor = .labelColor
+    }
     effect.addSubview(glyph)
 
     var chiclets: [NSBox] = []
@@ -61,7 +70,6 @@ final class BoxHUDRenderer: HUDRenderer {
       fill = bar
     }
     self.contentView = root
-    self.effectView = effect
     self.glyph = glyph
     self.chiclets = chiclets
     self.fill = fill
