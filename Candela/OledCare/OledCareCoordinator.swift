@@ -614,16 +614,22 @@ final class OledCareCoordinator: CheckupCareHolding {
     return deadline
   }
 
-  func pauseDimming(for key: String, duration: TimeInterval) {
-    guard duration.isFinite, duration > 0, duration <= TimedControlDeadline.maximumInterval else { return }
-    pauseDimming(for: key, until: now().addingTimeInterval(duration))
+  /// Scoped like the pause guard: another display's reset does not block this one.
+  func isResetBlockingDimmingPause(for key: String) -> Bool {
+    resetting || resettingDisplays.contains(key)
+  }
+
+  @discardableResult
+  func pauseDimming(for key: String, duration: TimeInterval) -> Bool {
+    guard duration.isFinite, duration > 0, duration <= TimedControlDeadline.maximumInterval else { return false }
+    return pauseDimming(for: key, until: now().addingTimeInterval(duration))
   }
 
   @discardableResult
   func pauseDimming(for key: String, until deadline: Date) -> Bool {
     // A per-display reset clears the pause when it begins, so one set before it
     // completes would outlive the reset meant to clear it.
-    guard !resetting, !resettingDisplays.contains(key),
+    guard !isResetBlockingDimmingPause(for: key),
           TimedControlDeadline.isValid(deadline, now: now()) else { return false }
     dimmingPauseDeadlines[key] = deadline
     invalidateDimmingEvidence(for: key)

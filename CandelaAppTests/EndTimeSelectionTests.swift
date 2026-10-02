@@ -46,8 +46,31 @@ struct EndTimeSelectionTests {
     #expect(model.applyDimmingPause(until: deadline, for: key) == nil)
     model.oledCare.resumeDimming(for: key)
     #expect(await model.beginReset())
-    #expect(model.applyDimmingPause(until: deadline, for: key) != nil)
+    model.oledCare.prepareForReset()
+    #expect(model.applyDimmingPause(until: deadline, for: key) == "Wait for the settings reset to finish.")
     #expect(model.oledCare.dimmingPauseDeadline(for: key) == nil)
+    model.oledCare.resetDidComplete()
+    await model.endReset()
+  }
+
+  @Test func customPauseRefusesOnlyTheDisplayBeingResetAndSaysWhy() async {
+    let key = "custom-pause-display-reset"
+    let other = "custom-pause-other-display"
+    let defaults = InMemoryDefaults()
+    for k in [key, other] { DisplayPrefs(defaults: defaults, persistenceKey: k).oledCareEnrolled = true }
+    let discovery = ScriptedDiscovery([(id: 7, key: key, name: "First"), (id: 8, key: other, name: "Second")])
+    let model = TestFixtures.appModel(discovery: discovery)
+    model.oledCare.prefsDefaults = defaults
+    await model.refresh()
+    let deadline = Date().addingTimeInterval(120)
+    #expect(await model.beginReset())
+    model.oledCare.beginDisplayReset(other)
+    // Another display's reset holds the shared latch but not this display.
+    #expect(model.applyDimmingPause(until: deadline, for: key) == nil)
+    #expect(model.oledCare.dimmingPauseDeadline(for: key) == deadline)
+    #expect(model.applyDimmingPause(until: deadline, for: other) == "Wait for the settings reset to finish.")
+    #expect(model.oledCare.dimmingPauseDeadline(for: other) == nil)
+    model.oledCare.displayResetDidComplete(other)
     await model.endReset()
   }
 

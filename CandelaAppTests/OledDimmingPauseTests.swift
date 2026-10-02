@@ -71,6 +71,8 @@ struct OledDimmingPauseTests {
       #expect(care.dimmingPauseDeadline(for: "panel") == Date(timeIntervalSince1970: 1_900))
     }
     care.prepareForReset()
+    #expect(care.isResetBlockingDimmingPause(for: "panel"))
+    #expect(!care.pauseDimming(for: "panel", duration: 60))
     #expect(!care.pauseDimming(for: "panel", until: clock.now.addingTimeInterval(60)))
     #expect(care.dimmingPauseDeadline(for: "panel") == nil)
   }
@@ -80,6 +82,7 @@ struct OledDimmingPauseTests {
     let coordinator = OledCareCoordinator(now: { clock.now })
     let store = InMemoryDefaults()
     coordinator.prefsDefaults = store
+    let standardKeys = Set(UserDefaults.standard.dictionaryRepresentation().keys)
     coordinator.pauseDimming(for: "one", duration: 900)
     coordinator.pauseDimming(for: "two", duration: 3_600)
     #expect(coordinator.dimmingPauseDeadline(for: "one") == Date(timeIntervalSince1970: 1_900))
@@ -93,6 +96,8 @@ struct OledDimmingPauseTests {
     #expect(coordinator.dimmingPauseDeadline(for: "one") != nil)
     // Session-only: the pause wrote nothing to the store prefs persist in.
     #expect(store.dictionaryRepresentation().isEmpty)
+    // The coordinator also persists some keys straight to the standard domain.
+    #expect(Set(UserDefaults.standard.dictionaryRepresentation().keys) == standardKeys)
     clock.now = Date(timeIntervalSince1970: 4_700)
     #expect(coordinator.dimmingPauseDeadline(for: "one") == nil)
   }
@@ -221,7 +226,12 @@ struct OledDimmingPauseTests {
     #expect(care.dimmingPauseDeadline(for: "panel") == nil)
     // Scoped to the display being reset.
     #expect(care.pauseDimming(for: "other", until: deadline))
+    #expect(!care.pauseDimming(for: "panel", duration: 900))
+    #expect(care.isResetBlockingDimmingPause(for: "panel"))
+    #expect(!care.isResetBlockingDimmingPause(for: "other"))
+    #expect(care.pauseDimming(for: "other", duration: 900))
     care.displayResetDidComplete("panel")
+    #expect(!care.isResetBlockingDimmingPause(for: "panel"))
     #expect(care.pauseDimming(for: "panel", until: deadline))
     #expect(care.dimmingPauseDeadline(for: "panel") == deadline)
   }

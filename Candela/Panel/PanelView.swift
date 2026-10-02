@@ -783,9 +783,13 @@ extension PanelView {
   }
 
   private func pauseDimming(for state: AppModel.DisplayState, duration: TimeInterval) {
-    model.oledCare.pauseDimming(for: state.display.persistenceKey, duration: duration)
+    let paused = model.oledCare.pauseDimming(for: state.display.persistenceKey, duration: duration)
     expandedSection = nil
     PanelMenu.endTracking()
+    // The menu closes either way, so a refusal needs a voice of its own.
+    if !paused {
+      model.hdrFeedback.show("Wait for the settings reset to finish.", on: OverlayWindow.screen(for: state.id))
+    }
   }
 
   /// Reads the summary only where the line will show it, so an un-enrolled

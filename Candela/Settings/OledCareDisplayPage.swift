@@ -488,10 +488,14 @@ struct OledCareDisplayPage: View {
           // (segments, pop-up row) draw a selected state there is none of.
           Menu(row.menuTitle) {
             Button("15 Minutes") {
-              model.oledCare.pauseDimming(for: persistenceKey, duration: 15 * 60)
+              if !model.oledCare.pauseDimming(for: persistenceKey, duration: 15 * 60) {
+                model.hdrFeedback.show("Wait for the settings reset to finish.", on: nil)
+              }
             }
             Button("1 Hour") {
-              model.oledCare.pauseDimming(for: persistenceKey, duration: 60 * 60)
+              if !model.oledCare.pauseDimming(for: persistenceKey, duration: 60 * 60) {
+                model.hdrFeedback.show("Wait for the settings reset to finish.", on: nil)
+              }
             }
             Button("Until…") {
               model.chooseDimmingPauseEndTime(for: persistenceKey, name: name)

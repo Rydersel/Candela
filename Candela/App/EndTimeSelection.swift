@@ -79,7 +79,10 @@ extension AppModel {
   }
 
   func applyDimmingPause(until deadline: Date, for key: String) -> String? {
-    guard !isResetting, !isSafeMode,
+    // The coordinator's scope, not `isResetting`: that latch is also up while
+    // a different display resets.
+    if oledCare.isResetBlockingDimmingPause(for: key) { return "Wait for the settings reset to finish." }
+    guard !isSafeMode,
           displays.contains(where: { $0.display.persistenceKey == key }),
           oledCare.isEnrolled(key) else {
       return "This display is no longer available for dimming pause."
