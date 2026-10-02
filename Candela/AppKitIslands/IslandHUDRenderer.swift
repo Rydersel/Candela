@@ -32,7 +32,6 @@ final class IslandHUDRenderer: HUDRenderer {
   /// Zero until the first screen is known, so the first layout always applies it.
   private var backingScale: CGFloat = 0
 
-  // Agreed by eye on 2026-10-01.
   private static let widenDamping: CGFloat = 17
   private static let widenStiffness: CGFloat = 170
   private static let foldDamping: CGFloat = 24

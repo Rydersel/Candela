@@ -1,8 +1,7 @@
 import AppKit
 import CandelaKit
 
-/// The three pill styles: system, segments, compact. The anatomy the app
-/// shipped with, now behind the renderer seam.
+/// The three pill styles: system, segments, compact.
 @MainActor
 final class PillHUDRenderer: HUDRenderer {
   let style: HUDStyle
@@ -21,8 +20,8 @@ final class PillHUDRenderer: HUDRenderer {
   private let segmentBoxes: [NSBox]
   private let metrics: Metrics
 
-  /// Per-style geometry. The Menu Bar preview's miniature implements
-  /// the same numbers from the spec, so a change here must travel there.
+  /// Per-style geometry. The Menu Bar preview's miniature repeats these
+  /// numbers, so a change here must travel there.
   private struct Metrics {
     let size: NSSize
     let cornerRadius: CGFloat
@@ -119,8 +118,6 @@ final class PillHUDRenderer: HUDRenderer {
     var tickBoxes: [NSBox] = []
     var segmentBoxes: [NSBox] = []
     if style == .segments {
-      // Pinned geometry: chiclets across the system bar rect, centered
-      // on the bar's line.
       let segmentWidth = (metrics.barWidth - CGFloat(Self.segmentCount - 1) * Self.segmentGap) / CGFloat(Self.segmentCount)
       let segmentY = metrics.barY + Metrics.barHeight / 2 - Self.segmentHeight / 2
       for index in 0 ..< Self.segmentCount {
