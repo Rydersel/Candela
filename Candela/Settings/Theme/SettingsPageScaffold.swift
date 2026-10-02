@@ -15,12 +15,23 @@ struct SettingsPageScaffold<Content: View>: View {
 
   private let source: Source
 
+  /// Fresh per initialisation, so a parent that rebuilt this scaffold always
+  /// reaches the reading closure. The closure is the only part of the input
+  /// that changes, and SwiftUI does not reliably count a new closure as a
+  /// change [MEASURED 2026-10-02]: the first scaffold of this type in a process
+  /// re-ran its body when its page re-rendered, every later one skipped it. A
+  /// page whose closure reads plain defaults then kept showing stale values.
+  /// The plain form needs nothing, because its content is built by the parent.
+  private let rebuild: UUID?
+
   init(@ViewBuilder content: () -> Content) {
     self.source = .plain(content())
+    self.rebuild = nil
   }
 
   init(@ViewBuilder reading: @escaping (ScrollViewProxy) -> Content) {
     self.source = .reading(reading)
+    self.rebuild = UUID()
   }
 
   var body: some View {

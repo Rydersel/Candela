@@ -23,7 +23,9 @@ struct AppMenuPane: View {
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
 
-  private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
+  /// Injectable so a hosted test can drive the pane without writing the
+  /// process's standard defaults.
+  var prefs = DisplayPrefs(persistenceKey: "app")
 
   /// Scroll anchors for the preview's click-to-jump. On the section
   /// container, not a row: the jump should land the section heading at the top.
