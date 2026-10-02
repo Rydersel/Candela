@@ -300,7 +300,7 @@ export const more: {
     },
     {
       title: "Keep Display Awake",
-      body: "Prevent display sleep from the menu bar until you turn it off or quit Candela.",
+      body: "Prevent display sleep from the menu bar for a chosen duration, until a custom end time, or until you turn it off.",
     },
     {
       title: "Keyboard shortcuts",

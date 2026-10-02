@@ -220,10 +220,10 @@ struct EndTimePickerView: View {
     .overlay(RoundedRectangle(cornerRadius: 6).stroke(SettingsTheme.cardStroke, lineWidth: 1))
   }
 
+  // English only, like every other label; the locale decides only whether the
+  // control is shown at all.
   private func periodSymbol(_ period: EndTimeDraft.Period) -> String {
-    let formatter = DateFormatter()
-    formatter.locale = .current
-    return period == .am ? formatter.amSymbol : formatter.pmSymbol
+    period == .am ? "AM" : "PM"
   }
 
   private var validationMessage: String? {
