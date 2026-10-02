@@ -7,6 +7,40 @@ import Testing
 /// own objects and is covered by the hardware pass.
 @Suite("Checkup live environment")
 struct CheckupLiveEnvironmentTests {
+  /// The dock-cycle sequence: the panel leaves mid-leg and another takes its
+  /// display ID, so the leg's final write would land on the newcomer.
+  @Test func theHDRLegWritesNothingOnceItsDisplayIsReplaced() async {
+    let base = RecordingHDR()
+    let present = PresenceFlag()
+    let checked = IdentityCheckedHDRToggling(base: base, isPresent: { present.value })
+    await base.onSet { present.value = false }
+    let runner = CheckupLiveHDRRunner(
+      hdr: checked, displayID: 7,
+      identity: CheckupDisplayIdentity(
+        identityKey: "k1", vendorID: 1, modelID: 2, serial: nil, manufactureWeek: nil,
+        manufactureYear: nil, nativePixelWidth: 3440, nativePixelHeight: 1440,
+        maxRefreshHz: 175, supportsPQEOTF: true, supportsHDRGammaEOTF: false,
+        productName: "MAG"),
+      settleDelay: .zero, restoreDelay: .zero)
+
+    _ = await runner.run()
+
+    // The toggle away went out while the panel was there; the restore did not.
+    #expect(await base.writes == [true])
+    // Latched: a display back under the same ID is not trusted again.
+    present.value = true
+    #expect(await !checked.setHDR(displayID: 7, enabled: false))
+    #expect(await base.writes == [true])
+  }
+
+  @Test func theHDRLegWritesThroughWhileItsDisplayStays() async {
+    let base = RecordingHDR()
+    let checked = IdentityCheckedHDRToggling(base: base, isPresent: { true })
+    #expect(await checked.setHDR(displayID: 7, enabled: true))
+    #expect(await checked.setHDR(displayID: 7, enabled: false))
+    #expect(await base.writes == [true, false])
+  }
+
   @Test @MainActor func anUnchangedTargetCanStartUnderTheConfigurationClaim() async throws {
     let discovery = ScriptedDiscovery([(id: 7, key: "checkup-unchanged-\(UUID())", name: "Test Display")])
     let model = TestFixtures.appModel(discovery: discovery, safeMode: true)
@@ -419,4 +453,32 @@ private actor AdmissionHDR: HDRToggling {
   func measuredHDREnabled(displayID: CGDirectDisplayID) async -> Bool { measured }
   func setHDR(displayID: CGDirectDisplayID, enabled: Bool) async -> Bool { false }
   func displaysReconfigured() async {}
+}
+
+private actor RecordingHDR: HDRToggling {
+  private(set) var writes: [Bool] = []
+  private var enabled = false
+  private var afterSet: (@Sendable () -> Void)?
+  func onSet(_ action: @escaping @Sendable () -> Void) { afterSet = action }
+  func supportsHDR(displayID _: CGDirectDisplayID) async -> Bool { true }
+  func isHDREnabled(displayID _: CGDirectDisplayID) async -> Bool { enabled }
+  func measuredHDREnabled(displayID _: CGDirectDisplayID) async -> Bool { enabled }
+  @discardableResult
+  func setHDR(displayID _: CGDirectDisplayID, enabled: Bool) async -> Bool {
+    writes.append(enabled)
+    self.enabled = enabled
+    afterSet?()
+    return true
+  }
+  func displaysReconfigured() async {}
+}
+
+/// `@unchecked Sendable`: the one stored var is behind `lock`.
+private final class PresenceFlag: @unchecked Sendable {
+  private let lock = NSLock()
+  private var _value = true
+  var value: Bool {
+    get { lock.withLock { _value } }
+    set { lock.withLock { _value = newValue } }
+  }
 }

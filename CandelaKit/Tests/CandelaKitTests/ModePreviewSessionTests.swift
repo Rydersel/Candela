@@ -134,6 +134,17 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
     set { lock.withLock { _divergeNextMirroringTo = newValue } }
   }
 
+  /// A fake with these displays online, each with its own identity: a mode
+  /// preview refuses a display whose identity it cannot read.
+  static func online(_ ids: CGDirectDisplayID...) -> FakeConfigurator {
+    let fake = FakeConfigurator()
+    fake.configuredDisplays = ids.map {
+      ConfiguredDisplay(id: $0, identity: DisplayConfigIdentity(
+        vendor: 1, model: 2, serial: $0, isBuiltIn: false), name: "Panel \($0)", isBuiltIn: false)
+    }
+    return fake
+  }
+
   func displays() -> [ConfiguredDisplay] { configuredDisplays }
   func modes(for _: CGDirectDisplayID) -> [DisplayMode] { available }
   func currentMode(for _: CGDirectDisplayID) -> DisplayMode? { current }
@@ -347,8 +358,20 @@ struct ModePreviewSessionTests {
     PreviewedMode(displayID: displayID, mode: mode(id))
   }
 
-  @Test func beginningAPreviewAppliesWithPreviewScopeNotSession() async {
+  @Test func aDisplayWhoseIdentityCannotBeReadIsNotPreviewed() async {
     let fake = FakeConfigurator()
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake)
+    guard case .failure = await session.begin(mode: mode(2), on: 7) else {
+      Issue.record("With no identity, nothing could stop the fallback reaching other hardware")
+      return
+    }
+    #expect(fake.applied.isEmpty)
+    #expect(await !session.hasOutstandingPreview)
+  }
+
+  @Test func beginningAPreviewAppliesWithPreviewScopeNotSession() async {
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -356,7 +379,7 @@ struct ModePreviewSessionTests {
   }
 
   @Test func confirmingReappliesWithSessionScope() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -369,7 +392,7 @@ struct ModePreviewSessionTests {
   /// inverts, a mode that makes the screen unreadable becomes permanent and
   /// the user cannot undo it from inside the app.
   @Test func theCountdownDefaultsToRevertingNotKeeping() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake, countdownSeconds: 2)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -381,7 +404,7 @@ struct ModePreviewSessionTests {
   }
 
   @Test func revertingRestoresTheExactPrePreviewMode() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(42)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -391,7 +414,7 @@ struct ModePreviewSessionTests {
   }
 
   @Test func aFailedApplyReportsTheErrorAndAppliesNothing() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     fake.failWith = DisplayConfigError(cgErrorCode: 1001)
     let session = ModePreviewSession(configurator: fake)
@@ -403,7 +426,7 @@ struct ModePreviewSessionTests {
   /// The readback can fail on a commit that WENT THROUGH. Refusing the preview
   /// there would leave a mode nobody picked on the glass with no countdown.
   @Test func aCommittedButUnhonouredApplyArmsTheRevertRatherThanRefusing() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     fake.divergeNextApplyTo = mode(9)
     let session = ModePreviewSession(configurator: fake, countdownSeconds: 1)
@@ -423,7 +446,7 @@ struct ModePreviewSessionTests {
   /// was asked for, on a screen showing something else, and the person
   /// answering has no way to see the difference.
   @Test func anUnhonouredCommitTravelsOutWithThePreview() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     fake.divergeNextApplyTo = mode(9)
     let session = ModePreviewSession(configurator: fake)
@@ -439,7 +462,7 @@ struct ModePreviewSessionTests {
   /// The control: an honoured commit carries nothing, so no surface can draw
   /// that caption over an ordinary preview.
   @Test func anHonouredCommitCarriesNoAchievedGeometry() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -451,7 +474,7 @@ struct ModePreviewSessionTests {
   /// the apply that is now history, and a stale caption would name a resolution
   /// nothing is showing.
   @Test func aFreshPreviewDoesNotInheritTheLastOnesDivergence() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     fake.divergeNextApplyTo = mode(9)
     let session = ModePreviewSession(configurator: fake)
@@ -465,7 +488,7 @@ struct ModePreviewSessionTests {
   /// An ANSWER is matched on the display and the mode alone, so a surface that
   /// rendered the preview before the divergence was known still resolves it.
   @Test func anAnswerCarryingNoAchievedGeometryStillResolvesThePreview() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     fake.divergeNextApplyTo = mode(9)
     let session = ModePreviewSession(configurator: fake)
@@ -476,7 +499,7 @@ struct ModePreviewSessionTests {
 
   /// A mode that never appeared cannot be approved by answering its recovery UI.
   @Test func keepingAfterAnUnhonouredCommitAppliesNothing() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     fake.divergeNextApplyTo = mode(9)
     let session = ModePreviewSession(configurator: fake)
@@ -492,7 +515,7 @@ struct ModePreviewSessionTests {
   }
 
   @Test func tickingAfterResolutionDoesNothing() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake, countdownSeconds: 1)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -507,7 +530,7 @@ struct ModePreviewSessionTests {
   /// so `currentMode` at confirm time can be the old mode again: committing that
   /// reports success while silently discarding the user's choice.
   @Test func confirmingCommitsTheApprovedModeNotWhateverIsCurrentNow() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -521,7 +544,7 @@ struct ModePreviewSessionTests {
   /// mode there is nothing to restore, so the countdown would expire into a
   /// no-op and leave the display in a mode nobody approved.
   @Test func aPreviewIsRefusedWhenThePreviousModeCannotBeRead() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = nil
     let session = ModePreviewSession(configurator: fake, countdownSeconds: 1)
     let result = await session.begin(mode: mode(2), on: 7)
@@ -533,7 +556,7 @@ struct ModePreviewSessionTests {
   /// Previewing a second mode without answering the first must not adopt the
   /// first preview as the thing to fall back to.
   @Test func aSecondPreviewStillRevertsToTheOriginalMode() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -545,7 +568,7 @@ struct ModePreviewSessionTests {
   /// A double-click on "Keep" must not report a reversion that never happened, or
   /// the UI tells the user the opposite of what the display is doing.
   @Test func answeringTwiceRepeatsTheOutcomeItAlreadyProduced() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -559,7 +582,7 @@ struct ModePreviewSessionTests {
   /// Retargeting the session at another display must end the first preview,
   /// not carry display 7's fallback mode over to display 8.
   @Test func previewingAnotherDisplayEndsTheFirstPreviewInsteadOfMixingThemUp() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -581,7 +604,7 @@ struct ModePreviewSessionTests {
   // pin that a failed resolution is recoverable rather than terminal.
 
   @Test func aFailedExpiryRevertStaysRevertibleAndRecovers() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake, countdownSeconds: 1)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -600,7 +623,7 @@ struct ModePreviewSessionTests {
   /// After the expiry revert throws, a fresh preview must still fall back to the
   /// mode the user started on, not to the unapproved preview on screen.
   @Test func aFailedResolutionDoesNotLoseTheOriginalMode() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake, countdownSeconds: 1)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -614,7 +637,7 @@ struct ModePreviewSessionTests {
   }
 
   @Test func aFailedCommitLeavesThePreviewRevertible() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -632,7 +655,7 @@ struct ModePreviewSessionTests {
   /// held only by process scope, so the countdown stays armed and still falls
   /// back to something the user can definitely see.
   @Test func aFailedCommitLeavesTheCountdownRunningSoItStillFallsBack() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake, countdownSeconds: 2)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -648,7 +671,7 @@ struct ModePreviewSessionTests {
   /// Refuse rather than report success: previewing display 8 while display 7
   /// cannot be restored would strand 7 on an unapproved mode silently.
   @Test func previewingAnotherDisplayIsRefusedWhenTheFirstCannotBeReverted() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -670,7 +693,7 @@ struct ModePreviewSessionTests {
   /// session claiming a reversion, the opposite of what happened to the screen.
   /// Both of `begin()`'s failure exits are exercised.
   @Test func aFailedBeginDoesNotEraseTheOutcomeAlreadyReported() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -693,7 +716,7 @@ struct ModePreviewSessionTests {
   /// `countdownSeconds`. Thirty seconds is a product decision, matching
   /// `MirrorPreviewSession`.
   @Test func theDefaultCountdownIsThirtySeconds() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -701,7 +724,7 @@ struct ModePreviewSessionTests {
   }
 
   @Test func theCountdownStopsBeingReportedOnceResolved() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake, countdownSeconds: 15)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -715,7 +738,7 @@ struct ModePreviewSessionTests {
   // MARK: - State a UI rebuilds itself from
 
   @Test func theSessionReportsWhatIsPreviewedSoAUINeverHasToRemember() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake, countdownSeconds: 15)
     #expect(await session.previewedMode == nil)
@@ -734,7 +757,7 @@ struct ModePreviewSessionTests {
   /// inferred either one would show a countdown that never fires, or hide one
   /// that will.
   @Test func aFailedExpiryStopsCountingDownWhileAFailedCommitKeepsCounting() async {
-    let expiry = FakeConfigurator()
+    let expiry = FakeConfigurator.online(7, 8, 42)
     expiry.current = mode(1)
     let expirySession = ModePreviewSession(configurator: expiry, countdownSeconds: 1)
     _ = await expirySession.begin(mode: mode(2), on: 7)
@@ -743,7 +766,7 @@ struct ModePreviewSessionTests {
     #expect(await expirySession.hasOutstandingPreview)
     #expect(await expirySession.isCountingDown == false)
 
-    let commit = FakeConfigurator()
+    let commit = FakeConfigurator.online(7, 8, 42)
     commit.current = mode(1)
     let commitSession = ModePreviewSession(configurator: commit, countdownSeconds: 15)
     _ = await commitSession.begin(mode: mode(2), on: 7)
@@ -756,7 +779,7 @@ struct ModePreviewSessionTests {
   /// on any OTHER display reverts the outstanding preview first, fails, and
   /// refuses — so one unplug would wedge mode switching for the whole session.
   @Test func discardingADepartedDisplayAppliesNothingAndUnblocksOtherDisplays() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake, countdownSeconds: 15)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -782,7 +805,7 @@ struct ModePreviewSessionTests {
   /// cannot prevent it, since the click runs one turn before the call, so the
   /// answer carries what it was about and the session refuses it.
   @Test func anAnswerForASupersededPreviewCommitsNothing() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -801,7 +824,7 @@ struct ModePreviewSessionTests {
   /// Same rule for the other answer, across displays: a revert aimed at the
   /// display the banner named must not restore a different display.
   @Test func aRevertForAnotherDisplaysPreviewRestoresNothing() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake, countdownSeconds: 15)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -820,7 +843,7 @@ struct ModePreviewSessionTests {
   /// failed commit the banner is still showing the SAME preview, so its answer
   /// still matches and recovery keeps working.
   @Test func theRetryPathStillMatchesAfterAFailedResolution() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -848,7 +871,7 @@ extension ModePreviewSessionTests {
     let requested = distinctMode(
       2, width: 2048, height: 858, provenance: .coreGraphicsServices)
     let actuallyPreviewed = distinctMode(9, width: 1920, height: 804)
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = original
     fake.divergeNextApplyTo = actuallyPreviewed
     let session = ModePreviewSession(configurator: fake, countdownSeconds: 30)
@@ -878,7 +901,7 @@ extension ModePreviewSessionTests {
     let requested = distinctMode(2, width: 2048, height: 858)
     let firstAchieved = distinctMode(9, width: 1920, height: 804)
     let secondAchieved = distinctMode(8, width: 1280, height: 536)
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = original
     fake.divergeNextApplyTo = firstAchieved
     let session = ModePreviewSession(configurator: fake, countdownSeconds: 30)
@@ -909,7 +932,7 @@ extension ModePreviewSessionTests {
 
 extension ModePreviewSessionTests {
   @Test func aDelayedRecoveryAnswerCannotKeepAFreshPreviewOfTheSameMode() async throws {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     fake.divergeNextApplyTo = mode(9)
     let session = ModePreviewSession(configurator: fake)
@@ -924,7 +947,7 @@ extension ModePreviewSessionTests {
   }
 
   @Test func aFailedKeepUpdatesEvidenceAndRefusesADelayedSecondKeep() async throws {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
@@ -943,7 +966,7 @@ extension ModePreviewSessionTests {
   }
 
   @Test func aRefusedFreshPreviewPreservesRecoveryEvidenceAndTheFallback() async {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     fake.divergeNextApplyTo = mode(9)
     let session = ModePreviewSession(configurator: fake, countdownSeconds: 1)
@@ -969,7 +992,7 @@ struct ScanoutPreviewRecoveryTests {
 
   @Test(arguments: [false, true])
   func immediateTimingRollbackNeverTargetsAReplacement(duringKeep: Bool) async throws {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     let original = DisplayConfigIdentity(vendor: 1, model: 2, serial: 3, isBuiltIn: false)
     let replacement = DisplayConfigIdentity(vendor: 1, model: 2, serial: 4, isBuiltIn: false)
     fake.configuredDisplays = [ConfiguredDisplay(id: 42, identity: original, name: "Panel", isBuiltIn: false)]
@@ -1002,7 +1025,7 @@ struct ScanoutPreviewRecoveryTests {
   }
 
   @Test func aSecondSelectionPreservesTheOriginalDisplayIdentity() async throws {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     let original = DisplayConfigIdentity(vendor: 1, model: 2, serial: 3, isBuiltIn: false)
     let replacement = DisplayConfigIdentity(vendor: 1, model: 2, serial: 4, isBuiltIn: false)
     fake.configuredDisplays = [ConfiguredDisplay(id: 42, identity: original, name: "Panel", isBuiltIn: false)]
@@ -1018,7 +1041,7 @@ struct ScanoutPreviewRecoveryTests {
 
   @Test(arguments: [false, true])
   func aReplacementCannotReceiveACommittedOutcome(duringApply: Bool) async throws {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     let original = DisplayConfigIdentity(vendor: 1, model: 2, serial: 3, isBuiltIn: false)
     let replacement = ConfiguredDisplay(id: 42,
       identity: DisplayConfigIdentity(vendor: 1, model: 2, serial: 4, isBuiltIn: false),
@@ -1037,7 +1060,7 @@ struct ScanoutPreviewRecoveryTests {
   }
 
   @Test func failedImmediateRestoreKeepsRecoveryCountdownAndOriginalFallback() async throws {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     fake.nextCommittedError = DisplayConfigError(unhonouredCommit: .init(
       requested: mode(2), achieved: mode(2),
@@ -1058,7 +1081,7 @@ struct ScanoutPreviewRecoveryTests {
   }
 
   @Test func timingMismatchDuringKeepRestoresTheOriginalMode() async throws {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 42)
@@ -1076,7 +1099,7 @@ struct ScanoutPreviewRecoveryTests {
   }
 
   @Test func wrongWireTimingRestoresCapturedModeImmediately() async throws {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     fake.nextCommittedError = DisplayConfigError(unhonouredCommit: .init(
       requested: mode(2), achieved: mode(2),
@@ -1095,7 +1118,7 @@ struct ScanoutPreviewRecoveryTests {
   }
 
   @Test func unattendedRecoveryExpiresOntoItsOriginalFallback() async throws {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     let identity = DisplayConfigIdentity(vendor: 1, model: 2, serial: 3, isBuiltIn: false)
     fake.configuredDisplays = [ConfiguredDisplay(id: 42, identity: identity, name: "Panel", isBuiltIn: false)]
     fake.current = mode(2)
@@ -1112,7 +1135,7 @@ struct ScanoutPreviewRecoveryTests {
   }
 
   @Test func unattendedRecoveryCannotOverwriteAnExistingPreview() async throws {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     fake.current = mode(1)
     let identity = DisplayConfigIdentity(vendor: 1, model: 2, serial: 3, isBuiltIn: false)
     fake.configuredDisplays = [ConfiguredDisplay(id: 42, identity: identity, name: "Panel", isBuiltIn: false)]
@@ -1127,7 +1150,7 @@ struct ScanoutPreviewRecoveryTests {
   }
 
   @Test func unattendedRecoveryNeverAppliesToAReplacementDisplay() async throws {
-    let fake = FakeConfigurator()
+    let fake = FakeConfigurator.online(7, 8, 42)
     let original = DisplayConfigIdentity(vendor: 1, model: 2, serial: 3, isBuiltIn: false)
     let replacement = DisplayConfigIdentity(vendor: 1, model: 2, serial: 4, isBuiltIn: false)
     fake.configuredDisplays = [ConfiguredDisplay(id: 42, identity: original, name: "Panel", isBuiltIn: false)]
@@ -1139,4 +1162,85 @@ struct ScanoutPreviewRecoveryTests {
     #expect(fake.applied.isEmpty)
     #expect(await !session.hasOutstandingPreview)
   }
+
+  @Test func aMismatchReadingOnThePreviousModeCannotStrandThePreview() async {
+    let fake = WithholdingConfigurator(current: mode(1), mismatched: [1, 2])
+    let gate = DisplayReconfigurationGate()
+    let session = ModePreviewSession(configurator: fake, countdownSeconds: 1)
+    #expect(await gate.claim(.displayModes) == .granted)
+    // The coordinator's funnel: the claim goes back once nothing is outstanding.
+    let releaseIfIdle = {
+      if await session.previewedMode == nil { await gate.release(.displayModes) }
+    }
+
+    _ = await session.begin(mode: mode(2), on: 42)
+    await releaseIfIdle()
+    if await session.previewedMode != nil {
+      _ = await session.tick()
+      await releaseIfIdle()
+    }
+
+    #expect(await session.previewedMode == nil)
+    #expect(await gate.holder == nil)
+    #expect(fake.current == mode(1))
+    #expect(fake.withheld == [mode(2).descriptor])
+  }
+}
+
+/// The real configurator's quarantine without hardware: a checked apply whose
+/// timing reads wrong withholds its mode and refuses it afterwards, while
+/// `restore` does neither.
+///
+/// `@unchecked Sendable`: every stored var is behind `lock`.
+final class WithholdingConfigurator: DisplayConfiguring, @unchecked Sendable {
+  private let lock = NSLock()
+  private var _current: DisplayMode
+  private var _withheld: Set<DisplayModeDescriptor> = []
+  private let mismatched: Set<Int32>
+  private let display = ConfiguredDisplay(
+    id: 42, identity: DisplayConfigIdentity(vendor: 1, model: 2, serial: 3, isBuiltIn: false),
+    name: "Panel", isBuiltIn: false)
+
+  init(current: DisplayMode, mismatched: Set<Int32>) {
+    _current = current
+    self.mismatched = mismatched
+  }
+
+  var current: DisplayMode { lock.withLock { _current } }
+  var withheld: Set<DisplayModeDescriptor> { lock.withLock { _withheld } }
+
+  func displays() -> [ConfiguredDisplay] { [display] }
+  func modes(for _: CGDirectDisplayID) -> [DisplayMode] { [] }
+  func currentMode(for _: CGDirectDisplayID) -> DisplayMode? { current }
+  func nativePixels(for _: CGDirectDisplayID) -> (width: Int, height: Int)? { (3440, 1440) }
+
+  func apply(_ mode: DisplayMode, to _: CGDirectDisplayID, scope _: DisplayConfigScope) throws {
+    try perform(mode, enforcesScanout: true)
+  }
+
+  func restore(_ mode: DisplayMode, to _: CGDirectDisplayID, scope _: DisplayConfigScope) throws {
+    try perform(mode, enforcesScanout: false)
+  }
+
+  private func perform(_ mode: DisplayMode, enforcesScanout: Bool) throws {
+    try lock.withLock {
+      if enforcesScanout, _withheld.contains(mode.descriptor) {
+        throw DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue)
+      }
+      _current = mode
+      guard enforcesScanout, mismatched.contains(mode.ioModeID) else { return }
+      _withheld.insert(mode.descriptor)
+      throw DisplayConfigError(unhonouredCommit: .init(
+        requested: mode, achieved: mode,
+        scanoutTiming: ScanoutTiming(width: 2560, height: 1440, refreshHz: 120)))
+    }
+  }
+
+  func applyMirroring(_: [MirrorChange], scope _: DisplayConfigScope) throws {}
+  var revealsHiddenModes: Bool { true }
+  var guardsWireTiming: Bool { true }
+  func modesWithheldByWireTimingGuard(for _: CGDirectDisplayID) -> Int { withheld.count }
+  var canRotate: Bool { false }
+  func rotation(of _: CGDirectDisplayID) -> DisplayRotation? { .standard }
+  func applyRotation(_: DisplayRotation, to _: CGDirectDisplayID) throws {}
 }

@@ -23,23 +23,33 @@ struct SynthesisTailTests {
 
   // MARK: - The engage tail
 
-  @Test func aScanoutMismatchDuringRetimeUnwindsInsteadOfReportingSuccess() async throws {
-    let hdr = FakeSynthesisHDR(supports: false)
-    let fixture = Fixture(hdr: hdr)
+  @Test func aScanoutMismatchAtRetimeFallsToTheBounceAndWithholdsNothing() async throws {
+    let hdr = FakeSynthesisHDR()
+    let fixture = Fixture(nativeRidesTheHiDPITwin: true, hdr: hdr)
     defer { fixture.forgetPrefs() }
     let display = try fixture.configured(Self.panelID)
     let stop = try firstStop(fixture)
-    let ownMode = try nativeRow(fixture)
-    let timing = ScanoutTiming(width: 1280, height: 1024, refreshHz: 175)
+    let twin = try #require(fixture.world.modes(for: Self.panelID).first { $0.ioModeID == 3 })
+    let wrong = ScanoutTiming(width: 1280, height: 1024, refreshHz: 175)
+    let world = fixture.world
+    fixture.configurator.withholdsScanoutMismatches = true
+    // The panel's own timing for the engine's check, wrong once the re-time
+    // lands, renegotiated by the bounce.
+    fixture.configurator.scanoutRead = { _ in
+      world.applies.isEmpty || !hdr.legs.isEmpty
+        ? ScanoutTiming(width: 3440, height: 1440, refreshHz: 175) : wrong
+    }
     fixture.configurator.nextModeApplyFailure = DisplayConfigError(unhonouredCommit: .init(
-      requested: ownMode, achieved: ownMode, scanoutTiming: timing))
+      requested: twin, achieved: twin, scanoutTiming: wrong))
 
     let result = await fixture.synthesis.engage(stop, on: display)
 
-    #expect(result == .failure(.scanoutMismatch(timing)))
-    #expect(fixture.synthesis.pairings.isEmpty)
-    #expect(fixture.host.live().isEmpty)
-    #expect(fixture.world.currentMode(for: Self.panelID) == ownMode)
+    #expect(!result.isFailure)
+    #expect(fixture.configurator.restores.first?.mode == twin)
+    #expect(hdr.legs.map(\.enabled) == [true, false])
+    #expect(fixture.configurator.withheld(on: Self.panelID).isEmpty)
+    #expect(fixture.synthesis.pairings.count == 1)
+    #expect(await fixture.synthesis.disengageForModeChange(display))
   }
 
   @Test func aScanoutMismatchAfterBounceUnwindsThePairing() async throws {
@@ -67,11 +77,13 @@ struct SynthesisTailTests {
     defer { fixture.forgetPrefs() }
     let display = try fixture.configured(Self.panelID)
     let stop = try firstStop(fixture)
-    let ownMode = try nativeRow(fixture)
     fixture.host.refusesDestroy = true
-    fixture.configurator.nextModeApplyFailure = DisplayConfigError(unhonouredCommit: .init(
-      requested: ownMode, achieved: ownMode,
-      scanoutTiming: ScanoutTiming(width: 1280, height: 1024, refreshHz: 175)))
+    let world = fixture.world
+    fixture.configurator.scanoutRead = { _ in
+      world.applies.isEmpty
+        ? ScanoutTiming(width: 3440, height: 1440, refreshHz: 175)
+        : ScanoutTiming(width: 1280, height: 1024, refreshHz: 175)
+    }
 
     let result = await fixture.synthesis.engage(stop, on: display)
 

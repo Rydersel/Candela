@@ -905,7 +905,7 @@ final class DisplayModeCoordinator {
             return .gone
           }
           do {
-            try configurator.apply(previous, to: display.id, scope: .session)
+            try configurator.restore(previous, to: display.id, scope: .session)
             guard configurator.displays().contains(where: { $0.id == display.id && $0.identity == identity }) else {
               arrivals.release(display.id)
               return .gone

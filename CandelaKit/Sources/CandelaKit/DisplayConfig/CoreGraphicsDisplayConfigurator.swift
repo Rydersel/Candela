@@ -215,8 +215,25 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   public func apply(
     _ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope
   ) throws {
+    try apply(mode, to: displayID, scope: scope, enforcesScanout: true)
+  }
+
+  public func restore(
+    _ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope
+  ) throws {
+    try apply(mode, to: displayID, scope: scope, enforcesScanout: false)
+  }
+
+  /// `enforcesScanout` false is the way back: it neither refuses a withheld
+  /// mode nor withholds one. A mismatch reading on the mode a person was
+  /// running before must not close the only route back to it, which is what
+  /// leaves a preview outstanding and its gate claim held for the session.
+  private func apply(
+    _ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope,
+    enforcesScanout: Bool
+  ) throws {
     let key = scanoutDisplayKey(displayID)
-    if let key, rejectedScanoutModes.contains(mode, displayKey: key) {
+    if enforcesScanout, let key, rejectedScanoutModes.contains(mode, displayKey: key) {
       throw DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue)
     }
     // Capture the panel's own dimensions before a reconfiguration can change
@@ -225,6 +242,11 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
       ? (width: mode.pixelWidth, height: mode.pixelHeight)
       : nativePixels(for: displayID)
     let location = ScanoutTimingReader.displayLocation(displayID)
+    // Before the apply, so a record still describing the outgoing timing after
+    // CoreGraphics already reports the new mode reads as stale, not as wrong.
+    let before = location.flatMap {
+      ScanoutTimingReader.read(displayID: displayID, expectedLocation: $0)
+    }
     switch mode.provenance {
     case .coreGraphics:
       try applyPublishedMode(mode, to: displayID, scope: scope)
@@ -242,20 +264,51 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
       // display".
       throw DisplayConfigError(cgErrorCode: CGError.invalidOperation.rawValue)
     }
-    guard let location else { return }
+    // No record before means none after: a location the reader cannot match
+    // (behind a hub, for one) would otherwise cost every apply the full
+    // settle, each poll a recursive registry walk, on the calling thread.
+    guard let location, before != nil else { return }
     let timing = settled(read: {
       ScanoutTimingReader.read(displayID: displayID, expectedLocation: location)
     }) {
-      ScanoutVerification.verdict(requested: mode, nativePixels: native, timing: $0) == .verified
+      Self.scanoutSettled($0, before: before, requested: mode, nativePixels: native)
     }
-    guard let timing,
-          ScanoutVerification.verdict(requested: mode, nativePixels: native, timing: timing) == .mismatch
-    else { return }
+    let verdict = ScanoutVerification.verdict(
+      requested: mode, nativePixels: native, before: before, after: timing)
+    guard verdict == .mismatch, enforcesScanout, let timing else {
+      if verdict != .verified { logScanout(verdict, mode: mode, displayID: displayID, timing: timing) }
+      return
+    }
+    logScanout(verdict, mode: mode, displayID: displayID, timing: timing)
     if let key, scanoutDisplayKey(displayID) == key {
       rejectedScanoutModes.record(mode, displayKey: key)
     }
     throw DisplayConfigError(unhonouredCommit: .init(
       requested: mode, achieved: achievedMode(for: displayID), scanoutTiming: timing))
+  }
+
+  /// Stop polling once there is no record (nothing more will come of it), the
+  /// record has moved off the pre-apply timing, or it already verifies.
+  static func scanoutSettled(
+    _ reading: ScanoutTiming?, before: ScanoutTiming?, requested: DisplayMode,
+    nativePixels: (width: Int, height: Int)?
+  ) -> Bool {
+    guard let reading else { return true }
+    return reading != before
+      || ScanoutVerification.verdict(requested: requested, nativePixels: nativePixels, timing: reading) == .verified
+  }
+
+  private func logScanout(
+    _ verdict: ScanoutVerification.Verdict, mode: DisplayMode,
+    displayID: CGDirectDisplayID, timing: ScanoutTiming?
+  ) {
+    Logger(subsystem: "com.rydersel.Candela", category: "topology").info(
+      """
+      scan-out \(String(describing: verdict), privacy: .public) on display \(displayID, privacy: .public) \
+      for \(Self.geometry(of: mode), privacy: .public): \
+      \(timing?.diagnosticDescription ?? "no fresh reading", privacy: .public)
+      """
+    )
   }
 
   /// The revealed path.

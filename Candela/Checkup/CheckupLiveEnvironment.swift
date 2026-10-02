@@ -301,7 +301,21 @@ enum CheckupLiveEnvironment {
         restoreControls: restoreControls),
       mode: CheckupLiveModeRunner(configurator: configurator, displayID: entry.id),
       hdr: CheckupLiveHDRRunner(
-        hdr: hdr, displayID: entry.id, identity: identity ?? unreadIdentity(for: entry)))
+        hdr: IdentityCheckedHDRToggling(
+          base: hdr, isPresent: presence(of: entry.id, configurator: configurator)),
+        displayID: entry.id, identity: identity ?? unreadIdentity(for: entry)))
+  }
+
+  /// Captured now, at runner build: the HDR leg asks later whether the same
+  /// hardware still holds this display ID.
+  private static func presence(
+    of displayID: CGDirectDisplayID, configurator: CoreGraphicsDisplayConfigurator
+  ) -> @Sendable () -> Bool {
+    let identity = configurator.displays().first(where: { $0.id == displayID })?.identity
+    return {
+      guard let identity else { return false }
+      return configurator.displays().contains { $0.id == displayID && $0.identity == identity }
+    }
   }
 
   /// Never asked to run: the plan pre-grades a display with no DDC path. Exists
@@ -359,5 +373,63 @@ enum CheckupLiveEnvironment {
       nativePixelWidth: entry.pixelWidth, nativePixelHeight: entry.pixelHeight,
       maxRefreshHz: nil, supportsPQEOTF: false, supportsHDRGammaEOTF: false,
       productName: entry.name)
+  }
+}
+
+/// HDR writes that stop for good once the checkup's display stops being the
+/// panel the run picked. A dock cycle can hand the display ID to another panel
+/// while the HDR leg waits on a settle, and the leg's last write would then
+/// put its prior state on that other panel. Reads pass through: they move
+/// nothing.
+///
+/// `@unchecked Sendable`: `gone` is behind `lock`; the rest is immutable.
+final class IdentityCheckedHDRToggling: HDRToggling, @unchecked Sendable {
+  private static let log = Logger(subsystem: "com.rydersel.Candela", category: "checkup")
+  private let base: any HDRToggling
+  private let isPresent: @Sendable () -> Bool
+  private let lock = NSLock()
+  private var gone = false
+
+  init(base: any HDRToggling, isPresent: @escaping @Sendable () -> Bool) {
+    self.base = base
+    self.isPresent = isPresent
+  }
+
+  /// Latches: a display that returns with the same ID has been through a
+  /// replug the run did not watch.
+  private func stillPresent() -> Bool {
+    lock.withLock {
+      if !gone, !isPresent() { gone = true }
+      return !gone
+    }
+  }
+
+  func supportsHDR(displayID: CGDirectDisplayID) async -> Bool {
+    await base.supportsHDR(displayID: displayID)
+  }
+
+  func isHDREnabled(displayID: CGDirectDisplayID) async -> Bool {
+    await base.isHDREnabled(displayID: displayID)
+  }
+
+  func measuredHDREnabled(displayID: CGDirectDisplayID) async -> Bool {
+    await base.measuredHDREnabled(displayID: displayID)
+  }
+
+  func observedHDREnabled(displayID: CGDirectDisplayID) async -> Bool? {
+    await base.observedHDREnabled(displayID: displayID)
+  }
+
+  @discardableResult
+  func setHDR(displayID: CGDirectDisplayID, enabled: Bool) async -> Bool {
+    guard stillPresent() else {
+      Self.log.info("checkup HDR write skipped: display \(displayID, privacy: .public) is no longer the panel the run picked")
+      return false
+    }
+    return await base.setHDR(displayID: displayID, enabled: enabled)
+  }
+
+  func displaysReconfigured() async {
+    await base.displaysReconfigured()
   }
 }

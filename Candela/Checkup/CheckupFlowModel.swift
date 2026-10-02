@@ -272,6 +272,12 @@ final class CheckupFlowModel {
       startedAt = nil
       generator = nil
       page = .displayPick
+      // Idle on the picker holds nothing; the next pick claims again.
+      if configurationHeld {
+        configurationHeld = false
+        let release = environment.endConfiguration
+        Task { await release() }
+      }
     // Everything from identity on has already touched the display or the
     // user's attestations; a step back there would rewrite a recorded claim.
     default:
@@ -680,19 +686,25 @@ final class CheckupFlowModel {
       // Read out for the same reason. The notice names one display, and
       // runners exist only after a target was picked, so there is one here.
       let target = selectedDisplay?.identityKey
-      // A display that has left cannot be put back, and saying so would blame
-      // the app for an unplug.
-      let notify = !displayGone
-      // The mode goes back on every exit path. Its outcome cannot change
+      // The mode goes back on every exit path that still has the display. Its outcome cannot change
       // a completion the user or the cable already decided, so it is not awaited.
       restorePending = true
       Task {
         // The HDR leg has its own restore. Let it finish before changing the
         // mode underneath it; cancel() above still stops a sweep immediately.
         await waitForActiveAdvances()
+        // A display that has left cannot be put back, and its ID can already
+        // belong to the panel a dock cycle brought in. Nothing is applied, and
+        // nothing blames the app for an unplug.
+        guard !displayGone else {
+          settled(false, target)
+          restorePending = false
+          releaseConfigurationIfFinished()
+          return
+        }
         let restored = await mode.restore()
         if !restored { Self.logRestoreNotAchieved() }
-        settled(!restored && notify, target)
+        settled(!restored, target)
         restorePending = false
         releaseConfigurationIfFinished()
       }

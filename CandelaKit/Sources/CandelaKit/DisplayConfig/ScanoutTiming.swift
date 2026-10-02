@@ -26,6 +26,32 @@ public enum ScanoutTimingReader {
     return read(displayID: displayID, expectedLocation: location)
   }
 
+  /// The display's own registry location, as the reader matches on it.
+  /// Public for the probe's `scanout` subcommand.
+  public static func location(of displayID: CGDirectDisplayID) -> String? {
+    displayLocation(displayID)
+  }
+
+  /// Every display-controller service path, for the probe: a location that
+  /// equals none of these is a reader that can never return a timing.
+  public static func controllerPaths() -> [String] {
+    let root = IORegistryGetRootEntry(kIOMainPortDefault)
+    defer { IOObjectRelease(root) }
+    var iterator = io_iterator_t()
+    guard IORegistryEntryCreateIterator(root, kIOServicePlane,
+      IOOptionBits(kIORegistryIterateRecursively), &iterator) == KERN_SUCCESS else { return [] }
+    defer { IOObjectRelease(iterator) }
+    var paths: [String] = []
+    while let object = Arm64DDC.ioregIterateToNextObjectOfInterest(
+      interests: ["AppleCLCD2"], iterator: &iterator) {
+      defer { IOObjectRelease(object.entry) }
+      var path = [CChar](repeating: 0, count: 4096)
+      guard IORegistryEntryGetPath(object.entry, kIOServicePlane, &path) == KERN_SUCCESS else { continue }
+      paths.append(String(decoding: path.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self))
+    }
+    return paths
+  }
+
   static func displayLocation(_ displayID: CGDirectDisplayID) -> String? {
     guard let location = Arm64DDC.displayInfoDictionary(displayID: displayID)?[kIODisplayLocationKey] as? String,
           !location.isEmpty else { return nil }
@@ -106,31 +132,71 @@ public enum ScanoutTimingReader {
 }
 
 /// The expected wire geometry is not always the framebuffer or the native size.
-/// Revealed HiDPI and synthesized modes require the panel's native timing;
-/// ordinary lower-resolution modes may legitimately drive a smaller timing.
+/// Revealed HiDPI and synthesized modes require the panel's native timing (or,
+/// for a revealed mode, at least its own framebuffer); ordinary lower-resolution
+/// modes may legitimately drive a smaller timing.
 public enum ScanoutVerification {
-  public enum Verdict: Equatable { case verified, mismatch, notVerifiable }
+  /// `mismatch` is the only verdict that restores and withholds, and only the
+  /// modes `isEnforced` names can earn it. `unexpected` is a reading that
+  /// disagrees with a mode macOS publishes for itself: kept for diagnostics,
+  /// never acted on, because nothing has measured those modes scanning out wrong.
+  public enum Verdict: Equatable { case verified, mismatch, unexpected, notVerifiable }
+
+  /// The modes whose wire timing the platform has been measured getting wrong.
+  public static func isEnforced(_ mode: DisplayMode) -> Bool {
+    mode.isSynthesized || (mode.isRevealed && mode.isHiDPI)
+  }
+
+  /// The post-apply verdict, given the reading taken before the apply.
+  ///
+  /// The controller can keep reporting the outgoing timing after CoreGraphics
+  /// already reports the new mode, and a stale record holds steady, so it
+  /// passes the reader's own double read. A reading identical to the pre-apply
+  /// one therefore proves nothing unless the request expects exactly that
+  /// timing. With no pre-apply reading there is nothing to tell a stale record
+  /// from a fresh one, so only a verified reading counts.
+  public static func verdict(
+    requested: DisplayMode, nativePixels: (width: Int, height: Int)?,
+    before: ScanoutTiming?, after: ScanoutTiming?
+  ) -> Verdict {
+    guard let after else { return .notVerifiable }
+    let reading = verdict(requested: requested, nativePixels: nativePixels, timing: after)
+    guard reading != .verified else { return .verified }
+    guard let before, before != after else { return .notVerifiable }
+    return reading
+  }
 
   public static func verdict(
     requested: DisplayMode, nativePixels: (width: Int, height: Int)?, timing: ScanoutTiming?
   ) -> Verdict {
     guard let timing else { return .notVerifiable }
+    let wrongly: Verdict = isEnforced(requested) ? .mismatch : .unexpected
     if requested.refreshHz > 0,
-       !ModePersistence.refreshMatches(requested.refreshHz, timing.refreshHz) { return .mismatch }
+       !ModePersistence.refreshMatches(requested.refreshHz, timing.refreshHz) { return wrongly }
     guard let nativePixels, nativePixels.width > 0, nativePixels.height > 0 else { return .notVerifiable }
     // Registry timings are in panel orientation; CoreGraphics can be rotated.
-    let nativeMatches = sameSize(timing, width: nativePixels.width, height: nativePixels.height)
-    if nativeMatches { return .verified }
-    if requested.isNative || requested.isSynthesized || (requested.isRevealed && requested.isHiDPI) {
-      return .mismatch
+    if sameSize(timing, width: nativePixels.width, height: nativePixels.height) { return .verified }
+    if requested.isSynthesized { return .mismatch }
+    if requested.isRevealed && requested.isHiDPI {
+      // Cropping is a timing smaller than the framebuffer it has to carry.
+      if !covers(timing, width: requested.pixelWidth, height: requested.pixelHeight) {
+        return .mismatch
+      }
+      return sameSize(timing, width: requested.pixelWidth, height: requested.pixelHeight)
+        ? .verified : .notVerifiable
     }
-    return sameSize(timing, width: requested.pixelWidth, height: requested.pixelHeight)
-      ? .verified : .notVerifiable
+    if sameSize(timing, width: requested.pixelWidth, height: requested.pixelHeight) { return .verified }
+    return requested.isNative ? .unexpected : .notVerifiable
   }
 
   private static func sameSize(_ timing: ScanoutTiming, width: Int, height: Int) -> Bool {
     (timing.width == width && timing.height == height)
       || (timing.width == height && timing.height == width)
+  }
+
+  private static func covers(_ timing: ScanoutTiming, width: Int, height: Int) -> Bool {
+    (timing.width >= width && timing.height >= height)
+      || (timing.width >= height && timing.height >= width)
   }
 }
 

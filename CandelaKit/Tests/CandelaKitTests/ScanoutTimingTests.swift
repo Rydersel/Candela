@@ -129,4 +129,75 @@ struct ScanoutTimingTests {
     #expect(snapshot.current == active)
     #expect(snapshot.modes == [safe])
   }
+
+  @Test func aReadingUnchangedFromBeforeTheApplyIsNotEvidence() {
+    let before = ScanoutTiming(width: 3440, height: 1440, refreshHz: 175)
+    let native120 = mode(.coreGraphics, pixels: (3440, 1440), hz: 120, native: true)
+    #expect(ScanoutVerification.verdict(requested: native120, nativePixels: (3440, 1440),
+      before: before, after: before) == .notVerifiable)
+    // Even an enforced mode: a stale record cannot condemn it.
+    #expect(ScanoutVerification.verdict(requested: mode(), nativePixels: (3440, 1440),
+      before: before, after: before) == .notVerifiable)
+    // Control: the same wrong reading, once it has moved, still condemns it.
+    #expect(ScanoutVerification.verdict(requested: mode(), nativePixels: (3440, 1440),
+      before: before, after: ScanoutTiming(width: 2560, height: 1440, refreshHz: 120)) == .mismatch)
+    // An unchanged reading the request expects verifies.
+    #expect(ScanoutVerification.verdict(
+      requested: mode(.coreGraphics, pixels: (3440, 1440), hz: 175, native: true),
+      nativePixels: (3440, 1440), before: before, after: before) == .verified)
+    // With nothing to compare against, a reading that does not verify proves nothing.
+    #expect(ScanoutVerification.verdict(requested: mode(), nativePixels: (3440, 1440),
+      before: nil, after: ScanoutTiming(width: 2560, height: 1440, refreshHz: 120)) == .notVerifiable)
+  }
+
+  @Test func aNativeModeOnAnotherTimingIsRecordedNotWithheld() {
+    let native120 = mode(.coreGraphics, pixels: (3440, 1440), hz: 120, native: true)
+    #expect(!ScanoutVerification.isEnforced(native120))
+    #expect(ScanoutVerification.verdict(requested: native120, nativePixels: (3440, 1440),
+      timing: ScanoutTiming(width: 3440, height: 1440, refreshHz: 175)) == .unexpected)
+    #expect(ScanoutVerification.verdict(requested: native120, nativePixels: (3440, 1440),
+      timing: ScanoutTiming(width: 2560, height: 1440, refreshHz: 120)) == .unexpected)
+    let ordinary = mode(.coreGraphics, pixels: (2560, 1080), logical: (2560, 1080), hz: 60)
+    #expect(ScanoutVerification.verdict(requested: ordinary, nativePixels: (3440, 1440),
+      timing: ScanoutTiming(width: 2560, height: 1080, refreshHz: 100)) == .unexpected)
+    #expect(ScanoutVerification.isEnforced(mode()))
+    #expect(ScanoutVerification.isEnforced(mode(.synthesized, hz: 0)))
+  }
+
+  @Test func aRevealedHiDPIModeOnItsOwnFramebufferTimingPasses() {
+    let small = mode(pixels: (2560, 1440), logical: (1280, 720))
+    #expect(ScanoutVerification.verdict(requested: small, nativePixels: (3440, 1440),
+      timing: ScanoutTiming(width: 2560, height: 1440, refreshHz: 120)) == .verified)
+    #expect(ScanoutVerification.verdict(requested: small, nativePixels: (3440, 1440),
+      timing: ScanoutTiming(width: 1440, height: 2560, refreshHz: 120)) == .verified)
+    let wider = mode(pixels: (3200, 1340), logical: (1600, 670))
+    #expect(ScanoutVerification.verdict(requested: wider, nativePixels: (3440, 1440),
+      timing: ScanoutTiming(width: 2560, height: 1440, refreshHz: 120)) == .mismatch)
+  }
+
+  @Test func noRecordStopsTheSettleWithoutPolling() {
+    let configurator = CoreGraphicsDisplayConfigurator()
+    var sleeps = 0
+    var reads = 0
+    let result: ScanoutTiming? = configurator.settled(
+      now: { Date(timeIntervalSince1970: 0) }, sleep: { _ in sleeps += 1 },
+      read: { reads += 1; return nil }
+    ) {
+      CoreGraphicsDisplayConfigurator.scanoutSettled(
+        $0, before: nil, requested: self.mode(), nativePixels: (3440, 1440))
+    }
+    #expect(result == nil)
+    #expect(reads == 1)
+    #expect(sleeps == 0)
+  }
+
+  @Test func aStaleRecordKeepsPollingUntilItMoves() {
+    let before = ScanoutTiming(width: 3440, height: 1440, refreshHz: 175)
+    let requested = mode(.coreGraphics, pixels: (3440, 1440), hz: 120, native: true)
+    #expect(!CoreGraphicsDisplayConfigurator.scanoutSettled(
+      before, before: before, requested: requested, nativePixels: (3440, 1440)))
+    #expect(CoreGraphicsDisplayConfigurator.scanoutSettled(
+      ScanoutTiming(width: 3440, height: 1440, refreshHz: 120), before: before,
+      requested: requested, nativePixels: (3440, 1440)))
+  }
 }

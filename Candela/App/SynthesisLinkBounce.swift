@@ -92,23 +92,30 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     case let .success(pairing):
       let target = retimeTarget(
         for: displayID, ownMode: ownMode, master: pairing.virtualDisplayID)
-      do {
-        if try await retime(displayID, to: target) == false { await bounce(displayID) }
-      } catch let failure as SynthesisFailure {
-        return await rejectTiming(failure, on: displayID)
-      } catch {
-        return await rejectTiming(.unwindIncomplete, on: displayID)
-      }
-      // The tail can change the controller timing after the engine verified
-      // the mirror. Judge its final state against the pre-mirror panel size.
+      // Judged against the pre-mirror panel size: the tail can change the
+      // controller timing after the engine verified the mirror.
       let requested = DisplayMode(
         ioModeID: DisplayMode.syntheticIoModeID(stopIndex: 0),
         logicalWidth: size.logicalWidth, logicalHeight: size.logicalHeight,
         pixelWidth: size.pixelWidth, pixelHeight: size.pixelHeight,
         refreshHz: 0, isNative: false, provenance: .synthesized)
-      if let timing = configurator.scanoutTiming(for: displayID),
-         ScanoutVerification.verdict(requested: requested, nativePixels: nativePixels,
-           timing: timing) == .mismatch {
+      let mismatchedTiming = { () -> ScanoutTiming? in
+        guard let timing = configurator.scanoutTiming(for: displayID),
+              ScanoutVerification.verdict(requested: requested, nativePixels: nativePixels,
+                timing: timing) == .mismatch
+        else { return nil }
+        return timing
+      }
+      // A wrong timing after the re-time is a link the bounce can renegotiate,
+      // so it takes the bounce rather than ending the engagement here. The
+      // check below judges what the bounce left.
+      if await retime(displayID, to: target) == false {
+        await bounce(displayID)
+      } else if let timing = mismatchedTiming() {
+        Self.log.info("synthesis.retime display \(displayID) landed on the wrong timing (\(timing.diagnosticDescription, privacy: .public)); bouncing")
+        await bounce(displayID)
+      }
+      if let timing = mismatchedTiming() {
         return await rejectTiming(.scanoutMismatch(timing), on: displayID)
       }
     case .failure:
@@ -187,16 +194,15 @@ struct BouncingSynthesisDriver: SynthesisDriving {
   /// picture [MEASURED 2026-08-18: OSD 175, picture intact, mirror standing].
   /// Returns false when it could not run OR could not be confirmed; the HDR
   /// bounce is the fallback renegotiator.
-  private func retime(_ displayID: CGDirectDisplayID, to target: DisplayMode?) async throws -> Bool {
+  private func retime(_ displayID: CGDirectDisplayID, to target: DisplayMode?) async -> Bool {
     guard let target else { return false }
     try? await Task.sleep(for: durations.beforeRetime)
     do {
-      // Session scope, matching the engine's own applies.
-      try configurator.apply(target, to: displayID, scope: .session)
+      // Session scope, matching the engine's own applies. `restore`, because
+      // the target is the panel's own mode (its native-flagged twin on the
+      // MAG): a timing reading taken mid-mirror must never withhold it.
+      try configurator.restore(target, to: displayID, scope: .session)
     } catch {
-      if let timing = (error as? DisplayConfigError)?.unhonouredCommit?.scanoutTiming {
-        throw SynthesisFailure.scanoutMismatch(timing)
-      }
       // "Did not land": the apply also throws on a commit the display did not honour.
       Self.log.info("synthesis.retime did not land on display \(displayID): \(String(describing: error), privacy: .public)")
       return false
@@ -274,7 +280,7 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     let achieved = configurator.currentMode(for: displayID)
     if let achieved, achieved.isHiDPI == ownMode.isHiDPI { return }
     do {
-      try configurator.apply(ownMode, to: displayID, scope: .session)
+      try configurator.restore(ownMode, to: displayID, scope: .session)
     } catch {
       // "Did not put back": the apply also throws on a commit the display did not honour.
       Self.log.error("""

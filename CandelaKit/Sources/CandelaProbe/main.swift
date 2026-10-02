@@ -55,6 +55,8 @@ usage: candela-probe [--display <id>] <subcommand>
   gamma reset                             CGDisplayRestoreColorSyncSettings
   watch [seconds=10]                      100 ms native-brightness delta log
   topology                                online displays: kind, identity, virtual verdict, DDC pool
+  scanout                                 the wire timing the scan-out reader reports per online display,
+                                          with its registry location and every controller path it can match
   vd create <slot 1-3> <w> <h> [--hidpi] [--hold <s>]  create a virtual display, hold, destroy
   vd online <id>                          is that display in THIS process's online list
   conform [--apply]                       assert the private-API platform assumptions; run after every macOS update
@@ -282,6 +284,25 @@ case "topology":
     isForeignVirtual: VirtualDisplayDetection.isVirtual
   )
   print("ddc-pool=\(pool.map(String.init).joined(separator: ","))")
+
+case "scanout":
+  // The reader's positive control. A location matching no controller path is a
+  // reader that answers nil forever, and the app treats nil as "not
+  // verifiable", so that failure is silent everywhere but here. Read-only.
+  requireOnlineDisplays()
+  let controllers = ScanoutTimingReader.controllerPaths()
+  print("controllers=\(controllers.count)")
+  for path in controllers { print("controller \(path)") }
+  for display in online {
+    let location = ScanoutTimingReader.location(of: display.id)
+    let matches = location.map { location in controllers.filter { $0 == location }.count } ?? 0
+    let timing = ScanoutTimingReader.read(displayID: display.id)
+    print("""
+    display id=\(display.id) name=\(display.title) location=\(location ?? "none") \
+    matching-controllers=\(matches) \
+    timing=\(timing.map { "\($0.width)x\($0.height)@\(String(format: "%.3f", $0.refreshHz))Hz" } ?? "no record")
+    """)
+  }
 
 case "vd":
   // Exercises the shipping VirtualDisplayHost without the app: creation,

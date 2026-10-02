@@ -32,6 +32,7 @@ struct DisplayModeEnumerationTests {
     let modes: DisplayModeCoordinator
     let persistence: ModePersistence
     let identity: DisplayConfigIdentity
+    let gate: DisplayReconfigurationGate
   }
 
   private static func rig() -> Rig {
@@ -44,14 +45,15 @@ struct DisplayModeEnumerationTests {
     )
     let configurator = FakeSynthesisDisplayConfigurator(world)
     let persistence = ModePersistence(defaults: InMemoryDefaults())
+    let gate = DisplayReconfigurationGate()
     let modes = DisplayModeCoordinator(
-      gate: DisplayReconfigurationGate(),
+      gate: gate,
       configurator: configurator,
       persistence: persistence
     )
     return Rig(
       world: world, configurator: configurator, modes: modes,
-      persistence: persistence, identity: identity
+      persistence: persistence, identity: identity, gate: gate
     )
   }
 
@@ -118,6 +120,56 @@ struct DisplayModeEnumerationTests {
     #expect(error.unhonouredCommit?.fallbackRestored == true)
   }
 
+  @Test func aMismatchReadingOnTheCapturedModeStillRestoresItAndReleasesTheGate() async throws {
+    let rig = Self.rig()
+    rig.persistence.setEnabled(true, for: rig.identity)
+    rig.persistence.store(Self.smaller.descriptor, for: rig.identity)
+    rig.configurator.withholdsScanoutMismatches = true
+    rig.configurator.updatesCurrentModeOnApply = true
+    let timing = ScanoutTiming(width: 1280, height: 1024, refreshHz: 175)
+    rig.configurator.modeApplyFailures = [
+      DisplayConfigError(unhonouredCommit: .init(
+        requested: Self.smaller, achieved: Self.smaller, scanoutTiming: timing)),
+      DisplayConfigError(unhonouredCommit: .init(
+        requested: Self.native, achieved: Self.native, scanoutTiming: timing))
+    ]
+
+    await rig.modes.reapplyStoredModes()
+
+    #expect(rig.modes.preview == nil)
+    #expect(await rig.gate.holder == nil)
+    #expect(rig.world.currentMode(for: Self.panelID) == Self.native)
+    #expect(rig.configurator.restores.map(\.mode) == [Self.native])
+    #expect(rig.configurator.withheld(on: Self.panelID) == [Self.smaller.descriptor])
+  }
+
+  @Test func aMismatchReadingOnThePreviewFallbackCannotStrandTheGate() async throws {
+    let fixture = SynthesisFixture()
+    defer { fixture.forgetPrefs() }
+    let id = SynthesisFixture.panelID
+    let modes = fixture.world.modes(for: id)
+    let native = try #require(modes.first { $0.ioModeID == 1 })
+    let smaller = try #require(modes.first { $0.ioModeID == 2 })
+    let timing = ScanoutTiming(width: 1280, height: 1024, refreshHz: 175)
+    fixture.configurator.withholdsScanoutMismatches = true
+    fixture.configurator.updatesCurrentModeOnApply = true
+    fixture.configurator.modeApplyFailures = [
+      DisplayConfigError(unhonouredCommit: .init(
+        requested: smaller, achieved: smaller, scanoutTiming: timing)),
+      DisplayConfigError(unhonouredCommit: .init(
+        requested: native, achieved: native, scanoutTiming: timing))
+    ]
+
+    fixture.modes.select(smaller, on: id, from: .settings, surface: .settingsBanner)
+    await fixture.settle()
+
+    #expect(fixture.modes.preview == nil)
+    #expect(await fixture.gate.holder == nil)
+    #expect(fixture.world.currentMode(for: id) == native)
+    #expect(fixture.configurator.restores.map(\.mode) == [native])
+    #expect(fixture.configurator.withheld(on: id) == [smaller.descriptor])
+  }
+
   @Test func failedStoredModeRollbackRetainsAnActionableRecoveryPreview() async throws {
     let rig = Self.rig()
     rig.persistence.setEnabled(true, for: rig.identity)
@@ -176,9 +228,7 @@ struct DisplayModeEnumerationTests {
 
   @Test(arguments: [false, true])
   func replacementDuringReapplyStopsReportingAndSynthesis(duringRollback: Bool) async throws {
-    let suite = "app-tests-reapply-replacement-\(UUID().uuidString)"
-    defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
-    let persistence = ModePersistence(defaults: UserDefaults(suiteName: suite)!)
+    let persistence = ModePersistence(defaults: InMemoryDefaults())
     let fixture = SynthesisFixture(modePersistence: persistence)
     defer { fixture.forgetPrefs() }
     let id = SynthesisFixture.panelID

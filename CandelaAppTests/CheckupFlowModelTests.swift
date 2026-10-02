@@ -628,9 +628,10 @@ struct CheckupFlowModelTests {
     #expect(cleanActions.checkupRestoreFailure == nil)
   }
 
-  /// A display that has left cannot be put back, and a notice there would blame
-  /// the app for an unplug. The restore is still attempted.
-  @Test func aDisconnectDoesNotBlameTheAppForAnUnpluggedDisplay() async {
+  /// A display that has left cannot be put back, its ID can already belong to
+  /// another panel, and a notice would blame the app for an unplug. So the
+  /// restore is not attempted at all.
+  @Test func aDisconnectAppliesNoRestoreAndBlamesNothing() async {
     let failing = CancelRecordingMode(restores: false)
     let flow = await pickedFlow(mode: failing)
     let actions = SettingsActions(model: TestFixtures.appModel())
@@ -638,8 +639,39 @@ struct CheckupFlowModelTests {
     let settled = barrier(on: flow)
     flow.displayDisconnected(7)
     await settle(until: { settled.withLock { $0 } })
-    #expect(failing.events == ["cancel", "restore"])
+    #expect(settled.withLock { $0 })
+    #expect(failing.events == ["cancel"])
     #expect(actions.checkupRestoreFailure == nil)
+  }
+
+  @Test func backToThePickerReleasesTheConfigurationClaim() async {
+    var env = environment(presenter: FakePresenter(), entry: entry())
+    var held = false
+    var acquires = 0
+    var releases = 0
+    env.beginConfiguration = { _ in held = true; acquires += 1; return nil }
+    env.endConfiguration = { held = false; releases += 1 }
+    let flow = CheckupFlowModel(environment: env)
+    await flow.advance()
+    flow.selectedDisplay = entry()
+    await flow.advance()
+    #expect(flow.page == .plan)
+    #expect(held)
+
+    flow.back()
+    await settle(until: { releases == 1 })
+
+    #expect(flow.page == .displayPick)
+    #expect(!held)
+    #expect(releases == 1)
+    // The next pick claims again rather than running on a claim it gave back.
+    await flow.advance()
+    #expect(flow.page == .plan)
+    #expect(acquires == 2)
+    #expect(held)
+    flow.abandon(reason: "closed")
+    await settle(until: { releases == 2 })
+    #expect(releases == 2)
   }
 
   /// A standing notice describes a run that is over, and the run being wired now

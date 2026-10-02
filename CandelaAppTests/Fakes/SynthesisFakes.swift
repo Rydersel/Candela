@@ -226,6 +226,22 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
   var modeApplyFailures: [DisplayConfigError?] = []
   var updatesCurrentModeOnApply = false
   var scanoutRead: (@Sendable (CGDirectDisplayID) -> ScanoutTiming?)?
+  /// Model the real configurator's quarantine: a checked apply that fails on
+  /// scan-out timing withholds its mode, and a later checked apply of it is
+  /// refused. `restore` neither refuses nor withholds, and a scripted timing
+  /// failure it consumes moves the world without throwing, as the real one does.
+  var withholdsScanoutMismatches = false
+
+  /// Written mid-operation from whichever executor applies, so locked.
+  private let quarantineLock = NSLock()
+  private var _withheld: [CGDirectDisplayID: Set<DisplayModeDescriptor>] = [:]
+  private var _restores: [(mode: DisplayMode, displayID: CGDirectDisplayID)] = []
+  func withheld(on displayID: CGDirectDisplayID) -> Set<DisplayModeDescriptor> {
+    quarantineLock.withLock { _withheld[displayID] ?? [] }
+  }
+  var restores: [(mode: DisplayMode, displayID: CGDirectDisplayID)] {
+    quarantineLock.withLock { _restores }
+  }
 
   init(_ world: FakeDisplayWorld) { self.world = world }
 
@@ -279,14 +295,34 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
   /// the call. The tail's achieved-state check then answers false, which is what
   /// puts the bounce under test.
   func apply(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope _: DisplayConfigScope) throws {
+    try performApply(mode, to: displayID, enforcesScanout: true)
+  }
+
+  func restore(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope _: DisplayConfigScope) throws {
+    quarantineLock.withLock { _restores.append((mode, displayID)) }
+    try performApply(mode, to: displayID, enforcesScanout: false)
+  }
+
+  private func performApply(
+    _ mode: DisplayMode, to displayID: CGDirectDisplayID, enforcesScanout: Bool
+  ) throws {
     onModeApply?()
     if refusesModeApplies { throw DisplayConfigError(cgErrorCode: CGError.failure.rawValue) }
+    if enforcesScanout, withholdsScanoutMismatches,
+       quarantineLock.withLock({ _withheld[displayID]?.contains(mode.descriptor) == true }) {
+      throw DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue)
+    }
     world.recordApply(mode, to: displayID)
     let scripted = modeApplyFailures.isEmpty ? nextModeApplyFailure : modeApplyFailures.removeFirst()
     if let failure = scripted {
       nextModeApplyFailure = nil
       if let achieved = failure.unhonouredCommit?.achieved {
         world.setCurrentMode(achieved, for: displayID)
+      }
+      let timingOnly = failure.unhonouredCommit?.scanoutTiming != nil
+      if withholdsScanoutMismatches, timingOnly {
+        guard enforcesScanout else { return }
+        quarantineLock.withLock { _ = _withheld[displayID, default: []].insert(mode.descriptor) }
       }
       throw failure
     }
