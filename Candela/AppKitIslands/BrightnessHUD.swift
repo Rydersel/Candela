@@ -151,7 +151,7 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     case .islandDrop, .islandEdge, .islandEdgeCapsules: IslandHUDRenderer(style: style)
     }
     let size = renderer.contentView.frame.size
-    let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
+    let panel = UnconstrainedPanel(contentRect: NSRect(origin: .zero, size: size),
                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
     panel.level = .screenSaver
     panel.isFloatingPanel = true
@@ -207,6 +207,14 @@ final class BrightnessHUD: BrightnessHUDPresenting {
       windows.removeValue(forKey: displayID)
     }
   }
+}
+
+/// The Island hangs from the top edge of the screen, through the menu bar, like
+/// the notch it sits on; AppKit's default constraint would push it down one bar
+/// height. The pills and boxes never ask for a frame above the bar, so for them
+/// this changes nothing.
+private final class UnconstrainedPanel: NSPanel {
+  override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
 }
 
 /// Internal, not fileprivate: every AppKit island that places a window on a

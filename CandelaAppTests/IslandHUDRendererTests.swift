@@ -36,4 +36,14 @@ struct IslandHUDRendererTests {
     #expect(renderer.traceStrokeEndForTesting == 0)
     #expect(renderer.readoutForTesting == "Muted")
   }
+
+  /// Mute empties the trace on its own, whatever value the caller passes.
+  @MainActor @Test func muteIgnoresThePassedValue() {
+    let renderer = IslandHUDRenderer(style: .islandDrop)
+    renderer.layOut(notch: IslandNotch(rect: CGRect(x: 790, y: 1131, width: 220, height: 38), isReal: true),
+                    screen: CGRect(x: 0, y: 0, width: 1800, height: 1169))
+    renderer.show(HUDContent(kind: .volumeMuted, value: 0.6, title: "LG UltraFine"), reduceMotion: true)
+    #expect(renderer.traceStrokeEndForTesting == 0)
+    #expect(renderer.readoutForTesting == "Muted")
+  }
 }
