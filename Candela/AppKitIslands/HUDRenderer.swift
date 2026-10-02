@@ -28,6 +28,9 @@ protocol HUDRenderer: AnyObject {
   func frame(on screen: NSScreen, position: HUDPosition) -> CGRect
   /// The view installed as the panel's content view, sized to `frame`.
   var contentView: NSView { get }
+  /// A show arriving during a self-animated exit must reverse that exit itself:
+  /// the window orders out only after the returned duration, and the generation
+  /// guard cancels that order-out, so nothing else brings the content back.
   func show(_ content: HUDContent, reduceMotion: Bool)
   func hide(reduceMotion: Bool) -> HUDDismissal
 }

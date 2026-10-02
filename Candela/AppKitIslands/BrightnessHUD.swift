@@ -118,7 +118,8 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     let normalized = CGFloat(min(max(maxValue > 0 ? value / maxValue : 0, 0), 1))
     let reduceMotion = Motion.systemReduceMotion
     // Frame before show: the island's trace is laid out against its panel.
-    window.panel.setFrame(window.renderer.frame(on: screen, position: position), display: false)
+    let frame = window.renderer.frame(on: screen, position: position)
+    window.panel.setFrame(frame, display: false)
     window.renderer.show(HUDContent(kind: type, value: normalized, title: title), reduceMotion: reduceMotion)
     fadeTimers[displayID]?.invalidate()
     fadeGenerations[displayID, default: 0] &+= 1
@@ -147,7 +148,7 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     case .classic, .classicCentered, .sequoia: BoxHUDRenderer(style: style)
     case .vertical: VerticalHUDRenderer()
     case .ring: RingHUDRenderer()
-    default: PillHUDRenderer(style: .system)  // replaced by the renderer tasks that follow
+    case .islandDrop, .islandEdge, .islandEdgeCapsules: IslandHUDRenderer(style: style)
     }
     let size = renderer.contentView.frame.size
     let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
