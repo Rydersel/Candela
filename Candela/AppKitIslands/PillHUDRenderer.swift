@@ -61,15 +61,15 @@ final class PillHUDRenderer: HUDRenderer {
   // native pill can tune them without archaeology.
   /// `.popover` blends lighter and brighter than `.hudWindow` in both
   /// appearances; the sheen below pushes it the rest of the way.
-  private static let material: NSVisualEffectView.Material = .popover
+  fileprivate static let material: NSVisualEffectView.Material = .popover
   /// White wash over the material, the "bright glass" half of the fix.
-  private static let sheenAlpha: CGFloat = 0.07
+  fileprivate static let sheenAlpha: CGFloat = 0.07
   /// The native edge reads as a LIGHT inner hairline in both appearances, so
   /// this is constant white rather than a semantic color: `separatorColor`
   /// resolved near-black and drew a visible outline. Static, so no per-show
   /// appearance refresh.
-  private static let hairlineColor = NSColor.white.withAlphaComponent(0.25)
-  private static let hairlineWidth: CGFloat = 0.75
+  fileprivate static let hairlineColor = NSColor.white.withAlphaComponent(0.25)
+  fileprivate static let hairlineWidth: CGFloat = 0.75
   /// Matches the native name label.
   private static let nameFontSize: CGFloat = 13
   /// Interval dots at the sixteenths, covered by the fill exactly as the native
@@ -82,40 +82,17 @@ final class PillHUDRenderer: HUDRenderer {
   private static let segmentHeight: CGFloat = 8
   private static let segmentCornerRadius: CGFloat = 2
 
-  private static let screenMargin: CGFloat = 20
+  /// Shared with the vertical and ring renderers, which place by the same pickers.
+  static let screenMargin: CGFloat = 20
   /// Extra clearance on top of the menu-bar allowance so the pill sits clearly
   /// below the bar rather than hugging it. Eyeballed against the native OSD.
-  private static let menuBarClearance: CGFloat = 10
+  static let menuBarClearance: CGFloat = 10
 
   init(style: HUDStyle) {
     let metrics = Metrics(style: style)
     let size = metrics.size
 
-    let rootView = NSView(frame: NSRect(origin: .zero, size: size))
-    rootView.wantsLayer = true
-    rootView.layer?.backgroundColor = NSColor.clear.cgColor
-
-    let effectView = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
-    effectView.material = Self.material
-    effectView.blendingMode = .behindWindow
-    effectView.state = .active
-    // DIVERGENCE from the fork, which forces `.vibrantDark`: the native pill
-    // adapts to the system appearance and so does this one, with dynamic
-    // semantic colors. The hairline is a constant white glass highlight, so
-    // nothing here needs an appearance refresh at show time.
-    effectView.wantsLayer = true
-    effectView.layer?.cornerRadius = metrics.cornerRadius
-    effectView.layer?.masksToBounds = true
-    effectView.layer?.borderWidth = Self.hairlineWidth
-    effectView.layer?.borderColor = Self.hairlineColor.cgColor
-    rootView.addSubview(effectView)
-
-    // The bright-glass sheen: first subview, so every control draws
-    // above it. Constant white; the alpha is the whole design.
-    let sheen = NSView(frame: NSRect(origin: .zero, size: size))
-    sheen.wantsLayer = true
-    sheen.layer?.backgroundColor = NSColor.white.withAlphaComponent(Self.sheenAlpha).cgColor
-    effectView.addSubview(sheen)
+    let (rootView, effectView) = makePillChrome(size: size, cornerRadius: metrics.cornerRadius)
 
     var nameLabel: NSTextField?
     if metrics.hasName {
@@ -248,4 +225,33 @@ final class PillHUDRenderer: HUDRenderer {
     let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .semibold)
     return NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(config)
   }
+}
+
+/// The pills' shared glass: popover material, light hairline, white sheen.
+/// Reads the fidelity knobs on `PillHUDRenderer`, so they stay in one place.
+@MainActor
+func makePillChrome(size: NSSize, cornerRadius: CGFloat) -> (root: NSView, effect: NSVisualEffectView) {
+  let root = NSView(frame: NSRect(origin: .zero, size: size))
+  root.wantsLayer = true
+  root.layer?.backgroundColor = NSColor.clear.cgColor
+  let effect = NSVisualEffectView(frame: root.bounds)
+  effect.material = PillHUDRenderer.material
+  effect.blendingMode = .behindWindow
+  effect.state = .active
+  // DIVERGENCE from the fork, which forces `.vibrantDark`: the native pill
+  // adapts to the system appearance and so does this one, with dynamic
+  // semantic colors. The hairline is a constant white glass highlight, so
+  // nothing here needs an appearance refresh at show time.
+  effect.wantsLayer = true
+  effect.layer?.cornerRadius = cornerRadius
+  effect.layer?.masksToBounds = true
+  effect.layer?.borderWidth = PillHUDRenderer.hairlineWidth
+  effect.layer?.borderColor = PillHUDRenderer.hairlineColor.cgColor
+  root.addSubview(effect)
+  // First subview, so every control draws above it.
+  let sheen = NSView(frame: root.bounds)
+  sheen.wantsLayer = true
+  sheen.layer?.backgroundColor = NSColor.white.withAlphaComponent(PillHUDRenderer.sheenAlpha).cgColor
+  effect.addSubview(sheen)
+  return (root, effect)
 }

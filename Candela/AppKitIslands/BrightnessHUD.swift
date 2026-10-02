@@ -145,6 +145,8 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     let renderer: any HUDRenderer = switch style {
     case .system, .segments, .compact: PillHUDRenderer(style: style)
     case .classic, .classicCentered, .sequoia: BoxHUDRenderer(style: style)
+    case .vertical: VerticalHUDRenderer()
+    case .ring: RingHUDRenderer()
     default: PillHUDRenderer(style: .system)  // replaced by the renderer tasks that follow
     }
     let size = renderer.contentView.frame.size
