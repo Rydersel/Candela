@@ -491,6 +491,82 @@ struct PanelRowModelTests {
     #expect(unenrolled == "178 h")
   }
 
+  // MARK: - Paused care line
+
+  /// Fixed so the words do not follow the machine running the suite.
+  static let clock: (now: Date, calendar: Calendar, locale: Locale) = {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "America/Chicago")!
+    // Thursday 2026-10-01, 14:00 local.
+    let now = calendar.date(from: DateComponents(year: 2026, month: 10, day: 1, hour: 14))!
+    return (now, calendar, Locale(identifier: "en_US"))
+  }()
+
+  static func deadline(days: Int, hour: Int, minute: Int) -> Date {
+    let (now, calendar, _) = clock
+    let day = calendar.date(byAdding: .day, value: days, to: calendar.startOfDay(for: now))!
+    return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day)!
+  }
+
+  static func pausedLine(
+    until deadline: Date, enrolled: Bool = true, hours: Double = 178.4,
+    safeMode: Bool = false, suspended: Bool = false
+  ) -> String? {
+    let (now, calendar, locale) = clock
+    return PanelView.careLine(
+      enrolled: enrolled, hours: hours, summary: nil, safeMode: safeMode,
+      suspended: suspended, pausedUntil: deadline, now: now, calendar: calendar, locale: locale
+    ).map(plainSpaces)
+  }
+
+  /// ICU puts a narrow no-break space before AM and PM.
+  static func plainSpaces(_ text: String) -> String {
+    text.replacingOccurrences(of: "\u{202F}", with: " ")
+  }
+
+  @Test func aPausedDisplayNamesWhenDimmingReturns() {
+    #expect(Self.pausedLine(until: Self.deadline(days: 0, hour: 15, minute: 45))
+      == "Dimming paused until 3:45 PM")
+    #expect(Self.pausedLine(until: Self.deadline(days: 1, hour: 4, minute: 0))
+      == "Dimming paused until tomorrow, 4:00 AM")
+    #expect(Self.pausedLine(until: Self.deadline(days: 3, hour: 4, minute: 0), hours: 0)
+      == "Dimming paused until Sun, 4:00 AM")
+  }
+
+  /// The engine suspends before it checks the pause, so the panel must not
+  /// claim the pause is what is holding dimming off.
+  @Test func aSuspensionOutranksThePause() {
+    let line = Self.pausedLine(until: Self.deadline(days: 0, hour: 15, minute: 45), suspended: true)
+    #expect(line == "OLED Care on · 178 h")
+  }
+
+  @Test func safeModeAndAnUnenrolledDisplayIgnoreAPause() {
+    let deadline = Self.deadline(days: 0, hour: 15, minute: 45)
+    #expect(Self.pausedLine(until: deadline, safeMode: true) == "178 h")
+    #expect(Self.pausedLine(until: deadline, enrolled: false) == "178 h")
+  }
+
+  @Test func theCompactEndTimeNamesTheDayWithoutAYear() {
+    let (now, calendar, locale) = Self.clock
+    func text(_ date: Date) -> String {
+      Self.plainSpaces(CompactEndTimeText.string(date, now: now, calendar: calendar, locale: locale))
+    }
+    #expect(text(Self.deadline(days: 0, hour: 23, minute: 5)) == "11:05 PM")
+    #expect(text(Self.deadline(days: 1, hour: 0, minute: 30)) == "tomorrow, 12:30 AM")
+    #expect(text(Self.deadline(days: 2, hour: 9, minute: 0)) == "Sat, 9:00 AM")
+    #expect(text(Self.deadline(days: 6, hour: 9, minute: 0)) == "Wed, 9:00 AM")
+    #expect(text(Self.deadline(days: 7, hour: 9, minute: 0)) == "Oct 8, 9:00 AM")
+    #expect(text(Self.deadline(days: 364, hour: 9, minute: 0)) == "Sep 30, 9:00 AM")
+  }
+
+  @Test func theKeepAwakeTitleUsesTheCompactEndTime() {
+    let (now, calendar, locale) = Self.clock
+    #expect(PanelView.keepAwakeTitle(expiresAt: nil) == "Keep display awake")
+    #expect(Self.plainSpaces(PanelView.keepAwakeTitle(
+      expiresAt: Self.deadline(days: 1, hour: 4, minute: 0),
+      now: now, calendar: calendar, locale: locale)) == "Until tomorrow, 4:00 AM")
+  }
+
   /// This form reads the app's own prefs domain, so the key is one nothing has
   /// written to and the answer is nil.
   @Test func theModelFormReadsTheDisplaysOwnPrefs() {

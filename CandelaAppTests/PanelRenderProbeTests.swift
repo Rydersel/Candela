@@ -9,8 +9,16 @@ import UniformTypeIdentifiers
 
 /// Opt-in evidence collection for ImageRenderer's intermittent glyph movement.
 /// Differences are recorded, not accepted through a tolerance or warm-up rule.
+///
+/// Every test here runs only with `CANDELA_RENDER_PROBE_DIR` set to a writable
+/// directory. They write PNG captures and a JSON report there for a person to
+/// look at, and open windows to capture from, so they prove nothing unattended
+/// and stay out of `make check` and CI. The controller runs them by hand before
+/// a release and reads the captures.
 @Suite("Panel render probe") @MainActor
 struct PanelRenderProbeTests {
+  /// Gated on `CANDELA_RENDER_PROBE_DIR`: writes four ImageRenderer captures
+  /// and a comparison report there. Run by hand before a release.
   @Test(.enabled(if: ProcessInfo.processInfo.environment["CANDELA_RENDER_PROBE_DIR"] != nil))
   func captureConsecutivePanels() throws {
     let directory = URL(fileURLWithPath: try #require(
@@ -48,6 +56,8 @@ struct PanelRenderProbeTests {
     try data.write(to: directory.appendingPathComponent("report.json"))
   }
 
+  /// Gated on `CANDELA_RENDER_PROBE_DIR`: opens off-screen windows and writes
+  /// the paused panel and settings captures there. Run by hand before a release.
   @Test(.enabled(if: ProcessInfo.processInfo.environment["CANDELA_RENDER_PROBE_DIR"] != nil))
   func captureNativePauseControls() async throws {
     let directory = URL(fileURLWithPath: try #require(
@@ -55,8 +65,8 @@ struct PanelRenderProbeTests {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let key = "native-pause-probe-\(UUID().uuidString)"
     let name = "OLED Display"
-    DisplayPrefs(persistenceKey: key).oledCareEnrolled = true
-    defer { UserDefaults.standard.removeObject(forKey: "oledCareEnrolled.\(key)") }
+    VolatilePrefs.set(["oledCareEnrolled.\(key)": true])
+    defer { VolatilePrefs.remove(["oledCareEnrolled.\(key)"]) }
     let model = TestFixtures.appModel(discovery: ScriptedDiscovery([(id: 7, key: key, name: name)]))
     await model.refresh()
     let state = try #require(model.displays.first)
@@ -132,6 +142,8 @@ struct PanelRenderProbeTests {
     }
   }
 
+  /// Gated on `CANDELA_RENDER_PROBE_DIR`: opens the end-time dialog in both
+  /// appearances and writes its captures there. Run by hand before a release.
   @Test(.enabled(if: ProcessInfo.processInfo.environment["CANDELA_RENDER_PROBE_DIR"] != nil))
   func captureCustomEndTimeDialogs() async throws {
     let directory = URL(fileURLWithPath: try #require(
@@ -170,6 +182,8 @@ struct PanelRenderProbeTests {
     }
   }
 
+  /// Gated on `CANDELA_RENDER_PROBE_DIR`: writes the calendar popover
+  /// capture there. Run by hand before a release.
   @Test(.enabled(if: ProcessInfo.processInfo.environment["CANDELA_RENDER_PROBE_DIR"] != nil))
   func captureCustomCalendar() async throws {
     let directory = URL(fileURLWithPath: try #require(

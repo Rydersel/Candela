@@ -51,9 +51,15 @@ macOS lock screen. Your saved brightness setting stays unchanged.
 
 ### Pause dimming temporarily
 
-Use **Pause Dimming** beside the display's care status or on its OLED Care
-page to pause for **15 minutes** or **1 hour**. The control shows the resume
-time, and **Resume Now** ends the pause early.
+In the menu bar panel, the care status line under an enrolled display's name
+is itself the control: click it for **Pause Dimming for 15 Minutes**, **Pause
+Dimming for 1 Hour** and **Pause Dimming Until…**, which opens a window for
+choosing a date and time up to a year ahead. The display's OLED Care page has
+the same three choices in its **Pause Dimming** menu under **Dimming**. While a
+pause runs, the status reads "Dimming paused until" and the end time, and
+**Resume Now** ends the pause early. A mirrored display, or one showing a
+checkup field, is already held undimmed for that reason, so its OLED Care page
+keeps naming that reason during a pause.
 
 A pause immediately lifts idle, unfocused, blackout, regional and lock dimming
 for that display. Health measurement and hours keep running under their usual

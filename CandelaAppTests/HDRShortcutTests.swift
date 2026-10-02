@@ -42,13 +42,14 @@ struct HDRShortcutTests {
     let state = TestFixtures.displayState(hdr: hdr)
     await state.controller.noteHDRStateMayHaveChanged()
     let action = HDRShortcutAction(gate: .init(), target: { _ in state })
-    #expect(await action.toggle(on: state.id).message.contains("HDR"))
+    #expect(await action.toggle(on: state.id) == .refused(PanelView.hdrNoModesCaption))
     #expect(await hdr.writes.isEmpty)
     let supported = ShortcutHDR()
     let second = TestFixtures.displayState(hdr: supported)
     await second.controller.noteHDRStateMayHaveChanged()
     let blocked = HDRShortcutAction(gate: .init(), target: { _ in second }, isSynthesized: { _ in true })
-    #expect(await blocked.toggle(on: second.id).message.contains("synthesized"))
+    #expect(await blocked.toggle(on: second.id)
+      == .refused("Turn off the synthesized display size before switching HDR on."))
     #expect(await supported.writes.isEmpty)
   }
 

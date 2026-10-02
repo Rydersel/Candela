@@ -69,6 +69,7 @@ struct EndTimePickerView: View {
   @State private var draft: EndTimeDraft
   @State private var showsCalendar = false
   @State private var dateHovered = false
+  @State private var clock = Date()
   @FocusState private var focusedField: Field?
   private enum Field { case hour, minute }
   private let accent = SettingsAccent.display(isBuiltIn: false, ordinal: 0)
@@ -84,6 +85,8 @@ struct EndTimePickerView: View {
   }
 
   var body: some View {
+    // Read unconditionally so the tick re-validates even while an error shows.
+    let _ = clock
     VStack(alignment: .leading, spacing: 20) {
       Text(detail)
         .font(.callout)
@@ -137,24 +140,31 @@ struct EndTimePickerView: View {
       .padding(16)
       .background(RoundedRectangle(cornerRadius: SettingsTheme.cardRadius).fill(SettingsTheme.cardFill))
       .overlay(RoundedRectangle(cornerRadius: SettingsTheme.cardRadius).stroke(SettingsTheme.cardStroke, lineWidth: 1))
-      TimelineView(.periodic(from: .now, by: 1)) { _ in
-        VStack(alignment: .leading, spacing: 16) {
-          Text(validationMessage ?? "Ends \(EndTimeText.string(draft.date ?? selection.deadline))")
-            .font(.callout)
-            .foregroundStyle(validationMessage == nil ? SettingsTheme.bodyColor : SettingsTheme.dangerTint)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(height: 36, alignment: .topLeading)
-          HStack(spacing: 10) {
-            Spacer()
-            Button("Cancel", action: cancel)
-              .buttonStyle(SettingsSecondaryButtonStyle())
-              .keyboardShortcut(.cancelAction)
-            Button(actionTitle, action: confirmDraft)
-              .buttonStyle(SettingsPrimaryButtonStyle())
-              .keyboardShortcut(.defaultAction)
-              .disabled(!canConfirmDraft)
-          }
+      VStack(alignment: .leading, spacing: 16) {
+        Text(validationMessage ?? "Ends \(EndTimeText.string(draft.date ?? selection.deadline, now: clock))")
+          .font(.callout)
+          .foregroundStyle(validationMessage == nil ? SettingsTheme.bodyColor : SettingsTheme.dangerTint)
+          .fixedSize(horizontal: false, vertical: true)
+          .frame(height: 36, alignment: .topLeading)
+        HStack(spacing: 10) {
+          Spacer()
+          Button("Cancel", action: cancel)
+            .buttonStyle(SettingsSecondaryButtonStyle())
+            .keyboardShortcut(.cancelAction)
+          Button(actionTitle, action: confirmDraft)
+            .buttonStyle(SettingsPrimaryButtonStyle())
+            .keyboardShortcut(.defaultAction)
+            .disabled(!canConfirmDraft)
         }
+      }
+    }
+    // Not a TimelineView: in a key window one costs a full window layout every
+    // display cycle whatever its schedule [MEASURED 2026-10-01]. A chosen time
+    // passing while the dialog is open still has to grey the action.
+    .task {
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(1))
+        clock = Date()
       }
     }
     .padding(24)

@@ -438,14 +438,20 @@ struct PanelView: View {
   /// Holds a power assertion for the app rather than touching a display, so it
   /// sits outside the per-display stack.
   ///
+  /// One line, and its height never changes with state: a caption that appeared
+  /// while the toggle was on grew the panel inside the already-open `NSMenu` and
+  /// clipped the footer off the bottom [MEASURED 2026-08-19]. Hence the compact
+  /// end time and `lineLimit(1)`; `PanelSizingTests` pins the widest label to
+  /// the column.
+  ///
   /// OLED care's idle dim, blackout and unfocused dim cannot engage while this
   /// is on, which Settings > Menu Bar states next to the hide switch.
   private var keepAwakeRow: some View {
     let disclosure = PanelDisclosureID(0, .keepAwake)
     let expanded = expandedSection == disclosure
-    let status = model.keepAwake.expiresAt.map {
-      "Awake until \(EndTimeText.string($0))"
-    } ?? (model.keepAwake.isOn ? "Until turned off" : "Off")
+    let title = Self.keepAwakeTitle(expiresAt: model.keepAwake.expiresAt)
+    let status = model.keepAwake.expiresAt.map { "Awake until \(CompactEndTimeText.string($0))" }
+      ?? (model.keepAwake.isOn ? "Until turned off" : "Off")
     return VStack(alignment: .leading, spacing: 4) {
       HStack(spacing: 0) {
         Button {
@@ -456,21 +462,19 @@ struct PanelView: View {
         } label: {
           HStack(spacing: 5) {
             Image(systemName: "cup.and.saucer.fill")
-            Text(model.keepAwake.expiresAt.map {
-              "Awake until \(EndTimeText.string($0))"
-            } ?? "Keep display awake")
-              .lineLimit(2)
+            Text(verbatim: title)
+              .lineLimit(1)
             Image(systemName: "chevron.down")
               .font(.system(size: 8, weight: .semibold))
               .rotationEffect(.degrees(expanded ? 180 : 0))
               .animation(Motion.disclosure(reduceMotion: reduceMotion), value: expanded)
           }
-          .font(.system(size: 12))
+          .font(.system(size: Self.keepAwakeFontSize))
           .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Keep display awake duration")
-        .accessibilityValue("\(status), \(expanded ? "Expanded" : "Collapsed")")
+        .accessibilityValue(Text(verbatim: Self.disclosureValue(status, expanded: expanded)))
         Spacer(minLength: 8)
         Toggle("", isOn: Binding(
           get: { model.keepAwake.isOn },
@@ -498,10 +502,10 @@ struct PanelView: View {
               guard duration != awakeDuration || !model.keepAwake.isOn else { return }
               awakeDuration = duration
               duration.apply(to: model.keepAwake)
-            }), stopCount: KeepAwakeDuration.allCases.count)
+            }), stopCount: KeepAwakeDuration.allCases.count,
+            accessibilityLabel: "Keep awake duration",
+            valueDescription: Self.keepAwakeStopTitle)
             .frame(height: 18)
-            .accessibilityLabel("Keep awake duration")
-            .accessibilityValue(awakeDuration.title)
           HStack {
             Text("15 min")
             Spacer()
@@ -528,6 +532,32 @@ struct PanelView: View {
     .padding(.horizontal, 14)
     .padding(.vertical, 8)
     .onAppear { synchronizeAwakeDuration() }
+  }
+
+  static let keepAwakeFontSize: CGFloat = 12
+
+  /// "Until", not "Awake until": the cup and the switch beside it already say
+  /// what is held, and "Awake until tomorrow" at the widest clock time measured
+  /// 180 pt in a 170 pt column.
+  static func keepAwakeTitle(
+    expiresAt: Date?, now: Date = Date(), calendar: Calendar = .current, locale: Locale = .current
+  ) -> String {
+    expiresAt.map {
+      "Until \(CompactEndTimeText.string($0, now: now, calendar: calendar, locale: locale))"
+    } ?? "Keep display awake"
+  }
+
+  /// What the native slider speaks for a stop. The `NSSlider` is its own
+  /// accessibility element, so a SwiftUI value on the representable may never
+  /// reach it, and its default value is the bare stop index.
+  nonisolated static func keepAwakeStopTitle(_ value: Double) -> String {
+    KeepAwakeDuration(rawValue: Int(value.rounded()))?.title ?? ""
+  }
+
+  /// Both panel disclosures put their open state in the value, so VoiceOver
+  /// reads the two the same way.
+  static func disclosureValue(_ status: String, expanded: Bool) -> String {
+    "\(status), \(expanded ? "expanded" : "collapsed")"
   }
 
   private func synchronizeAwakeDuration() {
@@ -706,7 +736,7 @@ extension PanelView {
         expandedSection = nil
         model.chooseDimmingPauseEndTime(for: state.display.persistenceKey, name: name)
       }
-      PanelCaption("Measuring and hours continue. Normal sleep is unchanged.", style: .secondary)
+      PanelCaption("Measurement and display hours continue; macOS can still sleep the display.", style: .secondary)
     }
   }
 
@@ -724,11 +754,28 @@ extension PanelView {
     persistenceKey: String, prefs: DisplayPrefs, care: OledCareCoordinator, safeMode: Bool
   ) -> String? {
     let enrolled = prefs.oledCareEnrolled
-    if enrolled, !safeMode, let deadline = care.dimmingPauseDeadline(for: persistenceKey) {
-      return "Dimming paused until \(EndTimeText.string(deadline))"
-    }
     let hours = care.hoursTracker(for: persistenceKey).totalHours
-    let summary = enrolled && !safeMode ? care.healthSummary(for: persistenceKey) : nil
+    let pausedUntil = enrolled && !safeMode ? care.dimmingPauseDeadline(for: persistenceKey) : nil
+    let summary = enrolled && !safeMode && pausedUntil == nil
+      ? care.healthSummary(for: persistenceKey) : nil
+    return careLine(
+      enrolled: enrolled, hours: hours, summary: summary, safeMode: safeMode,
+      suspended: care.dimStates[persistenceKey] == .suspended, pausedUntil: pausedUntil)
+  }
+
+  /// A suspension outranks the user's pause, as it does in the engine: a
+  /// mirrored display or a checkup field keeps its own line for the whole pause.
+  /// The paused form stands alone because it is the one thing the row has to
+  /// say, and with the hours beside it the widest end time no longer fit one
+  /// line (`PanelSizingTests` pins the width). The hours return with the dimming.
+  static func careLine(
+    enrolled: Bool, hours: Double, summary: PanelHealthSummary?, safeMode: Bool,
+    suspended: Bool, pausedUntil: Date?,
+    now: Date = Date(), calendar: Calendar = .current, locale: Locale = .current
+  ) -> String? {
+    if enrolled, !safeMode, !suspended, let pausedUntil {
+      return "Dimming paused until \(CompactEndTimeText.string(pausedUntil, now: now, calendar: calendar, locale: locale))"
+    }
     return PanelCareLine.text(
       enrolled: enrolled, hours: hours, summary: summary, safeMode: safeMode)
   }
@@ -829,8 +876,7 @@ private struct DisplayHeaderRow: View {
           .onHover { isCareHovering = $0 }
           .onDisappear { isCareHovering = false }
           .accessibilityLabel(Text(verbatim: "\(displayName) dimming controls"))
-          .accessibilityValue(Text(verbatim: careLine))
-          .accessibilityHint(careIsExpanded ? "Hide pause options" : "Show pause options")
+          .accessibilityValue(Text(verbatim: PanelView.disclosureValue(careLine, expanded: careIsExpanded)))
         } else {
           careStatus(careLine)
             .accessibilityLabel(Text(verbatim: "\(displayName), \(careLine)"))
@@ -984,5 +1030,31 @@ private struct FooterIconButtonStyle: ButtonStyle {
       .foregroundStyle(foreground)
       .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(background))
       .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+  }
+}
+
+/// An end time short enough for a one-line panel row: the time alone today,
+/// "tomorrow", a weekday within the week, a month and day further out. Never a
+/// year: a deadline is at most a year away, so the month and day already name
+/// one date.
+enum CompactEndTimeText {
+  static func string(
+    _ deadline: Date, now: Date = Date(), calendar: Calendar = .current, locale: Locale = .current
+  ) -> String {
+    var style = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+    let time = deadline.formatted(style.hour().minute())
+    let days = calendar.dateComponents(
+      [.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: deadline)
+    ).day ?? 0
+    switch days {
+    case ...0: return time
+    case 1: return "tomorrow, \(time)"
+    case 2...6:
+      style = style.weekday(.abbreviated)
+      return "\(deadline.formatted(style)), \(time)"
+    default:
+      style = style.month(.abbreviated).day()
+      return "\(deadline.formatted(style)), \(time)"
+    }
   }
 }

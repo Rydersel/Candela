@@ -391,12 +391,15 @@ struct OledCareDisplayPage: View {
   /// "paused" reading is the one state that must stay visible.
   private var statusText: LocalizedStringKey {
     if model.isSafeMode { return "Paused for this session (Safe Mode)" }
-    if let deadline = model.oledCare.dimmingPauseDeadline(for: persistenceKey) {
-      return "Dimming paused until \(EndTimeText.string(deadline))"
+    let dimState = model.oledCare.dimStates[persistenceKey]
+    // After the suspension, as in the engine: a mirror or a checkup field keeps
+    // its reason on screen for the whole of a user's pause.
+    if dimState != .suspended, let deadline = model.oledCare.dimmingPauseDeadline(for: persistenceKey) {
+      return "Dimming paused until \(CompactEndTimeText.string(deadline))"
     }
     // Exhaustive, so a new engine state is a compile error here rather than a
     // blank row.
-    switch model.oledCare.dimStates[persistenceKey] {
+    switch dimState {
     case .active: return "Not dimming"
     case .idleDim: return "Dimmed: the display has been idle"
     case .blackout: return "Screen off: the display has been idle"
@@ -419,10 +422,11 @@ struct OledCareDisplayPage: View {
 
   private var dimmingPauseControls: some View {
     let deadline = model.oledCare.dimmingPauseDeadline(for: persistenceKey)
-    return SettingRow("Pauses dimming for this display. Measuring and hours continue, and macOS can still put the display to sleep.") {
+    let menuTitle = deadline == nil ? "Pause Dimming" : "Change Duration"
+    return SettingRow("Measurement and display hours continue; macOS can still sleep the display.") {
       HStack(spacing: 12) {
         if let deadline {
-          Text("Paused until \(EndTimeText.string(deadline))")
+          Text("Paused until \(CompactEndTimeText.string(deadline))")
             .fixedSize(horizontal: false, vertical: true)
         } else {
           Text("Pause dimming temporarily")
@@ -433,7 +437,9 @@ struct OledCareDisplayPage: View {
             .buttonStyle(SettingsSecondaryButtonStyle())
             .accessibilityLabel("\(name), resume dimming now")
         }
-        Menu(deadline == nil ? "Pause Dimming" : "Change Duration") {
+        // A platform menu: these are actions, and the theme's choice controls
+        // (segments, pop-up row) draw a selected state there is none of.
+        Menu(menuTitle) {
           Button("15 Minutes") {
             model.oledCare.pauseDimming(for: persistenceKey, duration: 15 * 60)
           }
@@ -445,7 +451,7 @@ struct OledCareDisplayPage: View {
           }
         }
         .fixedSize()
-        .accessibilityLabel("\(name), pause dimming duration")
+        .accessibilityLabel(Text(verbatim: "\(name), \(menuTitle)"))
       }
     }
   }

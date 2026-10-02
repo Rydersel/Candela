@@ -209,16 +209,13 @@ struct KeyboardPane: View {
 
   // MARK: - More
 
-  /// Both rows are always present: a nav row that appears and disappears breaks
+  /// Every row is always present: a nav row that appears and disappears breaks
   /// path retention, so inactivity is stated on the page rather than by
   /// hiding the way there.
   private var moreSection: some View {
     SettingsCardSection(title: "More") {
-      DisclosureGroup("Display Shortcuts") {
-        SettingRow("Toggles HDR on the external display under the pointer.") {
-          KeyboardShortcuts.Recorder("Toggle HDR:", name: .toggleHDR)
-        }
-        .padding(.top, 8)
+      SettingRow("Turns HDR on or off for the external display under the pointer.") {
+        KeyboardShortcuts.Recorder("Toggle HDR:", name: .toggleHDR)
       }
       SettingsCardDivider()
       NavigationRow(

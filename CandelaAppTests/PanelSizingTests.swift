@@ -132,21 +132,18 @@ struct PanelSizingTests {
       "The Keep Awake header must keep its position relative to the display content")
   }
 
+  /// Opt-in: runs only with `CANDELA_NATIVE_MENU_TEST=1` in the test
+  /// environment. It pops up a real `NSMenu` and runs AppKit's tracking loop,
+  /// which takes the screen and the pointer's menu for several seconds, so it
+  /// cannot run unattended in `make check` or CI. The controller runs it by hand
+  /// before a release.
   @Test(.enabled(if: ProcessInfo.processInfo.environment["CANDELA_NATIVE_MENU_TEST"] == "1"),
     arguments: [(false, false), (false, true), (true, true)])
   func theTrackingMenuGrowsAndKeepsTheFooterVisible(withExternal: Bool, withBanner: Bool) async throws {
-    let defaults = UserDefaults.standard
+    let mode = (withBanner ? KeyMode.media : .custom).rawValue
     let keys = ["keyboardBrightness", "keyboardVolume"]
-    let saved = keys.map { defaults.object(forKey: $0) }
-    defer {
-      for (key, value) in zip(keys, saved) {
-        if let value { defaults.set(value, forKey: key) }
-        else { defaults.removeObject(forKey: key) }
-      }
-    }
-    let prefs = DisplayPrefs(persistenceKey: "app")
-    prefs.keyboardBrightness = withBanner ? .media : .custom
-    prefs.keyboardVolume = withBanner ? .media : .custom
+    VolatilePrefs.set(Dictionary(uniqueKeysWithValues: keys.map { ($0, mode) }))
+    defer { VolatilePrefs.remove(keys) }
     let model = TestFixtures.appModel(discovery: ScriptedDiscovery(withExternal ? [
       (id: 7, key: "native-disclosure-sizing", name: "Single Display")] : []))
     await model.refresh()
@@ -333,6 +330,154 @@ struct PanelSizingTests {
     var didCheck = false
   }
 
+  // MARK: - One-line rows
+
+  private static func textWidth(_ text: String, size: CGFloat) -> CGFloat {
+    (text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: size)]).width
+  }
+
+  /// Every end time a deadline up to a year away can produce, each day at the
+  /// widest clock reading: the day and the time are separate words, so their
+  /// widest forms add.
+  private static func widestEndTimes(size: CGFloat, render: (Date) -> String) -> String {
+    let clock = PanelRowModelTests.clock
+    let start = clock.calendar.startOfDay(for: clock.now)
+    let minutes = (0 ..< 24 * 60).map { start.addingTimeInterval(TimeInterval($0 * 60)) }
+    let widestTime = minutes.max {
+      textWidth(render($0), size: size) < textWidth(render($1), size: size)
+    }!
+    let offset = widestTime.timeIntervalSince(start)
+    let days = (0 ... 366).map {
+      clock.calendar.date(byAdding: .day, value: $0, to: start)!.addingTimeInterval(offset)
+    }
+    return days.map(render).max { textWidth($0, size: size) < textWidth($1, size: size) }!
+  }
+
+  /// The row's height must never change with state (the footer clip of
+  /// 2026-08-19), so its widest label has to fit beside the switch on one line.
+  /// The column is measured from the laid-out row, not assumed.
+  @Test func theWidestKeepAwakeLabelFitsOneLine() async throws {
+    let model = TestFixtures.appModel()
+    _ = NSApplication.shared
+    (NSApp as NSObject).accessibilitySetValue(true,
+      forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+    let host = PanelHostingView(rootView: PanelView(maximumHeight: 700).environment(model))
+    host.setFrameSize(host.fittingSize)
+    let window = mount(host)
+    defer { window.contentView = nil; window.close() }
+    try await Task.sleep(for: .milliseconds(150))
+    host.layoutSubtreeIfNeeded()
+    let nodes = accessibilityNodes(host)
+    let button = try #require(nodes.first {
+      ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake duration"
+    }?.object.accessibilityFrame?())
+    let toggle = try #require(nodes.first {
+      ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake"
+    }?.object.accessibilityFrame?())
+    let size = PanelView.keepAwakeFontSize
+    let chrome = button.width - Self.textWidth(PanelView.keepAwakeTitle(expiresAt: nil), size: size)
+    let column = toggle.minX - 8 - button.minX - chrome
+    let clock = PanelRowModelTests.clock
+    let widest = Self.widestEndTimes(size: size) {
+      PanelView.keepAwakeTitle(expiresAt: $0, now: clock.now, calendar: clock.calendar, locale: clock.locale)
+    }
+    #expect(column > 100, "The measured column is implausible: \(column)")
+    #expect(Self.textWidth(widest, size: size) <= column,
+      "\"\(widest)\" needs \(Self.textWidth(widest, size: size)) pt in a \(column) pt column")
+  }
+
+  /// Measured with a five-figure hour count so the test still holds if the
+  /// paused form ever takes the hours back.
+  @Test func theWidestPausedCareLineFitsOneLine() async throws {
+    let key = "paused-care-width-\(UUID().uuidString)"
+    VolatilePrefs.set(["oledCareEnrolled.\(key)": true])
+    defer { VolatilePrefs.remove(["oledCareEnrolled.\(key)"]) }
+    let name = "Paused Width"
+    let model = TestFixtures.appModel(discovery: ScriptedDiscovery([(id: 7, key: key, name: name)]))
+    await model.refresh()
+    _ = NSApplication.shared
+    (NSApp as NSObject).accessibilitySetValue(true,
+      forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+    let host = PanelHostingView(rootView: PanelView(maximumHeight: 700).environment(model))
+    host.setFrameSize(host.fittingSize)
+    let window = mount(host)
+    defer { window.contentView = nil; window.close() }
+    try await Task.sleep(for: .milliseconds(150))
+    host.layoutSubtreeIfNeeded()
+    let row = try #require(accessibilityNodes(host).first {
+      ($0.object.accessibilityLabel?() ?? nil) == "\(name) dimming controls"
+    }?.object.accessibilityFrame?())
+    let chevron = try #require(NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?
+      .withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))).size.width
+    // The status, the 6 pt gap, the 4 pt minimum spacer and the chevron.
+    let column = row.width - 6 - 4 - chevron
+    let clock = PanelRowModelTests.clock
+    let widest = Self.widestEndTimes(size: 11) {
+      PanelView.careLine(
+        enrolled: true, hours: 99_999, summary: nil, safeMode: false, suspended: false,
+        pausedUntil: $0, now: clock.now, calendar: clock.calendar, locale: clock.locale) ?? ""
+    }
+    #expect(column > 100, "The measured column is implausible: \(column)")
+    #expect(Self.textWidth(widest, size: 11) <= column,
+      "\"\(widest)\" needs \(Self.textWidth(widest, size: 11)) pt in a \(column) pt column")
+  }
+
+  /// The native slider is its own accessibility element, so the label and the
+  /// spoken stop have to be set on it; a SwiftUI modifier on the representable
+  /// is not proof they arrive.
+  @Test func theDurationSliderSpeaksTheStopNotItsIndex() async throws {
+    var value = 2.0
+    let binding = Binding(get: { value }, set: { value = $0 })
+    let host = NSHostingView(rootView: SelectionSlider(
+      value: binding, stopCount: KeepAwakeDuration.allCases.count,
+      accessibilityLabel: "Keep awake duration", valueDescription: PanelView.keepAwakeStopTitle))
+    host.setFrameSize(NSSize(width: 200, height: 24))
+    let window = mount(host)
+    defer { window.contentView = nil; window.close() }
+    host.layoutSubtreeIfNeeded()
+    let control = try #require(descendants(host).compactMap { $0 as? NSSlider }.first)
+    let slider = try #require(control.cell)
+    #expect(slider.accessibilityLabel() == "Keep awake duration")
+    #expect(slider.accessibilityValueDescription() == "1 hour")
+    value = 5
+    host.rootView = SelectionSlider(
+      value: binding, stopCount: KeepAwakeDuration.allCases.count,
+      accessibilityLabel: "Keep awake duration", valueDescription: PanelView.keepAwakeStopTitle)
+    host.layoutSubtreeIfNeeded()
+    #expect(slider.accessibilityValueDescription() == "8 hours")
+  }
+
+  @Test func theOpenedKeepAwakeRowPublishesOneSpokenSlider() async throws {
+    let model = TestFixtures.appModel()
+    _ = NSApplication.shared
+    (NSApp as NSObject).accessibilitySetValue(true,
+      forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+    let host = PanelHostingView(rootView: PanelView(maximumHeight: 700).environment(model))
+    host.setFrameSize(host.fittingSize)
+    let window = mount(host)
+    defer { window.contentView = nil; window.close() }
+    try await Task.sleep(for: .milliseconds(150))
+    host.layoutSubtreeIfNeeded()
+    let disclosure = try #require(accessibilityNodes(host).first {
+      ($0.object.accessibilityLabel?() ?? nil) == "Keep display awake duration"
+    })
+    #expect((disclosure.object as? NSAccessibilityElementProtocol).flatMap {
+      ($0 as AnyObject).accessibilityValue() as? String
+    } == "Off, collapsed")
+    #expect(disclosure.object.accessibilityPerformPress?() == true)
+    try await Task.sleep(for: .milliseconds(300))
+    host.setFrameSize(host.fittingSize)
+    host.layoutSubtreeIfNeeded()
+    let sliders = accessibilityNodes(host).filter {
+      ($0.object.accessibilityRole?() ?? nil) == .slider
+    }
+    #expect(sliders.count == 1)
+    #expect((sliders.first?.object.accessibilityLabel?() ?? nil) == "Keep awake duration")
+    #expect((sliders.first?.object.accessibilityValueDescription?() ?? nil)
+      == KeepAwakeDuration.untilTurnedOff.title)
+    #expect(!model.keepAwake.isOn, "Opening the duration choices must not start a hold")
+  }
+
   @Test func aShortPanelKeepsItsNaturalHeight() {
     let model = TestFixtures.appModel()
     let natural = NSHostingView(rootView: PanelView().environment(model))
@@ -457,5 +602,29 @@ struct PanelSizingTests {
     return [Node(object: object, inScrollArea: scrolling)] + children.flatMap {
       accessibilityNodes($0, inScrollArea: scrolling, depth: depth + 1)
     }
+  }
+}
+
+/// The panel and the accessibility predicate read `UserDefaults.standard` with
+/// no seam to inject through. The argument domain is volatile and outranks the
+/// app's own domain, so a value placed there reads like a stored pref and never
+/// reaches disk. Removal is per key rather than a restore of a saved copy, so
+/// two tests interleaving on the main actor cannot undo each other.
+@MainActor enum VolatilePrefs {
+  static func set(_ values: [String: Any]) {
+    mutate { domain in domain.merge(values) { $1 } }
+  }
+
+  static func remove(_ keys: [String]) {
+    mutate { domain in for key in keys { domain.removeValue(forKey: key) } }
+  }
+
+  private static func mutate(_ change: (inout [String: Any]) -> Void) {
+    let defaults = UserDefaults.standard
+    let name = UserDefaults.argumentDomain
+    var domain = defaults.volatileDomain(forName: name)
+    change(&domain)
+    defaults.removeVolatileDomain(forName: name)
+    defaults.setVolatileDomain(domain, forName: name)
   }
 }
