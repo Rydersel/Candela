@@ -11,7 +11,7 @@ struct DDCValueControllerTests {
   private final class Harness {
     let defaults: UserDefaults
     let prefs: DisplayPrefs
-    let fake = FakeDDC(readResult: nil) // write-only panel by default (MAG parity)
+    let fake = FakeDDC(readResult: nil) // unavailable readback by default
     let store = PathMemoryStore()
     let controller: DDCValueController
     /// The display's own VCP 0x8D verdict from the capabilities probe. A var,
@@ -635,7 +635,7 @@ struct DDCValueControllerTests {
     #expect(writes.contains { $0.command == VCP.audioMuteScreenBlank && $0.value == 1 })
   }
 
-  // MARK: - Validated read (`.read`, MAG write-only protection)
+  // MARK: - Validated read (`.read`, unavailable readback protection)
 
   @Test func refreshIsGatedOnTheReadStartupAction() async {
     let harness = Harness(command: .contrast, savedValue: 0.6)

@@ -5,7 +5,8 @@ import SwiftUI
 /// written once so the features cannot spell one statement several ways.
 ///
 /// Names the feature holding the gate rather than saying "busy": "finish that
-/// first" is actionable.
+/// first" is actionable. HDR and a settings reset run to the end on their own,
+/// with nothing for the person to finish, so those two say to wait.
 ///
 /// Deliberately silent about WHY the holder still holds it. The gate is taken
 /// for the reconfiguration itself as well as for an unanswered preview (a mirror
@@ -19,6 +20,9 @@ enum ReconfigurationCopy {
     case .displayModes: "Candela is already changing a display's resolution. Finish that first."
     case .mirroring: "Candela is already changing mirroring. Finish that first."
     case .rotation: "Candela is already rotating a display. Finish that first."
+    case .settingsReset: "Candela is already resetting settings. Wait for it to finish."
+    case .checkup: "Candela is already running a display checkup. Finish that first."
+    case .hdr: "Candela is already switching HDR. Wait for it to finish."
     case .arrangement: "Candela is already changing the display arrangement. Finish that first."
     }
   }

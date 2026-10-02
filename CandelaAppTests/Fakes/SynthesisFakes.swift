@@ -1,4 +1,4 @@
-import CandelaKit
+@testable import CandelaKit
 import CoreGraphics
 import Foundation
 
@@ -132,6 +132,12 @@ final class FakeDisplayWorld: @unchecked Sendable {
     lock.withLock { currentByID[displayID] }
   }
 
+  /// nil stands for a mode read that came back empty, as one straight after a
+  /// reconfiguration can.
+  func setCurrentMode(_ mode: DisplayMode?, for displayID: CGDirectDisplayID) {
+    lock.withLock { currentByID[displayID] = mode }
+  }
+
   func nativePixels(for displayID: CGDirectDisplayID) -> (width: Int, height: Int)? {
     lock.withLock {
       guard let twin = masterTwinLocked(displayID) else { return nativeByID[displayID] ?? nil }
@@ -219,8 +225,48 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
   var onModeApply: (@Sendable () -> Void)?
   /// A committed mode failure for coordinator recovery tests, consumed once.
   var nextModeApplyFailure: DisplayConfigError?
+  var modeApplyFailures: [DisplayConfigError?] = []
+  var updatesCurrentModeOnApply = false
+  var scanoutRead: (@Sendable (CGDirectDisplayID) -> ScanoutTiming?)?
+  /// Model the real configurator's quarantine: a checked apply that fails on
+  /// scan-out timing withholds its mode, and a later checked apply of it is
+  /// refused. `restore` neither refuses nor withholds, and a scripted timing
+  /// failure it consumes moves the world without throwing, as the real one does.
+  var withholdsScanoutMismatches = false
+  /// Route every apply through the kit's own scan-out guard, the one the real
+  /// configurator runs, reading `scanoutRead` on a virtual clock. The verdict,
+  /// the settle and the quarantine are then the shipped ones rather than this
+  /// fake's model of them, which scripted failures stand in for otherwise.
+  var usesRealScanoutGuard = false
+  /// The real guard's clock, advanced only by its own sleeps.
+  var scanoutClock: TimeInterval { quarantineLock.withLock { _scanoutClock } }
+  private var _scanoutClock: TimeInterval = 0
+  private var realGuard: CoreGraphicsDisplayConfigurator!
 
-  init(_ world: FakeDisplayWorld) { self.world = world }
+  /// Written mid-operation from whichever executor applies, so locked.
+  private let quarantineLock = NSLock()
+  private var _withheld: [CGDirectDisplayID: Set<DisplayModeDescriptor>] = [:]
+  private var _restores: [(mode: DisplayMode, displayID: CGDirectDisplayID)] = []
+  func withheld(on displayID: CGDirectDisplayID) -> Set<DisplayModeDescriptor> {
+    quarantineLock.withLock { _withheld[displayID] ?? [] }
+  }
+  var restores: [(mode: DisplayMode, displayID: CGDirectDisplayID)] {
+    quarantineLock.withLock { _restores }
+  }
+
+  init(_ world: FakeDisplayWorld) {
+    self.world = world
+    realGuard = CoreGraphicsDisplayConfigurator(scanout: .init(
+      location: { [unowned self] _ in scanoutRead == nil ? nil : "IOService:/fake/AppleCLCD2" },
+      read: { [unowned self] displayID, _ in scanoutRead?(displayID) },
+      hardwareIdentity: { [unowned self] displayID in
+        world.displays().first { $0.id == displayID }?.identity.key ?? "\(displayID)"
+      },
+      now: { [unowned self] in
+        Date(timeIntervalSince1970: quarantineLock.withLock { _scanoutClock })
+      },
+      sleep: { [unowned self] interval in quarantineLock.withLock { _scanoutClock += interval } }))
+  }
 
   /// Every mode apply, in order. Forwarded from the world so a test asserting
   /// on the engage tail reads it off the object it configured.
@@ -250,6 +296,10 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
     return world.nativePixels(for: displayID)
   }
 
+  func scanoutTiming(for displayID: CGDirectDisplayID) -> ScanoutTiming? {
+    scanoutRead?(displayID)
+  }
+
   /// Read from the world directly, not through the four methods above, so the
   /// recorded count is one call, as on the real configurator.
   func modeSnapshot(for displayID: CGDirectDisplayID) -> DisplayModeSnapshot {
@@ -268,19 +318,60 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
   /// the call. The tail's achieved-state check then answers false, which is what
   /// puts the bounce under test.
   func apply(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope _: DisplayConfigScope) throws {
+    try performApply(mode, to: displayID, enforcesScanout: true)
+  }
+
+  func restore(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope _: DisplayConfigScope) throws {
+    quarantineLock.withLock { _restores.append((mode, displayID)) }
+    try performApply(mode, to: displayID, enforcesScanout: false)
+  }
+
+  private func performApply(
+    _ mode: DisplayMode, to displayID: CGDirectDisplayID, enforcesScanout: Bool
+  ) throws {
+    guard usesRealScanoutGuard else {
+      try performModelledApply(mode, to: displayID, enforcesScanout: enforcesScanout)
+      return
+    }
+    do {
+      try realGuard.guardedApply(
+        mode, to: displayID, enforcesScanout: enforcesScanout,
+        nativePixels: { [world] in world.nativePixels(for: displayID) },
+        achieved: { [world] in world.currentMode(for: displayID) }
+      ) {
+        try performModelledApply(mode, to: displayID, enforcesScanout: enforcesScanout)
+      }
+    } catch let error as DisplayConfigError where error.unhonouredCommit?.scanoutTiming != nil {
+      // Mirrors the real guard's quarantine so `withheld(on:)` reads it.
+      quarantineLock.withLock { _ = _withheld[displayID, default: []].insert(mode.descriptor) }
+      throw error
+    }
+  }
+
+  private func performModelledApply(
+    _ mode: DisplayMode, to displayID: CGDirectDisplayID, enforcesScanout: Bool
+  ) throws {
     onModeApply?()
     if refusesModeApplies { throw DisplayConfigError(cgErrorCode: CGError.failure.rawValue) }
+    if enforcesScanout, withholdsScanoutMismatches,
+       quarantineLock.withLock({ _withheld[displayID]?.contains(mode.descriptor) == true }) {
+      throw DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue)
+    }
     world.recordApply(mode, to: displayID)
-    if let failure = nextModeApplyFailure {
+    let scripted = modeApplyFailures.isEmpty ? nextModeApplyFailure : modeApplyFailures.removeFirst()
+    if let failure = scripted {
       nextModeApplyFailure = nil
-      if let achieved = failure.unhonouredCommit?.achieved,
-         let display = world.displays().first(where: { $0.id == displayID }) {
-        world.attach(
-          display, modes: world.modes(for: displayID), current: achieved,
-          nativePixels: world.nativePixels(for: displayID))
+      if let achieved = failure.unhonouredCommit?.achieved {
+        world.setCurrentMode(achieved, for: displayID)
+      }
+      let timingOnly = failure.unhonouredCommit?.scanoutTiming != nil
+      if withholdsScanoutMismatches, timingOnly {
+        guard enforcesScanout else { return }
+        quarantineLock.withLock { _ = _withheld[displayID, default: []].insert(mode.descriptor) }
       }
       throw failure
     }
+    if updatesCurrentModeOnApply { world.setCurrentMode(mode, for: displayID) }
   }
 
   func applyMirroring(_ changes: [MirrorChange], scope _: DisplayConfigScope) throws {
@@ -315,6 +406,8 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
 final class FakeSynthesisVirtualDisplayHost: VirtualDisplayAchievedModeReporting, @unchecked Sendable {
   let world: FakeDisplayWorld
   var isAvailable = true
+  var refusesDestroy = false
+  var onDestroy: (@Sendable () -> Void)?
   /// Report a mode the spec did not ask for, to reach `virtualModeNotAchieved`.
   var achieves2x = true
   /// Runs on the engine's executor at the top of `create`, before anything
@@ -372,8 +465,10 @@ final class FakeSynthesisVirtualDisplayHost: VirtualDisplayAchievedModeReporting
 
   @discardableResult
   func destroy(slot: Int, departureTimeout _: TimeInterval) -> Bool {
+    guard !refusesDestroy else { return false }
     guard let handle = lock.withLock({ handles.removeValue(forKey: slot) }) else { return false }
     world.detach(handle.displayID)
+    onDestroy?()
     return true
   }
 
@@ -425,6 +520,13 @@ final class FakeSynthesisHDR: @unchecked Sendable {
   }
 
   var legs: [(enabled: Bool, granted: Bool)] { lock.withLock { _legs } }
+  /// Runs after each leg is recorded, outside the lock: what the HDR round
+  /// trip did to the display besides HDR, such as dropping a re-time.
+  var onLeg: (@Sendable (_ enabled: Bool) -> Void)? {
+    get { lock.withLock { _onLeg } }
+    set { lock.withLock { _onLeg = newValue } }
+  }
+  private var _onLeg: (@Sendable (_ enabled: Bool) -> Void)?
   var leftStanding: [CGDirectDisplayID] { lock.withLock { _leftStanding } }
 
   /// The seam a `SynthesisCoordinator` takes, over this fake.
@@ -433,7 +535,7 @@ final class FakeSynthesisHDR: @unchecked Sendable {
       supportsHDR: { [self] _ in lock.withLock { _supports } },
       measuredHDREnabled: { [self] _ in lock.withLock { _live } },
       setHDR: { [self] _, enabled, _ in
-        lock.withLock {
+        let (granted, hook) = lock.withLock {
           let granted = enabled ? _achievesOn : _achievesOff
           if granted { _live = enabled }
           // A leg that did not take leaves the state the fixture says: nil by
@@ -441,8 +543,10 @@ final class FakeSynthesisHDR: @unchecked Sendable {
           // every failure as "still off" made the old on-leg give-up look safe.
           if !granted, enabled { _live = _stateAfterFailedOn }
           _legs.append((enabled, granted))
-          return granted
+          return (granted, _onLeg)
         }
+        hook?(enabled)
+        return granted
       },
       reportHDRLeftStanding: { [self] displayID in
         lock.withLock { _leftStanding.append(displayID) }

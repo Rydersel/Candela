@@ -60,6 +60,34 @@ letterboxed or cropped while macOS reports success throughout. The display's
 Diagnostics page reports how many modes are being withheld, and the guard can
 be turned off; see [advanced settings](advanced-settings.md).
 
+After a change to a size marked **Added by Candela** that renders at HiDPI, or
+to an in-between size marked **Rendered by Candela**, Candela checks the signal
+the display controller is actually driving.
+
+- **Added by Candela.** The signal's refresh rate has to match the one chosen.
+  It passes at the panel's native resolution or at the size's own pixel count,
+  and fails when it is smaller than that pixel count, which would crop the
+  desktop. On a failure the previous resolution comes back on its own, a
+  message says what the display actually received, and that size is kept out
+  of the size list on that connection until Candela restarts.
+- **Rendered by Candela.** Candela puts the display back on the timing of its
+  own mode, the one it was running before the size was engaged. The signal
+  passes at the panel's native resolution or at that mode's pixel count, and
+  once the display has landed on that mode its refresh rate has to match too.
+  A wrong signal gets one HDR round trip to renegotiate the link, on displays
+  that have HDR. If it is still wrong, the size is taken down and a message
+  says what the display received. Nothing is withheld: the size can be picked
+  again.
+
+If the previous resolution cannot be put back, the usual recovery countdown
+takes over. Nothing changes, and the usual countdown applies, when the
+controller does not report its signal, when its readings have not settled, or,
+after a change to a size marked **Added by Candela**, when its reading is
+identical to the one taken before the change (a controller can keep reporting
+the outgoing timing for a while). The copied or exported
+diagnostics report includes the signal's size and refresh rate when the
+controller reports them.
+
 ## The recommended size
 
 Where a display declares its physical size, Candela works out which logical

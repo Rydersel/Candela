@@ -45,6 +45,22 @@ struct ModeSynthesisEngineTests {
     )
   }
 
+  /// The engine has no pre-apply reading, so the pre-mirror record could pass
+  /// for a fresh one. The engage tail judges the wire once it has re-timed the
+  /// slave; a foreign timing here is not the engine's to act on.
+  @Test(arguments: [
+    ScanoutTiming(width: 2560, height: 1440, refreshHz: 100),
+    ScanoutTiming(width: 3440, height: 1440, refreshHz: 100),
+  ])
+  func theEngineLeavesTheWireTimingToTheEngageTail(_ timing: ScanoutTiming) async {
+    let world = world()
+    world.scanoutTimings = [Self.physical: timing]
+    let result = await engine(world).engage(size, onPhysical: Self.physical,
+      identityKey: world.identityKey(of: Self.physical))
+    #expect(result.failureValue == nil)
+    #expect(world.mirrors[Self.physical] != nil)
+  }
+
   private var size: SyntheticSize {
     SyntheticSize(logicalWidth: 3268, logicalHeight: 1368, percentOfNative: 95)
   }

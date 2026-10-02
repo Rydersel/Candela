@@ -1,3 +1,4 @@
+import AppKit
 import CandelaKit
 import Foundation
 import KeyboardShortcuts
@@ -10,6 +11,7 @@ extension KeyboardShortcuts.Name {
   static let volumeUp = Self("volumeUp")
   static let volumeDown = Self("volumeDown")
   static let mute = Self("mute")
+  static let toggleHDR = Self("toggleHDR")
 }
 
 /// Custom-shortcut dispatch (fork KeyboardShortcutsManager): handlers are
@@ -48,6 +50,8 @@ final class ShortcutManager {
     // Fork parity: mute has key-down only.
     KeyboardShortcuts.onKeyDown(for: .mute) { [weak self] in self?.mute() }
 
+    KeyboardShortcuts.onKeyUp(for: .toggleHDR) { [weak self] in self?.toggleHDR() }
+
     // Registration must match the persisted modes from the first launch
     // onward, not only after the pane is visited.
     Self.syncRegistration()
@@ -78,11 +82,46 @@ final class ShortcutManager {
     setRegistered(KeyModePolicy.firesCustomShortcuts(prefs.keyboardVolume), volumeNames)
   }
 
+  /// Remove assignments through the library before wiping defaults. It needs
+  /// the stored chords to unregister their live Carbon hotkeys.
+  static func clearAssignmentsForReset() {
+    KeyboardShortcuts.resetAll()
+  }
+
   private static func setRegistered(_ registered: Bool, _ names: [KeyboardShortcuts.Name]) {
     if registered {
       KeyboardShortcuts.enable(names)
     } else {
       KeyboardShortcuts.disable(names)
+    }
+  }
+
+  private func toggleHDR() {
+    let point = NSEvent.mouseLocation
+    let screen = NSScreen.screens.first { NSMouseInRect(point, $0.frame, false) }
+    let screenID = screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+    // A mirroring panel has no screen of its own, so the pointer finds the
+    // surface it shows (a synthesized size's virtual master, for one).
+    let target = HDRShortcutAction.pointerTarget(
+      underScreen: screenID, among: model.displays.map(\.id),
+      ownedSurfaces: model.virtualDisplays.ownedDisplayIDs, mirrorsDisplay: CGDisplayMirrorsDisplay)
+    // Resolved at the press, so a replug before the task runs cannot redirect it.
+    let state: AppModel.DisplayState? = if case let .display(id) = target {
+      model.displays.first(where: { $0.id == id })
+    } else {
+      nil
+    }
+    PanelMenu.endTracking()
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      let result: HDRShortcutAction.Outcome
+      if let state {
+        result = await model.hdrAction.toggle(state)
+      } else {
+        result = await model.hdrAction.toggle(at: target)
+      }
+      // The pointer's screen: a mirroring panel has none of its own to show it on.
+      model.hdrFeedback.show(result.message, on: screen)
     }
   }
 

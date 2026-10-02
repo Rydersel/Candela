@@ -143,6 +143,11 @@ enum DisplayModeCopy {
   /// is display text down to the times sign and the "Hz" abbreviation, and both
   /// are read inconsistently. Same statement, said out loud.
   static func spokenAchievedGeometry(_ commit: DisplayConfigError.UnhonouredCommit) -> String {
+    if let timing = commit.scanoutTiming {
+      let spoken = ModeSpeech.spoken(
+        logicalWidth: timing.width, logicalHeight: timing.height, refreshHz: timing.refreshHz)
+      return "The display took \(spoken)."
+    }
     guard let achieved = commit.achieved else { return unreadableAchievedGeometry() }
     let spoken = ModeSpeech.spoken(
       logicalWidth: achieved.logicalWidth,
@@ -152,9 +157,12 @@ enum DisplayModeCopy {
     return "The display is showing \(spoken)."
   }
 
-  /// Latest achieved geometry beside the recovery instruction. Readback cannot
-  /// tell whether the display is using the correct wire timing.
+  /// Prefer the controller timing when it explains why the preview was rejected.
   static func achievedGeometry(_ commit: DisplayConfigError.UnhonouredCommit) -> String {
+    if let timing = commit.scanoutTiming {
+      // A measured rate carries float noise a published one does not.
+      return "The display took \(size(width: timing.width, height: timing.height)), \(refresh(DisplayMode.quantizedRefresh(timing.refreshHz)))."
+    }
     guard let achieved = commit.achieved else { return unreadableAchievedGeometry() }
     return achievedGeometry(
       width: achieved.logicalWidth, height: achieved.logicalHeight,
@@ -200,11 +208,23 @@ enum DisplayModeCopy {
     "\(AppInfo.productName) could not switch this display to the resolution you picked, because another display could not be put back to the resolution it was on. Check that display before trying again."
   }
 
+  /// A mode whose signal came out wrong and was put back. The configurator
+  /// keeps it out of this connection's lists until the app restarts; worded
+  /// as the guide words it.
+  static func scanoutRejected(_ commit: DisplayConfigError.UnhonouredCommit) -> String {
+    "\(achievedGeometry(commit)) The previous resolution was restored. \(AppInfo.productName) won't offer the resolution that failed on this connection again until \(AppInfo.productName) restarts."
+  }
+
   /// One sentence for each reason a selection took no effect: a new reason with
   /// no row here is a compile error, not surfaces quietly disagreeing.
   static func startFailure(_ reason: DisplayModeCoordinator.StartFailure.Reason) -> LocalizedStringKey {
     switch reason {
-    case let .failed(error): error.didCommit ? startFailureAfterACommit : startFailure
+    case let .failed(error):
+      if let commit = error.unhonouredCommit, commit.scanoutTiming != nil, commit.fallbackRestored {
+        LocalizedStringKey(scanoutRejected(commit))
+      } else {
+        error.didCommit ? startFailureAfterACommit : startFailure
+      }
     case let .blocked(claimant): ReconfigurationCopy.blocked(by: claimant)
     }
   }
@@ -220,7 +240,8 @@ enum DisplayModeCopy {
   static func startFailureSubject(
     displayName: String, reason: DisplayModeCoordinator.StartFailure.Reason
   ) -> String {
-    guard case let .failed(error) = reason, error.didCommit else { return displayName }
+    guard case let .failed(error) = reason, error.didCommit,
+          error.unhonouredCommit?.fallbackRestored != true else { return displayName }
     return displayName.isEmpty
       ? "This display and another display"
       : "\(displayName) and another display"
@@ -236,8 +257,23 @@ enum DisplayModeCopy {
   static func startFailureDiagnostic(_ reason: DisplayModeCoordinator.StartFailure.Reason) -> String {
     switch reason {
     case let .failed(error):
-      error.didCommit ? "Another display: \(diagnostic(error))" : diagnostic(error)
-    case let .blocked(claimant): "Held by \(claimant.rawValue)"
+      error.didCommit && error.unhonouredCommit?.fallbackRestored != true
+        ? "Another display: \(diagnostic(error))" : diagnostic(error)
+    case let .blocked(claimant): "Held by \(heldBy(claimant))"
+    }
+  }
+
+  /// A plain phrase for the gate's holder: the claimant's raw value is an
+  /// internal name and would put `settingsReset` on screen.
+  static func heldBy(_ claimant: ReconfigurationClaimant) -> String {
+    switch claimant {
+    case .displayModes: "a resolution change"
+    case .mirroring: "a mirroring change"
+    case .rotation: "a rotation"
+    case .arrangement: "an arrangement change"
+    case .hdr: "an HDR switch"
+    case .checkup: "a display checkup"
+    case .settingsReset: "a settings reset"
     }
   }
 
@@ -247,6 +283,9 @@ enum DisplayModeCopy {
   static func diagnostic(_ error: DisplayConfigError) -> String {
     guard let unhonoured = error.unhonouredCommit else {
       return "CoreGraphics error \(error.cgErrorCode)"
+    }
+    if let timing = unhonoured.scanoutTiming {
+      return "The display received \(size(width: timing.width, height: timing.height)), \(refresh(DisplayMode.quantizedRefresh(timing.refreshHz)))"
     }
     let landed = unhonoured.achieved.map { "\(size($0)), \(refresh($0.refreshHz))" }
     return "CoreGraphics reported success; display shows \(landed ?? "an unreadable resolution")"
@@ -299,7 +338,16 @@ enum DisplayModeCopy {
     switch notice {
     case let .substituted(mode): reapplySubstituted(requested: requested, applied: mode)
     case .unavailable: reapplyUnavailable(requested: requested)
-    case .failed: reapplyFailed(requested: requested)
+    case let .failed(error):
+      if let commit = error.unhonouredCommit, commit.scanoutTiming != nil {
+        if commit.fallbackRestored {
+          LocalizedStringKey(scanoutRejected(commit))
+        } else {
+          LocalizedStringKey("\(achievedGeometry(commit)) The previous resolution could not be restored. Choose another resolution for this display.")
+        }
+      } else {
+        reapplyFailed(requested: requested)
+      }
     }
   }
 }

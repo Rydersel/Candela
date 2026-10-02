@@ -33,6 +33,11 @@ final class FakeSynthesisWorld: @unchecked Sendable {
   }
 
   private let lock = NSLock()
+  private var _scanoutTimings: [CGDirectDisplayID: ScanoutTiming] = [:]
+  var scanoutTimings: [CGDirectDisplayID: ScanoutTiming] {
+    get { lock.withLock { _scanoutTimings } }
+    set { lock.withLock { _scanoutTimings = newValue } }
+  }
   private var _calls: [SynthesisCall] = []
   private var _panels: [CGDirectDisplayID: Panel] = [:]
   /// Enumeration order for `displays()`; `MirrorTopology` sorts anyway, but a
@@ -491,9 +496,12 @@ final class FakeSynthesisConfigurator: DisplayConfiguring, @unchecked Sendable {
     world.achievedMode(for: displayID)
   }
 
-  func nativePixels(for _: CGDirectDisplayID) -> (width: Int, height: Int)? {
-    world.record(.unexpected("nativePixels(for:)"))
-    return nil
+  func nativePixels(for displayID: CGDirectDisplayID) -> (width: Int, height: Int)? {
+    DisplayModeSnapshot.nativePixels(in: world.modes(for: displayID))
+  }
+
+  func scanoutTiming(for displayID: CGDirectDisplayID) -> ScanoutTiming? {
+    world.scanoutTimings[displayID]
   }
 
   func apply(_: DisplayMode, to _: CGDirectDisplayID, scope _: DisplayConfigScope) throws {

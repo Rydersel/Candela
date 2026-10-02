@@ -30,9 +30,8 @@ struct DDCWireDegradationTests {
     #expect(!harness.controller.isWireUnresponsive)
   }
 
-  /// The MAG341C's shape, and why the failure-counting rule keys on writes: it answers every read with
-  /// zeros and honours every write. The read verdict is asserted beside the
-  /// health to show they are separate facts.
+  /// A panel can return unusable zeros while accepting writes. Read evidence
+  /// and write health must remain separate; neither proves the achieved output.
   @Test func aWriteOnlyPanelWhoseWritesLandIsNeverDemoted() async {
     let harness = Harness(ddcRead: (current: 0, max: 0), withHDR: false)
     await harness.prime()

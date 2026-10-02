@@ -21,10 +21,10 @@ records nothing, so enroll it first.
 
 ## Dimming
 
-All of it is on the display's OLED Care page, under **Dimming**. Every one of
-these dims by drawing a dark overlay over the display. Your monitor's own
-brightness setting is not touched, and any key or click restores the picture
-immediately.
+All of it is on the display's OLED Care page, under **Dimming**. Idle,
+unfocused, blackout and regional dimming draw dark overlays. Lock dimming
+uses a temporary brightness adjustment because overlays cannot cover the
+macOS lock screen. Your saved brightness setting stays unchanged.
 
 - **Idle dim.** After a set number of minutes with no keyboard or mouse
   activity anywhere on the Mac, the display dims to a level you choose. Video
@@ -48,6 +48,28 @@ immediately.
   itself is foreground, because its windows are excluded from capture. This
   setting is **off by default** and needs both
   measurement settings on the Health pane.
+
+### Pause dimming temporarily
+
+In the menu bar panel, the care status line under an enrolled display's name
+is itself the control: click it for **Pause Dimming for 15 Minutes**, **Pause
+Dimming for 1 Hour** and **Pause Dimming Until…**, which opens a window for
+choosing a date and time up to a year ahead. The display's OLED Care page has
+the same three choices in its **Pause Dimming** menu under **Dimming**. While a
+pause runs, the status reads "Dimming paused until" and the end time, and
+**Resume Now** ends the pause early. A mirrored display, or one showing a
+checkup field, is already held undimmed for that reason, so its OLED Care page
+keeps naming that reason during a pause.
+
+A pause immediately lifts idle, unfocused, blackout, regional and lock dimming
+for that display. Health measurement and hours keep running under their usual
+conditions. It does not change enrollment, saved dimming settings or macOS
+sleep behavior.
+
+The pause follows the display across reconnects and its deadline includes
+time spent asleep. Dimming resumes with a fresh idle interval, and regional
+protection gathers fresh evidence. Quitting Candela, resetting its settings
+or turning off that display's enrollment clears the pause.
 
 ### How adaptive regional protection decides
 

@@ -193,6 +193,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     restoreCoordinator.restorePass = { [weak model] in model?.performRestorePass() }
 
     let hostingView = PanelHostingView(rootView: PanelRoot(model: model, updater: updaterModel))
+    hostingView.configureDisclosures()
     hostingView.frame.size = hostingView.fittingSize
 
     let panelItem = NSMenuItem()
@@ -311,6 +312,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         displayManager.noteWake()
         // The observer closure runs off-main; the coordinator is MainActor.
         Task { @MainActor in
+          self?.model.keepAwake.expireIfNeeded()
           self?.restoreCoordinator.noteWake()
           // A wire that stopped answering before the Mac slept is asked
           // again rather than staying demoted across a link the sleep rebuilt.
@@ -1081,6 +1083,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// changes only the NEXT interval, so the first frame takes a direct read; a
   /// rebuilt poll job would adopt after the panel closed, for the same reason.
   func menuWillOpen(_ menu: NSMenu) {
+    PanelMenu.beginTracking()
     model.surfaceVisibility.setPanelOpen(true)
     model.refreshNativeBrightnessForSurface()
     // Freeze the reminder before sizing, so it cannot arrive or leave while
@@ -1091,6 +1094,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // before tracking starts; a queued layout can arrive after the menu closes.
     if let host = menu.items.first?.view as? PanelHostingView<PanelRoot> {
       let screen = statusItem?.button?.window?.screen ?? NSScreen.main
+      host.rootView.disclosure = nil
       host.rootView.maximumHeight = screen.map {
         Self.panelMaximumHeight(
           visibleHeight: $0.visibleFrame.height, frameMaxY: $0.frame.maxY,
@@ -1189,11 +1193,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   }
 
   private func runSettingsReset() async {
-    // One reset at a time, app-wide (the latch a per-display reset claims too).
-    // Overlapping them lets that reset restore HDR through a controller step 5
-    // has already thrown away.
-    guard model.beginReset() else { return }
-    defer { model.endReset() }
+    let ran = await model.withSettingsReset { await applySettingsReset() }
+    if !ran {
+      model.hdrFeedback.show(model.resetRefusalMessage ?? "Wait for the current display change to finish before resetting settings.", on: nil)
+    }
+  }
+
+  private func applySettingsReset() async {
     // ---- 0. OLED care first (the mute-strand rule's ordering applied to
     //         dimming): overlays down and hour counters reset while their
     //         objects are still alive. The domain wipe never reaches them,
@@ -1350,6 +1356,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     //          change. Read here, written back after.
     let automaticUpdateChecks = updaterModel.automaticallyChecksForUpdates
 
+    // Unregister while the library can still resolve each stored chord.
+    ShortcutManager.clearAssignmentsForReset()
     // ---- 4. The wipe itself.
     UserDefaults.standard.removePersistentDomain(
       forName: Bundle.main.bundleIdentifier ?? "com.rydersel.Candela"
@@ -1666,16 +1674,19 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
 }
 
 /// Concrete root view so NSHostingView can be subclassed without AnyView.
-private struct PanelRoot: View {
+struct PanelRoot: View {
   let model: AppModel
-  let updater: UpdaterModel
+  let updater: UpdaterModel?
   var maximumHeight: CGFloat? = nil
+  var disclosure: PanelDisclosureID? = nil
+  var changeDisclosure: ((PanelDisclosureID?) -> Void)? = nil
 
   var body: some View {
-    PanelView(maximumHeight: maximumHeight)
+    PanelView(maximumHeight: maximumHeight,
+      controlledDisclosure: disclosure, changeDisclosure: changeDisclosure)
       .environment(model)
       .environment(updater)
-      .environment(updater.reminder)
+      .environment(updater?.reminder)
   }
 }
 
@@ -1683,9 +1694,7 @@ private struct PanelRoot: View {
 /// views are frame-based with no Auto Layout parent, so when the panel's content
 /// changes the frame has to follow the new fitting size.
 final class PanelHostingView<Content: View>: NSHostingView<Content> {
-  required init(rootView: Content) {
-    super.init(rootView: rootView)
-  }
+  required init(rootView: Content) { super.init(rootView: rootView) }
 
   @available(*, unavailable)
   @objc dynamic required init?(coder _: NSCoder) {
@@ -1695,8 +1704,21 @@ final class PanelHostingView<Content: View>: NSHostingView<Content> {
   override func invalidateIntrinsicContentSize() {
     super.invalidateIntrinsicContentSize()
     let target = fittingSize
-    if frame.size != target {
-      setFrameSize(target)
+    if target.width > 0, target.height > 0, frame.size != target { setFrameSize(target) }
+  }
+}
+
+// The native host owns disclosure state so the root's new input and the menu
+// frame can change in the same click. Local SwiftUI State is applied later,
+// leaving a rendered frame at the previous host size.
+extension PanelHostingView where Content == PanelRoot {
+  func configureDisclosures() {
+    rootView.changeDisclosure = { [weak self] disclosure in
+      guard let self, rootView.disclosure != disclosure else { return }
+      PanelMenu.prepareForDisclosureChange()
+      rootView.disclosure = disclosure
+      layoutSubtreeIfNeeded()
+      PanelMenu.refitAfterDisclosureChange()
     }
   }
 }

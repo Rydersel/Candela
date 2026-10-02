@@ -239,6 +239,29 @@ struct OledExposureCaptureTests {
     }
   }
 
+  @Test(arguments: [false, true])
+  func pauseBoundariesRejectInFlightCaptures(resuming: Bool) async throws {
+    let rig = CaptureRig()
+    let coordinator = OledCareCoordinator(exposureCapture: rig.pipeline)
+    let key = "pause-capture-\(UUID().uuidString)"
+    if resuming { coordinator.pauseDimming(for: key, duration: 900) }
+    let old = try #require(rig.reserve(key, panel: 11))
+    let work = Task { await rig.run([old]) }
+    await rig.waitForCaptureStart()
+    if resuming { coordinator.resumeDimming(for: key) }
+    else { coordinator.pauseDimming(for: key, duration: 900) }
+    let replacement = rig.pipeline.reserve(key: key, target: old.target,
+      transform: old.transform, epoch: 0)
+    #expect(replacement != nil)
+    rig.resolve(0, Self.sample)
+    await work.value
+    #expect(rig.maps.isEmpty)
+    if let replacement {
+      #expect(rig.pipeline.reserve(key: key, target: replacement.target,
+        transform: replacement.transform, epoch: 0) == nil)
+    }
+  }
+
   @Test func aFailedOldEnumerationCannotReleaseAReplacementReservation() async throws {
     let rig = CaptureRig()
     let request = try #require(rig.reserve("panel", panel: 11))

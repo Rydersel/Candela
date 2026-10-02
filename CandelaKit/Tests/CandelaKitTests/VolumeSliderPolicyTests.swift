@@ -20,8 +20,7 @@ struct VolumeSliderPolicyTests {
 
   @Test func supportedAndUnknownBothStayEnabled() {
     #expect(VolumeSliderPolicy.isEnabled(override: .auto, volumeSupport: .supported))
-    // The MAG 341C's permanent state: a write-only panel, so the probe never
-    // does better than .unknown, while its 3.5 mm jack works.
+    // An unanswered capabilities probe must not disable a working audio output.
     #expect(VolumeSliderPolicy.isEnabled(override: .auto, volumeSupport: .unknown))
   }
 
@@ -233,9 +232,8 @@ struct MuteKeyAcceptanceTests {
       volumeSupport: .unsupported, muteSupport: .supported, usesDedicatedMuteCommand: false))
   }
 
-  /// The MAG rule on the second register: a write-only panel can never read
-  /// better than `.unknown` for 0x8D either, and the volume-denial rule never greys on absence of
-  /// evidence. Both strategies must keep taking the key.
+  /// Unknown support for either register is not a denial. Both mute
+  /// strategies must keep accepting the key until the panel reports otherwise.
   @Test func noEvidenceIsNotADenialOnEitherRegister() {
     for dedicated in [true, false] {
       #expect(VolumeSliderPolicy.acceptsMuteKey(

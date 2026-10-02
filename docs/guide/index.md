@@ -1,8 +1,9 @@
 # Candela guides
 
 Most display utilities stop at the slider. These pages cover the parts of
-Candela that keep a record of your display and act on it, plus the escape
-hatches for hardware that misbehaves.
+Candela that keep a record of your display and act on it, the temporary
+controls that put things back on their own, and the escape hatches for
+hardware that misbehaves.
 
 - [OLED care](oled-care.md). Enrolling a display, the dimming settings, the
   exposure heat map, panel hours, and what the permission-free path can and
@@ -10,6 +11,9 @@ hatches for hardware that misbehaves.
 - [Checkup](checkup.md). The panel diagnostic: what it measures, how each
   claim is graded, the planted control that grades your own eyes, and what the
   report does not certify.
+- [Everyday controls](everyday-controls.md). Changes that end themselves:
+  keeping a display awake until a set time, pausing OLED dimming without
+  unenrolling, and an optional HDR shortcut.
 - [Resolutions](resolutions.md). The size list, the HiDPI sizes macOS does not
   list, the in-between sizes Candela renders, and what happens when a size
   fails.

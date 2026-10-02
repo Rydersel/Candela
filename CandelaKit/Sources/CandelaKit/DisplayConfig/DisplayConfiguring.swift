@@ -121,10 +121,17 @@ public struct DisplayConfigError: Error, Sendable, Equatable {
     /// Nil when the display could not say what it is running, which is not
     /// evidence the mode landed.
     public let achieved: DisplayMode?
+    /// A controller reading that disagreed even if CoreGraphics reported success.
+    public let scanoutTiming: ScanoutTiming?
+    /// The captured fallback was applied and verified after a timing mismatch.
+    public let fallbackRestored: Bool
 
-    public init(requested: DisplayMode, achieved: DisplayMode?) {
+    public init(requested: DisplayMode, achieved: DisplayMode?,
+                scanoutTiming: ScanoutTiming? = nil, fallbackRestored: Bool = false) {
       self.requested = requested
       self.achieved = achieved
+      self.scanoutTiming = scanoutTiming
+      self.fallbackRestored = fallbackRestored
     }
   }
 
@@ -272,6 +279,8 @@ public protocol DisplayConfiguring: DisplayRotationConfiguring {
   /// panel running a mode it does not publish. Compare geometry only; ids are
   /// positional. Defaults to `currentMode(for:)` for conformers with no raw read.
   func achievedMode(for displayID: CGDirectDisplayID) -> DisplayMode?
+  /// Nil is not verifiable, including unsupported controllers and virtual displays.
+  func scanoutTiming(for displayID: CGDirectDisplayID) -> ScanoutTiming?
   /// The panel's own pixel count, from the mode flagged native. Needed to tell
   /// scaled modes from native ones.
   func nativePixels(for displayID: CGDirectDisplayID) -> (width: Int, height: Int)?
@@ -285,6 +294,13 @@ public protocol DisplayConfiguring: DisplayRotationConfiguring {
   /// last throw follows a committed transaction**: the display is wherever
   /// CoreGraphics put it, and only the caller's revert puts it back.
   func apply(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope) throws
+
+  /// `apply` for the way back: a preview's fallback, an unattended rollback, or
+  /// a mirror slave re-timed onto its own mode. Never refuses a mode the
+  /// scan-out check withheld and never withholds one, so a mismatch reading on
+  /// the mode a display was already running cannot close the route back to it.
+  /// The framebuffer readback still applies and still throws.
+  func restore(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope) throws
 
   /// Stages one `CGConfigureDisplayMirrorOfDisplay` per change in a SINGLE
   /// transaction and commits it.
@@ -365,6 +381,13 @@ extension DisplayConfiguring {
     currentMode(for: displayID)
   }
 
+  public func scanoutTiming(for displayID: CGDirectDisplayID) -> ScanoutTiming? { nil }
+  /// A conformer that withholds nothing has nothing to skip.
+  public func restore(
+    _ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope
+  ) throws {
+    try apply(mode, to: displayID, scope: scope)
+  }
   /// Correct for any conformance and cheap for a fake; the real configurator
   /// overrides it.
   public func modeSnapshot(for displayID: CGDirectDisplayID) -> DisplayModeSnapshot {

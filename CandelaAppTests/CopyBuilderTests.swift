@@ -566,6 +566,37 @@ struct CopyBuilderTests {
           width: 1920, height: 1080, refreshHz: 30, dialect: .resolution))
   }
 
+  @Test func scanoutFailureNamesTheWireTimingAndRecoveredDisplay() {
+    let error = DisplayConfigError(unhonouredCommit: .init(
+      requested: Self.mode, achieved: Self.mode,
+      scanoutTiming: ScanoutTiming(width: 2560, height: 1440, refreshHz: 120),
+      fallbackRestored: true))
+    let reason = DisplayModeCoordinator.StartFailure.Reason.failed(error)
+    #expect(DisplayModeCopy.achievedGeometry(error.unhonouredCommit!).contains("2560"))
+    #expect(DisplayModeCopy.spokenAchievedGeometry(error.unhonouredCommit!)
+      == "The display took 2,560 by 1,440 at 120 hertz.")
+    // The synthesized-size sentence writes the size the way every other size
+    // is written, and names the feature by its one user-facing name.
+    let synthesis = render(SynthesisCopy.engineFailure(.scanoutMismatch(
+      ScanoutTiming(width: 2560, height: 1440, refreshHz: 120))))
+    #expect(synthesis.contains(DisplayModeCopy.size(width: 2560, height: 1440)))
+    #expect(!synthesis.contains(" x "))
+    #expect(synthesis.contains("renders was removed"))
+    #expect(!synthesis.contains("rendered size"))
+    // A measured rate carries float noise; the sentence prints the published one.
+    for measured in [120.0004, 119.99] {
+      let noisy = render(SynthesisCopy.engineFailure(.scanoutMismatch(
+        ScanoutTiming(width: 2560, height: 1440, refreshHz: measured))))
+      #expect(noisy.contains("120 Hz"))
+      #expect(!noisy.contains("120.0"))
+    }
+    #expect(render(DisplayModeCopy.startFailure(reason)).contains("previous resolution was restored"))
+    #expect(DisplayModeCopy.startFailureSubject(displayName: "External", reason: reason) == "External")
+    let reapply = render(DisplayModeCopy.reapply(requested: Self.descriptor, notice: .failed(error)))
+    #expect(reapply.contains("2560"))
+    #expect(reapply.contains("previous resolution was restored"))
+  }
+
   @Test func displayModeStartFailureStatesEitherReason() {
     #expect(render(DisplayModeCopy.startFailure).contains("could not switch this display"))
     // Nothing committed on this route, so the sentence says so instead of
@@ -582,7 +613,11 @@ struct CopyBuilderTests {
     #expect(
       DisplayModeCopy.startFailureDiagnostic(.failed(DisplayConfigError(cgErrorCode: 1001)))
         == "CoreGraphics error 1001")
-    #expect(DisplayModeCopy.startFailureDiagnostic(.blocked(by: .rotation)) == "Held by rotation")
+    #expect(DisplayModeCopy.startFailureDiagnostic(.blocked(by: .rotation)) == "Held by a rotation")
+    // The tooltip never shows the claimant's internal name.
+    #expect(DisplayModeCopy.startFailureDiagnostic(.blocked(by: .settingsReset))
+      == "Held by a settings reset")
+    #expect(DisplayModeCopy.startFailureDiagnostic(.blocked(by: .hdr)) == "Held by an HDR switch")
 
     // No code to print for an unhonoured commit. Achieved differs from requested
     // so the assertions can tell which one the sentence names.
@@ -670,6 +705,30 @@ struct CopyBuilderTests {
       DisplayConfigError(unhonouredCommit: .init(requested: Self.mode, achieved: nil)))
     #expect(unreadable.contains("unreadable resolution"))
     #expect(!unreadable.contains("CoreGraphics error"))
+  }
+
+  /// A wrong signal is reported in the app's own size and refresh spelling,
+  /// and the session withholding is said the way the guide says it.
+  @Test func displayModeScanoutMismatchSpeaksPlainly() {
+    let commit = DisplayConfigError.UnhonouredCommit(
+      requested: Self.mode, achieved: Self.mode,
+      scanoutTiming: ScanoutTiming(width: 2560, height: 1440, refreshHz: 120.0004),
+      fallbackRestored: true)
+    let error = DisplayConfigError(unhonouredCommit: commit)
+    let tooltip = DisplayModeCopy.diagnostic(error)
+    #expect(tooltip == "The display received \(DisplayModeCopy.size(width: 2560, height: 1440)), 120 Hz")
+    #expect(!tooltip.contains("scan-out"))
+    #expect(!tooltip.contains(" x "))
+    #expect(!tooltip.contains(".000"))
+
+    let restart = "\(AppInfo.productName) won't offer the resolution that failed on this connection again until \(AppInfo.productName) restarts."
+    let sentence = DisplayModeCopy.scanoutRejected(commit)
+    #expect(sentence.hasPrefix("The display took \(DisplayModeCopy.size(width: 2560, height: 1440)), 120 Hz."))
+    #expect(sentence.hasSuffix(restart))
+    #expect(!sentence.contains("withheld"))
+    #expect(render(DisplayModeCopy.startFailure(.failed(error))).contains(sentence))
+    #expect(render(DisplayModeCopy.reapply(
+      requested: Self.mode.descriptor, notice: .failed(error))).contains(sentence))
   }
 
   @Test func displayModeResolveFailuresInviteAnotherAttempt() {
@@ -829,10 +888,12 @@ struct CopyBuilderTests {
     let rendered = ReconfigurationClaimant.allCases.map { render(ReconfigurationCopy.blocked(by: $0)) }
     #expect(rendered.count == ReconfigurationClaimant.allCases.count)
     #expect(Set(rendered).count == rendered.count)
-    for sentence in rendered {
+    for (claimant, sentence) in zip(ReconfigurationClaimant.allCases, rendered) {
       // The reconfiguration gate: name the holder and hand the user their
-      // next move.
-      #expect(sentence.contains("Finish that first."))
+      // next move. HDR and a reset finish on their own, so those two wait.
+      let waits = [.hdr, .settingsReset].contains(claimant)
+      #expect(sentence.contains("Wait for it to finish.") == waits, "\(claimant): \(sentence)")
+      #expect(sentence.contains("Finish that first.") == !waits, "\(claimant): \(sentence)")
       #expect(sentence.contains(AppInfo.productName))
     }
     #expect(render(ReconfigurationCopy.blocked(by: .displayModes)).contains("changing a display's resolution"))
@@ -1485,7 +1546,7 @@ struct CopyBuilderTests {
   private static let allSynthesisFailures: [SynthesisFailure] = [
     .unavailable, .noFreeSlot, .createFailed(.classFamilyUnavailable),
     .virtualModeNotAchieved, .mirrorRefused, .engageNotAchieved, .notEngaged,
-    .unwindIncomplete,
+    .unwindIncomplete, .scanoutMismatch(ScanoutTiming(width: 2560, height: 1440, refreshHz: 120)),
   ]
 
   private static func guardSynthesisFailure(_ failure: SynthesisFailure) -> Int {
@@ -1498,6 +1559,7 @@ struct CopyBuilderTests {
     case .engageNotAchieved: 5
     case .notEngaged: 6
     case .unwindIncomplete: 7
+    case .scanoutMismatch: 8
     }
   }
 
@@ -1559,7 +1621,7 @@ struct CopyBuilderTests {
     #expect(Set(Self.allModeReapplyNotices.map(Self.guardModeReapplyNotice)).count == 3)
     #expect(Set(Self.allStartFailureReasons.map(Self.guardStartFailureReason)).count == 2)
     #expect(Set(Self.allLockDimSkips.map(Self.guardLockDimSkip)).count == 4)
-    #expect(Set(Self.allSynthesisFailures.map(Self.guardSynthesisFailure)).count == 8)
+    #expect(Set(Self.allSynthesisFailures.map(Self.guardSynthesisFailure)).count == 9)
     #expect(Set(Self.allSynthesisRefusalReasons.map(Self.guardSynthesisRefusalReason)).count == 10)
   }
 }

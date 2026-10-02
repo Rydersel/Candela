@@ -23,6 +23,25 @@ struct SynthesisGateTests {
   private static let secondPanelID = SynthesisFixture.secondPanelID
   private static let nativeWidth = SynthesisFixture.nativeWidth
 
+  @Test(arguments: [false, true])
+  func onlyResetTeardownCanUseTheParentResetReservation(wholeApp: Bool) async throws {
+    let fixture = Fixture()
+    defer { fixture.forgetPrefs() }
+    let display = try fixture.configured(Self.panelID)
+    let stop = try #require(fixture.modes.catalogs[Self.panelID]?.syntheticStops.first)
+    _ = await fixture.synthesis.engage(stop, on: display)
+    #expect(await fixture.gate.claim(.settingsReset).isGranted)
+    #expect(await !fixture.synthesis.setOptIn(false, on: display))
+    #expect(fixture.synthesis.isEngaged(displayID: Self.panelID))
+    let reset = wholeApp
+      ? await fixture.synthesis.disengageAllForReset(underResetClaim: true)
+      : await fixture.synthesis.reset(display, underResetClaim: true)
+    #expect(reset)
+    #expect(fixture.synthesis.pairings.isEmpty)
+    #expect(await fixture.gate.holder == .settingsReset)
+    await fixture.gate.release(.settingsReset)
+  }
+
   @Test func anOptedInPanelOffersSynthesizedStops() async {
     let fixture = Fixture()
     defer { fixture.forgetPrefs() }
@@ -265,77 +284,46 @@ struct SynthesisGateTests {
     #expect(fixture.synthesis.refusalReason(for: engaged) == nil)
   }
 
-  /// The hotkey's unwind used to tear a set down behind another feature's open
-  /// reconfiguration and answer true. Only the whole-app reset may go on without
-  /// the claim, and only after its wait; a zero window is the never-clears case.
-  @Test func aRefusedGateStopsTheUnwindAndTheResetProceedsOnlyAfterItsWait() async throws {
+  /// Reset authorization cannot borrow or displace another feature's claim.
+  @Test func aRefusedGateStopsBothOrdinaryAndResetAuthorizedUnwind() async throws {
     let fixture = Fixture()
     defer { fixture.forgetPrefs() }
     let display = try fixture.configured(Self.panelID)
     let stop = try #require(fixture.modes.catalogs[Self.panelID]?.syntheticStops.first)
-
     _ = await fixture.synthesis.engage(stop, on: display)
     #expect(fixture.synthesis.isEngaged(displayID: Self.panelID))
+    #expect(await fixture.gate.claim(.mirroring).isGranted)
 
-    // Held by another feature across both calls below.
-    let held = await fixture.gate.claim(.mirroring)
-    #expect(held.isGranted, "the fixture's own control")
-
-    let refused = await fixture.synthesis.disengageAllForReset()
-    #expect(!refused)
-    #expect(
-      fixture.synthesis.isEngaged(displayID: Self.panelID),
-      "a refusal must leave the set exactly where it found it"
-    )
-
-    let forced = await fixture.synthesis.disengageAllForReset(
-      force: true, forcedClaimWait: .zero, forcedClaimRetryDelay: .zero
-    )
-    #expect(forced)
-    #expect(fixture.synthesis.pairings.isEmpty)
-
-    // The forced pass never took the claim, so it must not have released one.
+    #expect(await !fixture.synthesis.disengageAllForReset())
+    #expect(await !fixture.synthesis.disengageAllForReset(underResetClaim: true))
+    #expect(fixture.synthesis.isEngaged(displayID: Self.panelID))
     #expect(await fixture.gate.holder == .mirroring)
+
     await fixture.gate.release(.mirroring)
+    #expect(await fixture.gate.claim(.settingsReset).isGranted)
+    #expect(await fixture.synthesis.disengageAllForReset(underResetClaim: true))
+    #expect(fixture.synthesis.pairings.isEmpty)
+    #expect(await fixture.gate.holder == .settingsReset)
+    await fixture.gate.release(.settingsReset)
   }
 
-  /// A holder that lets go inside the window is waited for. The flag separates
-  /// a wait from a barge: a barge returns while the releaser is still asleep and
-  /// sees it unset.
-  @Test func aResetWaitsOutAGateHolderThatLetsGoInsideTheWindow() async throws {
+  @Test func resetAuthorizationRequiresAnExistingResetReservation() async throws {
     let fixture = Fixture()
     defer { fixture.forgetPrefs() }
     let display = try fixture.configured(Self.panelID)
     let stop = try #require(fixture.modes.catalogs[Self.panelID]?.syntheticStops.first)
-
     _ = await fixture.synthesis.engage(stop, on: display)
+    #expect(await fixture.gate.holder == nil)
+
+    #expect(await !fixture.synthesis.reset(display, underResetClaim: true))
+    #expect(await !fixture.synthesis.disengageAllForReset(underResetClaim: true))
     #expect(fixture.synthesis.isEngaged(displayID: Self.panelID))
+    #expect(await fixture.gate.holder == nil)
 
-    let held = await fixture.gate.claim(.mirroring)
-    #expect(held.isGranted, "the fixture's own control")
-
-    let signal = ReleaseSignal()
-    let gate = fixture.gate
-    let releaser = Task {
-      try? await Task.sleep(for: .milliseconds(150))
-      await signal.markReleased()
-      await gate.release(.mirroring)
-    }
-
-    let forced = await fixture.synthesis.disengageAllForReset(
-      force: true, forcedClaimWait: .seconds(5), forcedClaimRetryDelay: .milliseconds(10)
-    )
-    await releaser.value
-
-    #expect(forced)
+    // The ordinary safety unwind still acquires its own display-mode claim.
+    #expect(await fixture.synthesis.disengageAllForReset())
     #expect(fixture.synthesis.pairings.isEmpty)
-    #expect(
-      await signal.released,
-      "the forced pass must wait the holder out rather than barge past it"
-    )
-    // Now its own claim; a barge would have left the gate free. The fixture
-    // leaves `releaseClaimIfIdle` unwired, so nothing hands it back here.
-    #expect(await fixture.gate.holder == .displayModes, "the reset holds the claim it waited for")
+    #expect(await fixture.gate.holder == .displayModes)
     await fixture.gate.release(.displayModes)
   }
 
@@ -440,10 +428,4 @@ private func awaitSignal(_ semaphore: DispatchSemaphore) async -> Bool {
       continuation.resume(returning: semaphore.wait(timeout: .now() + 5) == .success)
     }
   }
-}
-
-/// Lets the test observe, rather than time, whether the reset waited.
-private actor ReleaseSignal {
-  private(set) var released = false
-  func markReleased() { released = true }
 }

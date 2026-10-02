@@ -73,6 +73,9 @@ struct CheckupEnvironment {
   var bookShowing: (_ identityKey: String, _ kind: CheckupFieldKind, _ seconds: TimeInterval) -> Void
   var now: () -> Date
   var makeRNG: () -> any RandomNumberGenerator
+  var beginConfiguration: @MainActor (CheckupDisplayEntry) async -> String? = { _ in nil }
+  var endConfiguration: @MainActor () async -> Void = {}
+  var isCurrentTarget: @MainActor (CheckupDisplayEntry) async -> Bool = { _ in true }
 }
 
 /// `CheckupField.plantPosition` is generic over the generator, and an

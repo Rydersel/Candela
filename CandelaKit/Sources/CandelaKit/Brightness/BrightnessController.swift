@@ -289,8 +289,8 @@ public final class BrightnessController: PendingWireDraining {
   /// waits on it rather than on a clock. Default matches the coalescer's
   /// accept-everything default.
   @ObservationIgnored private var isEpochCurrent: @Sendable (UInt64) -> Bool = { _ in true }
-  /// Last-written brightness is the only truth on write-only DDC panels, so it
-  /// is persisted here and restored at init — without it the panel opens at
+  /// Saved brightness preserves intent when hardware readback is unavailable, so it
+  /// is persisted here and restored at init. Without it the panel opens at
   /// the default on every launch.
   private let store: (any BrightnessStoring)?
   private let storageKey: String?
@@ -539,7 +539,7 @@ public final class BrightnessController: PendingWireDraining {
     }
     // Under the native path the DDC brightness register is locked by the
     // monitor (and unreadable); adopting it would corrupt combined state.
-    guard !usesNative else { return }
+    guard !usesNative, !settleInProgress else { return }
     let tuning = prefs.tuning(for: .brightness)
     guard !tuning.unavailableDDC else { return }
     // The software path writes no DDC brightness, so the register still holds the
@@ -573,6 +573,7 @@ public final class BrightnessController: PendingWireDraining {
     let mappingAtStart = QuitBrightnessHandback.Mapping(prefs)
     let issuedAtStart = issuedGeneration
     let registerAtStart = readSkip.registerGeneration
+    let hdrAtStart = hdrTransitionGeneration
     let outcome = await writer.readOutcome(command: readCode)
     // Preferences can change while the wire is busy, with or without another
     // refresh. Evidence and scale from the old register belong to that register.
@@ -605,10 +606,20 @@ public final class BrightnessController: PendingWireDraining {
     // Everything below ADOPTS: the published brightness and the store. A write
     // issued since the read began is the newer intent, so the read is dropped and
     // the next pass re-reads.
-    guard issuedGeneration == issuedAtStart else { return }
+    // Entering HDR can suspend before submitting native brightness. A DDC
+    // response from before that transition may still publish wire evidence,
+    // but must not replace the user's value or write the software leg.
+    func canAdopt() -> Bool {
+      issuedGeneration == issuedAtStart && hdrTransitionGeneration == hdrAtStart
+        && !usesNative && !settleInProgress
+        && temporaryDimFactor == nil && !prefs.temporaryDimEngaged
+        && readSkip.registerGeneration == registerAtStart && mappingAtStart == .init(prefs)
+    }
+    guard canAdopt() else { return }
     if await recoverQuitHandback(current: result.current, maximum: result.max, tuning: tuning) {
       return
     }
+    guard canAdopt() else { return }
     // Read mirrors write (fork convDDCToValue): un-apply curve and invert through
     // the same tuning, or a tuned readable panel adopts a corrupted brightness at
     // every launch.
@@ -620,13 +631,17 @@ public final class BrightnessController: PendingWireDraining {
       invert: tuning.invert
     )
     if !prefs.disableCombinedBrightness {
-      // C2: a readable panel's DDC value lives in the upper [s, 1] band of the
-      // combined scale. Adopting current/max directly would map DDC 50% to "combined
-      // 0.5", i.e. DDC 0, corrupting the store. DDC 0 is consistent with ANY
-      // software-zone value, so a zero read keeps the saved value.
-      guard result.current > 0 else { return }
+      // The tuned hardware floor is consistent with any software-zone value.
+      // Preserve that value, but adopt the boundary when the previous value was
+      // above it. Test the mapped portion because inversion and a minimum
+      // override can put the floor at a nonzero register value.
       let s = switchingValue
+      guard raw > 0 || brightness > s else { return }
       brightness = s + raw * (1 - s)
+      // A monitor-side rise can leave our previous gamma or shade dim applied.
+      // The adopted hardware-band value needs full software brightness; leave
+      // the register at the value the monitor just reported.
+      applySoftware(1)
     } else {
       brightness = raw
     }
@@ -2087,13 +2102,12 @@ public final class BrightnessController: PendingWireDraining {
   /// `beginTemporaryDim`; OLED care's lock dim is the only caller today.
   ///
   /// Deliberately NOT expressed as a `setBrightness` to a lower value. That
-  /// would overwrite `brightness` and the persisted store, which are the user's
-  /// value and the only truth a write-only panel has: a crash or a force-quit
-  /// while dimmed would then make the dim permanent, and a slider moved during
-  /// the dim would have nothing to be restored to.
+  /// would overwrite the user's `brightness` and its persisted value. A crash
+  /// while dimmed would then save the dim permanently, and moving the slider
+  /// during the dim would lose the original restore target.
   ///
   /// Scope of the "a process that dies while dimmed still reopens correctly" claim:
-  /// unconditional on a write-only panel, where the store IS the truth. On a panel
+  /// uses the saved restore target when readback is unavailable. On a panel
   /// that answers DDC reads the hazard is a readback of a register we dimmed, and it
   /// is not confined to launch, since `refreshFromHardware` also runs on every
   /// reconfiguration, which a lock dim outlasts. THIS process is covered, because that
@@ -2532,18 +2546,22 @@ public final class BrightnessController: PendingWireDraining {
     let canonical = brightnessRaw(portion, tuning: tuning)
     if canonical != current {
       let epoch = epochProvider()
+      let hdrGeneration = hdrTransitionGeneration
       coalescer.resetDuplicateState()
       submittedDDCPortion = portion
       submitHardware(.ddc(raw: canonical), applier: brightnessApplier(tuning: tuning),
                      preservingHandback: true)
       let generation = issuedGeneration
       await coalescer.waitUntilCompleted(through: generation)
+      let appliedGeneration = await coalescer.appliedThrough()
       guard issuedGeneration == generation, quitHandback?.id == record.id,
-        isEpochCurrent(epoch), await coalescer.appliedThrough() == generation else { return true }
+        hdrTransitionGeneration == hdrGeneration, !usesNative, !settleInProgress,
+        isEpochCurrent(epoch), appliedGeneration == generation else { return true }
       // A write ACK is not achieved state. Keep the evidence if readback fails
       // or the monitor ignored the canonical target.
       let achieved = await writer.readOutcome(command: tuning.remapCodes.first ?? VCP.brightness)
       guard issuedGeneration == generation, quitHandback?.id == record.id,
+        hdrTransitionGeneration == hdrGeneration, !usesNative, !settleInProgress,
         isEpochCurrent(epoch), record.mapping == .init(prefs),
         record.savedLogical == storedLogicalBrightness,
         achieved.value?.current == canonical, achieved.value?.max == maximum else { return true }

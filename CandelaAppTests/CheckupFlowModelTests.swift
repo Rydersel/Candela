@@ -93,9 +93,51 @@ struct CheckupFlowModelTests {
     await flow.advance()                     // refresh -> witness
   }
 
+  @Test func returningToThePickerDropsThePreviousTargetsClaims() async {
+    let first = entry(.noDDC)
+    var second = entry(.readsDDC)
+    second.id = 8
+    second.identityKey = "second"
+    var env = environment(presenter: FakePresenter(), entry: first)
+    env.displays.append(second)
+    let flow = CheckupFlowModel(environment: env)
+    await flow.advance()
+    flow.selectedDisplay = first
+    await flow.advance()
+    #expect(flow.claims.count == 3)
+
+    flow.back()
+    flow.selectedDisplay = second
+    flow.abandon(reason: "closed before starting the second display")
+    #expect(flow.report?.identity.identityKey == "second")
+    #expect(flow.report?.claims.isEmpty == true)
+  }
+
+  @Test func aNewTargetDoesNotInheritPregradedClaimsOnItsPlan() async {
+    let first = entry(.noDDC)
+    var second = entry(.readsDDC)
+    second.id = 8
+    second.identityKey = "second"
+    var env = environment(presenter: FakePresenter(), entry: first)
+    env.displays.append(second)
+    let flow = CheckupFlowModel(environment: env)
+    await flow.advance()
+    flow.selectedDisplay = first
+    await flow.advance()
+    flow.back()
+    flow.selectedDisplay = second
+    await flow.advance()
+    #expect(flow.page == .plan)
+    #expect(flow.claims.isEmpty)
+    flow.abandon(reason: "test ended")
+  }
+
   @Test func theHappyPathReachesSummaryWithAValidEnvelope() async throws {
     let presenter = FakePresenter()
-    let flow = CheckupFlowModel(environment: environment(presenter: presenter, entry: entry()))
+    var env = environment(presenter: presenter, entry: entry())
+    var releases = 0
+    env.endConfiguration = { releases += 1 }
+    let flow = CheckupFlowModel(environment: env)
     #expect(flow.page == .scenario)
     await toFirstField(flow)
     #expect(flow.page == .witness)
@@ -117,6 +159,8 @@ struct CheckupFlowModelTests {
     let envelope = try #require(flow.envelope)
     #expect(envelope.validate())
     #expect(envelope.report.completion == .complete)
+    await settle(until: { releases == 1 })
+    #expect(releases == 1)
     #expect(envelope.report.plant?.detectedAtPixels == 4)
     #expect(envelope.report.claims.contains { $0.id == "field.black" && $0.verdict.kind == "selfReported" && $0.detectedAt == 4 })
     #expect(envelope.report.claims.contains { $0.id == "field.gray7" && $0.verdict == .selfReported("nothing seen; ungraded, no control on this field") })
@@ -363,6 +407,172 @@ struct CheckupFlowModelTests {
     return flow
   }
 
+
+  @Test func aBusyConfigurationDoesNotBuildOrRunCheckupRunners() async {
+    var env = environment(presenter: FakePresenter(), entry: entry())
+    let original = env.runners
+    var builds = 0
+    var releases = 0
+    env.runners = { entry in builds += 1; return original(entry) }
+    env.beginConfiguration = { _ in "Finish the current display change first." }
+    env.endConfiguration = { releases += 1 }
+    let flow = CheckupFlowModel(environment: env)
+    await flow.advance()
+    flow.selectedDisplay = entry()
+    await flow.advance()
+    #expect(builds == 0)
+    #expect(flow.report?.completion == .incomplete(reason: "Finish the current display change first."))
+    #expect(releases == 0)
+  }
+
+  @Test func closingDuringAcquireReleasesWithoutStartingCheckup() async {
+    let acquire = CheckupLegGate()
+    var env = environment(presenter: FakePresenter(), entry: entry())
+    let original = env.runners
+    var builds = 0
+    var releases = 0
+    env.runners = { entry in builds += 1; return original(entry) }
+    env.beginConfiguration = { _ in await acquire.wait(); return nil }
+    env.endConfiguration = { releases += 1 }
+    let flow = CheckupFlowModel(environment: env)
+    await flow.advance()
+    flow.selectedDisplay = entry()
+    let choosing = Task { await flow.advance() }
+    for _ in 0..<200 {
+      if await acquire.entered { break }
+      await Task.yield()
+    }
+    #expect(await acquire.entered)
+    flow.abandon(reason: "closed")
+    await acquire.open()
+    await choosing.value
+    await settle(until: { releases == 1 })
+    #expect(builds == 0)
+    #expect(releases == 1)
+    #expect(flow.page == .summary)
+  }
+
+  @Test(arguments: [false, true])
+  func endingDuringTargetValidationReleasesWithoutStartingCheckup(cancelTask: Bool) async {
+    let validation = CheckupLegGate()
+    var env = environment(presenter: FakePresenter(), entry: entry())
+    let original = env.runners
+    var builds = 0
+    var releases = 0
+    var held = false
+    env.runners = { entry in builds += 1; return original(entry) }
+    env.beginConfiguration = { _ in held = true; return nil }
+    env.isCurrentTarget = { _ in await validation.wait(); return true }
+    env.endConfiguration = { held = false; releases += 1 }
+    let flow = CheckupFlowModel(environment: env)
+    await flow.advance()
+    flow.selectedDisplay = entry()
+    let choosing = Task { await flow.advance() }
+    for _ in 0..<200 {
+      if await validation.entered { break }
+      await Task.yield()
+    }
+    #expect(await validation.entered)
+    #expect(flow.running)
+    #expect(held)
+    flow.back()
+    #expect(flow.page == .displayPick)
+    if cancelTask { choosing.cancel() } else { flow.abandon(reason: "closed") }
+    #expect(releases == 0)
+    await validation.open()
+    await choosing.value
+    await settle(until: { releases == 1 })
+    #expect(builds == 0)
+    #expect(releases == 1)
+    #expect(!held)
+    #expect(flow.page == .summary)
+  }
+
+
+  @Test func cancellingDuringAcquireReleasesWithoutStartingCheckup() async {
+    let acquire = CheckupLegGate()
+    var env = environment(presenter: FakePresenter(), entry: entry())
+    let original = env.runners
+    var builds = 0
+    var releases = 0
+    env.runners = { entry in builds += 1; return original(entry) }
+    env.beginConfiguration = { _ in await acquire.wait(); return nil }
+    env.endConfiguration = { releases += 1 }
+    let flow = CheckupFlowModel(environment: env)
+    await flow.advance()
+    flow.selectedDisplay = entry()
+    let choosing = Task { await flow.advance() }
+    for _ in 0..<200 {
+      if await acquire.entered { break }
+      await Task.yield()
+    }
+    #expect(await acquire.entered)
+    choosing.cancel()
+    await acquire.open()
+    await choosing.value
+    await settle(until: { releases == 1 })
+    #expect(builds == 0)
+    #expect(releases == 1)
+    #expect(flow.page == .summary)
+  }
+
+  @Test func closingDuringHDRWaitsForItsRestoreBeforeModeCleanupAndRelease() async {
+    let hdr = CheckupLegGate()
+    let mode = CancelRecordingMode(restores: true)
+    var env = environment(presenter: FakePresenter(), entry: entry(), mode: mode)
+    let original = env.runners
+    var held = false
+    var releases = 0
+    env.beginConfiguration = { _ in held = true; return nil }
+    env.endConfiguration = { held = false; releases += 1 }
+    env.runners = { entry in
+      var runners = original(entry)
+      runners.hdr = GatedCheckupHDR(gate: hdr)
+      return runners
+    }
+    let flow = CheckupFlowModel(environment: env)
+    await toFirstField(flow)
+    await flow.advance()
+    await flow.advance()
+    for _ in CheckupFieldKind.protocolOrder.dropLast() { await flow.advance() }
+    let leg = Task { await flow.advance() }
+    for _ in 0..<200 {
+      if await hdr.entered { break }
+      await Task.yield()
+    }
+    #expect(await hdr.entered)
+    #expect(held)
+    #expect(mode.events == ["restore"])
+    flow.abandon(reason: "closed")
+    for _ in 0..<50 { await Task.yield() }
+    #expect(mode.events == ["restore", "cancel"])
+    #expect(held)
+    #expect(releases == 0)
+    await hdr.open()
+    await leg.value
+    await settle(until: { releases == 1 })
+    #expect(mode.events == ["restore", "cancel", "restore"])
+    #expect(!held)
+    #expect(releases == 1)
+  }
+
+  @Test func failedAbortRestorationStillReleasesConfigurationExactlyOnce() async {
+    var env = environment(presenter: FakePresenter(), entry: entry(), mode: CancelRecordingMode(restores: false))
+    var acquires = 0
+    var releases = 0
+    env.beginConfiguration = { _ in acquires += 1; return nil }
+    env.endConfiguration = { releases += 1 }
+    let flow = CheckupFlowModel(environment: env)
+    await flow.advance()
+    flow.selectedDisplay = entry()
+    await flow.advance()
+    flow.abandon(reason: "closed")
+    flow.abandon(reason: "closed again")
+    await settle(until: { releases == 1 })
+    #expect(acquires == 1)
+    #expect(releases == 1)
+  }
+
   /// A restore queued behind a running sweep is serviced only after the sweep
   /// returns, so the cancel has to come first. Order is the mechanism, so order
   /// is what the test reads.
@@ -418,9 +628,10 @@ struct CheckupFlowModelTests {
     #expect(cleanActions.checkupRestoreFailure == nil)
   }
 
-  /// A display that has left cannot be put back, and a notice there would blame
-  /// the app for an unplug. The restore is still attempted.
-  @Test func aDisconnectDoesNotBlameTheAppForAnUnpluggedDisplay() async {
+  /// A display that has left cannot be put back, its ID can already belong to
+  /// another panel, and a notice would blame the app for an unplug. So the
+  /// restore is not attempted at all.
+  @Test func aDisconnectAppliesNoRestoreAndBlamesNothing() async {
     let failing = CancelRecordingMode(restores: false)
     let flow = await pickedFlow(mode: failing)
     let actions = SettingsActions(model: TestFixtures.appModel())
@@ -428,8 +639,75 @@ struct CheckupFlowModelTests {
     let settled = barrier(on: flow)
     flow.displayDisconnected(7)
     await settle(until: { settled.withLock { $0 } })
-    #expect(failing.events == ["cancel", "restore"])
+    #expect(settled.withLock { $0 })
+    #expect(failing.events == ["cancel"])
     #expect(actions.checkupRestoreFailure == nil)
+  }
+
+  @Test func backToThePickerReleasesTheConfigurationClaim() async {
+    var env = environment(presenter: FakePresenter(), entry: entry())
+    var held = false
+    var acquires = 0
+    var releases = 0
+    env.beginConfiguration = { _ in held = true; acquires += 1; return nil }
+    env.endConfiguration = { held = false; releases += 1 }
+    let flow = CheckupFlowModel(environment: env)
+    await flow.advance()
+    flow.selectedDisplay = entry()
+    await flow.advance()
+    #expect(flow.page == .plan)
+    #expect(held)
+
+    flow.back()
+    await settle(until: { releases == 1 })
+
+    #expect(flow.page == .displayPick)
+    #expect(!held)
+    #expect(releases == 1)
+    // The next pick claims again rather than running on a claim it gave back.
+    await flow.advance()
+    #expect(flow.page == .plan)
+    #expect(acquires == 2)
+    #expect(held)
+    flow.abandon(reason: "closed")
+    await settle(until: { releases == 2 })
+    #expect(releases == 2)
+  }
+
+  /// A quick re-pick after Back must wait for the release still in flight
+  /// rather than be refused by it and end the run as incomplete.
+  @Test func aQuickRePickAfterBackWaitsForTheRelease() async {
+    let releasing = CheckupLegGate()
+    var env = environment(presenter: FakePresenter(), entry: entry())
+    var held = false
+    var acquires = 0
+    env.beginConfiguration = { _ in
+      guard !held else { return "Wait for the previous checkup to finish restoring the display." }
+      held = true
+      acquires += 1
+      return nil
+    }
+    env.endConfiguration = { await releasing.wait(); held = false }
+    let flow = CheckupFlowModel(environment: env)
+    await flow.advance()
+    flow.selectedDisplay = entry()
+    await flow.advance()
+    #expect(flow.page == .plan)
+
+    flow.back()
+    let repick = Task { await flow.advance() }
+    for _ in 0..<200 {
+      if await releasing.entered { break }
+      await Task.yield()
+    }
+    #expect(await releasing.entered)
+    await releasing.open()
+    await repick.value
+
+    #expect(flow.page == .plan, "the re-pick ran once the claim was back")
+    #expect(acquires == 2)
+    #expect(held)
+    flow.abandon(reason: "closed")
   }
 
   /// A standing notice describes a run that is over, and the run being wired now
@@ -864,5 +1142,14 @@ struct GatedCapabilities: CheckupCapabilitiesRunning {
     await gate.wait()
     return [CheckupClaim(family: .capabilities, id: CheckupCheckID.capabilityBrightness,
                          verdict: .observed("read 50, wrote 50, read 50"))]
+  }
+}
+
+
+struct GatedCheckupHDR: CheckupHDRRunning {
+  let gate: CheckupLegGate
+  func run() async -> [CheckupClaim] {
+    await gate.wait()
+    return []
   }
 }

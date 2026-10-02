@@ -151,7 +151,7 @@ struct AppMenuPane: View {
   /// one-line row is what keeps the panel from resizing while its menu is open,
   /// so the reach gets stated here.
   private var keepAwakeRow: some View {
-    SettingRow("Keep Display Awake stops the display sleeping until you turn it off or quit. While it is on, OLED care's idle dimming, blackout and unfocused dimming do not start. Hiding the row here does not turn it off.") {
+    SettingRow("Keep Display Awake stops the display sleeping until you turn it off, its time runs out, or you quit. While it is on, OLED care's idle dimming, blackout and unfocused dimming do not start. Hiding the row here does not turn it off.") {
       Toggle("Show Keep Display Awake in the menu bar", isOn: Binding(
         get: { !prefs.hideKeepAwake },
         set: { shown in
