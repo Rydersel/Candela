@@ -47,7 +47,7 @@ final class PillHUDRenderer: HUDRenderer {
         self.margin = 14
         self.barY = 16
         self.hasName = false
-      default:  // `.system` and `.segments`; no other style ever builds a pill.
+      default:  // `.system` and `.segments`; only the three pill styles reach this renderer.
         self.size = NSSize(width: 314, height: 62)
         self.cornerRadius = 22
         self.margin = 18

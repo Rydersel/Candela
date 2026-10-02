@@ -144,6 +144,7 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   private static func makeWindow(style: HUDStyle) -> Window {
     let renderer: any HUDRenderer = switch style {
     case .system, .segments, .compact: PillHUDRenderer(style: style)
+    case .classic, .classicCentered, .sequoia: BoxHUDRenderer(style: style)
     default: PillHUDRenderer(style: .system)  // replaced by the renderer tasks that follow
     }
     let size = renderer.contentView.frame.size
@@ -156,7 +157,8 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     panel.isOpaque = false
     panel.backgroundColor = .clear
     // The native pill keeps a soft shadow; the heaviness came from the dark
-    // border plus the dark material, not from this.
+    // border plus the dark material, not from this. The system's classic box
+    // drew no shadow, and the Island is the notch itself, so neither gets one.
     panel.hasShadow = !style.isIsland && style != .classic && style != .classicCentered
     panel.isMovable = false
     panel.ignoresMouseEvents = true
