@@ -200,4 +200,97 @@ struct ScanoutTimingTests {
       ScanoutTiming(width: 3440, height: 1440, refreshHz: 120), before: before,
       requested: requested, nativePixels: (3440, 1440)))
   }
+
+  // MARK: - The real configurator's guard, driven through its probe seam
+
+  private let previous = ScanoutTiming(width: 3440, height: 1440, refreshHz: 175)
+  private let foreign = ScanoutTiming(width: 2560, height: 1440, refreshHz: 120)
+
+  @Test func aLateRecordFromThePreviousApplyCannotWithholdTheNextMode() throws {
+    // B's pre-apply reading is still the old timing, then A's late timing lands
+    // inside B's window, then the window closes.
+    let script = ScriptedScanout([previous, previous, foreign])
+    let configurator = CoreGraphicsDisplayConfigurator(scanout: script.probe)
+    try configurator.guardedApply(mode(), to: 42, enforcesScanout: true,
+      nativePixels: { (3440, 1440) }, achieved: { nil }) {}
+    // Not withheld: the same mode is not refused the next time.
+    try configurator.guardedApply(mode(), to: 42, enforcesScanout: true,
+      nativePixels: { (3440, 1440) }, achieved: { nil }) {}
+  }
+
+  @Test func aSteadyForeignTimingWithholdsAndRefusesTheMode() throws {
+    let script = ScriptedScanout([previous, foreign, foreign])
+    let configurator = CoreGraphicsDisplayConfigurator(scanout: script.probe)
+    let error = try #require(throws: DisplayConfigError.self) {
+      try configurator.guardedApply(self.mode(), to: 42, enforcesScanout: true,
+        nativePixels: { (3440, 1440) }, achieved: { self.mode() }) {}
+    }
+    #expect(error.unhonouredCommit?.scanoutTiming == foreign)
+    var committed = false
+    let refused = try #require(throws: DisplayConfigError.self) {
+      try configurator.guardedApply(self.mode(id: 9), to: 42, enforcesScanout: true,
+        nativePixels: { (3440, 1440) }, achieved: { nil }) { committed = true }
+    }
+    #expect(refused.cgErrorCode == CGError.illegalArgument.rawValue)
+    #expect(!committed)
+  }
+
+  @Test func theWayBackNeitherRefusesNorWithholds() throws {
+    let script = ScriptedScanout([previous, foreign, foreign])
+    let configurator = CoreGraphicsDisplayConfigurator(scanout: script.probe)
+    _ = try? configurator.guardedApply(mode(), to: 42, enforcesScanout: true,
+      nativePixels: { (3440, 1440) }, achieved: { nil }) {}
+    script.reset([previous, foreign, foreign])
+    var committed = false
+    try configurator.guardedApply(mode(), to: 42, enforcesScanout: false,
+      nativePixels: { (3440, 1440) }, achieved: { nil }) { committed = true }
+    #expect(committed)
+  }
+
+  @Test func aModeThatVerifiesStopsTheSettleAtOnce() throws {
+    let script = ScriptedScanout([previous, ScanoutTiming(width: 3440, height: 1440, refreshHz: 120)])
+    let configurator = CoreGraphicsDisplayConfigurator(scanout: script.probe)
+    try configurator.guardedApply(mode(), to: 42, enforcesScanout: true,
+      nativePixels: { (3440, 1440) }, achieved: { nil }) {}
+    #expect(script.sleeps == 0)
+  }
+
+  @Test func anUnchangedRecordOnAWithholdableModeIsNotVerifiable() {
+    let script = ScriptedScanout([previous, previous, previous])
+    let configurator = CoreGraphicsDisplayConfigurator(scanout: script.probe)
+    let result = configurator.settledScanout(
+      requested: mode(), nativePixels: (3440, 1440), before: script.next()) { script.next() }
+    #expect(result.verdict == .notVerifiable)
+  }
+}
+
+/// A probe whose reads follow a script and whose clock runs out with it: the
+/// window closes the moment the last scripted reading has been taken.
+///
+/// `@unchecked Sendable`: every stored var is behind `lock`.
+final class ScriptedScanout: @unchecked Sendable {
+  private let lock = NSLock()
+  private var readings: [ScanoutTiming?]
+  private var _sleeps = 0
+
+  init(_ readings: [ScanoutTiming?]) { self.readings = readings }
+
+  var sleeps: Int { lock.withLock { _sleeps } }
+
+  func reset(_ readings: [ScanoutTiming?]) { lock.withLock { self.readings = readings } }
+
+  func next() -> ScanoutTiming? {
+    lock.withLock { readings.isEmpty ? nil : readings.removeFirst() }
+  }
+
+  var probe: CoreGraphicsDisplayConfigurator.ScanoutProbe {
+    .init(
+      location: { _ in "IOService:/port1/AppleCLCD2" },
+      read: { [self] _, _ in next() },
+      hardwareIdentity: { _ in "1:2:3" },
+      now: { [self] in
+        Date(timeIntervalSince1970: lock.withLock { readings.isEmpty } ? 1_000 : 0)
+      },
+      sleep: { [self] _ in lock.withLock { _sleeps += 1 } })
+  }
 }

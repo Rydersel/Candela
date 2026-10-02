@@ -13,9 +13,11 @@ import Foundation
 /// refresh, bounds and scale.
 ///
 /// Two modes can still be bound to different wire timings. The controller's
-/// active timing can be checked after application when its registry record is
-/// available. This collapse is not proof the panel scans both modes out alike;
-/// the keep/revert countdown remains the last check on what reaches the glass.
+/// active timing is read after an apply where its registry record exists, but
+/// a record that does not move across the apply proves nothing, so it cannot
+/// be relied on to catch a crop. This collapse is not proof the panel scans
+/// both modes out alike; the keep/revert countdown remains the last check on
+/// what reaches the glass.
 public enum DisplayModeList {
   /// What a person can actually see in a row. Refresh arrives quantized from
   /// `DisplayMode.quantizedRefresh`, which is load-bearing in BOTH directions:

@@ -803,18 +803,29 @@ final class DisplayModeCoordinator {
     // `dropPreviewOnDepartedDisplay`'s reason: the derived copy is nil for several
     // awaits after `begin()` succeeds, and reapplying over a live preview would
     // strand it, so the countdown would "revert" to a mode the display had left.
-    let hasModePreview = await session.previewedMode != nil
-    let hasSynthesisPreview = await synthesis?.session.previewedSynthesis != nil
-    if hasModePreview || hasSynthesisPreview {
-      // An unattended failure may need the one recovery countdown. Do not
-      // start another apply while either preview session already owns it.
+    let modePreview = await session.previewedMode
+    if modePreview?.unhonouredCommit != nil {
+      // A recovery countdown already owns the one countdown an unattended
+      // failure would need. Its end is a reconfiguration, which calls this again.
       for display in displays { arrivals.release(display.id) }
       return
     }
+    // Only the previewed display waits. A kept synthesized-size preview changes
+    // no hardware and raises no reconfiguration event of its own, so a display
+    // plugged in beside one would otherwise stay on macOS's default.
+    let previewed = Set([
+      modePreview?.displayID, await synthesis?.session.previewedSynthesis?.physicalDisplayID,
+    ].compactMap { $0 })
+    for display in displays where previewed.contains(display.id) {
+      // "Not now" rather than "never": resolving the preview is itself a
+      // reconfiguration, and the event it produces calls this again.
+      arrivals.release(display.id)
+    }
+    let pending = displays.filter { !previewed.contains($0.id) }
     // Synchronous on the main actor, so an unhonoured commit blocks here for the
     // configurator's whole settle window. An honoured one returns on the first
     // read; the alternative is reporting a restore that did not happen.
-    for (index, display) in displays.enumerated() {
+    for (index, display) in pending.enumerated() {
       // Synthesis reapply runs AFTER the stored-mode decision for the same
       // display, never beside it: engaging makes the panel a mirror slave, and a
       // stored mode applied to a slave is the case `ModeReapplyPolicy` defers for.
@@ -822,7 +833,7 @@ final class DisplayModeCoordinator {
       // fights its own remembered resolution.
       let step = await reapplyStoredMode(for: display)
       if step == .recovering {
-        for remaining in displays.dropFirst(index + 1) { arrivals.release(remaining.id) }
+        for remaining in pending.dropFirst(index + 1) { arrivals.release(remaining.id) }
         break
       }
       guard step == .done else { continue }
@@ -915,8 +926,12 @@ final class DisplayModeCoordinator {
               scanoutTiming: commit.scanoutTiming, fallbackRestored: true))
           } catch {
             log.error("Could not restore the prior mode after a scan-out mismatch on display \(display.id)")
-            recovering = await session.retainRecovery(
-              after: commit, previousMode: previous, on: display.id, identity: identity)
+            // A standing synthesis preview owns the countdown; the mode session
+            // refuses on its own preview by itself.
+            recovering = await synthesis?.session.previewedSynthesis == nil
+              ? await session.retainRecovery(
+                after: commit, previousMode: previous, on: display.id, identity: identity)
+              : false
             if recovering {
               stopCountdown()
               surfaces[display.id] = .floatingPanel
@@ -1327,6 +1342,21 @@ final class DisplayModeCoordinator {
   ///
   /// Enters the queue, so it must not be called from inside one of its
   /// operations.
+  /// Drops a recovery preview, one standing on a commit the display did not
+  /// honour, without applying anything, so Reset All Settings can claim the
+  /// gate. A recovery whose restore keeps failing would otherwise hold the
+  /// claim, and block the reset, until the display is unplugged. The display
+  /// stays where the failed rollback left it; nothing here can move it back.
+  func discardRecoveryForReset() async {
+    await queue.enqueueReturning {
+      guard let outstanding = await self.session.previewedMode,
+            outstanding.unhonouredCommit != nil else { return }
+      await self.session.discard(displayID: outstanding.displayID)
+      self.log.error("discarded a recovery preview on display \(outstanding.displayID) for a settings reset")
+      await self.adopt(.clear)
+    }
+  }
+
   func releaseReconfigurationClaimIfIdle() async {
     await queue.enqueueReturning { await self.adopt(.keep, synthesis: .keep) }
   }

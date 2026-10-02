@@ -226,6 +226,86 @@ struct DisplayModeEnumerationTests {
     #expect(rig.world.applies.last?.displayID == secondID)
   }
 
+  /// A recovery whose restore keeps failing must not hold the display-modes
+  /// claim against Reset All Settings for as long as the display stays plugged
+  /// in. The retries are the countdown's expiry path: each attempts the restore.
+  @Test func aFailingRecoveryDoesNotBlockTheSettingsReset() async throws {
+    let rig = Self.rig()
+    rig.persistence.setEnabled(true, for: rig.identity)
+    rig.persistence.store(Self.smaller.descriptor, for: rig.identity)
+    rig.configurator.updatesCurrentModeOnApply = true
+    let refused = DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
+    rig.configurator.modeApplyFailures = [
+      DisplayConfigError(unhonouredCommit: .init(
+        requested: Self.smaller, achieved: Self.smaller,
+        scanoutTiming: ScanoutTiming(width: 1280, height: 1024, refreshHz: 175))),
+      refused, refused, refused,
+    ]
+
+    await rig.modes.reapplyStoredModes()
+    let recovery = try #require(rig.modes.preview)
+    #expect(await rig.modes.revert(recovery) != .reverted)
+    #expect(await rig.modes.revert(recovery) != .reverted)
+    #expect(rig.modes.preview != nil, "the restore still fails, so the recovery stands")
+    // Control: without the discard the reset is refused.
+    #expect(await rig.gate.claim(.settingsReset) == .refused(by: .displayModes))
+
+    await rig.modes.discardRecoveryForReset()
+
+    #expect(rig.modes.preview == nil)
+    #expect(await rig.gate.claim(.settingsReset) == .granted)
+    await rig.gate.release(.settingsReset)
+  }
+
+  /// An ordinary preview is not a recovery, so the reset discard leaves it.
+  @Test func theResetDiscardLeavesAnOrdinaryPreviewStanding() async throws {
+    let rig = Self.rig()
+    rig.modes.select(Self.smaller, on: Self.panelID, from: .settings, surface: .settingsBanner)
+    for _ in 0 ..< 2000 where rig.modes.isApplying {
+      try? await Task.sleep(for: .milliseconds(1))
+    }
+    let preview = try #require(rig.modes.preview)
+
+    await rig.modes.discardRecoveryForReset()
+
+    #expect(rig.modes.preview == preview)
+    #expect(await rig.modes.revert(preview) == .reverted)
+  }
+
+  /// A display plugged in while a synthesized size is under preview on another
+  /// panel gets its remembered mode in the same pass. Keeping that preview
+  /// changes no hardware and raises no reconfiguration, so nothing would call
+  /// the reapply again for it.
+  @Test func anArrivalBesideASynthesisPreviewGetsItsStoredMode() async throws {
+    let persistence = ModePersistence(defaults: InMemoryDefaults())
+    let fixture = SynthesisFixture(modePersistence: persistence)
+    defer { fixture.forgetPrefs() }
+    let id = SynthesisFixture.panelID
+    let stop = try #require(fixture.modes.catalogs[id]?.syntheticStops.first)
+    fixture.modes.select(SyntheticSizeCatalog.row(for: stop), on: id,
+      from: .settings, surface: .settingsBanner)
+    await fixture.settle()
+    #expect(await fixture.synthesis.session.previewedSynthesis?.physicalDisplayID == id)
+
+    let arrivingID: CGDirectDisplayID = 13
+    let arriving = DisplayConfigIdentity(vendor: 0x3669, model: 9, serial: 10, isBuiltIn: false)
+    fixture.world.attach(
+      ConfiguredDisplay(id: arrivingID, identity: arriving, name: "Arriving panel", isBuiltIn: false),
+      modes: [Self.native, Self.smaller], current: Self.native,
+      nativePixels: (width: 3440, height: 1440))
+    persistence.setEnabled(true, for: arriving)
+    persistence.store(Self.smaller.descriptor, for: arriving)
+    fixture.configurator.updatesCurrentModeOnApply = true
+
+    await fixture.modes.reapplyStoredModes()
+
+    #expect(fixture.world.currentMode(for: arrivingID) == Self.smaller)
+    #expect(await fixture.synthesis.session.previewedSynthesis?.physicalDisplayID == id,
+      "the preview it arrived beside still stands")
+    #expect(!fixture.world.applies.contains { $0.displayID == id && $0.mode == Self.smaller })
+    await fixture.revertAnyPreview()
+  }
+
   @Test(arguments: [false, true])
   func replacementDuringReapplyStopsReportingAndSynthesis(duringRollback: Bool) async throws {
     let persistence = ModePersistence(defaults: InMemoryDefaults())

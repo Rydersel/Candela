@@ -72,6 +72,38 @@ struct SynthesisTailTests {
     #expect(fixture.synthesis.pairings.isEmpty)
   }
 
+  /// The re-time targets the twin of the panel's OWN mode by framebuffer, so a
+  /// person running a published 2560x1440 on a 3440x1440 panel is re-timed onto
+  /// a 2560x1440 wire on purpose. That is the target, not a mismatch.
+  @Test func aRetimeOntoANonNativeOwnModeEngages() async throws {
+    let hdr = FakeSynthesisHDR()
+    let fixture = Fixture(hdr: hdr)
+    defer { fixture.forgetPrefs() }
+    let rate = Fixture.nativeHz
+    let native = try nativeRow(fixture)
+    let own = DisplayMode(ioModeID: 4, logicalWidth: 2560, logicalHeight: 1440,
+      pixelWidth: 2560, pixelHeight: 1440, refreshHz: rate, isNative: false)
+    let twin = DisplayMode(ioModeID: 5, logicalWidth: 1280, logicalHeight: 720,
+      pixelWidth: 2560, pixelHeight: 1440, refreshHz: rate, isNative: false)
+    let display = try fixture.configured(Self.panelID)
+    fixture.world.attach(display, modes: [native, own, twin], current: own,
+      nativePixels: (width: Fixture.nativeWidth, height: Fixture.nativeHeight))
+    fixture.modes.refreshCatalog(for: Self.panelID)
+    let stop = try firstStop(fixture)
+    fixture.configurator.updatesCurrentModeOnApply = true
+    fixture.configurator.scanoutRead = { _ in
+      ScanoutTiming(width: 2560, height: 1440, refreshHz: rate)
+    }
+
+    let result = await fixture.synthesis.engage(stop, on: display)
+
+    #expect(!result.isFailure, "\(result)")
+    #expect(fixture.configurator.restores.first?.mode == twin)
+    #expect(hdr.legs.isEmpty, "a landed re-time on its own target needs no bounce")
+    #expect(fixture.synthesis.pairings.count == 1)
+    #expect(await fixture.synthesis.disengageForModeChange(display))
+  }
+
   @Test func aTimingMismatchWhoseUnwindFailsRetainsRecoveryState() async throws {
     let fixture = Fixture(hdr: FakeSynthesisHDR(supports: false))
     defer { fixture.forgetPrefs() }

@@ -535,6 +535,9 @@ final class AppModel {
     // work may start until the gate also grants this reset its claim.
     isResetting = true
     resettingOffMain.withLock { $0 = true }
+    // A recovery whose restore keeps failing holds the display-modes claim
+    // for as long as the display stays plugged in; the reset outranks it.
+    await displayModes.discardRecoveryForReset()
     if await reconfigurationGate.claim(.settingsReset).refusedBy != nil {
       resetRefusalMessage = "Finish the current display change before resetting settings."
       isResetting = false

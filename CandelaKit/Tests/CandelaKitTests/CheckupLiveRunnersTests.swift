@@ -264,15 +264,18 @@ struct CheckupLiveRunnersTests {
     #expect(await runner.restore())
     #expect(configurator.applies.isEmpty)
 
-    // The control: a sweep that DID run remembers a mode and its restore is a
-    // real apply. Without it, an empty apply list proves nothing.
+    #expect(configurator.restores.isEmpty)
+
+    // The control: a sweep that DID run remembers a mode and puts it back.
+    // Without it, an empty apply list proves nothing.
     let ran = SweepConfigurator(modeList: nativeSizeModes([60, 120]), capAt: 240)
     let ranRunner = CheckupLiveModeRunner(configurator: ran, displayID: 1)
     _ = await ranRunner.runRefreshSweep()
     let swept = ran.applies.count
     #expect(swept == 2)
     #expect(await ranRunner.restore())
-    #expect(ran.applies.count == swept + 1)
+    #expect(ran.restores.count == 1)
+    #expect(ran.applies.count == swept)
   }
 
   /// The restore is ungated by the cancel, and it still grades on the mode the
@@ -288,7 +291,7 @@ struct CheckupLiveRunnersTests {
     _ = await runner.runRefreshSweep()
     #expect(willing.applies.last == modes[1])
     #expect(await runner.restore())
-    #expect(willing.applies.last == modes[0])
+    #expect(willing.restores == [modes[0]])
 
     // A panel that ACKs the restore and does not move: the achieved-state read
     // is the only thing that can catch it, cancelled or not.
@@ -325,7 +328,11 @@ struct CheckupLiveRunnersTests {
     let willing = SweepConfigurator(modeList: [m60, m120], capAt: 60)
     let runner = CheckupLiveModeRunner(configurator: willing, displayID: 1)
     _ = await runner.runRefreshSweep()
+    let sweepApplies = willing.applies.count
     #expect(await runner.restore())
+    // The put-back goes through the path that never refuses a withheld mode.
+    #expect(willing.restores == [m60])
+    #expect(willing.applies.count == sweepApplies)
 
     // Accepts the apply, reports a different mode: the ACK that means nothing.
     let stubborn = StuckConfigurator(modeList: [m60, m120])
@@ -371,6 +378,13 @@ struct CheckupLiveRunnersTests {
       applied = mode
       applies.append(mode)
       onApply?(applies.count)
+    }
+    /// Its own record rather than the protocol default, which forwards to
+    /// `apply` and would hide a put-back that went through the checked path.
+    var restores: [DisplayMode] = []
+    func restore(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope) throws {
+      applied = mode
+      restores.append(mode)
     }
     func applyMirroring(_ changes: [MirrorChange], scope: DisplayConfigScope) throws {}
     var revealsHiddenModes: Bool { true }

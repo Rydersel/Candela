@@ -5,16 +5,39 @@ import os
 /// The real `DisplayConfiguring`. Thin on purpose.
 public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   private let rejectedScanoutModes = RejectedScanoutModes()
+  private let scanout: ScanoutProbe
 
-  public init() {}
+  public init() { scanout = .live }
+
+  /// A test seam: the scan-out guard's reads and clock, so its real branching
+  /// runs without a display.
+  init(scanout: ScanoutProbe) { self.scanout = scanout }
+
+  /// The hardware reads behind the post-apply scan-out check, and the clock its
+  /// settle runs on.
+  struct ScanoutProbe: Sendable {
+    var location: @Sendable (CGDirectDisplayID) -> String?
+    var read: @Sendable (CGDirectDisplayID, String) -> ScanoutTiming?
+    var hardwareIdentity: @Sendable (CGDirectDisplayID) -> String
+    var now: @Sendable () -> Date = Date.init
+    var sleep: @Sendable (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) }
+
+    static let live = ScanoutProbe(
+      location: { ScanoutTimingReader.displayLocation($0) },
+      read: { ScanoutTimingReader.read(displayID: $0, expectedLocation: $1) },
+      hardwareIdentity: {
+        "\(CGDisplayVendorNumber($0)):\(CGDisplayModelNumber($0)):\(CGDisplaySerialNumber($0))"
+      })
+  }
 
   public func scanoutTiming(for displayID: CGDirectDisplayID) -> ScanoutTiming? {
-    ScanoutTimingReader.read(displayID: displayID)
+    guard let location = scanout.location(displayID) else { return nil }
+    return scanout.read(displayID, location)
   }
 
   private func scanoutDisplayKey(_ displayID: CGDirectDisplayID) -> String? {
-    guard let location = ScanoutTimingReader.displayLocation(displayID) else { return nil }
-    return "\(CGDisplayVendorNumber(displayID)):\(CGDisplayModelNumber(displayID)):\(CGDisplaySerialNumber(displayID)):\(location)"
+    guard let location = scanout.location(displayID) else { return nil }
+    return "\(scanout.hardwareIdentity(displayID)):\(location)"
   }
 
   private func allowedModes(_ pass: EnumerationPass, displayID: CGDirectDisplayID) -> [DisplayMode] {
@@ -232,49 +255,57 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     _ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope,
     enforcesScanout: Bool
   ) throws {
+    try guardedApply(
+      mode, to: displayID, enforcesScanout: enforcesScanout,
+      nativePixels: { mode.isNative ? (mode.pixelWidth, mode.pixelHeight) : nativePixels(for: displayID) },
+      achieved: { achievedMode(for: displayID) }
+    ) {
+      switch mode.provenance {
+      case .coreGraphics:
+        try applyPublishedMode(mode, to: displayID, scope: scope)
+      case .coreGraphicsServices:
+        try applyRevealedMode(mode, to: displayID, scope: scope)
+      case .synthesized:
+        // Refused, not routed. A synthesized size is engaged by
+        // `ModeSynthesisEngine` (a virtual display plus a mirror) and its sentinel
+        // `ioModeID` denotes nothing in either mode-ID space, so there is no
+        // transaction to stage. Reaching here means a caller bypassed the engine.
+        //
+        // `invalidOperation` rather than the `illegalArgument` the published path
+        // throws for an unresolvable ID: sharing that code would make "you
+        // bypassed the engine" indistinguishable from "that mode is not on this
+        // display".
+        throw DisplayConfigError(cgErrorCode: CGError.invalidOperation.rawValue)
+      }
+    }
+  }
+
+  /// The quarantine and the scan-out check around one commit. Internal so a
+  /// test drives this exact branching with a scripted reader and commit.
+  func guardedApply(
+    _ mode: DisplayMode, to displayID: CGDirectDisplayID, enforcesScanout: Bool,
+    nativePixels: () -> (width: Int, height: Int)?, achieved: () -> DisplayMode?,
+    commit: () throws -> Void
+  ) throws {
     let key = scanoutDisplayKey(displayID)
     if enforcesScanout, let key, rejectedScanoutModes.contains(mode, displayKey: key) {
       throw DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue)
     }
     // Capture the panel's own dimensions before a reconfiguration can change
     // the enumerated framebuffer. An unsupported reader never claims success.
-    let native = mode.isNative
-      ? (width: mode.pixelWidth, height: mode.pixelHeight)
-      : nativePixels(for: displayID)
-    let location = ScanoutTimingReader.displayLocation(displayID)
+    let native = nativePixels()
+    let location = scanout.location(displayID)
     // Before the apply, so a record still describing the outgoing timing after
     // CoreGraphics already reports the new mode reads as stale, not as wrong.
-    let before = location.flatMap {
-      ScanoutTimingReader.read(displayID: displayID, expectedLocation: $0)
-    }
-    switch mode.provenance {
-    case .coreGraphics:
-      try applyPublishedMode(mode, to: displayID, scope: scope)
-    case .coreGraphicsServices:
-      try applyRevealedMode(mode, to: displayID, scope: scope)
-    case .synthesized:
-      // Refused, not routed. A synthesized size is engaged by
-      // `ModeSynthesisEngine` (a virtual display plus a mirror) and its sentinel
-      // `ioModeID` denotes nothing in either mode-ID space, so there is no
-      // transaction to stage. Reaching here means a caller bypassed the engine.
-      //
-      // `invalidOperation` rather than the `illegalArgument` the published path
-      // throws for an unresolvable ID: sharing that code would make "you
-      // bypassed the engine" indistinguishable from "that mode is not on this
-      // display".
-      throw DisplayConfigError(cgErrorCode: CGError.invalidOperation.rawValue)
-    }
+    let before = location.flatMap { scanout.read(displayID, $0) }
+    try commit()
     // No record before means none after: a location the reader cannot match
     // (behind a hub, for one) would otherwise cost every apply the full
     // settle, each poll a recursive registry walk, on the calling thread.
     guard let location, before != nil else { return }
-    let timing = settled(read: {
-      ScanoutTimingReader.read(displayID: displayID, expectedLocation: location)
-    }) {
-      Self.scanoutSettled($0, before: before, requested: mode, nativePixels: native)
-    }
-    let verdict = ScanoutVerification.verdict(
-      requested: mode, nativePixels: native, before: before, after: timing)
+    let (timing, verdict) = settledScanout(
+      requested: mode, nativePixels: native, before: before
+    ) { scanout.read(displayID, location) }
     guard verdict == .mismatch, enforcesScanout, let timing else {
       if verdict != .verified { logScanout(verdict, mode: mode, displayID: displayID, timing: timing) }
       return
@@ -284,11 +315,47 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
       rejectedScanoutModes.record(mode, displayKey: key)
     }
     throw DisplayConfigError(unhonouredCommit: .init(
-      requested: mode, achieved: achievedMode(for: displayID), scanoutTiming: timing))
+      requested: mode, achieved: achieved(), scanoutTiming: timing))
+  }
+
+  /// The settle and its verdict together.
+  ///
+  /// A mode that can be withheld polls until it verifies or the window closes,
+  /// and a mismatch needs the last two readings to agree. The record can lag
+  /// past the window: a mode picked within about a second of the previous
+  /// apply starts from the old timing, and the PREVIOUS apply's late timing can
+  /// then land inside this window. Stopping at the first moved reading judged
+  /// the new mode on its predecessor's timing and withheld it for the session.
+  func settledScanout(
+    requested: DisplayMode, nativePixels: (width: Int, height: Int)?,
+    before: ScanoutTiming?, read: () -> ScanoutTiming?
+  ) -> (timing: ScanoutTiming?, verdict: ScanoutVerification.Verdict) {
+    guard ScanoutVerification.isEnforced(requested) else {
+      let timing = settled(now: scanout.now, sleep: scanout.sleep, read: read) {
+        Self.scanoutSettled($0, before: before, requested: requested, nativePixels: nativePixels)
+      }
+      return (timing, ScanoutVerification.verdict(
+        requested: requested, nativePixels: nativePixels, before: before, after: timing))
+    }
+    var earlier: ScanoutTiming?
+    var timing = read()
+    let deadline = scanout.now().addingTimeInterval(Self.modeSettleWindow)
+    while ScanoutVerification.verdict(
+      requested: requested, nativePixels: nativePixels, timing: timing) != .verified,
+      scanout.now() < deadline {
+      scanout.sleep(Self.modeSettlePoll)
+      earlier = timing
+      timing = read()
+    }
+    let verdict = ScanoutVerification.verdict(
+      requested: requested, nativePixels: nativePixels, before: before, after: timing)
+    let steady = timing != nil && earlier == timing
+    return (timing, verdict == .mismatch && !steady ? .notVerifiable : verdict)
   }
 
   /// Stop polling once there is no record (nothing more will come of it), the
-  /// record has moved off the pre-apply timing, or it already verifies.
+  /// record has moved off the pre-apply timing, or it already verifies. Only for
+  /// modes that cannot be withheld, whose verdict is never acted on.
   static func scanoutSettled(
     _ reading: ScanoutTiming?, before: ScanoutTiming?, requested: DisplayMode,
     nativePixels: (width: Int, height: Int)?
@@ -302,7 +369,13 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     _ verdict: ScanoutVerification.Verdict, mode: DisplayMode,
     displayID: CGDirectDisplayID, timing: ScanoutTiming?
   ) {
-    Logger(subsystem: "com.rydersel.Candela", category: "topology").info(
+    // An unconfirmed reading on a mode that can be withheld is the guard's
+    // blind spot (an unchanged record hides the measured crop), so it is kept
+    // where a default `log show` finds it.
+    let level: OSLogType = verdict == .mismatch
+      || (verdict == .notVerifiable && ScanoutVerification.isEnforced(mode)) ? .error : .info
+    Logger(subsystem: "com.rydersel.Candela", category: "topology").log(
+      level: level,
       """
       scan-out \(String(describing: verdict), privacy: .public) on display \(displayID, privacy: .public) \
       for \(Self.geometry(of: mode), privacy: .public): \

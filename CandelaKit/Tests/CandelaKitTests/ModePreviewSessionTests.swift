@@ -1187,9 +1187,9 @@ struct ScanoutPreviewRecoveryTests {
   }
 }
 
-/// The real configurator's quarantine without hardware: a checked apply whose
-/// timing reads wrong withholds its mode and refuses it afterwards, while
-/// `restore` does neither.
+/// The real configurator's quarantine without hardware: its own guard decides
+/// what is withheld and refused, reading a timing that follows the committed
+/// mode, so this fake reimplements none of that branching.
 ///
 /// `@unchecked Sendable`: every stored var is behind `lock`.
 final class WithholdingConfigurator: DisplayConfiguring, @unchecked Sendable {
@@ -1197,6 +1197,8 @@ final class WithholdingConfigurator: DisplayConfiguring, @unchecked Sendable {
   private var _current: DisplayMode
   private var _withheld: Set<DisplayModeDescriptor> = []
   private let mismatched: Set<Int32>
+  private var real: CoreGraphicsDisplayConfigurator!
+  private var clock: TimeInterval = 0
   private let display = ConfiguredDisplay(
     id: 42, identity: DisplayConfigIdentity(vendor: 1, model: 2, serial: 3, isBuiltIn: false),
     name: "Panel", isBuiltIn: false)
@@ -1204,6 +1206,20 @@ final class WithholdingConfigurator: DisplayConfiguring, @unchecked Sendable {
   init(current: DisplayMode, mismatched: Set<Int32>) {
     _current = current
     self.mismatched = mismatched
+    real = CoreGraphicsDisplayConfigurator(scanout: .init(
+      location: { _ in "IOService:/port1/AppleCLCD2" },
+      read: { [unowned self] _, _ in timing(of: self.current) },
+      hardwareIdentity: { _ in "1:2:3" },
+      now: { [unowned self] in Date(timeIntervalSince1970: lock.withLock { clock }) },
+      sleep: { [unowned self] interval in lock.withLock { clock += interval } }))
+  }
+
+  /// A mismatched mode drives a foreign timing at its own rate, so the reading
+  /// moves with the mode and a stale record never stands in for a fresh one.
+  private func timing(of mode: DisplayMode) -> ScanoutTiming {
+    mismatched.contains(mode.ioModeID)
+      ? ScanoutTiming(width: 2560, height: 1440, refreshHz: mode.refreshHz)
+      : ScanoutTiming(width: 3440, height: 1440, refreshHz: mode.refreshHz)
   }
 
   var current: DisplayMode { lock.withLock { _current } }
@@ -1214,25 +1230,23 @@ final class WithholdingConfigurator: DisplayConfiguring, @unchecked Sendable {
   func currentMode(for _: CGDirectDisplayID) -> DisplayMode? { current }
   func nativePixels(for _: CGDirectDisplayID) -> (width: Int, height: Int)? { (3440, 1440) }
 
-  func apply(_ mode: DisplayMode, to _: CGDirectDisplayID, scope _: DisplayConfigScope) throws {
-    try perform(mode, enforcesScanout: true)
+  func apply(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope _: DisplayConfigScope) throws {
+    try perform(mode, on: displayID, enforcesScanout: true)
   }
 
-  func restore(_ mode: DisplayMode, to _: CGDirectDisplayID, scope _: DisplayConfigScope) throws {
-    try perform(mode, enforcesScanout: false)
+  func restore(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope _: DisplayConfigScope) throws {
+    try perform(mode, on: displayID, enforcesScanout: false)
   }
 
-  private func perform(_ mode: DisplayMode, enforcesScanout: Bool) throws {
-    try lock.withLock {
-      if enforcesScanout, _withheld.contains(mode.descriptor) {
-        throw DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue)
+  private func perform(_ mode: DisplayMode, on displayID: CGDirectDisplayID, enforcesScanout: Bool) throws {
+    do {
+      try real.guardedApply(mode, to: displayID, enforcesScanout: enforcesScanout,
+        nativePixels: { (3440, 1440) }, achieved: { self.current }) {
+        lock.withLock { _current = mode }
       }
-      _current = mode
-      guard enforcesScanout, mismatched.contains(mode.ioModeID) else { return }
-      _withheld.insert(mode.descriptor)
-      throw DisplayConfigError(unhonouredCommit: .init(
-        requested: mode, achieved: mode,
-        scanoutTiming: ScanoutTiming(width: 2560, height: 1440, refreshHz: 120)))
+    } catch let error as DisplayConfigError where error.unhonouredCommit?.scanoutTiming != nil {
+      lock.withLock { _ = _withheld.insert(mode.descriptor) }
+      throw error
     }
   }
 

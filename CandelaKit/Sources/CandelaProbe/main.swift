@@ -40,7 +40,9 @@ usage: candela-probe [--display <id>] <subcommand>
   curated                                 what the default size picker shows, after curation
   modeapply <ioModeID> [holdSeconds=5] [session]
                                           apply one mode by id at preview scope, then revert;
-                                          "session" keeps the mode after exit, and you put the display back
+                                          "session" keeps the mode after exit, and you put the display back;
+                                          prints the scan-out reading and its raw timing id before the apply,
+                                          after it, and at the end of the hold
   identity                                EDID identity facts as the checkup reads them, as JSON
   refreshsweep                            apply every rate at the native size at preview scope, then restore
   checkup validate <file>                 verify an exported checkup report against its own hash
@@ -505,7 +507,17 @@ case "modeapply":
     print("no mode with id \(wanted) on display \(target)")
     exit(3)
   }
+  // The reading has to MOVE with the mode for the scan-out check to mean
+  // anything; three readings show it moving, or lagging, in one run.
+  func printScanout(_ label: String) {
+    let reading = ScanoutTimingReader.diagnosticRead(displayID: target)
+    print("""
+    scanout \(label): \(reading.timing.map { "\($0.width)x\($0.height)@\(String(format: "%.3f", $0.refreshHz))Hz" } ?? "no record") \
+    timing-id \(reading.timingModeID.map(String.init) ?? "none")
+    """)
+  }
   let before = configurator.currentMode(for: target)
+  printScanout("before")
   print("before: \(before.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID) \(String(format: "%g", $0.refreshHz)) Hz" } ?? "unknown")")
   print("applying: \(mode.logicalWidth)x\(mode.logicalHeight) fb \(mode.pixelWidth)x\(mode.pixelHeight) id \(mode.ioModeID) provenance \(mode.provenance) \(String(format: "%g", mode.refreshHz)) Hz")
   // Run for an unhonoured commit too: that apply MOVED the display, so what it
@@ -513,8 +525,10 @@ case "modeapply":
   func reportAchievedThenHold() {
     let after = configurator.currentMode(for: target)
     print("after:  \(after.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID) \(String(format: "%g", $0.refreshHz)) Hz" } ?? "unknown")")
+    printScanout("after")
     print("scope: \(applyScope); holding \(holdSeconds)s...")
     sleep(holdSeconds)
+    printScanout("end of hold")
     print(
       applyScope == .session
         ? "exiting: session scope keeps the mode; put the display back."

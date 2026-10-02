@@ -58,10 +58,28 @@ public enum ScanoutTimingReader {
     return location
   }
 
+  /// The probe's `modeapply` control: the reading with the raw
+  /// `DPTimingModeId` it was resolved from, so a known pair of modes can be
+  /// shown moving the record (the Dell's 76 to 78) in one command.
+  public static func diagnosticRead(
+    displayID: CGDirectDisplayID
+  ) -> (timing: ScanoutTiming?, timingModeID: Int?) {
+    guard let location = displayLocation(displayID),
+          let record = record(displayID: displayID, expectedLocation: location)
+    else { return (nil, nil) }
+    return (parse(record), integer(record["DPTimingModeId"]))
+  }
+
   /// The exact port path is mandatory. Vendor, model and EDID UUID alone cannot
   /// distinguish identical neighbors. Resolve the path again after applying so
   /// a display ID reassigned during reconfiguration cannot borrow another pipe.
   static func read(displayID: CGDirectDisplayID, expectedLocation: String) -> ScanoutTiming? {
+    record(displayID: displayID, expectedLocation: expectedLocation).flatMap(parse)
+  }
+
+  private static func record(
+    displayID: CGDirectDisplayID, expectedLocation: String
+  ) -> [String: Any]? {
     guard displayLocation(displayID) == expectedLocation else { return nil }
     let root = IORegistryGetRootEntry(kIOMainPortDefault)
     defer { IOObjectRelease(root) }
@@ -92,7 +110,7 @@ public enum ScanoutTimingReader {
     }
     guard let record = matchingRecord(displayLocation: expectedLocation, candidates: candidates),
           displayLocation(displayID) == expectedLocation else { return nil }
-    return parse(record)
+    return record
   }
 
   static func matchingRecord(
@@ -155,6 +173,11 @@ public enum ScanoutVerification {
   /// one therefore proves nothing unless the request expects exactly that
   /// timing. With no pre-apply reading there is nothing to tell a stale record
   /// from a fresh one, so only a verified reading counts.
+  ///
+  /// The price is a blind spot: a wrong timing that equals the outgoing one
+  /// (a revealed 3440x1440 at 2x and 120 Hz applied from a published 2560x1440
+  /// at 120 Hz, the measured crop) reads as not verifiable. The configurator
+  /// logs that verdict at error level for the modes it could withhold.
   public static func verdict(
     requested: DisplayMode, nativePixels: (width: Int, height: Int)?,
     before: ScanoutTiming?, after: ScanoutTiming?
@@ -187,6 +210,29 @@ public enum ScanoutVerification {
     }
     if sameSize(timing, width: requested.pixelWidth, height: requested.pixelHeight) { return .verified }
     return requested.isNative ? .unexpected : .notVerifiable
+  }
+
+  /// A synthesized size's mirror slave after the engage tail re-timed it onto
+  /// `retimedOnto`, the twin of a mode the panel publishes for itself. That
+  /// mode need not be native (a person running 2560x1440 on a 3440x1440 panel
+  /// is re-timed onto 2560x1440), so its framebuffer is a correct wire as well
+  /// as the native size; anything else is the wrong timing. The refresh is
+  /// checked only when the re-time is known to have landed: otherwise the
+  /// slave sits on a rate of the mirror's choosing.
+  public static func retimeVerdict(
+    retimedOnto target: DisplayMode?, landed: Bool,
+    nativePixels: (width: Int, height: Int)?, timing: ScanoutTiming?
+  ) -> Verdict {
+    guard let timing else { return .notVerifiable }
+    if landed, let target, target.refreshHz > 0,
+       !ModePersistence.refreshMatches(target.refreshHz, timing.refreshHz) { return .mismatch }
+    if let nativePixels, sameSize(timing, width: nativePixels.width, height: nativePixels.height) {
+      return .verified
+    }
+    if let target, sameSize(timing, width: target.pixelWidth, height: target.pixelHeight) {
+      return .verified
+    }
+    return nativePixels == nil && target == nil ? .notVerifiable : .mismatch
   }
 
   private static func sameSize(_ timing: ScanoutTiming, width: Int, height: Int) -> Bool {

@@ -92,24 +92,23 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     case let .success(pairing):
       let target = retimeTarget(
         for: displayID, ownMode: ownMode, master: pairing.virtualDisplayID)
-      // Judged against the pre-mirror panel size: the tail can change the
-      // controller timing after the engine verified the mirror.
-      let requested = DisplayMode(
-        ioModeID: DisplayMode.syntheticIoModeID(stopIndex: 0),
-        logicalWidth: size.logicalWidth, logicalHeight: size.logicalHeight,
-        pixelWidth: size.pixelWidth, pixelHeight: size.pixelHeight,
-        refreshHz: 0, isNative: false, provenance: .synthesized)
+      // Judged against the re-time target's framebuffer as well as the
+      // pre-mirror panel size: the target is the twin of the panel's own mode,
+      // which need not be native, and the bounce cannot move a timing the
+      // re-time chose on purpose.
+      var landed = false
       let mismatchedTiming = { () -> ScanoutTiming? in
         guard let timing = configurator.scanoutTiming(for: displayID),
-              ScanoutVerification.verdict(requested: requested, nativePixels: nativePixels,
-                timing: timing) == .mismatch
+              ScanoutVerification.retimeVerdict(retimedOnto: target, landed: landed,
+                nativePixels: nativePixels, timing: timing) == .mismatch
         else { return nil }
         return timing
       }
       // A wrong timing after the re-time is a link the bounce can renegotiate,
       // so it takes the bounce rather than ending the engagement here. The
       // check below judges what the bounce left.
-      if await retime(displayID, to: target) == false {
+      landed = await retime(displayID, to: target)
+      if !landed {
         await bounce(displayID)
       } else if let timing = mismatchedTiming() {
         Self.log.info("synthesis.retime display \(displayID) landed on the wrong timing (\(timing.diagnosticDescription, privacy: .public)); bouncing")

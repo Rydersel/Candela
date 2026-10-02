@@ -179,7 +179,6 @@ public actor ModeSynthesisEngine {
     let free = VirtualDisplayIdentity.synthesisSlotRange.filter { !occupied.contains($0) }
     guard !free.isEmpty else { return .failure(.noFreeSlot) }
 
-    let nativePixels = configurator.nativePixels(for: displayID)
     let spec = VirtualDisplaySpec(
       name: Self.virtualDisplayName,
       logicalWidth: size.logicalWidth, logicalHeight: size.logicalHeight,
@@ -235,24 +234,9 @@ public actor ModeSynthesisEngine {
       return .failure(fail(.engageNotAchieved, unwinding: pairing))
     }
 
-    // The physical rate is independent of the virtual master's 60 Hz and
-    // the app retimes it after engage. Check native geometry here, not that rate.
-    let requested = DisplayMode(ioModeID: DisplayMode.syntheticIoModeID(stopIndex: 0),
-      logicalWidth: size.logicalWidth, logicalHeight: size.logicalHeight,
-      pixelWidth: size.pixelWidth, pixelHeight: size.pixelHeight,
-      refreshHz: 0, isNative: false, provenance: .synthesized)
-    var timing: ScanoutTiming?
-    for attempt in 1...3 {
-      timing = configurator.scanoutTiming(for: displayID)
-      if ScanoutVerification.verdict(requested: requested, nativePixels: nativePixels,
-        timing: timing) == .verified { break }
-      if attempt < 3, readbackRetryDelay > 0 { Thread.sleep(forTimeInterval: readbackRetryDelay) }
-    }
-    if let timing, ScanoutVerification.verdict(requested: requested,
-      nativePixels: nativePixels, timing: timing) == .mismatch {
-      return .failure(fail(.scanoutMismatch(timing), unwinding: pairing))
-    }
-
+    // No scan-out check here: with no pre-apply reading the record can still
+    // describe the pre-mirror timing, and the engage tail judges the wire after
+    // it re-times the slave onto the timing it chose.
     table[displayID] = pairing
     log.info("synthesis.engage slot=\(slot) physical=\(displayID) vd=\(handle.displayID) \(size.logicalWidth)x\(size.logicalHeight)")
     return .success(pairing)
