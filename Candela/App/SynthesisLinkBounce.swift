@@ -115,10 +115,11 @@ struct BouncingSynthesisDriver: SynthesisDriving {
         Self.log.info("synthesis.retime display \(displayID) landed on the wrong timing (\(timing.diagnosticDescription, privacy: .public)); bouncing")
         // The HDR round trip can drop the re-time, and a target-sized wire on a
         // mode of the mirror's choosing is the measured crop, not the re-time.
-        // A skipped bounce moved nothing, so the landing it found still stands.
-        if await bounce(displayID), await stillOn(target, displayID) == false {
+        // A skipped bounce moved nothing, so the landing it found still stands;
+        // after a bounce only a positive read of the target keeps it.
+        if await bounce(displayID), await stillOn(target, displayID) != true {
           landed = false
-          Self.log.info("synthesis.retime display \(displayID) left its re-time target during the bounce")
+          Self.log.info("synthesis.retime display \(displayID) is not confirmed on its re-time target after the bounce")
         }
       }
       if let timing = await steadyMismatch(
@@ -260,15 +261,16 @@ struct BouncingSynthesisDriver: SynthesisDriving {
   }
 
   /// Whether the display is still on `target` after the bounce, nil when no
-  /// mode can be read. A read straight after the off leg can be nil or still
-  /// landing, so a miss takes one more read a `timingPoll` later before it
-  /// counts. Unknown is not "off": it cannot overturn a landing already seen.
+  /// mode can be read. The off leg has already waited out its settle, so a miss
+  /// takes only one more read a `timingPoll` later. Unknown is treated as not
+  /// on the target by the caller: the measured crop is a target-sized wire on a
+  /// mode the mirror chose, and an unreadable mode cannot rule it out.
   private func stillOn(_ target: DisplayMode?, _ displayID: CGDirectDisplayID) async -> Bool? {
     if isOn(target, displayID) { return true }
     try? await Task.sleep(for: durations.timingPoll)
     if isOn(target, displayID) { return true }
     guard configurator.currentMode(for: displayID) != nil else {
-      Self.log.info("synthesis.retime display \(displayID) has no readable mode after the bounce; keeping the landing seen before it")
+      Self.log.info("synthesis.retime display \(displayID) has no readable mode after the bounce")
       return nil
     }
     return false

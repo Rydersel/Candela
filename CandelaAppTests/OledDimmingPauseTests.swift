@@ -218,13 +218,25 @@ struct OledDimmingPauseTests {
     #expect(paused.lastAppliedAlpha == nil)
     #expect(care.dimStates[rig.key] == .active)
     // Session-only, through the path that ends the lock dim, renders and writes
-    // dimStates: nothing under the app's own keys changed in either domain.
-    #expect(Self.appOwned(UserDefaults.standard, displayKey: rig.key) == standardBefore)
+    // dimStates. The one expected write is the brightness controller clearing
+    // its interrupted-dim marker as the lock dim ends; anything else under the
+    // app's own keys or the display's key would be the pause leaking to disk.
+    let marker = "temporaryDimEngaged.\(rig.key)"
+    #expect((standardBefore[marker] as? Bool) == true)
+    #expect(UserDefaults.standard.bool(forKey: marker) == false)
+    let standardRest = Self.without(marker, standardBefore)
+    #expect(Self.without(marker, Self.appOwned(UserDefaults.standard, displayKey: rig.key)) == standardRest)
     #expect(Self.appOwned(rig.defaults, displayKey: rig.key) == storeBefore)
     care.resumeDimming(for: rig.key)
     #expect(care.dimmingPauseDeadline(for: rig.key) == nil)
-    #expect(Self.appOwned(UserDefaults.standard, displayKey: rig.key) == standardBefore)
+    #expect(Self.without(marker, Self.appOwned(UserDefaults.standard, displayKey: rig.key)) == standardRest)
     #expect(Self.appOwned(rig.defaults, displayKey: rig.key) == storeBefore)
+  }
+
+  private static func without(_ key: String, _ dict: NSDictionary) -> NSDictionary {
+    let copy = dict.mutableCopy() as! NSMutableDictionary
+    copy.removeObject(forKey: key)
+    return copy
   }
 
   /// Every key the app writes is a `PrefName` raw value, optionally scoped by

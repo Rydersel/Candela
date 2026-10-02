@@ -212,7 +212,7 @@ enum DisplayModeCopy {
   /// keeps it out of this connection's lists until the app restarts; worded
   /// as the guide words it.
   static func scanoutRejected(_ commit: DisplayConfigError.UnhonouredCommit) -> String {
-    "\(achievedGeometry(commit)) The previous resolution was restored. \(AppInfo.productName) won't offer the resolution you picked on this connection again until it restarts."
+    "\(achievedGeometry(commit)) The previous resolution was restored. \(AppInfo.productName) won't offer the resolution that failed on this connection again until \(AppInfo.productName) restarts."
   }
 
   /// One sentence for each reason a selection took no effect: a new reason with

@@ -214,9 +214,7 @@ public actor ModePreviewSession {
   }
 
   /// Keep the original safe target when an unattended apply and its immediate
-  /// rollback both failed. It is recovery-only and cannot replace a live preview;
-  /// a caller refused for that reason holds the recovery until the preview
-  /// resolves (`DisplayModeCoordinator` queues it).
+  /// rollback both failed. It is recovery-only and cannot replace a live preview.
   @discardableResult
   public func retainRecovery(
     after commit: DisplayConfigError.UnhonouredCommit, previousMode: DisplayMode,

@@ -142,10 +142,10 @@ struct SynthesisTailTests {
     #expect(fixture.synthesis.pairings.isEmpty)
   }
 
-  /// A mode read that comes back empty after the bounce's off leg says nothing
-  /// about where the display is. It cannot overturn the re-time that landed
-  /// before the bounce, so a target-sized wire still reads as the re-time.
-  @Test func anUnreadableModeAfterTheBounceKeepsTheLandedRetime() async throws {
+  /// After a bounce only a positive read of the re-time target keeps the
+  /// landing: an unreadable mode cannot rule out the measured crop (a
+  /// target-sized wire on a mode the mirror chose), so the engagement unwinds.
+  @Test func anUnreadableModeAfterTheBounceDoesNotTrustTheRetime() async throws {
     let hdr = FakeSynthesisHDR()
     let fixture = Fixture(hdr: hdr)
     defer { fixture.forgetPrefs() }
@@ -173,12 +173,48 @@ struct SynthesisTailTests {
 
     let result = await fixture.synthesis.engage(stop, on: display)
 
-    #expect(fixture.configurator.restores.first?.mode == twin)
     #expect(hdr.legs.map(\.enabled) == [true, false])
+    #expect(result == .failure(.scanoutMismatch(crop)))
+    #expect(fixture.synthesis.pairings.isEmpty)
+  }
+
+  /// A bounce that never ran moved nothing: the landing the re-time found
+  /// stands even when the mode cannot be read afterwards.
+  @Test func aSkippedBounceKeepsTheLandingItFound() async throws {
+    let hdr = FakeSynthesisHDR(supports: false)
+    let fixture = Fixture(hdr: hdr)
+    defer { fixture.forgetPrefs() }
+    let rate = Fixture.nativeHz
+    let native = try nativeRow(fixture)
+    let own = DisplayMode(ioModeID: 4, logicalWidth: 2560, logicalHeight: 1440,
+      pixelWidth: 2560, pixelHeight: 1440, refreshHz: rate, isNative: false)
+    let twin = DisplayMode(ioModeID: 5, logicalWidth: 1280, logicalHeight: 720,
+      pixelWidth: 2560, pixelHeight: 1440, refreshHz: rate, isNative: false)
+    let display = try fixture.configured(Self.panelID)
+    fixture.world.attach(display, modes: [native, own, twin], current: own,
+      nativePixels: (width: Fixture.nativeWidth, height: Fixture.nativeHeight))
+    fixture.modes.refreshCatalog(for: Self.panelID)
+    let stop = try firstStop(fixture)
+    fixture.configurator.updatesCurrentModeOnApply = true
+    let world = fixture.world
+    let id = Self.panelID
+    let wrong = ScanoutTiming(width: 1280, height: 1024, refreshHz: rate)
+    let target = ScanoutTiming(width: 2560, height: 1440, refreshHz: rate)
+    let reads = OSAllocatedUnfairLock(initialState: 0)
+    fixture.configurator.scanoutRead = { _ in
+      if world.applies.isEmpty { return target }
+      let n = reads.withLock { $0 += 1; return $0 }
+      // Three wrong reads make the steady mismatch that asks for the bounce;
+      // the mode goes unreadable on the last, so a recheck after the skipped
+      // bounce would find nothing and wrongly drop the landing.
+      if n == 3 { world.setCurrentMode(nil, for: id) }
+      return n <= 3 ? wrong : target
+    }
+
+    let result = await fixture.synthesis.engage(stop, on: display)
+
+    #expect(hdr.legs.isEmpty)
     #expect(!result.isFailure, "\(result)")
-    #expect(fixture.synthesis.pairings.count == 1)
-    world.setCurrentMode(twin, for: id)
-    #expect(await fixture.synthesis.disengageForModeChange(display))
   }
 
   /// The record can lag the re-time: a wrong timing that holds across the
