@@ -137,6 +137,7 @@ struct SynthesisTailTests {
     let result = await fixture.synthesis.engage(stop, on: display)
 
     #expect(fixture.configurator.restores.first?.mode == twin)
+    #expect(fixture.configurator.restores.first?.mode == twin)
     #expect(hdr.legs.map(\.enabled) == [true, false])
     #expect(result == .failure(.scanoutMismatch(crop)))
     #expect(fixture.synthesis.pairings.isEmpty)

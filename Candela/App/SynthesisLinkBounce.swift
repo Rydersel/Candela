@@ -115,8 +115,11 @@ struct BouncingSynthesisDriver: SynthesisDriving {
         Self.log.info("synthesis.retime display \(displayID) landed on the wrong timing (\(timing.diagnosticDescription, privacy: .public)); bouncing")
         // The HDR round trip can drop the re-time, and a target-sized wire on a
         // mode of the mirror's choosing is the measured crop, not the re-time.
-        // A skipped bounce moved nothing, so the landing it found still stands;
-        // after a bounce only a positive read of the target keeps it.
+        // A bounce that issued no leg moved nothing, so the landing it found
+        // still stands; after one that did, only a positive read of the target
+        // keeps it. Without the landing only the size is judged, not the
+        // refresh: a native-sized wire at the mirror's own rate is a slower
+        // link, not the crop.
         if await bounce(displayID), await stillOn(target, displayID) != true {
           landed = false
           Self.log.info("synthesis.retime display \(displayID) is not confirmed on its re-time target after the bounce")
