@@ -23,8 +23,7 @@ struct AppMenuPane: View {
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
 
-  /// Injectable so a hosted test can drive the pane without writing the
-  /// process's standard defaults.
+  /// Injectable so a hosted test never writes the process's standard defaults.
   var prefs = DisplayPrefs(persistenceKey: "app")
 
   /// Scroll anchors for the preview's click-to-jump. On the section

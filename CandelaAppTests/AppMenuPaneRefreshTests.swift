@@ -3,17 +3,13 @@ import CandelaKit
 import SwiftUI
 import Testing
 
-/// The Menu Bar pane kept in one host while its prefs change underneath it, the
-/// way the settings window keeps it while the user picks from its pop-ups.
-/// Prefs are plain defaults, so `prefsRevision` is the only thing that can make
-/// the retained pane re-read them; a fresh render would read the new values
-/// whether or not that signal reaches the content.
+/// One retained host while prefs change, as in the settings window. Prefs are
+/// plain defaults, so only `prefsRevision` makes the pane re-read them; a fresh
+/// render would pass whether or not that signal arrives.
 @Suite("Menu Bar pane refresh") @MainActor
 struct AppMenuPaneRefreshTests {
-  /// Two hosts in turn, and the second is the one that matters: the first
-  /// reading-form scaffold in a process followed the bump even while the
-  /// defect was live, and only the ones after it went stale [MEASURED
-  /// 2026-10-02]. One host alone, run first, would pass over the bug.
+  /// The second host is the one that matters: only reading-form scaffolds after
+  /// the process's first went stale [MEASURED 2026-10-02].
   @Test func aRetainedPaneFollowsAStyleChange() async throws {
     for host in 1...2 {
       try await driveOneHost(round: host)
@@ -37,9 +33,8 @@ struct AppMenuPaneRefreshTests {
     host.frame = NSRect(x: 0, y: 0, width: 720, height: 2400)
 
     try await expect(in: host, style: .system, round: round)
-    // `.islandEdge` disables both position rows and rewrites their captions,
-    // so all three things a style pick moves get checked. The write is the
-    // pop-up's own setter: the pref, then the fan-out.
+    // `.islandEdge` also disables the position rows and rewrites their captions.
+    // Same order as the pop-up's setter: pref, then fan-out.
     for style in [HUDStyle.islandEdge, .compact] {
       prefs.hudStyle = style
       actions.prefDidChange(.hudStyle)

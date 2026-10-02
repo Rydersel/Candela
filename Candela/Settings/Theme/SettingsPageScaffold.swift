@@ -15,14 +15,10 @@ struct SettingsPageScaffold<Content: View>: View {
 
   private let source: Source
 
-  /// Fresh per initialisation, so a parent that rebuilt this scaffold always
-  /// reaches the reading closure. The closure is the only part of the input
-  /// that changes, and SwiftUI does not reliably count a new closure as a
-  /// change [MEASURED 2026-10-02]: the first scaffold of this type in a process
-  /// re-ran its body when its page re-rendered, every later one skipped it. A
-  /// page whose closure reads plain defaults then kept showing stale values.
-  /// The plain form needs nothing, because its content is built by the parent.
-  /// Never read: its inequality between initialisations is the whole point.
+  /// Never read; a fresh value per init forces a rebuilt scaffold to re-run its
+  /// reading closure. SwiftUI does not reliably count a new closure as a change
+  /// [MEASURED 2026-10-02]: the first scaffold of this type in a process re-ran,
+  /// every later one went stale. Plain form needs none; the parent builds it.
   private let rebuild: UUID?
 
   init(@ViewBuilder content: () -> Content) {
