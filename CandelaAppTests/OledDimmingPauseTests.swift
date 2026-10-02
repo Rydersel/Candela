@@ -27,6 +27,29 @@ struct OledDimmingPauseTests {
       isCheckupFieldShowing: field)
   }
 
+  /// IDs no NSScreen carries, so an overlay apply reaches no real window.
+  private static let liveID: CGDirectDisplayID = 0xFFFF_FF01
+  private static let reconnectedID: CGDirectDisplayID = 0xFFFF_FF02
+
+  /// A hardware-free model whose coordinator holds the model link and reads
+  /// enrollment from an in-memory store, with one enrolled key.
+  @MainActor private struct Rig {
+    let key: String
+    let discovery: ScriptedDiscovery
+    let model: AppModel
+
+    init(key: String, topology: [(id: CGDirectDisplayID, key: String, name: String)]) async {
+      self.key = key
+      let defaults = InMemoryDefaults()
+      DisplayPrefs(defaults: defaults, persistenceKey: key).oledCareEnrolled = true
+      discovery = ScriptedDiscovery(topology)
+      model = TestFixtures.appModel(discovery: discovery)
+      model.oledCare.prefsDefaults = defaults
+      model.oledCare.adopt(model: model)
+      await model.refresh()
+    }
+  }
+
   @Test func customPauseKeepsExactDeadlineAndOtherDisplaysIndependent() {
     let clock = TimeSource()
     let care = OledCareCoordinator(now: { clock.now })
@@ -131,21 +154,58 @@ struct OledDimmingPauseTests {
       signals: signals(idle: 8_300)) == .idleDim)
   }
 
-  @Test func reconnectUsesTheStableKeyAndSettingsResetClearsPauses() {
-    let coordinator = OledCareCoordinator()
-    coordinator.pauseDimming(for: "panel", duration: 900)
-    var reconnected = state()
-    reconnected.lastDisplayID = 42
-    #expect(coordinator.updateDimming(for: "panel", state: &reconnected,
-      signals: signals()) == .active)
+  @Test func reconnectUsesTheStableKeyAndSettingsResetClearsPauses() async throws {
+    let rig = await Rig(key: "pause-reconnect", topology: [])
+    let care = rig.model.oledCare
+    // Paused while disconnected: no per-display state exists to carry it.
+    #expect(care.pauseDimming(for: rig.key, until: Date().addingTimeInterval(900)))
+    #expect(care.states[rig.key] == nil)
+    rig.discovery.topology = [(id: Self.reconnectedID, key: rig.key, name: "Panel")]
+    await rig.model.refresh()
+    care.reapplyAfterPrefChange(persistenceKey: rig.key)
+    var fresh = try #require(care.states[rig.key])
+    #expect(fresh.lastDisplayID == Self.reconnectedID)
+    #expect(!fresh.dimmingPaused)
+    let dim = care.updateDimming(for: rig.key, state: &fresh, signals: signals())
+    #expect(dim == .active)
+    #expect(fresh.dimmingPaused)
+    // What render draws from on that first tick, for any state the engine reports.
+    for state in [dim, .idleDim, .blackout] {
+      let overlay = OledCareCoordinator.baseOverlay(state, state: fresh)
+      #expect(overlay.alpha == nil && !overlay.blackout)
+    }
     var other = state()
-    #expect(coordinator.updateDimming(for: "other", state: &other,
-      signals: signals()) == .blackout)
-    coordinator.beginDisplayReset("panel")
-    #expect(coordinator.dimmingPauseDeadline(for: "panel") == nil)
-    coordinator.pauseDimming(for: "other", duration: 900)
-    coordinator.prepareForReset()
-    #expect(coordinator.dimmingPauseDeadline(for: "other") == nil)
+    let otherDim = care.updateDimming(for: "other", state: &other, signals: signals())
+    #expect(otherDim == .blackout)
+    #expect(OledCareCoordinator.baseOverlay(otherDim, state: other).blackout)
+    care.beginDisplayReset(rig.key)
+    #expect(care.dimmingPauseDeadline(for: rig.key) == nil)
+    care.pauseDimming(for: "other", duration: 900)
+    care.prepareForReset()
+    #expect(care.dimmingPauseDeadline(for: "other") == nil)
+  }
+
+  /// The immediate lift in `pauseDimming(for:until:)`: a display already in lock
+  /// dim must come back now, not on the driver's next tick.
+  @Test func pausingEndsALiveLockDimAndClearsTheOverlayAtOnce() async throws {
+    let rig = await Rig(key: "pause-lock-dim", topology: [(id: Self.liveID, key: "pause-lock-dim", name: "Panel")])
+    let care = rig.model.oledCare
+    care.reapplyAfterPrefChange(persistenceKey: rig.key)
+    var staged = try #require(care.states[rig.key])
+    let controller = try #require(
+      rig.model.displays.first { $0.display.persistenceKey == rig.key }?.controller)
+    controller.beginTemporaryDim(factor: 0.4)
+    staged.lockDimEngaged = true
+    staged.lastAppliedAlpha = 0.5
+    care.states[rig.key] = staged
+    #expect(controller.temporaryDimFactor == 0.4)
+    #expect(care.pauseDimming(for: rig.key, until: Date().addingTimeInterval(600)))
+    let paused = try #require(care.states[rig.key])
+    #expect(!paused.lockDimEngaged)
+    #expect(controller.temporaryDimFactor == nil)
+    #expect(paused.dimmingPaused)
+    #expect(paused.lastAppliedAlpha == nil)
+    #expect(care.dimStates[rig.key] == .active)
   }
 
   @Test func aPauseThatExpiresWhileDisconnectedResumesWithFreshIdleTime() {
@@ -161,11 +221,11 @@ struct OledDimmingPauseTests {
   }
 
   @Test func unenrollmentClearsThePauseEvenWithoutAConnectedDisplay() {
-    let key = "dimming-pause-\(UUID().uuidString)"
+    let key = "dimming-pause"
     let coordinator = OledCareCoordinator()
+    coordinator.prefsDefaults = InMemoryDefaults()
     coordinator.pauseDimming(for: key, duration: 900)
-    // A never-enrolled unique preference key is also the disconnected opt-out
-    // state. The preference hook must clear it before requiring a live model.
+    // A never-enrolled key is also the disconnected opt-out state. The preference hook must clear it before requiring a live model.
     coordinator.reapplyAfterPrefChange(persistenceKey: key)
     #expect(coordinator.dimmingPauseDeadline(for: key) == nil)
   }

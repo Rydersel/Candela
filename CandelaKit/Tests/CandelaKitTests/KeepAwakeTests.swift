@@ -278,4 +278,30 @@ struct KeepAwakeTests {
     keepAwake.setOn(false)
   }
 
+  /// A relative timer does not count time the Mac spends asleep, so the wake
+  /// hook must move the next check to the wall-clock deadline. Without that, a
+  /// hold outlives its advertised end by the length of the sleep.
+  @Test func wakingFromSleepRearmsTheCheckAtTheWallClockDeadline() async throws {
+    let holder = RecordingHolder()
+    var clock = Date()
+    let keepAwake = KeepAwake(holder: holder, now: { clock }, clockNotifications: NotificationCenter())
+    keepAwake.start(for: 3_600)
+    let deadline = try #require(keepAwake.expiresAt)
+    // The Mac slept for almost the whole hour; the hour-long timer did not run.
+    clock = deadline.addingTimeInterval(-0.02)
+    keepAwake.expireIfNeeded(at: clock)
+    #expect(keepAwake.isOn)
+    #expect(keepAwake.expiresAt == deadline)
+    #expect(holder.created.count == 1)
+    clock = deadline
+    // No further wake or clock notification: the re-armed timer must end it.
+    let limit = ContinuousClock.now.advanced(by: .seconds(2))
+    while keepAwake.isOn && ContinuousClock.now < limit {
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(!keepAwake.isOn)
+    #expect(holder.outstanding == 0)
+    keepAwake.setOn(false)
+  }
+
 }

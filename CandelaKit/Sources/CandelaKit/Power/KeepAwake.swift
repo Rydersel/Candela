@@ -86,7 +86,6 @@ public final class KeepAwake {
         Task { @MainActor [weak self] in
           guard let self else { return }
           self.expireIfNeeded(at: self.now())
-          if self.expiresAt != nil { self.scheduleExpiryCheck() }
         }
       }
     }
@@ -94,20 +93,21 @@ public final class KeepAwake {
     let timer = Timer(timeInterval: remaining, repeats: false) { [weak self] _ in
       MainActor.assumeIsolated {
         guard let self else { return }
+        // A clock adjustment can make the callback early; expireIfNeeded then
+        // re-arms for the remaining wall-clock interval.
         self.expireIfNeeded(at: self.now())
-        // A clock adjustment can make the callback early. Keep checking until
-        // the advertised wall-clock deadline instead of stranding the hold.
-        if self.expiresAt != nil { self.scheduleExpiryCheck() }
       }
     }
     expiryTimer = timer
     RunLoop.main.add(timer, forMode: .common)
   }
 
-  /// Also checked after wake, when a sleeping Mac may have missed the timer.
+  /// Also called on wake. A relative Timer does not count time asleep, so a
+  /// hold still short of its deadline re-arms from the remaining wall-clock
+  /// interval, or it would end late by the length of the sleep.
   public func expireIfNeeded(at date: Date = Date()) {
-    guard let expiresAt, date >= expiresAt else { return }
-    setOn(false)
+    guard let expiresAt else { return }
+    if date >= expiresAt { setOn(false) } else { scheduleExpiryCheck() }
   }
 
   @ObservationIgnored private let now: () -> Date

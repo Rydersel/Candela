@@ -61,6 +61,17 @@ final class OledCareCoordinator: CheckupCareHolding {
   private var dimmingPauseDeadlines: [String: Date] = [:]
   @ObservationIgnored private var dimmingResumePending: Set<String> = []
   @ObservationIgnored private let now: () -> Date
+  /// Where enrollment and the other per-display care prefs are read. Settable
+  /// rather than an init argument because `AppModel` builds this lazily with
+  /// no arguments; the test bundle swaps in an in-memory store before
+  /// anything reads it, so no test touches the real defaults domain.
+  @ObservationIgnored var prefsDefaults: UserDefaults = .standard
+
+  private func prefs(for key: String) -> DisplayPrefs {
+    DisplayPrefs(defaults: prefsDefaults, persistenceKey: key)
+  }
+
+  func isEnrolled(_ key: String) -> Bool { prefs(for: key).oledCareEnrolled }
 
   /// Built unconditionally in `start(model:)`, Safe Mode included, so the pane's
   /// global toggles always reflect real system state. Nil only before launch
@@ -298,8 +309,10 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// into a map the user just deleted; comparing the epoch makes that
   /// impossible rather than unlikely.
   @ObservationIgnored private var exposureEpoch = 0
-  /// Per enrolled-and-connected display, by persistenceKey.
-  @ObservationIgnored private var states: [String: PerDisplay] = [:]
+  /// Per enrolled-and-connected display, by persistenceKey. Internal so the
+  /// test bundle can stage a display mid-dim; nothing in the app writes it
+  /// from outside this type.
+  @ObservationIgnored var states: [String: PerDisplay] = [:]
   /// One display's place in a capture wave. The epoch is stamped when the tick
   /// queues it, so a delete between the tick and the wave still invalidates
   /// what comes back. Internal for `PerDisplay`'s reason.
@@ -354,12 +367,17 @@ final class OledCareCoordinator: CheckupCareHolding {
 
   // MARK: - Lifecycle
 
+  /// The model link alone. `start` adds the driver, the lock and wake
+  /// observers and the chrome controller, none of which the test bundle may
+  /// run, so a test stages a connected display through this instead.
+  func adopt(model: AppModel) { self.model = model }
+
   /// Called once from `applicationDidFinishLaunching`. Safe Mode suppresses the
   /// driver loop (no overlays, no sampling, no hours) but still builds the
   /// chrome controller: its toggles are explicit user actions.
   func start(model: AppModel) {
     guard chrome == nil else { return }
-    self.model = model
+    adopt(model: model)
     chrome = ChromeAutoHideController(writer: SystemChromeWriter())
     guard !model.isSafeMode else { return }
 
@@ -514,7 +532,7 @@ final class OledCareCoordinator: CheckupCareHolding {
   func healthSummary(for persistenceKey: String) -> PanelHealthSummary {
     let map = accumulators[persistenceKey]?.map ?? loadExposureMap(for: persistenceKey)
     let owners = ownerHours[persistenceKey]?.hours ?? loadOwnerHours(for: persistenceKey)
-    let prefs = DisplayPrefs(persistenceKey: persistenceKey)
+    let prefs = self.prefs(for: persistenceKey)
     let telemetry = states[persistenceKey]?.telemetryEnabled ?? prefs.oledTelemetry
     let observing = states[persistenceKey]?.windowObservationEnabled
       ?? prefs.oledWindowObservation
@@ -675,7 +693,7 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// disconnected display; reconciliation walks the whole live display list.
   func reapplyAfterPrefChange(persistenceKey: String?) {
     let keys = persistenceKey.map { [$0] } ?? Array(dimmingPauseDeadlines.keys)
-    for key in keys where !DisplayPrefs(persistenceKey: key).oledCareEnrolled {
+    for key in keys where !isEnrolled(key) {
       clearDimmingPause(for: key)
       dimmingResumePending.remove(key)
     }
@@ -843,7 +861,7 @@ final class OledCareCoordinator: CheckupCareHolding {
     for displayState in model.displays {
       let key = displayState.display.persistenceKey
       seen.insert(key)
-      let prefs = DisplayPrefs(persistenceKey: key)
+      let prefs = self.prefs(for: key)
       guard prefs.oledCareEnrolled else {
         clearDimmingPause(for: key)
         dimmingResumePending.remove(key)
@@ -1466,6 +1484,13 @@ final class OledCareCoordinator: CheckupCareHolding {
 
   // MARK: - Rendering (with the two funcs below, the ONLY overlay callers)
 
+  /// The state's own overlay before any nomination composes into it. A user
+  /// pause wins over every dim state, blackout included.
+  static func baseOverlay(_ dimState: OledDimState, state: PerDisplay) -> (alpha: Double?, blackout: Bool) {
+    guard !state.dimmingPaused else { return (nil, false) }
+    return (state.engine.alpha(for: dimState), dimState == .blackout)
+  }
+
   /// THE render funnel: every overlay apply in this type goes through here.
   ///
   /// **The mask carries ABSOLUTE per-cell opacity, and `alpha` goes to 1 when
@@ -1475,8 +1500,7 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// render 0.075 in the region and ZERO everywhere else, deleting the uniform
   /// dim the user asked for.
   private func render(_ dimState: OledDimState, into state: inout PerDisplay, on id: CGDirectDisplayID) {
-    let stateAlpha = state.dimmingPaused ? nil : state.engine.alpha(for: dimState)
-    let blackout = !state.dimmingPaused && dimState == .blackout
+    let (stateAlpha, blackout) = Self.baseOverlay(dimState, state: state)
     // `.active` DOES compose: detection dimming is the one care feature that
     // runs while the user is working, so it can require an overlay in a state
     // whose own alpha is nil. Four cases do not, each for its own reason:

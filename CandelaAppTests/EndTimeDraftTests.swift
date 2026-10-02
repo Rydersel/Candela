@@ -68,9 +68,32 @@ struct EndTimeDraftTests {
   @Test func localizedDigitsAndMinutePrecisionAreSupported() {
     var draft = EndTimeDraft(date: date(2026, 9, 30, 13, 10).addingTimeInterval(42), calendar: calendar,
                             uses24HourClock: true)
-    #expect(draft.date == date(2026, 9, 30, 13, 10))
     draft.hour = "١٤"; draft.minute = "٢٥"
     #expect(draft.date == date(2026, 9, 30, 14, 25))
+  }
+
+  /// Confirming an unchanged dialog must not shorten the hold, and a deadline
+  /// inside the current minute must not reopen already in the past.
+  @Test func reopeningAnExistingDeadlineKeepsItsSeconds() {
+    let existing = date(2026, 9, 30, 13, 10).addingTimeInterval(42)
+    var draft = EndTimeDraft(date: existing, calendar: calendar, uses24HourClock: true)
+    #expect(draft.date == existing)
+    draft.minute = "11"
+    #expect(draft.date == date(2026, 9, 30, 13, 11))
+    draft.day = date(2026, 10, 1); draft.minute = "10"
+    #expect(draft.date == date(2026, 10, 1, 13, 10))
+  }
+
+  /// The calendar here is en_US, so only the separate locale argument can
+  /// produce the 24 hour result.
+  @Test(arguments: [("en_US", false, "01"), ("de_DE", true, "13")])
+  func theLocaleDecidesTheHourCycle(identifier: String, uses24: Bool, hour: String) {
+    let draft = EndTimeDraft(date: date(2026, 9, 30, 13, 5), calendar: calendar,
+                             locale: Locale(identifier: identifier))
+    #expect(draft.uses24HourClock == uses24)
+    #expect(draft.hour == hour)
+    #expect(draft.period == .pm)
+    #expect(draft.date == date(2026, 9, 30, 13, 5))
   }
 
   @Test func monthGridHonorsFirstWeekdayLeapYearsAndYearBoundaries() {

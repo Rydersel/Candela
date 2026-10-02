@@ -5,12 +5,13 @@ import Testing
 @Suite("Custom end time") @MainActor
 struct EndTimeSelectionTests {
   @Test func customPauseRevalidatesEnrollmentAndDisplayIdentityAtConfirmation() async {
-    let key = "custom-pause-\(UUID().uuidString)"
-    let prefs = DisplayPrefs(persistenceKey: key)
+    let key = "custom-pause"
+    let defaults = InMemoryDefaults()
+    let prefs = DisplayPrefs(defaults: defaults, persistenceKey: key)
     prefs.oledCareEnrolled = true
-    defer { UserDefaults.standard.removeObject(forKey: "oledCareEnrolled.\(key)") }
     let discovery = ScriptedDiscovery([(id: 7, key: key, name: "First")])
     let model = TestFixtures.appModel(discovery: discovery)
+    model.oledCare.prefsDefaults = defaults
     await model.refresh()
     let deadline = Date().addingTimeInterval(120)
     #expect(model.applyDimmingPause(until: deadline, for: key) == nil)
@@ -28,17 +29,22 @@ struct EndTimeSelectionTests {
   }
 
   @Test func customPauseRefusesSafeModeAndASettingsReset() async {
-    let key = "custom-pause-blocked-\(UUID().uuidString)"
-    DisplayPrefs(persistenceKey: key).oledCareEnrolled = true
-    defer { UserDefaults.standard.removeObject(forKey: "oledCareEnrolled.\(key)") }
+    let key = "custom-pause-blocked"
+    let defaults = InMemoryDefaults()
+    DisplayPrefs(defaults: defaults, persistenceKey: key).oledCareEnrolled = true
     let discovery = ScriptedDiscovery([(id: 7, key: key, name: "Display")])
     let safe = TestFixtures.appModel(discovery: discovery, safeMode: true)
+    safe.oledCare.prefsDefaults = defaults
     await safe.refresh()
     let deadline = Date().addingTimeInterval(120)
     #expect(safe.applyDimmingPause(until: deadline, for: key) != nil)
     #expect(safe.oledCare.dimmingPauseDeadline(for: key) == nil)
     let model = TestFixtures.appModel(discovery: discovery)
+    model.oledCare.prefsDefaults = defaults
     await model.refresh()
+    // The control: the same model accepts the pause before the reset begins.
+    #expect(model.applyDimmingPause(until: deadline, for: key) == nil)
+    model.oledCare.resumeDimming(for: key)
     #expect(await model.beginReset())
     #expect(model.applyDimmingPause(until: deadline, for: key) != nil)
     #expect(model.oledCare.dimmingPauseDeadline(for: key) == nil)
