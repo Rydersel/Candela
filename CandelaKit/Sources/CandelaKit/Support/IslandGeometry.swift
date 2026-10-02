@@ -27,24 +27,19 @@ public enum IslandGeometry {
   static let panelExtraHeight: CGFloat = 60
   static let panelExtraWidth: CGFloat = 440
 
-  /// Whether the menu bar is on screen now. An auto-hidden bar collapses the
-  /// difference to zero; the half point absorbs rounding in the reported frames.
-  public static func menuBarVisible(screen: CGRect, visibleFrame: CGRect) -> Bool {
-    screen.maxY - visibleFrame.maxY > 0.5
-  }
-
   /// The notch from the screen's auxiliary areas: the gap between them is the
   /// glass. Without them, a drawn notch centred on the FULL frame.
   ///
   /// A visible bar hides anything a window draws in the strip beside the notch,
   /// at every level up to the shielding one, so the Island cannot trace the
   /// glass then. It hangs from the bar's bottom edge instead, in the notchless
-  /// form, still centred under the glass where there is one.
+  /// form, still centred under the glass where there is one. `menuBarHeight`
+  /// is nil while the bar is hidden.
   public static func notch(
-    screen: CGRect, visibleFrame: CGRect, auxiliaryTopLeft: CGRect?, auxiliaryTopRight: CGRect?
+    screen: CGRect, menuBarHeight: CGFloat?, auxiliaryTopLeft: CGRect?, auxiliaryTopRight: CGRect?
   ) -> IslandNotch {
-    let barVisible = menuBarVisible(screen: screen, visibleFrame: visibleFrame)
-    let top = barVisible ? visibleFrame.maxY : screen.maxY
+    let barVisible = menuBarHeight != nil
+    let top = screen.maxY - (menuBarHeight ?? 0)
     if let left = auxiliaryTopLeft, let right = auxiliaryTopRight {
       let width = screen.width - left.width - right.width
       let height = barVisible ? fallbackNotchSize.height : left.height

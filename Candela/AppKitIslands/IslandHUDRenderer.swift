@@ -108,7 +108,7 @@ final class IslandHUDRenderer: HUDRenderer {
 
   func frame(on screen: NSScreen, position: HUDPosition) -> CGRect {
     let notch = IslandGeometry.notch(
-      screen: screen.frame, visibleFrame: screen.visibleFrame, auxiliaryTopLeft: screen.auxiliaryTopLeftArea,
+      screen: screen.frame, menuBarHeight: MenuBarVisibility.height(on: screen), auxiliaryTopLeft: screen.auxiliaryTopLeftArea,
       auxiliaryTopRight: screen.auxiliaryTopRightArea)
     // Hand-made layers rasterise at 1x unless told otherwise, which softens the strokes on Retina.
     if backingScale != screen.backingScaleFactor {
