@@ -1,4 +1,3 @@
-// CandelaKit/Sources/CandelaKit/Support/IslandGeometry.swift
 import CoreGraphics
 
 /// The notch an Island draws on, in screen coordinates. Real when the display
@@ -31,7 +30,7 @@ public enum IslandGeometry {
   /// The notch from the screen's auxiliary areas: the gap between them is the
   /// glass. Without them, a drawn notch centred on the FULL frame.
   public static func notch(
-    screen: CGRect, auxiliaryTopLeft: CGRect?, auxiliaryTopRight: CGRect?, menuBarHeight: CGFloat
+    screen: CGRect, auxiliaryTopLeft: CGRect?, auxiliaryTopRight: CGRect?
   ) -> IslandNotch {
     if let left = auxiliaryTopLeft, let right = auxiliaryTopRight {
       let width = screen.width - left.width - right.width
@@ -82,7 +81,7 @@ public enum IslandGeometry {
   public enum PathSegment: Equatable, Sendable {
     case move(CGPoint)
     case line(CGPoint)
-    /// Degrees, y up, as `NSBezierPath.appendArc` and `CGPath.addArc` read them.
+    /// Degrees, y up, as `NSBezierPath.appendArc` reads them; a `CGPath` caller converts to radians.
     case arc(center: CGPoint, radius: CGFloat, startDegrees: CGFloat, endDegrees: CGFloat, clockwise: Bool)
   }
 

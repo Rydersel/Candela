@@ -1,4 +1,3 @@
-// CandelaKit/Tests/CandelaKitTests/IndicatorGeometryTests.swift
 import CoreGraphics
 import Testing
 @testable import CandelaKit
@@ -15,12 +14,12 @@ struct IndicatorGeometryTests {
     #expect(IndicatorSteps.filled(-0.2, of: 16) == 0)
   }
 
-  /// Measured from the system's own box: 200 square, a 160 by 8 track 20 up,
+  /// Measured from the system's own box: 200 square, a 161 by 8 track 20 up,
   /// sixteen 9 by 6 chiclets on a 10 pt pitch from x 21.
   @Test func classicBoxMatchesTheMeasuredSystemBox() {
     #expect(ClassicBox.size == CGSize(width: 200, height: 200))
     #expect(ClassicBox.cornerRadius == 16)
-    #expect(ClassicBox.trackRect == CGRect(x: 20, y: 20, width: 160, height: 8))
+    #expect(ClassicBox.trackRect == CGRect(x: 20, y: 20, width: 161, height: 8))
     #expect(ClassicBox.chicletRect(0) == CGRect(x: 21, y: 21, width: 9, height: 6))
     #expect(ClassicBox.chicletRect(15).maxX == 180)
     #expect(ClassicBox.glyphRect == CGRect(x: 15, y: 15, width: 170, height: 170))

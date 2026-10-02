@@ -35,7 +35,7 @@ struct HUDStyleTests {
     #expect(HUDStyle.sequoia.fixedAnchor == .bottomCenter(inset: 140))
     #expect(HUDStyle.classicCentered.fixedAnchor == .center)
     for style in [HUDStyle.islandDrop, .islandEdge, .islandEdgeCapsules] {
-      #expect(style.fixedAnchor == .topCenter, "\(style)")
+      #expect(style.fixedAnchor == .topEdge, "\(style)")
       #expect(style.isIsland, "\(style)")
     }
     #expect(!HUDStyle.classic.isIsland)

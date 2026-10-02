@@ -22,7 +22,7 @@ public enum HUDAnchor: Equatable, Sendable {
   case center
   /// Flush with the top edge, centred on the FULL frame: the notch is centred on
   /// the glass, not on the visible frame.
-  case topCenter
+  case topEdge
 }
 
 /// The pill's origin on one display: screen geometry in, a point out.
@@ -92,7 +92,7 @@ public enum HUDPlacement {
     case .center:
       x = frame.midX - size.width / 2
       y = frame.midY - size.height / 2
-    case .topCenter:
+    case .topEdge:
       x = frame.midX - size.width / 2
       y = frame.maxY - size.height
     }

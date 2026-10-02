@@ -1,4 +1,3 @@
-// CandelaKit/Sources/CandelaKit/Support/IndicatorGeometry.swift
 import CoreGraphics
 
 /// Shared step rule: a half step lights the nearer unit.
@@ -14,7 +13,7 @@ public enum IndicatorSteps {
 public enum ClassicBox {
   public static let size = CGSize(width: 200, height: 200)
   public static let cornerRadius: CGFloat = 16
-  public static let trackRect = CGRect(x: 20, y: 20, width: 160, height: 8)
+  public static let trackRect = CGRect(x: 20, y: 20, width: 161, height: 8)
   public static let chicletCount = 16
   public static let chicletSize = CGSize(width: 9, height: 6)
   public static let chicletPitch: CGFloat = 10

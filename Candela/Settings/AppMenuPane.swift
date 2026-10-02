@@ -250,9 +250,8 @@ struct AppMenuPane: View {
               actions.prefDidChange(.hudStyle)
             }
           )) {
-            // `HUDStyle.pickerOrder` even though it matches raw order today,
-            // so a future case slots into reading order without renumbering
-            // raws.
+            // `HUDStyle.pickerOrder`, not raw order: reading order differs
+            // (vertical and ring, raws 6 and 7, precede the classic styles).
             ForEach(HUDStyle.pickerOrder, id: \.self) { style in
               Text(label(for: style)).tag(style)
             }

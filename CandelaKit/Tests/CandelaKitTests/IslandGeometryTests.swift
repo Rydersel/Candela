@@ -1,4 +1,3 @@
-// CandelaKit/Tests/CandelaKitTests/IslandGeometryTests.swift
 import CoreGraphics
 import Testing
 @testable import CandelaKit
@@ -12,7 +11,7 @@ struct IslandGeometryTests {
   let auxRight = CGRect(x: 1010, y: 1131, width: 790, height: 38)
 
   @Test func aRealNotchIsTheGapBetweenTheAuxiliaryAreas() {
-    let notch = IslandGeometry.notch(screen: builtIn, auxiliaryTopLeft: auxLeft, auxiliaryTopRight: auxRight, menuBarHeight: 24)
+    let notch = IslandGeometry.notch(screen: builtIn, auxiliaryTopLeft: auxLeft, auxiliaryTopRight: auxRight)
     #expect(notch.isReal)
     #expect(notch.rect == CGRect(x: 790, y: 1131, width: 220, height: 38))
   }
@@ -21,13 +20,13 @@ struct IslandGeometryTests {
   /// as tall as the notch would be.
   @Test func aDrawnNotchCentresOnTheScreenAtTheFallbackSize() {
     let external = CGRect(x: -2560, y: -300, width: 2560, height: 1440)
-    let notch = IslandGeometry.notch(screen: external, auxiliaryTopLeft: nil, auxiliaryTopRight: nil, menuBarHeight: 24)
+    let notch = IslandGeometry.notch(screen: external, auxiliaryTopLeft: nil, auxiliaryTopRight: nil)
     #expect(!notch.isReal)
     #expect(notch.rect == CGRect(x: -2560 + 1170, y: -300 + 1440 - 38, width: 220, height: 38))
   }
 
   @Test func thePanelSpansTheNotchOrTheScreen() {
-    let notch = IslandGeometry.notch(screen: builtIn, auxiliaryTopLeft: auxLeft, auxiliaryTopRight: auxRight, menuBarHeight: 24)
+    let notch = IslandGeometry.notch(screen: builtIn, auxiliaryTopLeft: auxLeft, auxiliaryTopRight: auxRight)
     let narrow = IslandGeometry.panelFrame(screen: builtIn, notch: notch, fullWidth: false)
     #expect(narrow == CGRect(x: 900 - 330, y: 1169 - 98, width: 660, height: 98))
     let wide = IslandGeometry.panelFrame(screen: builtIn, notch: notch, fullWidth: true)
@@ -37,7 +36,7 @@ struct IslandGeometryTests {
   /// Closed sits one point inside a real notch so nothing of ours shows below the
   /// glass's corners; a drawn notch IS the closed shape.
   @Test func closedAndOpenTabsInPanelCoordinates() {
-    let notch = IslandGeometry.notch(screen: builtIn, auxiliaryTopLeft: auxLeft, auxiliaryTopRight: auxRight, menuBarHeight: 24)
+    let notch = IslandGeometry.notch(screen: builtIn, auxiliaryTopLeft: auxLeft, auxiliaryTopRight: auxRight)
     let panel = IslandGeometry.panelFrame(screen: builtIn, notch: notch, fullWidth: false)
     let closed = IslandGeometry.closedTab(notch: notch, panel: panel)
     #expect(closed == CGRect(x: 221, y: 61, width: 218, height: 38))

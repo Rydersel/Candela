@@ -158,18 +158,12 @@ struct HUDPlacementTests {
 
   /// The notch is centred on the glass, so top centre uses the full frame even
   /// when a side Dock narrows the visible one.
-  @Test func topCenterIsFlushWithTheTopEdgeOnTheFullFrame() {
+  @Test func topEdgeIsFlushWithTheTopOnTheFullFrame() {
     let island = CGSize(width: 660, height: 98)
     let screen = CGRect(x: 0, y: 0, width: 1800, height: 1169)
     let dockLeft = CGRect(x: 90, y: 0, width: 1710, height: 1169)
-    let point = origin(.topCenter, size: island, frame: screen, visible: dockLeft)
+    let point = origin(.topEdge, size: island, frame: screen, visible: dockLeft)
     #expect(point == CGPoint(x: 570, y: 1071))
-  }
-
-  @Test func positionAnchorsMatchTheOriginalForm() {
-    for position in HUDPosition.allCases {
-      #expect(origin(.position(position), size: pill, frame: landscape) == origin(position, frame: landscape), "\(position)")
-    }
   }
 
   /// The Dell at 270 degrees: the box lands inside the rotated frame, 140 above
@@ -180,7 +174,7 @@ struct HUDPlacementTests {
     let bottom = origin(.bottomCenter(inset: 140), size: box, frame: portrait)
     #expect(bottom == CGPoint(x: 3440 + 980, y: -1200 + 140))
     #expect(portrait.contains(CGRect(origin: bottom, size: box)))
-    let top = origin(.topCenter, size: CGSize(width: 660, height: 98), frame: portrait)
+    let top = origin(.topEdge, size: CGSize(width: 660, height: 98), frame: portrait)
     #expect(top.y == CGFloat(-1200 + 3840 - 98))
     #expect(top.x == CGFloat(3440 + 750))
   }

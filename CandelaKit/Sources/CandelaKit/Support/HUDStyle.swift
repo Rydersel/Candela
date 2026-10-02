@@ -44,7 +44,7 @@ public enum HUDStyle: Int, Sendable, CaseIterable {
     case .system, .segments, .compact, .vertical, .ring: nil
     case .classic, .sequoia: .bottomCenter(inset: 140)
     case .classicCentered: .center
-    case .islandDrop, .islandEdge, .islandEdgeCapsules: .topCenter
+    case .islandDrop, .islandEdge, .islandEdgeCapsules: .topEdge
     }
   }
 
