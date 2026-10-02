@@ -491,10 +491,8 @@ struct MenuBarPreviewView: View {
     return leading ? kinds : kinds.reversed()
   }
 
-  /// Room the right-edge bars need so the top-right panel sits inward of them
-  /// rather than under them: the bars are centred on the card and the panel
-  /// runs past the middle at any realistic height, and the bars, drawn last,
-  /// would also take its clicks.
+  /// Keeps the top-right panel inward of the right-edge bars. The panel runs past
+  /// the card's middle at any realistic height, and the bars, drawn last, would take its clicks.
   private var rightSideStripWidth: CGFloat {
     CGFloat(sideKinds(leading: false).count) * (VerticalPill.size.width * Self.s + 6)
   }

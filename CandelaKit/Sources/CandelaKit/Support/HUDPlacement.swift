@@ -73,10 +73,9 @@ public enum HUDPlacement {
   /// Fixed homes use the full frame throughout, because a Dock has never moved the
   /// Classic box and the notch is centred on the glass.
   ///
-  /// The side anchor takes its edge from the visible frame, so a pinned side Dock
-  /// never sits on top of the bar, and its height from the full frame, where the
-  /// middle of the glass is. It carries its own margin, so `margin` is ignored for
-  /// it, as it is for the fixed homes.
+  /// The side anchor takes its edge from the visible frame, clear of a pinned side
+  /// Dock, and its height from the full frame. It carries its own margin, so `margin`
+  /// is ignored, as for the fixed homes.
   public static func origin(
     _ anchor: HUDAnchor,
     size: CGSize,

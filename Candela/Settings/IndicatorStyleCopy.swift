@@ -29,7 +29,7 @@ enum IndicatorStyleCopy {
   /// Each row's caption describes ITS OWN control: it is republished as the
   /// control's accessibility hint.
   static func positionCaption(for style: HUDStyle, kind: Kind) -> String {
-    // The rows still apply to Vertical, but they pick a side rather than a corner.
+    // Vertical's rows pick a side, not a corner.
     if style == .vertical {
       return switch kind {
       case .brightness: "Left or right picks the side; Vertical sits at its middle. Contrast uses this position too."
