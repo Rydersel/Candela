@@ -21,6 +21,11 @@ public enum ClassicBox {
   /// inside the page sits above its centre, which is why the page centre is
   /// lower than the glyph reads.
   public static let glyphRect = CGRect(x: 15, y: 15, width: 170, height: 170)
+  /// Where the PDF drawing's centre sits (87 below the top), and the symbol
+  /// size whose ink matches its 112 pt height. A stand-in symbol is drawn at
+  /// natural size there, because scaling one into the page would fill it.
+  public static let fallbackGlyphCenter = CGPoint(x: 100, y: 113)
+  public static let fallbackGlyphPointSize: CGFloat = 117
 
   public static func chicletRect(_ index: Int) -> CGRect {
     CGRect(

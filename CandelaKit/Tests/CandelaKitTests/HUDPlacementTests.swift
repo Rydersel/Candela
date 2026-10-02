@@ -156,7 +156,7 @@ struct HUDPlacementTests {
     #expect(point == CGPoint(x: 401, y: 301))
   }
 
-  /// The notch is centred on the glass, so top centre uses the full frame even
+  /// The notch is centred on the glass, so the top edge uses the full frame even
   /// when a side Dock narrows the visible one.
   @Test func topEdgeIsFlushWithTheTopOnTheFullFrame() {
     let island = CGSize(width: 660, height: 98)

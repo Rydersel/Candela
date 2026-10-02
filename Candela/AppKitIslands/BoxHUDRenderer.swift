@@ -40,6 +40,7 @@ final class BoxHUDRenderer: HUDRenderer {
     if isClassic {
       glyph = NSImageView(frame: ClassicBox.glyphRect)
       glyph.imageScaling = .scaleProportionallyUpOrDown
+      glyph.imageAlignment = .alignCenter
       glyph.contentTintColor = Self.chicletColor
     } else {
       // Natural size, centred on the glyph rect's centre: scaling into the rect
@@ -75,6 +76,14 @@ final class BoxHUDRenderer: HUDRenderer {
     self.fill = fill
   }
 
+  /// Centred where the PDF's drawing sits and spanning the box's width, so the
+  /// widest symbol at natural size is never clipped.
+  private static let classicFallbackFrame: NSRect = {
+    let center = ClassicBox.fallbackGlyphCenter
+    let halfHeight = ClassicBox.size.height - center.y
+    return NSRect(x: 0, y: center.y - halfHeight, width: ClassicBox.size.width, height: halfHeight * 2)
+  }()
+
   private static func box(_ frame: NSRect, _ color: NSColor, radius: CGFloat = 0) -> NSBox {
     let box = NSBox(frame: frame)
     box.boxType = .custom
@@ -98,8 +107,19 @@ final class BoxHUDRenderer: HUDRenderer {
       glyph.image = NSImage(systemSymbolName: Self.filledSymbol(content.kind), accessibilityDescription: nil)?
         .withSymbolConfiguration(config)
       fill?.frame = SequoiaBox.fillRect(value: Double(content.value))
+      // The fill keeps a minimum width so a low value still reads; mute is an empty bar.
+      fill?.isHidden = content.kind == .volumeMuted
     } else {
-      glyph.image = ClassicGlyphs.image(for: content.kind)
+      let classic = ClassicGlyphs.glyph(for: content.kind)
+      glyph.image = classic.image
+      switch classic.source {
+      case .systemPDF:
+        glyph.frame = ClassicBox.glyphRect
+        glyph.imageScaling = .scaleProportionallyUpOrDown
+      case .symbol:
+        glyph.frame = Self.classicFallbackFrame
+        glyph.imageScaling = .scaleNone
+      }
       let lit = IndicatorSteps.filled(Double(content.value), of: ClassicBox.chicletCount)
       for (index, chiclet) in chiclets.enumerated() { chiclet.isHidden = index >= lit }
     }

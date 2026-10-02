@@ -29,6 +29,8 @@ final class IslandHUDRenderer: HUDRenderer {
   private var closed = CGRect.zero
   private var open = CGRect.zero
   private var laidOut: (frame: CGRect, notch: IslandNotch)?
+  /// Zero until the first screen is known, so the first layout always applies it.
+  private var backingScale: CGFloat = 0
 
   // Agreed by eye on 2026-10-01.
   private static let widenDamping: CGFloat = 17
@@ -51,6 +53,9 @@ final class IslandHUDRenderer: HUDRenderer {
   private var hasCapsules: Bool { style == .islandEdgeCapsules }
   private var traceWidth: CGFloat { isDrop ? IslandGeometry.dropTraceWidth : IslandGeometry.edgeTraceWidth }
   private var iconPointSize: CGFloat { isDrop ? 15 : 13 }
+  /// Without a notch the tab is all ours and arrives and leaves with the rest.
+  /// Over a real notch its closed state is the notch itself, so it stays opaque.
+  private var fadesShape: Bool { !notch.isReal }
 
   init(style: HUDStyle) {
     precondition(style.isIsland)
@@ -89,15 +94,12 @@ final class IslandHUDRenderer: HUDRenderer {
     sheen.locations = [-0.3, -0.15, 0]
     sheen.opacity = 0
     icon.contentsGravity = .resizeAspect
-    icon.contentsScale = 2
     icon.opacity = 0
     readout.font = Self.roundedFont(14, .semibold)
     readout.fontSize = 14
-    readout.contentsScale = 2
     readout.opacity = 0
     name.font = NSFont.systemFont(ofSize: 11, weight: .medium)
     name.fontSize = 11
-    name.contentsScale = 2
     name.truncationMode = .end
     name.opacity = 0
     if isDrop { root.layer!.addSublayer(shape) }
@@ -110,6 +112,16 @@ final class IslandHUDRenderer: HUDRenderer {
     let notch = IslandGeometry.notch(
       screen: screen.frame, auxiliaryTopLeft: screen.auxiliaryTopLeftArea,
       auxiliaryTopRight: screen.auxiliaryTopRightArea)
+    // Hand-made layers rasterise at 1x unless told otherwise, which softens the strokes on Retina.
+    if backingScale != screen.backingScaleFactor {
+      backingScale = screen.backingScaleFactor
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      for layer in [shape, under, track, trace, sheen, sheenMask, icon, readout, name] as [CALayer] {
+        layer.contentsScale = backingScale
+      }
+      CATransaction.commit()
+    }
     layOut(notch: notch, screen: screen.frame)
     return panelFrame
   }
@@ -137,6 +149,7 @@ final class IslandHUDRenderer: HUDRenderer {
       contentView.layer!.insertSublayer(shape, at: 0)
     }
     shape.path = Self.path(IslandGeometry.tabPath(closed))
+    shape.opacity = !fadesShape || trace.opacity > 0 ? 1 : 0
     let outline: CGPath = isDrop
       ? Self.path(IslandGeometry.outline(around: open))
       : Self.path(IslandGeometry.edgeOutline(
@@ -239,8 +252,9 @@ final class IslandHUDRenderer: HUDRenderer {
       name.string = content.title
       if !isDrop { layOutContent(glass: IslandGeometry.glass(notch: notch, panel: panelFrame)) }
     }
-    let tint = content.kind == .brightness ? Self.brightnessTint : Self.volumeTint
-    let band = content.kind == .brightness ? NSColor.white : Self.volumeShimmer
+    let isVolume = content.kind == .volume || muted
+    let tint = isVolume ? Self.volumeTint : Self.brightnessTint
+    let band = isVolume ? Self.volumeShimmer : NSColor.white
     trace.strokeColor = tint.cgColor
     trace.shadowColor = tint.cgColor
     sheen.colors = [band.withAlphaComponent(0).cgColor, band.withAlphaComponent(0.95).cgColor, band.withAlphaComponent(0).cgColor]
@@ -271,7 +285,7 @@ final class IslandHUDRenderer: HUDRenderer {
     let openPath = Self.path(IslandGeometry.tabPath(open))
     if reduceMotion {
       shape.path = openPath
-      for layer in [icon, readout, name, under, track, trace, sheen] { layer.opacity = 1 }
+      for layer in [shape, icon, readout, name, under, track, trace, sheen] { layer.opacity = 1 }
       capsules.forEach { $0.alphaValue = 1 }
       CATransaction.commit()
       return
@@ -281,6 +295,7 @@ final class IslandHUDRenderer: HUDRenderer {
                             damping: Self.widenDamping, stiffness: Self.widenStiffness), forKey: "path")
       shape.path = openPath
       for layer in [icon, readout, name] { Self.fade(layer, to: 1, duration: 0.22, delay: 0.2) }
+      if fadesShape { Self.fade(shape, to: 1, duration: 0.22, delay: 0.2) }
       // Only once the shape has landed, so the outline is never seen off the edge.
       for layer in [under, track, trace, sheen] { Self.fade(layer, to: 1, duration: 0.25, delay: 0.5) }
       for layer in [trace, sheenMask, under] {
@@ -288,6 +303,7 @@ final class IslandHUDRenderer: HUDRenderer {
       }
     } else {
       for view in capsules { Self.fade(view, to: 1, duration: 0.3) }
+      if fadesShape { Self.fade(shape, to: 1, duration: 0.3) }
       for layer in [icon, readout, name] { Self.fade(layer, to: 1, duration: 0.3, delay: 0.05) }
       for layer in [under, track, trace, sheen] { Self.fade(layer, to: 1, duration: 0.25) }
       for layer in [trace, sheenMask, under] {
@@ -322,10 +338,12 @@ final class IslandHUDRenderer: HUDRenderer {
     if reduceMotion {
       shape.path = closedPath
       for layer in [icon, readout, name, under, track, trace, sheen] { layer.opacity = 0 }
+      shape.opacity = fadesShape ? 0 : 1
       capsules.forEach { $0.alphaValue = 0 }
       return .selfAnimated(0)
     }
     for layer in [icon, readout, name, under, track, trace, sheen] { Self.fade(layer, to: 0, duration: 0.14) }
+    if fadesShape { Self.fade(shape, to: 0, duration: 0.14) }
     for view in capsules { Self.fade(view, to: 0, duration: 0.25) }
     if isDrop {
       shape.add(Self.spring("path", from: shape.presentation()?.path ?? shape.path, to: closedPath,
