@@ -129,6 +129,22 @@ struct EndTimeDraftTests {
     #expect(sameDay == "14:00")
   }
 
+  /// A 0-to-11 hour cycle (K): the draft reads it as a 12-hour clock showing
+  /// 12 for midnight, so the Ends line must say 12:30 too, never 0:30.
+  @Test func aZeroToElevenClockReadsTheSameInTheDraftAndTheEndsLine() {
+    var components = Locale.Components(identifier: "en_US")
+    components.hourCycle = .zeroToEleven
+    let elevenHour = Locale(components: components)
+    let deadline = date(2026, 10, 1, 0, 30)
+    let draft = EndTimeDraft(date: deadline, calendar: calendar, locale: elevenHour)
+    #expect(!draft.uses24HourClock)
+    #expect(draft.hour == "12" && draft.period == .am)
+    let text = EndTimeText.string(deadline, now: date(2026, 10, 1, 0, 0), calendar: calendar,
+                                  locale: elevenHour)
+    #expect(text.contains("12:30"))
+    #expect(!text.hasPrefix("0:"))
+  }
+
   /// The calendar popover's headers and spoken day names come from this
   /// calendar, so it carries English names and keeps the week's first day.
   @Test func englishCalendarKeepsTheFirstWeekday() {

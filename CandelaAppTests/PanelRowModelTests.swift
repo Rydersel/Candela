@@ -688,22 +688,62 @@ struct PanelRowModelTests {
     let clock = TimeSource()
     let awake = KeepAwake(holder: Holder(), now: { clock.now }, clockNotifications: NotificationCenter())
     defer { awake.setOn(false) }
-    #expect(KeepAwakeDuration.describing(awake, now: clock.now) == nil)
+    #expect(KeepAwakeDuration.describing(awake) == nil)
 
-    #expect(awake.start(until: clock.now.addingTimeInterval(3 * 86_400)))
-    #expect(KeepAwakeDuration.describing(awake, now: clock.now) == nil)
-    #expect(awake.start(until: clock.now.addingTimeInterval(7_200 + 30)))
-    #expect(KeepAwakeDuration.describing(awake, now: clock.now) == .twoHours)
-    #expect(awake.start(until: clock.now.addingTimeInterval(5_000)))
-    #expect(KeepAwakeDuration.describing(awake, now: clock.now) == nil)
+    #expect(KeepAwakeDuration.start(awake, until: clock.now.addingTimeInterval(3 * 86_400), now: clock.now))
+    #expect(KeepAwakeDuration.describing(awake) == nil)
+    #expect(KeepAwakeDuration.start(awake, until: clock.now.addingTimeInterval(7_200 + 30), now: clock.now))
+    #expect(KeepAwakeDuration.describing(awake) == .twoHours)
+    #expect(KeepAwakeDuration.start(awake, until: clock.now.addingTimeInterval(5_000), now: clock.now))
+    #expect(KeepAwakeDuration.describing(awake) == nil)
 
     // A stop's own hold keeps its name while the time left runs down.
     KeepAwakeDuration.oneHour.apply(to: awake)
     clock.now = clock.now.addingTimeInterval(40 * 60)
-    #expect(KeepAwakeDuration.describing(awake, now: clock.now) == .oneHour)
+    #expect(KeepAwakeDuration.describing(awake) == .oneHour)
 
     KeepAwakeDuration.untilTurnedOff.apply(to: awake)
-    #expect(KeepAwakeDuration.describing(awake, now: clock.now) == .untilTurnedOff)
+    #expect(KeepAwakeDuration.describing(awake) == .untilTurnedOff)
+  }
+
+  /// The name is decided when the hold starts: re-matching the time left on
+  /// every expand read "1 hour" in the first minute and "Custom" after it.
+  @Test func aHoldFromTheDialogKeepsOneNameAsItRunsDown() {
+    let clock = TimeSource()
+    let awake = KeepAwake(holder: Holder(), now: { clock.now }, clockNotifications: NotificationCenter())
+    defer { awake.setOn(false) }
+    let start = clock.now
+    #expect(KeepAwakeDuration.start(awake, until: start.addingTimeInterval(3_630), now: start))
+    let first = KeepAwakeDuration.describing(awake)
+    clock.now = start.addingTimeInterval(120)
+    #expect(first == .oneHour)
+    #expect(KeepAwakeDuration.describing(awake) == first)
+  }
+
+  /// A hold that ended on its own must not leave "Custom" beside an off switch.
+  @Test func theDurationRowNeverReadsCustomWhileTheHoldIsOff() {
+    for duration in KeepAwakeDuration.allCases {
+      for isCustom in [false, true] {
+        #expect(PanelView.awakeDurationLabel(duration, isCustom: isCustom, isOn: false) == duration.title)
+      }
+      #expect(PanelView.awakeDurationLabel(duration, isCustom: false, isOn: true) == duration.title)
+      #expect(PanelView.awakeDurationLabel(duration, isCustom: true, isOn: true) == "Custom")
+    }
+  }
+
+  private final class RefusingHolder: PowerAssertionHolding {
+    func createPreventDisplaySleep(named name: String) -> UInt32? { nil }
+    func release(_ id: UInt32) {}
+  }
+
+  /// A refused assertion leaves the switch off, so the row must not name the
+  /// stop as if it were holding.
+  @Test func aRefusedAssertionNamesNoStop() {
+    let awake = KeepAwake(holder: RefusingHolder(), clockNotifications: NotificationCenter())
+    for duration in KeepAwakeDuration.allCases {
+      #expect(PanelView.chooseAwakeDuration(Double(duration.rawValue), keepAwake: awake) == nil)
+      #expect(!awake.isOn)
+    }
   }
 
   @Test func aValueOffTheStopsChangesNothing() {

@@ -27,8 +27,8 @@ year and click **Keep Awake**; **Cancel** leaves the current hold unchanged.
 
 Candela releases its display-sleep assertion when the timer ends, including after
 the Mac wakes from sleep. Quitting also ends the hold. It is never saved across
-app launches. Keep Awake also prevents OLED Care from starting automatic dimming
-while the hold is active.
+app launches. Keep Awake also stops idle, blackout, unfocused and regional
+dimming from starting while the hold is active; lock dimming still applies.
 
 ## Pause OLED dimming
 

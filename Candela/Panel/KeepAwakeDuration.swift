@@ -42,14 +42,22 @@ enum KeepAwakeDuration: Int, CaseIterable {
   }
 
   /// The stop the panel's Duration row names for a running hold, or nil for
-  /// "Custom". The stop that started the hold keeps its name as the time left
-  /// runs down; a custom end time is named only if it lands on a stop, so a
-  /// three-day hold never reads as the nearest stop the switch would start.
-  @MainActor static func describing(_ keepAwake: KeepAwake, now: Date = Date()) -> Self? {
+  /// "Custom". The name is decided once, when the hold starts, so the same
+  /// hold keeps one name as its time left runs down.
+  @MainActor static func describing(_ keepAwake: KeepAwake) -> Self? {
     guard keepAwake.isOn else { return nil }
     guard let expiresAt = keepAwake.expiresAt else { return .untilTurnedOff }
-    if let started = lastStarted, started.expiresAt == expiresAt { return started.duration }
-    return matching(remaining: expiresAt.timeIntervalSince(now))
+    guard let started = lastStarted, started.expiresAt == expiresAt else { return nil }
+    return started.duration
+  }
+
+  /// Starts a hold at a chosen instant. It takes a stop's name only if it
+  /// lands within a minute of one now, so a three-day hold never reads as the
+  /// nearest stop the switch would start.
+  @MainActor static func start(_ keepAwake: KeepAwake, until deadline: Date, now: Date = Date()) -> Bool {
+    guard keepAwake.start(until: deadline) else { return false }
+    lastStarted = matching(remaining: deadline.timeIntervalSince(now)).map { ($0, deadline) }
+    return true
   }
 
   @MainActor private static var lastStarted: (duration: Self, expiresAt: Date)?

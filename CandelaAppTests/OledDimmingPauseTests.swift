@@ -37,10 +37,12 @@ struct OledDimmingPauseTests {
     let key: String
     let discovery: ScriptedDiscovery
     let model: AppModel
+    let defaults: UserDefaults
 
     init(key: String, topology: [(id: CGDirectDisplayID, key: String, name: String)]) async {
       self.key = key
       let defaults = InMemoryDefaults()
+      self.defaults = defaults
       DisplayPrefs(defaults: defaults, persistenceKey: key).oledCareEnrolled = true
       discovery = ScriptedDiscovery(topology)
       model = TestFixtures.appModel(discovery: discovery)
@@ -82,7 +84,6 @@ struct OledDimmingPauseTests {
     let coordinator = OledCareCoordinator(now: { clock.now })
     let store = InMemoryDefaults()
     coordinator.prefsDefaults = store
-    let standardKeys = Set(UserDefaults.standard.dictionaryRepresentation().keys)
     coordinator.pauseDimming(for: "one", duration: 900)
     coordinator.pauseDimming(for: "two", duration: 3_600)
     #expect(coordinator.dimmingPauseDeadline(for: "one") == Date(timeIntervalSince1970: 1_900))
@@ -95,9 +96,9 @@ struct OledDimmingPauseTests {
     #expect(coordinator.dimmingPauseDeadline(for: "two") == nil)
     #expect(coordinator.dimmingPauseDeadline(for: "one") != nil)
     // Session-only: the pause wrote nothing to the store prefs persist in.
+    // The standard domain is checked in the rig test, where a pause reaches
+    // per-display state.
     #expect(store.dictionaryRepresentation().isEmpty)
-    // The coordinator also persists some keys straight to the standard domain.
-    #expect(Set(UserDefaults.standard.dictionaryRepresentation().keys) == standardKeys)
     clock.now = Date(timeIntervalSince1970: 4_700)
     #expect(coordinator.dimmingPauseDeadline(for: "one") == nil)
   }
@@ -207,6 +208,8 @@ struct OledDimmingPauseTests {
     staged.lastAppliedAlpha = 0.5
     care.states[rig.key] = staged
     #expect(controller.temporaryDimFactor == 0.4)
+    let standardBefore = Self.appOwned(UserDefaults.standard)
+    let storeBefore = Self.appOwned(rig.defaults)
     #expect(care.pauseDimming(for: rig.key, until: Date().addingTimeInterval(600)))
     let paused = try #require(care.states[rig.key])
     #expect(!paused.lockDimEngaged)
@@ -214,6 +217,23 @@ struct OledDimmingPauseTests {
     #expect(paused.dimmingPaused)
     #expect(paused.lastAppliedAlpha == nil)
     #expect(care.dimStates[rig.key] == .active)
+    // Session-only, through the path that ends the lock dim, renders and writes
+    // dimStates: nothing under the app's own keys changed in either domain.
+    #expect(Self.appOwned(UserDefaults.standard) == standardBefore)
+    #expect(Self.appOwned(rig.defaults) == storeBefore)
+    care.resumeDimming(for: rig.key)
+    #expect(care.dimmingPauseDeadline(for: rig.key) == nil)
+    #expect(Self.appOwned(UserDefaults.standard) == standardBefore)
+    #expect(Self.appOwned(rig.defaults) == storeBefore)
+  }
+
+  /// Every key the app writes is a `PrefName` raw value, optionally scoped by
+  /// `.<persistenceKey>`, or OLED care's own `oled…` engine state.
+  private static func appOwned(_ defaults: UserDefaults) -> NSDictionary {
+    let names = PrefName.allCases.map(\.rawValue)
+    return defaults.dictionaryRepresentation().filter { key, _ in
+      key.hasPrefix("oled") || names.contains { key == $0 || key.hasPrefix($0 + ".") }
+    } as NSDictionary
   }
 
   @Test func aPauseCannotBeSetWhileItsDisplayIsResetting() {

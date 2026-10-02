@@ -101,7 +101,9 @@ struct EndTimeCalendarMonth {
 enum EnglishDates {
   static func locale(clockFrom locale: Locale = .current) -> Locale {
     var names = Locale.Components(locale: Locale(identifier: "en_US"))
-    names.hourCycle = locale.hourCycle
+    // The draft's hour field reads K as h and shows 12 for midnight; the
+    // readouts follow it rather than printing 0:30.
+    names.hourCycle = locale.hourCycle == .zeroToEleven ? .oneToTwelve : locale.hourCycle
     return Locale(components: names)
   }
 

@@ -209,10 +209,10 @@ enum DisplayModeCopy {
   }
 
   /// A mode whose signal came out wrong and was put back. The configurator
-  /// keeps it out of the lists until the app restarts; worded as the guide
-  /// words it.
+  /// keeps it out of this connection's lists until the app restarts; worded
+  /// as the guide words it.
   static func scanoutRejected(_ commit: DisplayConfigError.UnhonouredCommit) -> String {
-    "\(achievedGeometry(commit)) The previous resolution was restored. \(AppInfo.productName) won't offer it again until it restarts."
+    "\(achievedGeometry(commit)) The previous resolution was restored. \(AppInfo.productName) won't offer that resolution on this connection again until \(AppInfo.productName) restarts."
   }
 
   /// One sentence for each reason a selection took no effect: a new reason with

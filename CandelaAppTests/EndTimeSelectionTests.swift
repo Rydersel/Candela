@@ -74,6 +74,25 @@ struct EndTimeSelectionTests {
     await model.endReset()
   }
 
+  private final class Holder: PowerAssertionHolding {
+    func createPreventDisplaySleep(named name: String) -> UInt32? { 1 }
+    func release(_ id: UInt32) {}
+  }
+
+  /// No reset touches Keep Awake, and the app-wide reset latch is also up
+  /// while a single display resets, so the dialog must not refuse during one.
+  @Test func keepAwakeEndTimeIsNotRefusedDuringASettingsReset() async {
+    let model = TestFixtures.appModel()
+    let awake = KeepAwake(holder: Holder(), clockNotifications: NotificationCenter())
+    defer { awake.setOn(false) }
+    #expect(await model.beginReset())
+    #expect(model.isResetting)
+    let deadline = Date().addingTimeInterval(600)
+    #expect(model.applyKeepAwake(until: deadline, to: awake) == nil)
+    #expect(awake.isOn && awake.expiresAt == deadline)
+    await model.endReset()
+  }
+
   @Test func editingAndCancellingDoNotApplyAndConfirmationUsesTheSelectedInstant() {
     let now = Date(timeIntervalSince1970: 1_000)
     var applied: [Date] = []

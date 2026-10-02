@@ -67,9 +67,16 @@ extension AppModel {
   func chooseKeepAwakeEndTime() {
     endTimePicker.present(title: "Keep Display Awake", detail: "Choose when the display can sleep again.",
                          actionTitle: "Keep Awake", currentDeadline: keepAwake.expiresAt) { [weak self] deadline in
-      guard let self, !self.isResetting else { return "Wait for the settings reset to finish." }
-      return self.keepAwake.start(until: deadline) ? nil : "macOS could not keep the display awake. Try again."
+      guard let self else { return "Candela is no longer available." }
+      return self.applyKeepAwake(until: deadline, to: self.keepAwake)
     }
+  }
+
+  /// No reset gate: no reset touches Keep Awake, and the panel's switch and
+  /// slider are not gated either.
+  func applyKeepAwake(until deadline: Date, to keepAwake: KeepAwake) -> String? {
+    KeepAwakeDuration.start(keepAwake, until: deadline)
+      ? nil : "macOS could not keep the display awake. Try again."
   }
 
   func chooseDimmingPauseEndTime(for key: String, name: String) {

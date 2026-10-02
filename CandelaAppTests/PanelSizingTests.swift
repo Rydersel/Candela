@@ -442,11 +442,14 @@ struct PanelSizingTests {
     #expect(slider.accessibilityValueDescription() == "8 hours")
   }
 
+  /// Mounted the way production mounts it, so the host-owned disclosure path
+  /// runs by default; `PanelMenu.menu` is nil here, so the refit is a no-op.
   @Test func theOpenedKeepAwakeRowPublishesOneSpokenSlider() async throws {
     let model = TestFixtures.appModel()
     EnhancedAccessibility.enable()
     defer { EnhancedAccessibility.disable() }
-    let host = PanelHostingView(rootView: PanelView(maximumHeight: 700).environment(model))
+    let host = PanelHostingView(rootView: PanelRoot(model: model, updater: nil, maximumHeight: 700))
+    host.configureDisclosures()
     host.setFrameSize(host.fittingSize)
     let window = mount(host)
     defer { window.contentView = nil; window.close() }
@@ -470,6 +473,7 @@ struct PanelSizingTests {
     #expect((sliders.first?.object.accessibilityValueDescription?() ?? nil)
       == KeepAwakeDuration.untilTurnedOff.title)
     #expect(!model.keepAwake.isOn, "Opening the duration choices must not start a hold")
+    #expect(host.rootView.disclosure != nil, "The host, not local state, holds the open disclosure")
   }
 
   // MARK: - The care disclosure
@@ -483,7 +487,8 @@ struct PanelSizingTests {
       discovery: ScriptedDiscovery([(id: 7, key: key, name: Self.careName)]), safeMode: safeMode)
     await model.refresh()
     if paused { model.oledCare.pauseDimming(for: key, duration: 15 * 60) }
-    let host = PanelHostingView(rootView: PanelView(maximumHeight: 700).environment(model))
+    let host = PanelHostingView(rootView: PanelRoot(model: model, updater: nil, maximumHeight: 700))
+    host.configureDisclosures()
     host.setFrameSize(host.fittingSize)
     let window = mount(host)
     try await Task.sleep(for: .milliseconds(150))

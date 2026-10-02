@@ -496,7 +496,9 @@ struct PanelView: View {
           HStack {
             Text("Duration").foregroundStyle(.secondary)
             Spacer()
-            Text(awakeIsCustom ? "Custom" : awakeDuration.title).monospacedDigit()
+            Text(verbatim: Self.awakeDurationLabel(
+              awakeDuration, isCustom: awakeIsCustom, isOn: model.keepAwake.isOn))
+              .monospacedDigit()
           }
           .font(.system(size: 11))
           SelectionSlider(value: Binding(
@@ -555,11 +557,19 @@ struct PanelView: View {
   /// the stop shown is only the one nearest the time left, so re-choosing it is
   /// how a person asks for that full duration from now. `start(for:)` replaces
   /// the deadline on the one assertion, so a repeat never takes a second.
+  /// Nil when macOS refuses the assertion, so the row never names a stop that
+  /// is not holding the display awake.
   @discardableResult
   static func chooseAwakeDuration(_ value: Double, keepAwake: KeepAwake) -> KeepAwakeDuration? {
     guard let duration = KeepAwakeDuration(rawValue: Int(value.rounded())) else { return nil }
     duration.apply(to: keepAwake)
-    return duration
+    return keepAwake.isOn ? duration : nil
+  }
+
+  /// "Custom" describes a running hold; once the hold ends, on its own or by
+  /// the switch, the row names the stop the switch would start.
+  static func awakeDurationLabel(_ duration: KeepAwakeDuration, isCustom: Bool, isOn: Bool) -> String {
+    isCustom && isOn ? "Custom" : duration.title
   }
 
   /// What the native slider speaks for a stop. The `NSSlider` is its own
@@ -576,7 +586,10 @@ struct PanelView: View {
   }
 
   private func synchronizeAwakeDuration() {
-    guard model.keepAwake.isOn else { return }
+    guard model.keepAwake.isOn else {
+      awakeIsCustom = false
+      return
+    }
     let named = KeepAwakeDuration.describing(model.keepAwake)
     // The slider still needs a position; the label says the hold is custom.
     awakeDuration = named ?? model.keepAwake.expiresAt.map {

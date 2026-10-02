@@ -69,7 +69,7 @@ the display controller is actually driving.
   and fails when it is smaller than that pixel count, which would crop the
   desktop. On a failure the previous resolution comes back on its own, a
   message says what the display actually received, and that size is kept out
-  of the size list until Candela restarts.
+  of the size list on that connection until Candela restarts.
 - **Rendered by Candela.** Candela puts the display back on the timing of its
   own mode, the one it was running before the size was engaged. The signal
   passes at the panel's native resolution or at that mode's pixel count, and
@@ -81,9 +81,10 @@ the display controller is actually driving.
 
 If the previous resolution cannot be put back, the usual recovery countdown
 takes over. Nothing changes, and the usual countdown applies, when the
-controller does not report its signal, when its reading is identical to the one
-taken before the change (a controller can keep reporting the outgoing timing
-for a while), or when its readings have not settled. The copied or exported
+controller does not report its signal, when its readings have not settled, or,
+after a change to a size marked **Added by Candela**, when its reading is
+identical to the one taken before the change (a controller can keep reporting
+the outgoing timing for a while). The copied or exported
 diagnostics report includes the signal's size and refresh rate when the
 controller reports them.
 

@@ -583,6 +583,13 @@ struct CopyBuilderTests {
     #expect(!synthesis.contains(" x "))
     #expect(synthesis.contains("renders was removed"))
     #expect(!synthesis.contains("rendered size"))
+    // A measured rate carries float noise; the sentence prints the published one.
+    for measured in [120.0004, 119.99] {
+      let noisy = render(SynthesisCopy.engineFailure(.scanoutMismatch(
+        ScanoutTiming(width: 2560, height: 1440, refreshHz: measured))))
+      #expect(noisy.contains("120 Hz"))
+      #expect(!noisy.contains("120.0"))
+    }
     #expect(render(DisplayModeCopy.startFailure(reason)).contains("previous resolution was restored"))
     #expect(DisplayModeCopy.startFailureSubject(displayName: "External", reason: reason) == "External")
     let reapply = render(DisplayModeCopy.reapply(requested: Self.descriptor, notice: .failed(error)))
@@ -714,7 +721,7 @@ struct CopyBuilderTests {
     #expect(!tooltip.contains(" x "))
     #expect(!tooltip.contains(".000"))
 
-    let restart = "\(AppInfo.productName) won't offer it again until it restarts."
+    let restart = "\(AppInfo.productName) won't offer that resolution on this connection again until \(AppInfo.productName) restarts."
     let sentence = DisplayModeCopy.scanoutRejected(commit)
     #expect(sentence.hasPrefix("The display took \(DisplayModeCopy.size(width: 2560, height: 1440)), 120 Hz."))
     #expect(sentence.hasSuffix(restart))

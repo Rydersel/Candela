@@ -350,7 +350,7 @@ struct EndTimeCalendarView: View {
     let isSelected = calendar.isDate(date, inSameDayAs: day)
     let isToday = calendar.isDate(date, inSameDayAs: today)
     return Button { day = date; selected() } label: {
-      Text("\(calendar.component(.day, from: date))")
+      Text(verbatim: String(calendar.component(.day, from: date)))
         .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
         .settingsText(isSelected ? .white : SettingsTheme.titleColor)
         .frame(maxWidth: .infinity, minHeight: 36)
