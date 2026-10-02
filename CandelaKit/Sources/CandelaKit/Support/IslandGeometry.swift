@@ -30,11 +30,10 @@ public enum IslandGeometry {
   /// The notch from the screen's auxiliary areas: the gap between them is the
   /// glass. Without them, a drawn notch centred on the FULL frame.
   ///
-  /// A visible bar hides anything a window draws in the strip beside the notch,
-  /// at every level up to the shielding one, so the Island cannot trace the
-  /// glass then. It hangs from the bar's bottom edge instead, in the notchless
-  /// form, still centred under the glass where there is one. `menuBarHeight`
-  /// is nil while the bar is hidden.
+  /// A visible bar covers the strip beside the notch at every window level up
+  /// to shielding, so the Island cannot trace the glass. It hangs notchless from
+  /// the bar's bottom edge instead, still centred under any glass.
+  /// `menuBarHeight` is nil while the bar is hidden.
   public static func notch(
     screen: CGRect, menuBarHeight: CGFloat?, auxiliaryTopLeft: CGRect?, auxiliaryTopRight: CGRect?
   ) -> IslandNotch {
@@ -53,8 +52,8 @@ public enum IslandGeometry {
       isReal: false)
   }
 
-  /// The window: its top on the notch's top (the screen's edge, or the bar's
-  /// bottom when the bar is showing), as wide as the screen for the edge styles.
+  /// The window: top on the notch's top (the screen edge, or the bar's bottom
+  /// while it shows), as wide as the screen for the edge styles.
   public static func panelFrame(screen: CGRect, notch: IslandNotch, fullWidth: Bool) -> CGRect {
     let height = notch.rect.height + panelExtraHeight
     let top = notch.rect.maxY

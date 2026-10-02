@@ -4,7 +4,8 @@ import QuartzCore
 
 /// The three Island styles. The notch is the island where the display has one;
 /// where it does not, nothing pretends to be one: the drop grows straight down
-/// from the top edge and the edge trace runs straight. The value is a luminous
+/// from the top edge and the edge trace runs straight. A visible menu bar lowers
+/// the Island to the bar's bottom edge in the notchless form. The value is a luminous
 /// trace and the information sits where there is screen; nothing is drawn on
 /// the glass.
 ///

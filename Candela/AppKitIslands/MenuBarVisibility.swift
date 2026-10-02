@@ -1,25 +1,23 @@
 import AppKit
 import CoreGraphics
 
-/// Whether a display's menu bar is on screen right now, and how tall it is.
+/// Whether a display's menu bar is on screen, and its height.
 ///
-/// Neither `NSScreen` answer works [MEASURED 2026-10-02]. `frame.maxY -
-/// visibleFrame.maxY` reads 38 on the notched built-in with the bar auto-hidden
-/// (the notch's safe area) and 39 with it shown, and 0 on an external either
-/// way. `menuBarAllowance` returns the bar's thickness even while it is hidden.
+/// `NSScreen` cannot tell [MEASURED 2026-10-02]. `frame.maxY - visibleFrame.maxY`
+/// reads 38 hidden and 39 shown on the notched built-in (the notch's safe area),
+/// 0 on an external either way; `menuBarAllowance` reports the bar's thickness
+/// even while it is hidden.
 ///
-/// What does change is the window server's own bar window: owner "Window
-/// Server", layer 24, origin at the display's top-left, the display's full
-/// width and the bar's height (0,0 1800x39 on the built-in, 1800,0 2560x30 on
-/// an external). With the bar auto-hidden no Window Server window sits at
-/// layer 24 on any display. It is matched on owner, layer and bounds, never on
-/// its "Menubar" title: window titles are withheld from a process without
-/// Screen Recording, which the app does not ask for, while owner, layer and
-/// bounds are reported regardless.
+/// The window server's bar window does change: owner "Window Server", layer 24,
+/// at the display's top-left, full width, bar height (0,0 1800x39 on the
+/// built-in, 1800,0 2560x30 on an external). With the bar auto-hidden no Window
+/// Server window sits at layer 24 on any display. Matched on owner, layer and
+/// bounds, never the "Menubar" title: titles are withheld without Screen
+/// Recording, which the app does not request.
 @MainActor
 enum MenuBarVisibility {
   private static let barLayer = 24
-  /// Generous for any bar thickness, short of anything that could be a real window.
+  /// Room for any bar thickness, short of a real window's height.
   private static let heightRange: ClosedRange<CGFloat> = 1...60
 
   /// Nil while the bar is hidden, or when the window list cannot say.
