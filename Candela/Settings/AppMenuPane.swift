@@ -261,7 +261,7 @@ struct AppMenuPane: View {
 
         SettingsCardDivider()
 
-        SettingRow(LocalizedStringKey(IndicatorStyleCopy.positionCaption(for: prefs.hudStyle, kind: .brightness))) {
+        SettingRow(caption: SettingsCaption(verbatim: IndicatorStyleCopy.positionCaption(for: prefs.hudStyle, kind: .brightness))) {
           ThemedChoiceRow(label: "Brightness indicator position:", selection: Binding(
             get: { prefs.hudPositionBrightness },
             set: { position in
@@ -281,7 +281,7 @@ struct AppMenuPane: View {
 
         SettingsCardDivider()
 
-        SettingRow(LocalizedStringKey(IndicatorStyleCopy.positionCaption(for: prefs.hudStyle, kind: .volume))) {
+        SettingRow(caption: SettingsCaption(verbatim: IndicatorStyleCopy.positionCaption(for: prefs.hudStyle, kind: .volume))) {
           ThemedChoiceRow(label: "Volume indicator position:", selection: Binding(
             get: { prefs.hudPositionVolume },
             set: { position in
