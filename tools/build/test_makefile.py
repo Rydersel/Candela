@@ -24,10 +24,11 @@ class MakefileTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         for name in ("Makefile", "project.yml"):
             shutil.copy2(ROOT / name, self.root / name)
-        checker = ROOT / "tools/build/check-release-markers.sh"
-        if checker.exists():
-            (self.root / "tools/build").mkdir(parents=True)
-            shutil.copy2(checker, self.root / "tools/build")
+        for script in ("check-release-markers.sh", "deploy-local.sh"):
+            source = ROOT / "tools/build" / script
+            if source.exists():
+                (self.root / "tools/build").mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, self.root / "tools/build")
         for name in ("Candela", "CandelaAppTests", "CandelaKit", "bin"):
             (self.root / name).mkdir()
         # project.yml compiles the engine suite's in-memory defaults into the
@@ -170,6 +171,16 @@ class MakefileTests(unittest.TestCase):
         args = self.last_build()
         self.assertEqual(args[args.index("-configuration") + 1], "Release")
         self.assertIn("CODE_SIGN_IDENTITY=-", args)
+
+    def test_deploy_runs_the_gate_then_refuses_without_the_signing_check(self):
+        self.compile_binary("Contents/MacOS/Candela", "Where this display has been lit")
+        dest = self.root / "Applications"
+        dest.mkdir()
+        result = self.make("deploy", f"DEST={dest}", succeeds=False)
+        args = self.last_build()
+        self.assertEqual(args[args.index("-configuration") + 1], "Release")
+        self.assertIn("verify-signing.sh", result.stdout)
+        self.assertFalse((dest / "Candela.app").exists())
 
     def test_markers_reject_marker_in_nested_macho(self):
         self.compile_binary("Contents/MacOS/Candela", "Where this display has been lit")
