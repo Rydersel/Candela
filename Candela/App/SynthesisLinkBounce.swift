@@ -113,11 +113,11 @@ struct BouncingSynthesisDriver: SynthesisDriving {
       } else if let timing = await steadyMismatch(
         on: displayID, retimedOnto: target, landed: landed, nativePixels: nativePixels) {
         Self.log.info("synthesis.retime display \(displayID) landed on the wrong timing (\(timing.diagnosticDescription, privacy: .public)); bouncing")
-        await bounce(displayID)
         // The HDR round trip can drop the re-time, and a target-sized wire on a
         // mode of the mirror's choosing is the measured crop, not the re-time.
-        landed = isOn(target, displayID)
-        if !landed {
+        // A skipped bounce moved nothing, so the landing it found still stands.
+        if await bounce(displayID), await stillOn(target, displayID) == false {
+          landed = false
           Self.log.info("synthesis.retime display \(displayID) left its re-time target during the bounce")
         }
       }
@@ -259,6 +259,21 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     return true
   }
 
+  /// Whether the display is still on `target` after the bounce, nil when no
+  /// mode can be read. A read straight after the off leg can be nil or still
+  /// landing, so a miss takes one more read a `timingPoll` later before it
+  /// counts. Unknown is not "off": it cannot overturn a landing already seen.
+  private func stillOn(_ target: DisplayMode?, _ displayID: CGDirectDisplayID) async -> Bool? {
+    if isOn(target, displayID) { return true }
+    try? await Task.sleep(for: durations.timingPoll)
+    if isOn(target, displayID) { return true }
+    guard configurator.currentMode(for: displayID) != nil else {
+      Self.log.info("synthesis.retime display \(displayID) has no readable mode after the bounce; keeping the landing seen before it")
+      return nil
+    }
+    return false
+  }
+
   /// Geometry and quantized refresh, never `ioModeID`, which is positional.
   private func isOn(_ target: DisplayMode?, _ displayID: CGDirectDisplayID) -> Bool {
     guard let target, let achieved = configurator.currentMode(for: displayID) else { return false }
@@ -352,8 +367,11 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     await engine.pairing(forPhysical: displayID)
   }
 
-  private func bounce(_ displayID: CGDirectDisplayID) async {
-    guard await hdr.supportsHDR(displayID) else { return }
+  /// Returns whether the round trip ran: false when HDR is unsupported, or
+  /// live or unvouched for, and nothing was written.
+  @discardableResult
+  private func bounce(_ displayID: CGDirectDisplayID) async -> Bool {
+    guard await hdr.supportsHDR(displayID) else { return false }
     // The engage's reconfigure is still settling when this runs, and the
     // MonitorPanel access lock is non-blocking: the first write straight after
     // the engage was measured refused. Settle FIRST, then read the guard.
@@ -367,7 +385,7 @@ struct BouncingSynthesisDriver: SynthesisDriving {
       Self.log.info(
         "synthesis.bounce skipped on display \(displayID): HDR is live, or its state is nobody's to vouch for"
       )
-      return
+      return false
     }
     var wentOn = false
     for attempt in 1...3 {
@@ -398,6 +416,7 @@ struct BouncingSynthesisDriver: SynthesisDriving {
         "synthesis.bounce finished on display \(displayID): HDR is measured off (round trip \(wentOn, privacy: .public))"
       )
     }
+    return true
   }
 
   /// The OFF discipline, and the one hard rule in this file: HDR left standing

@@ -142,6 +142,45 @@ struct SynthesisTailTests {
     #expect(fixture.synthesis.pairings.isEmpty)
   }
 
+  /// A mode read that comes back empty after the bounce's off leg says nothing
+  /// about where the display is. It cannot overturn the re-time that landed
+  /// before the bounce, so a target-sized wire still reads as the re-time.
+  @Test func anUnreadableModeAfterTheBounceKeepsTheLandedRetime() async throws {
+    let hdr = FakeSynthesisHDR()
+    let fixture = Fixture(hdr: hdr)
+    defer { fixture.forgetPrefs() }
+    let rate = Fixture.nativeHz
+    let native = try nativeRow(fixture)
+    let own = DisplayMode(ioModeID: 4, logicalWidth: 2560, logicalHeight: 1440,
+      pixelWidth: 2560, pixelHeight: 1440, refreshHz: rate, isNative: false)
+    let twin = DisplayMode(ioModeID: 5, logicalWidth: 1280, logicalHeight: 720,
+      pixelWidth: 2560, pixelHeight: 1440, refreshHz: rate, isNative: false)
+    let display = try fixture.configured(Self.panelID)
+    fixture.world.attach(display, modes: [native, own, twin], current: own,
+      nativePixels: (width: Fixture.nativeWidth, height: Fixture.nativeHeight))
+    fixture.modes.refreshCatalog(for: Self.panelID)
+    let stop = try firstStop(fixture)
+    fixture.configurator.updatesCurrentModeOnApply = true
+    let world = fixture.world
+    let crop = ScanoutTiming(width: 2560, height: 1440, refreshHz: rate)
+    let wrong = ScanoutTiming(width: 1280, height: 1024, refreshHz: rate)
+    let id = Self.panelID
+    hdr.onLeg = { enabled in if !enabled { world.setCurrentMode(nil, for: id) } }
+    fixture.configurator.scanoutRead = { _ in
+      if world.applies.isEmpty { return crop }
+      return hdr.legs.isEmpty ? wrong : crop
+    }
+
+    let result = await fixture.synthesis.engage(stop, on: display)
+
+    #expect(fixture.configurator.restores.first?.mode == twin)
+    #expect(hdr.legs.map(\.enabled) == [true, false])
+    #expect(!result.isFailure, "\(result)")
+    #expect(fixture.synthesis.pairings.count == 1)
+    world.setCurrentMode(twin, for: id)
+    #expect(await fixture.synthesis.disengageForModeChange(display))
+  }
+
   /// The record can lag the re-time: a wrong timing that holds across the
   /// short poll and gives way at the extra read is the previous timing still
   /// landing, not a link the bounce has to renegotiate.

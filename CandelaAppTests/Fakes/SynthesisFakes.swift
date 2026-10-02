@@ -132,7 +132,9 @@ final class FakeDisplayWorld: @unchecked Sendable {
     lock.withLock { currentByID[displayID] }
   }
 
-  func setCurrentMode(_ mode: DisplayMode, for displayID: CGDirectDisplayID) {
+  /// nil stands for a mode read that came back empty, as one straight after a
+  /// reconfiguration can.
+  func setCurrentMode(_ mode: DisplayMode?, for displayID: CGDirectDisplayID) {
     lock.withLock { currentByID[displayID] = mode }
   }
 
