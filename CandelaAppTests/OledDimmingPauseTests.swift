@@ -208,8 +208,8 @@ struct OledDimmingPauseTests {
     staged.lastAppliedAlpha = 0.5
     care.states[rig.key] = staged
     #expect(controller.temporaryDimFactor == 0.4)
-    let standardBefore = Self.appOwned(UserDefaults.standard)
-    let storeBefore = Self.appOwned(rig.defaults)
+    let standardBefore = Self.appOwned(UserDefaults.standard, displayKey: rig.key)
+    let storeBefore = Self.appOwned(rig.defaults, displayKey: rig.key)
     #expect(care.pauseDimming(for: rig.key, until: Date().addingTimeInterval(600)))
     let paused = try #require(care.states[rig.key])
     #expect(!paused.lockDimEngaged)
@@ -219,20 +219,23 @@ struct OledDimmingPauseTests {
     #expect(care.dimStates[rig.key] == .active)
     // Session-only, through the path that ends the lock dim, renders and writes
     // dimStates: nothing under the app's own keys changed in either domain.
-    #expect(Self.appOwned(UserDefaults.standard) == standardBefore)
-    #expect(Self.appOwned(rig.defaults) == storeBefore)
+    #expect(Self.appOwned(UserDefaults.standard, displayKey: rig.key) == standardBefore)
+    #expect(Self.appOwned(rig.defaults, displayKey: rig.key) == storeBefore)
     care.resumeDimming(for: rig.key)
     #expect(care.dimmingPauseDeadline(for: rig.key) == nil)
-    #expect(Self.appOwned(UserDefaults.standard) == standardBefore)
-    #expect(Self.appOwned(rig.defaults) == storeBefore)
+    #expect(Self.appOwned(UserDefaults.standard, displayKey: rig.key) == standardBefore)
+    #expect(Self.appOwned(rig.defaults, displayKey: rig.key) == storeBefore)
   }
 
   /// Every key the app writes is a `PrefName` raw value, optionally scoped by
-  /// `.<persistenceKey>`, or OLED care's own `oled…` engine state.
-  private static func appOwned(_ defaults: UserDefaults) -> NSDictionary {
+  /// `.<persistenceKey>`, or OLED care's own `oled…` engine state; any key that
+  /// names the display is kept too, so a pause persisted under a new key of its
+  /// own would still be caught.
+  private static func appOwned(_ defaults: UserDefaults, displayKey: String? = nil) -> NSDictionary {
     let names = PrefName.allCases.map(\.rawValue)
     return defaults.dictionaryRepresentation().filter { key, _ in
       key.hasPrefix("oled") || names.contains { key == $0 || key.hasPrefix($0 + ".") }
+        || (displayKey.map { key.contains($0) } ?? false)
     } as NSDictionary
   }
 

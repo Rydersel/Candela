@@ -720,6 +720,20 @@ struct PanelRowModelTests {
     #expect(KeepAwakeDuration.describing(awake) == first)
   }
 
+  /// Confirming the dialog unchanged hands back the hold's own deadline; the
+  /// stop it started from must keep its name rather than re-match the time left.
+  @Test func anUnchangedReopenKeepsTheStopsName() {
+    let clock = TimeSource()
+    let awake = KeepAwake(holder: Holder(), now: { clock.now }, clockNotifications: NotificationCenter())
+    defer { awake.setOn(false) }
+    let start = clock.now
+    KeepAwakeDuration.oneHour.apply(to: awake)
+    let deadline = awake.expiresAt!
+    clock.now = start.addingTimeInterval(20 * 60)
+    #expect(KeepAwakeDuration.start(awake, until: deadline, now: clock.now))
+    #expect(KeepAwakeDuration.describing(awake) == .oneHour)
+  }
+
   /// A hold that ended on its own must not leave "Custom" beside an off switch.
   @Test func theDurationRowNeverReadsCustomWhileTheHoldIsOff() {
     for duration in KeepAwakeDuration.allCases {

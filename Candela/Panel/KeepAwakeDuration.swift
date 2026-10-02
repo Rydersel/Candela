@@ -56,7 +56,11 @@ enum KeepAwakeDuration: Int, CaseIterable {
   /// nearest stop the switch would start.
   @MainActor static func start(_ keepAwake: KeepAwake, until deadline: Date, now: Date = Date()) -> Bool {
     guard keepAwake.start(until: deadline) else { return false }
-    lastStarted = matching(remaining: deadline.timeIntervalSince(now)).map { ($0, deadline) }
+    // Confirming the dialog unchanged keeps the hold's own deadline, so the stop
+    // it started from keeps its name instead of re-matching the time left.
+    if lastStarted?.expiresAt != deadline {
+      lastStarted = matching(remaining: deadline.timeIntervalSince(now)).map { ($0, deadline) }
+    }
     return true
   }
 

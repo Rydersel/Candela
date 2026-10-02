@@ -554,8 +554,9 @@ struct PanelView: View {
   }
 
   /// A choice on the slider always starts the hold, the current stop included:
-  /// the stop shown is only the one nearest the time left, so re-choosing it is
-  /// how a person asks for that full duration from now. `start(for:)` replaces
+  /// a stop hold keeps the name it started with and a custom hold shows the
+  /// stop nearest the time left, so re-choosing the shown stop is how a person
+  /// asks for that full duration from now. `start(for:)` replaces
   /// the deadline on the one assertion, so a repeat never takes a second.
   /// Nil when macOS refuses the assertion, so the row never names a stop that
   /// is not holding the display awake.

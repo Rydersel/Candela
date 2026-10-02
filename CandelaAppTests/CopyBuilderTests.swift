@@ -721,7 +721,7 @@ struct CopyBuilderTests {
     #expect(!tooltip.contains(" x "))
     #expect(!tooltip.contains(".000"))
 
-    let restart = "\(AppInfo.productName) won't offer that resolution on this connection again until \(AppInfo.productName) restarts."
+    let restart = "\(AppInfo.productName) won't offer the resolution you picked on this connection again until it restarts."
     let sentence = DisplayModeCopy.scanoutRejected(commit)
     #expect(sentence.hasPrefix("The display took \(DisplayModeCopy.size(width: 2560, height: 1440)), 120 Hz."))
     #expect(sentence.hasSuffix(restart))
