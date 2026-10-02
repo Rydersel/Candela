@@ -175,8 +175,7 @@ The actual running candidate's one-display menu grew from 154 to 257 points.
 Live slider actions selected one hour while off without activating a session,
 then started one hour, replaced it with 15 minutes and switched to indefinite.
 All three states reused the same Candela Keep Awake assertion; switching off
-removed it. Final build and picker verification are recorded in
-[release-controls-verification.md](release-controls-verification.md).
+removed it.
 
 
 ## Anchored menu animation, September 30
