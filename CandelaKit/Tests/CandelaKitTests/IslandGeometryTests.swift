@@ -11,7 +11,7 @@ struct IslandGeometryTests {
   let auxRight = CGRect(x: 1010, y: 1131, width: 790, height: 38)
 
   @Test func aRealNotchIsTheGapBetweenTheAuxiliaryAreas() {
-    let notch = IslandGeometry.notch(screen: builtIn, auxiliaryTopLeft: auxLeft, auxiliaryTopRight: auxRight)
+    let notch = IslandGeometry.notch(screen: builtIn, visibleFrame: builtIn, auxiliaryTopLeft: auxLeft, auxiliaryTopRight: auxRight)
     #expect(notch.isReal)
     #expect(notch.rect == CGRect(x: 790, y: 1131, width: 220, height: 38))
   }
@@ -20,13 +20,13 @@ struct IslandGeometryTests {
   /// as tall as the notch would be.
   @Test func aDrawnNotchCentresOnTheScreenAtTheFallbackSize() {
     let external = CGRect(x: -2560, y: -300, width: 2560, height: 1440)
-    let notch = IslandGeometry.notch(screen: external, auxiliaryTopLeft: nil, auxiliaryTopRight: nil)
+    let notch = IslandGeometry.notch(screen: external, visibleFrame: external, auxiliaryTopLeft: nil, auxiliaryTopRight: nil)
     #expect(!notch.isReal)
     #expect(notch.rect == CGRect(x: -2560 + 1170, y: -300 + 1440 - 38, width: 220, height: 38))
   }
 
   @Test func thePanelSpansTheNotchOrTheScreen() {
-    let notch = IslandGeometry.notch(screen: builtIn, auxiliaryTopLeft: auxLeft, auxiliaryTopRight: auxRight)
+    let notch = IslandGeometry.notch(screen: builtIn, visibleFrame: builtIn, auxiliaryTopLeft: auxLeft, auxiliaryTopRight: auxRight)
     let narrow = IslandGeometry.panelFrame(screen: builtIn, notch: notch, fullWidth: false)
     #expect(narrow == CGRect(x: 900 - 330, y: 1169 - 98, width: 660, height: 98))
     let wide = IslandGeometry.panelFrame(screen: builtIn, notch: notch, fullWidth: true)
@@ -36,7 +36,7 @@ struct IslandGeometryTests {
   /// Closed sits one point inside a real notch so nothing of ours shows below the
   /// glass's corners.
   @Test func closedAndOpenTabsInPanelCoordinates() {
-    let notch = IslandGeometry.notch(screen: builtIn, auxiliaryTopLeft: auxLeft, auxiliaryTopRight: auxRight)
+    let notch = IslandGeometry.notch(screen: builtIn, visibleFrame: builtIn, auxiliaryTopLeft: auxLeft, auxiliaryTopRight: auxRight)
     let panel = IslandGeometry.panelFrame(screen: builtIn, notch: notch, fullWidth: false)
     let closed = IslandGeometry.closedTab(notch: notch, panel: panel)
     #expect(closed == CGRect(x: 221, y: 61, width: 218, height: 38))
@@ -50,7 +50,7 @@ struct IslandGeometryTests {
   /// No notch, no pretend notch: the drop's tab starts as a flat line on the top
   /// edge and opens only to the row's height plus headroom.
   @Test func aDrawnNotchGivesAFlatClosedTabAndAShallowOpenOne() {
-    let notch = IslandGeometry.notch(screen: external, auxiliaryTopLeft: nil, auxiliaryTopRight: nil)
+    let notch = IslandGeometry.notch(screen: external, visibleFrame: external, auxiliaryTopLeft: nil, auxiliaryTopRight: nil)
     let panel = IslandGeometry.panelFrame(screen: external, notch: notch, fullWidth: false)
     #expect(IslandGeometry.glass(notch: notch, panel: panel) == CGRect(x: 220, y: 60, width: 220, height: 38))
     #expect(IslandGeometry.closedTab(notch: notch, panel: panel) == CGRect(x: 204, y: 98, width: 252, height: 0))
@@ -60,9 +60,44 @@ struct IslandGeometryTests {
   /// The edge styles' side information closes in on a narrow gap at the
   /// screen's centre rather than flanking a notch that is not there.
   @Test func aDrawnNotchFlanksANarrowCentredGap() {
-    let notch = IslandGeometry.notch(screen: external, auxiliaryTopLeft: nil, auxiliaryTopRight: nil)
+    let notch = IslandGeometry.notch(screen: external, visibleFrame: external, auxiliaryTopLeft: nil, auxiliaryTopRight: nil)
     let panel = IslandGeometry.panelFrame(screen: external, notch: notch, fullWidth: true)
     #expect(IslandGeometry.flank(notch: notch, panel: panel) == CGRect(x: 1268, y: 60, width: 24, height: 38))
+  }
+
+  /// The built-in with its bar showing: the visible frame stops 38 pt short of the top.
+  var builtInBelowBar: CGRect { CGRect(x: 0, y: 0, width: 1800, height: 1169 - 38) }
+
+  @Test func theBarIsVisibleOnlyWhenTheVisibleFrameStopsShortOfTheTop() {
+    #expect(IslandGeometry.menuBarVisible(screen: builtIn, visibleFrame: builtInBelowBar))
+    #expect(!IslandGeometry.menuBarVisible(screen: builtIn, visibleFrame: builtIn))
+    // A Dock at the bottom moves the visible frame's floor, never its top.
+    #expect(!IslandGeometry.menuBarVisible(screen: builtIn, visibleFrame: CGRect(x: 0, y: 80, width: 1800, height: 1089)))
+  }
+
+  /// A visible bar hides the strip beside the glass, so the anchor drops to the
+  /// bar's bottom edge, keeps the glass's x and width, and stops being real.
+  @Test func aVisibleBarHangsANotchlessAnchorUnderTheGlass() {
+    let notch = IslandGeometry.notch(
+      screen: builtIn, visibleFrame: builtInBelowBar, auxiliaryTopLeft: auxLeft, auxiliaryTopRight: auxRight)
+    #expect(!notch.isReal)
+    #expect(notch.rect == CGRect(x: 790, y: 1131 - 38, width: 220, height: 38))
+    #expect(notch.rect.maxY == builtIn.maxY - 38)
+    for fullWidth in [false, true] {
+      let panel = IslandGeometry.panelFrame(screen: builtIn, notch: notch, fullWidth: fullWidth)
+      #expect(panel.maxY == builtIn.maxY - 38, "fullWidth \(fullWidth)")
+    }
+    // The notchless tab: flat on the bar's edge, opening to the row plus headroom.
+    let panel = IslandGeometry.panelFrame(screen: builtIn, notch: notch, fullWidth: false)
+    #expect(IslandGeometry.closedTab(notch: notch, panel: panel) == CGRect(x: 204, y: 98, width: 252, height: 0))
+    #expect(IslandGeometry.openTab(notch: notch, panel: panel) == CGRect(x: 204, y: 98 - 44, width: 252, height: 44))
+  }
+
+  @Test func aVisibleBarOnADisplayWithoutANotchCentresBelowTheBar() {
+    let below = CGRect(x: external.minX, y: external.minY, width: external.width, height: external.height - 25)
+    let notch = IslandGeometry.notch(screen: external, visibleFrame: below, auxiliaryTopLeft: nil, auxiliaryTopRight: nil)
+    #expect(!notch.isReal)
+    #expect(notch.rect == CGRect(x: -2560 + 1170, y: -300 + 1440 - 25 - 38, width: 220, height: 38))
   }
 
   @Test func theGlassOutlineHugsTheNotchFromOutside() {

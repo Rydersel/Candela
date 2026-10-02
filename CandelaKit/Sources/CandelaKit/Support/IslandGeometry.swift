@@ -27,31 +27,47 @@ public enum IslandGeometry {
   static let panelExtraHeight: CGFloat = 60
   static let panelExtraWidth: CGFloat = 440
 
+  /// Whether the menu bar is on screen now. An auto-hidden bar collapses the
+  /// difference to zero; the half point absorbs rounding in the reported frames.
+  public static func menuBarVisible(screen: CGRect, visibleFrame: CGRect) -> Bool {
+    screen.maxY - visibleFrame.maxY > 0.5
+  }
+
   /// The notch from the screen's auxiliary areas: the gap between them is the
   /// glass. Without them, a drawn notch centred on the FULL frame.
+  ///
+  /// A visible bar hides anything a window draws in the strip beside the notch,
+  /// at every level up to the shielding one, so the Island cannot trace the
+  /// glass then. It hangs from the bar's bottom edge instead, in the notchless
+  /// form, still centred under the glass where there is one.
   public static func notch(
-    screen: CGRect, auxiliaryTopLeft: CGRect?, auxiliaryTopRight: CGRect?
+    screen: CGRect, visibleFrame: CGRect, auxiliaryTopLeft: CGRect?, auxiliaryTopRight: CGRect?
   ) -> IslandNotch {
+    let barVisible = menuBarVisible(screen: screen, visibleFrame: visibleFrame)
+    let top = barVisible ? visibleFrame.maxY : screen.maxY
     if let left = auxiliaryTopLeft, let right = auxiliaryTopRight {
       let width = screen.width - left.width - right.width
+      let height = barVisible ? fallbackNotchSize.height : left.height
       return IslandNotch(
-        rect: CGRect(x: screen.minX + left.width, y: screen.maxY - left.height, width: width, height: left.height),
-        isReal: true)
+        rect: CGRect(x: screen.minX + left.width, y: top - height, width: width, height: height),
+        isReal: !barVisible)
     }
     let size = fallbackNotchSize
     return IslandNotch(
-      rect: CGRect(x: screen.midX - size.width / 2, y: screen.maxY - size.height, width: size.width, height: size.height),
+      rect: CGRect(x: screen.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height),
       isReal: false)
   }
 
-  /// The window: flush with the top, as wide as the screen for the edge styles.
+  /// The window: its top on the notch's top (the screen's edge, or the bar's
+  /// bottom when the bar is showing), as wide as the screen for the edge styles.
   public static func panelFrame(screen: CGRect, notch: IslandNotch, fullWidth: Bool) -> CGRect {
     let height = notch.rect.height + panelExtraHeight
+    let top = notch.rect.maxY
     if fullWidth {
-      return CGRect(x: screen.minX, y: screen.maxY - height, width: screen.width, height: height)
+      return CGRect(x: screen.minX, y: top - height, width: screen.width, height: height)
     }
     let width = notch.rect.width + panelExtraWidth
-    return CGRect(x: notch.rect.midX - width / 2, y: screen.maxY - height, width: width, height: height)
+    return CGRect(x: notch.rect.midX - width / 2, y: top - height, width: width, height: height)
   }
 
   /// The notch in panel coordinates.

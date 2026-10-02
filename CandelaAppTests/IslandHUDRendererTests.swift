@@ -79,4 +79,30 @@ struct IslandHUDRendererTests {
     renderer.show(HUDContent(kind: .brightness, value: 0.8, title: "LG UltraFine"), reduceMotion: false)
     #expect(renderer.traceStrokeEndForTesting == 0.8)
   }
+
+  /// The built-in with its menu bar showing: the anchor sits under the glass at
+  /// the bar's bottom edge and is not real, so nothing traces the hidden strip.
+  static let belowBar = IslandNotch(rect: CGRect(x: 790, y: 1131 - 38, width: 220, height: 38), isReal: false)
+  static let builtIn = CGRect(x: 0, y: 0, width: 1800, height: 1169)
+
+  @MainActor @Test func theEdgeStylesDrawNoNotchUnderAVisibleBar() {
+    for style in [HUDStyle.islandEdge, .islandEdgeCapsules] {
+      let renderer = IslandHUDRenderer(style: style)
+      renderer.layOut(notch: Self.belowBar, screen: Self.builtIn)
+      renderer.show(HUDContent(kind: .brightness, value: 0.5, title: "LG UltraFine"), reduceMotion: true)
+      #expect(Self.filledShapes(in: renderer.contentView.layer!) == 0, "\(style)")
+    }
+    let drop = IslandHUDRenderer(style: .islandDrop)
+    drop.layOut(notch: Self.belowBar, screen: Self.builtIn)
+    #expect(Self.filledShapes(in: drop.contentView.layer!) == 1)
+  }
+
+  @MainActor @Test func theDropTraceFollowsTheValueUnderAVisibleBar() {
+    let renderer = IslandHUDRenderer(style: .islandDrop)
+    renderer.layOut(notch: Self.belowBar, screen: Self.builtIn)
+    renderer.show(HUDContent(kind: .brightness, value: 0.4, title: "LG UltraFine"), reduceMotion: false)
+    #expect(renderer.traceStrokeEndForTesting == 0.4)
+    renderer.show(HUDContent(kind: .brightness, value: 0.8, title: "LG UltraFine"), reduceMotion: false)
+    #expect(renderer.traceStrokeEndForTesting == 0.8)
+  }
 }
