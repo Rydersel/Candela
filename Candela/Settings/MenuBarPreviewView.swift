@@ -155,7 +155,7 @@ struct MenuBarPreviewView: View {
       .padding(.top, Self.menuBarHeight + (holdsPanel ? 5 : 8))
       .padding(.bottom, 8)
       .padding(.leading, position == .topLeft ? 14 : 0)
-      .padding(.trailing, position == .topRight ? 16 : 0)
+      .padding(.trailing, position == .topRight ? 16 + rightSideStripWidth : 0)
     }
   }
 
@@ -489,6 +489,14 @@ struct MenuBarPreviewView: View {
     if onThisSide(prefs.hudPositionBrightness) { kinds.append(.brightness) }
     if onThisSide(prefs.hudPositionVolume) { kinds.append(.volume) }
     return leading ? kinds : kinds.reversed()
+  }
+
+  /// Room the right-edge bars need so the top-right panel sits inward of them
+  /// rather than under them: the bars are centred on the card and the panel
+  /// runs past the middle at any realistic height, and the bars, drawn last,
+  /// would also take its clicks.
+  private var rightSideStripWidth: CGFloat {
+    CGFloat(sideKinds(leading: false).count) * (VerticalPill.size.width * Self.s + 6)
   }
 
   private func sideIndicatorLayer(externals: [AppModel.DisplayState]) -> some View {

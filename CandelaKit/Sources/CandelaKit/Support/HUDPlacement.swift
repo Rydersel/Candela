@@ -75,7 +75,8 @@ public enum HUDPlacement {
   ///
   /// The side anchor takes its edge from the visible frame, so a pinned side Dock
   /// never sits on top of the bar, and its height from the full frame, where the
-  /// middle of the glass is.
+  /// middle of the glass is. It carries its own margin, so `margin` is ignored for
+  /// it, as it is for the fixed homes.
   public static func origin(
     _ anchor: HUDAnchor,
     size: CGSize,

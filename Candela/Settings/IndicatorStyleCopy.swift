@@ -47,6 +47,7 @@ enum IndicatorStyleCopy {
     case .bottomCenter: "\(label(for: style)) sits where macOS put it."
     case .center: "This style sits at the center of the screen."
     case .topEdge: "The Island lives on the notch."
+    // Exhaustiveness only: no style's fixed anchor is a chosen position or a side.
     case .position, .sideCenter: positionCaption(for: .system, kind: kind)
     }
   }
