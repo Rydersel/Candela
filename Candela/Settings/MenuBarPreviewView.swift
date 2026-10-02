@@ -51,7 +51,9 @@ struct MenuBarPreviewView: View {
   // legible inside one form row without dwarfing the controls below.
   private static let s: CGFloat = 0.5
 
-  private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
+  /// Injectable so a render test can choose a style without writing the
+  /// process's standard defaults.
+  var prefs = DisplayPrefs(persistenceKey: "app")
 
   var body: some View {
     // Prefs are plain UserDefaults: without this read a position change would
@@ -70,7 +72,9 @@ struct MenuBarPreviewView: View {
       // The Island styles live on the notch; the miniature grows one, 110 wide,
       // flush with the bar's top, so the preview has somewhere to put them.
       if prefs.hudStyle.isIsland {
-        UnevenRoundedRectangle(bottomLeadingRadius: 5, bottomTrailingRadius: 5)
+        UnevenRoundedRectangle(
+          bottomLeadingRadius: IslandGeometry.cornerRadius * Self.s,
+          bottomTrailingRadius: IslandGeometry.cornerRadius * Self.s)
           .fill(.black)
           .frame(width: IslandGeometry.fallbackNotchSize.width * Self.s, height: Self.menuBarHeight)
           .accessibilityHidden(true)
@@ -471,16 +475,16 @@ struct MenuBarPreviewView: View {
     switch prefs.hudStyle.fixedAnchor {
     case nil, .position:
       EmptyView()
-    case .bottomCenter:
+    case .bottomCenter(let inset):
       HStack(spacing: 6) {
         boxMiniature(kind: .brightness, externals: externals)
         boxMiniature(kind: .volume, externals: externals)
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
       // Not to vertical scale: 300 pt of card stands for a 1169 pt screen, so the
-      // scaled 70 pt inset would lift the box far above where macOS draws it.
-      // Half of it sits at the real 12% of the height.
-      .padding(.bottom, 140 * Self.s * 0.5)
+      // scaled inset would lift the box far above where macOS draws it. Half of
+      // it sits at the real 12% of the height.
+      .padding(.bottom, inset * Self.s * 0.5)
     case .center:
       HStack(spacing: 6) {
         boxMiniature(kind: .brightness, externals: externals)
@@ -517,9 +521,10 @@ struct MenuBarPreviewView: View {
             .foregroundStyle(.secondary)
             .frame(maxHeight: .infinity)
           HStack(spacing: 0.5) {
-            ForEach(0..<16) { index in
+            ForEach(0..<ClassicBox.chicletCount, id: \.self) { index in
               Rectangle()
-                .fill(index < IndicatorSteps.filled(subject.value, of: 16) ? AnyShapeStyle(.secondary) : AnyShapeStyle(.clear))
+                .fill(index < IndicatorSteps.filled(subject.value, of: ClassicBox.chicletCount)
+                  ? AnyShapeStyle(.secondary) : AnyShapeStyle(.clear))
                 .frame(maxWidth: .infinity)
             }
           }
@@ -541,15 +546,24 @@ struct MenuBarPreviewView: View {
   private func islandMiniature(externals: [AppModel.DisplayState]) -> some View {
     let subject = pillSubject(kind: .brightness, externals: externals)
     let notchW = IslandGeometry.fallbackNotchSize.width * Self.s
+    let radius = IslandGeometry.cornerRadius * Self.s
+    // The miniature notch is the menu bar's height, not the real notch's halved.
+    let notchKitHeight = Self.menuBarHeight / Self.s
+    // The real widths halve to under what reads as a line at this size.
+    let dropTraceWidth = max(1.5, IslandGeometry.dropTraceWidth * Self.s)
+    let edgeTraceWidth = max(1.5, IslandGeometry.edgeTraceWidth * Self.s)
     return LiftButton(label: "Island indicator preview on the notch; opens the On-Screen Indicators settings below") {
       jump(.indicators)
     } content: {
       ZStack(alignment: .top) {
         if prefs.hudStyle == .islandDrop {
-          UnevenRoundedRectangle(bottomLeadingRadius: 5, bottomTrailingRadius: 5)
+          let tab = CGRect(
+            x: 0, y: 0,
+            width: IslandGeometry.fallbackNotchSize.width + IslandGeometry.flare * 2,
+            height: notchKitHeight + IslandGeometry.drop)
+          UnevenRoundedRectangle(bottomLeadingRadius: radius, bottomTrailingRadius: radius)
             .fill(.black)
-            .frame(width: notchW + IslandGeometry.flare * 2 * Self.s,
-                   height: Self.menuBarHeight + IslandGeometry.drop * Self.s)
+            .frame(width: tab.width * Self.s, height: tab.height * Self.s)
             .overlay(alignment: .bottom) {
               HStack {
                 Image(systemName: "sun.max.fill").font(.system(size: 7)).foregroundStyle(.white)
@@ -561,9 +575,10 @@ struct MenuBarPreviewView: View {
               .frame(height: IslandGeometry.drop * Self.s)
             }
             .overlay {
-              UnevenRoundedRectangle(bottomLeadingRadius: 5, bottomTrailingRadius: 5)
+              IslandTraceShape(
+                segments: IslandGeometry.outline(around: tab), kitHeight: tab.height, scale: Self.s)
                 .trim(from: 0, to: subject.value)
-                .stroke(.white, lineWidth: 1.5)
+                .stroke(.white, lineWidth: dropTraceWidth)
                 .shadow(color: .white, radius: 2)
             }
         } else {
@@ -575,19 +590,32 @@ struct MenuBarPreviewView: View {
             .padding(.horizontal, prefs.hudStyle == .islandEdgeCapsules ? 5 : 0)
             .padding(.vertical, 2)
             .background(prefs.hudStyle == .islandEdgeCapsules ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: Capsule())
+            // Equal flexible sides keep the gap on the notch, which is centred
+            // on the card whatever the two texts measure.
+            .frame(maxWidth: .infinity, alignment: .trailing)
             Spacer().frame(width: notchW)
             Text(SliderSnap.percentText(subject.value))
               .font(.system(size: 6.5, weight: .semibold).monospacedDigit()).foregroundStyle(.white)
               .padding(.horizontal, prefs.hudStyle == .islandEdgeCapsules ? 5 : 0)
               .padding(.vertical, 2)
               .background(prefs.hudStyle == .islandEdgeCapsules ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: Capsule())
+              .frame(maxWidth: .infinity, alignment: .leading)
           }
           .frame(height: Self.menuBarHeight)
           .frame(maxWidth: .infinity)
-          .overlay(alignment: .top) {
+          .overlay {
             GeometryReader { geo in
-              Rectangle().fill(.white)
-                .frame(width: geo.size.width * subject.value, height: 1.5)
+              let panelWidth = geo.size.width / Self.s
+              let notch = CGRect(
+                x: (panelWidth - IslandGeometry.fallbackNotchSize.width) / 2, y: 0,
+                width: IslandGeometry.fallbackNotchSize.width, height: notchKitHeight)
+              // The top run sits a half line down so the card's clip keeps all of it.
+              let top = notchKitHeight - edgeTraceWidth / 2 / Self.s
+              IslandTraceShape(
+                segments: IslandGeometry.edgeOutline(panelWidth: panelWidth, top: top, around: notch),
+                kitHeight: notchKitHeight, scale: Self.s)
+                .trim(from: 0, to: subject.value)
+                .stroke(.white, lineWidth: edgeTraceWidth)
                 .shadow(color: .white, radius: 2)
             }
           }
@@ -662,6 +690,38 @@ struct MenuBarPreviewView: View {
     case .topRight: "top right"
     }
     return "\(kindName.capitalized) indicator preview at the \(positionName) of the screen; opens the On-Screen Indicators settings below"
+  }
+}
+
+/// An Island trace from the Kit's own path, so `trim` runs the way the real
+/// trace runs. The Kit is y up in window points; SwiftUI is y down, so each
+/// point mirrors about `kitHeight` and scales. Internal, not private, for the
+/// arc-direction test.
+struct IslandTraceShape: Shape {
+  let segments: [IslandGeometry.PathSegment]
+  let kitHeight: CGFloat
+  let scale: CGFloat
+
+  func path(in rect: CGRect) -> Path {
+    func flipped(_ point: CGPoint) -> CGPoint {
+      CGPoint(x: point.x * scale, y: (kitHeight - point.y) * scale)
+    }
+    var path = Path()
+    for segment in segments {
+      switch segment {
+      case .move(let point):
+        path.move(to: flipped(point))
+      case .line(let point):
+        path.addLine(to: flipped(point))
+      case let .arc(center, radius, startDegrees, endDegrees, clockwise):
+        // Mirroring y negates every angle and reverses the turn.
+        path.addArc(
+          center: flipped(center), radius: radius * scale,
+          startAngle: .degrees(-startDegrees), endAngle: .degrees(-endDegrees),
+          clockwise: !clockwise)
+      }
+    }
+    return path
   }
 }
 

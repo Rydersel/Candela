@@ -352,6 +352,21 @@ struct RenderSmokeTests {
       "an ambient scheme flip must be visible to this comparison; max channel delta \(String(describing: delta))")
   }
 
+  /// Every indicator style's miniature, so each drawing branch runs its body:
+  /// the column pills, the boxes at their homes and the three Islands. The
+  /// style goes into in-memory defaults handed to the view, never the
+  /// process's standard domain.
+  @Test(arguments: HUDStyle.allCases)
+  func theMenuBarPreviewRendersEveryIndicatorStyle(_ style: HUDStyle) {
+    let prefs = DisplayPrefs(defaults: InMemoryDefaults(), persistenceKey: "app")
+    prefs.hudStyle = style
+    let image = render(
+      MenuBarPreviewView(jump: { _ in }, prefs: prefs)
+        .environment(TestFixtures.appModel())
+        .frame(width: SettingsTheme.pageWidth))
+    expectPixels(image, "MenuBarPreviewView with the \(String(describing: style)) style")
+  }
+
   // MARK: - The guided setup flow
 
   /// The window the flow asks for is 760x560 at its minimum, so every render
