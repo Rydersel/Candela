@@ -34,7 +34,7 @@ struct IslandGeometryTests {
   }
 
   /// Closed sits one point inside a real notch so nothing of ours shows below the
-  /// glass's corners; a drawn notch IS the closed shape.
+  /// glass's corners.
   @Test func closedAndOpenTabsInPanelCoordinates() {
     let notch = IslandGeometry.notch(screen: builtIn, auxiliaryTopLeft: auxLeft, auxiliaryTopRight: auxRight)
     let panel = IslandGeometry.panelFrame(screen: builtIn, notch: notch, fullWidth: false)
@@ -42,8 +42,28 @@ struct IslandGeometryTests {
     #expect(closed == CGRect(x: 221, y: 61, width: 218, height: 38))
     let open = IslandGeometry.openTab(notch: notch, panel: panel)
     #expect(open == CGRect(x: 220 - 16, y: 60 - 34, width: 220 + 32, height: 38 + 34))
-    let drawn = IslandNotch(rect: notch.rect, isReal: false)
-    #expect(IslandGeometry.closedTab(notch: drawn, panel: panel) == CGRect(x: 220, y: 60, width: 220, height: 38))
+    #expect(IslandGeometry.flank(notch: notch, panel: panel) == IslandGeometry.glass(notch: notch, panel: panel))
+  }
+
+  let external = CGRect(x: -2560, y: -300, width: 2560, height: 1440)
+
+  /// No notch, no pretend notch: the drop's tab starts as a flat line on the top
+  /// edge and opens only to the row's height plus headroom. The glass here is
+  /// (220, 60, 220, 38) in the panel.
+  @Test func aDrawnNotchGivesAFlatClosedTabAndAShallowOpenOne() {
+    let notch = IslandGeometry.notch(screen: external, auxiliaryTopLeft: nil, auxiliaryTopRight: nil)
+    let panel = IslandGeometry.panelFrame(screen: external, notch: notch, fullWidth: false)
+    #expect(IslandGeometry.glass(notch: notch, panel: panel) == CGRect(x: 220, y: 60, width: 220, height: 38))
+    #expect(IslandGeometry.closedTab(notch: notch, panel: panel) == CGRect(x: 204, y: 98, width: 252, height: 0))
+    #expect(IslandGeometry.openTab(notch: notch, panel: panel) == CGRect(x: 204, y: 98 - 44, width: 252, height: 44))
+  }
+
+  /// The edge styles' side information closes in on a narrow gap at the
+  /// screen's centre rather than flanking a notch that is not there.
+  @Test func aDrawnNotchFlanksANarrowCentredGap() {
+    let notch = IslandGeometry.notch(screen: external, auxiliaryTopLeft: nil, auxiliaryTopRight: nil)
+    let panel = IslandGeometry.panelFrame(screen: external, notch: notch, fullWidth: true)
+    #expect(IslandGeometry.flank(notch: notch, panel: panel) == CGRect(x: 1268, y: 60, width: 24, height: 38))
   }
 
   @Test func theGlassOutlineHugsTheNotchFromOutside() {
@@ -71,5 +91,10 @@ struct IslandGeometryTests {
     let plain = IslandGeometry.outline(around: glass)
     #expect(plain.first == .move(CGPoint(x: 790, y: 98)))
     #expect(plain.last == .line(CGPoint(x: 1010, y: 98)))
+  }
+
+  @Test func theStraightEdgeIsOneLineCornerToCorner() {
+    #expect(IslandGeometry.straightEdge(panelWidth: 2560, top: 96)
+      == [.move(CGPoint(x: 0, y: 96)), .line(CGPoint(x: 2560, y: 96))])
   }
 }

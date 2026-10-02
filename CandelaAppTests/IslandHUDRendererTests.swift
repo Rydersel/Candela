@@ -46,4 +46,37 @@ struct IslandHUDRendererTests {
     #expect(renderer.traceStrokeEndForTesting == 0)
     #expect(renderer.readoutForTesting == "Muted")
   }
+
+  /// A display without a notch, at a negative origin like an external left of the built-in.
+  static let drawn = IslandNotch(rect: CGRect(x: -1390, y: 1102, width: 220, height: 38), isReal: false)
+  static let external = CGRect(x: -2560, y: -300, width: 2560, height: 1440)
+
+  /// Filled shape layers anywhere under the content view; the trace layers are
+  /// stroke-only, so only a notch-shaped tab counts.
+  @MainActor static func filledShapes(in layer: CALayer) -> Int {
+    let own = (layer as? CAShapeLayer)?.fillColor != nil ? 1 : 0
+    return own + (layer.sublayers ?? []).reduce(0) { $0 + filledShapes(in: $1) }
+  }
+
+  @MainActor @Test func theEdgeStylesDrawNoNotchWhereThereIsNone() {
+    for style in [HUDStyle.islandEdge, .islandEdgeCapsules] {
+      let renderer = IslandHUDRenderer(style: style)
+      renderer.layOut(notch: Self.drawn, screen: Self.external)
+      renderer.show(HUDContent(kind: .brightness, value: 0.5, title: "LG UltraFine"), reduceMotion: true)
+      #expect(Self.filledShapes(in: renderer.contentView.layer!) == 0, "\(style)")
+    }
+    // The control: the drop's own tab is the one filled shape the count can see.
+    let drop = IslandHUDRenderer(style: .islandDrop)
+    drop.layOut(notch: Self.drawn, screen: Self.external)
+    #expect(Self.filledShapes(in: drop.contentView.layer!) == 1)
+  }
+
+  @MainActor @Test func theDropTraceFollowsTheValueWithoutANotch() {
+    let renderer = IslandHUDRenderer(style: .islandDrop)
+    renderer.layOut(notch: Self.drawn, screen: Self.external)
+    renderer.show(HUDContent(kind: .brightness, value: 0.4, title: "LG UltraFine"), reduceMotion: false)
+    #expect(renderer.traceStrokeEndForTesting == 0.4)
+    renderer.show(HUDContent(kind: .brightness, value: 0.8, title: "LG UltraFine"), reduceMotion: false)
+    #expect(renderer.traceStrokeEndForTesting == 0.8)
+  }
 }

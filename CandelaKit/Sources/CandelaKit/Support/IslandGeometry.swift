@@ -61,15 +61,37 @@ public enum IslandGeometry {
   }
 
   /// One point inside a real notch: the physical corners are rounded and
-  /// anything on the exact edge peeks out below them.
+  /// anything on the exact edge peeks out below them. Without a notch the tab
+  /// starts as nothing at the top edge, at the open width, and only grows down,
+  /// so no pretend notch is ever drawn.
   public static func closedTab(notch: IslandNotch, panel: CGRect) -> CGRect {
     let g = glass(notch: notch, panel: panel)
-    return notch.isReal ? g.insetBy(dx: 1, dy: 0).offsetBy(dx: 0, dy: 1) : g
+    guard notch.isReal else {
+      return CGRect(x: g.minX - flare, y: g.maxY, width: g.width + flare * 2, height: 0)
+    }
+    return g.insetBy(dx: 1, dy: 0).offsetBy(dx: 0, dy: 1)
   }
 
+  /// Without a notch there is no glass to hang below, so the tab is only the
+  /// content row plus a little headroom under the top edge.
   public static func openTab(notch: IslandNotch, panel: CGRect) -> CGRect {
     let g = glass(notch: notch, panel: panel)
+    guard notch.isReal else {
+      let height = drop + 10
+      return CGRect(x: g.minX - flare, y: g.maxY - height, width: g.width + flare * 2, height: height)
+    }
     return CGRect(x: g.minX - flare, y: g.minY - drop, width: g.width + flare * 2, height: g.height + drop)
+  }
+
+  /// What the edge styles' side information sits either side of: the glass, or
+  /// without a notch a narrow gap so name and readout read as one group.
+  public static func flank(notch: IslandNotch, panel: CGRect) -> CGRect {
+    let g = glass(notch: notch, panel: panel)
+    guard notch.isReal else {
+      let width: CGFloat = 24
+      return CGRect(x: g.midX - width / 2, y: g.minY, width: width, height: g.height)
+    }
+    return g
   }
 
   /// The rect a trace of `lineWidth` follows so its inner edge touches the glass.
@@ -102,6 +124,11 @@ public enum IslandGeometry {
   /// top-right corner. Open, so a stroke can draw itself along it.
   public static func outline(around r: CGRect) -> [PathSegment] {
     [.move(CGPoint(x: r.minX, y: r.maxY))] + sides(r) + [.line(CGPoint(x: r.maxX, y: r.maxY))]
+  }
+
+  /// The whole top edge, corner to corner, with nothing to dip around.
+  public static func straightEdge(panelWidth: CGFloat, top: CGFloat) -> [PathSegment] {
+    [.move(CGPoint(x: 0, y: top)), .line(CGPoint(x: panelWidth, y: top))]
   }
 
   /// The whole top edge, corner to corner, dipping around the glass.

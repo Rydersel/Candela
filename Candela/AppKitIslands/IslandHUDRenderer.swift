@@ -2,9 +2,11 @@ import AppKit
 import CandelaKit
 import QuartzCore
 
-/// The three Island styles. The notch is the island: real where the display has
-/// one, drawn where it does not. The value is a luminous trace and the
-/// information sits where there is screen; nothing is drawn on the glass.
+/// The three Island styles. The notch is the island where the display has one;
+/// where it does not, nothing pretends to be one: the drop grows straight down
+/// from the top edge and the edge trace runs straight. The value is a luminous
+/// trace and the information sits where there is screen; nothing is drawn on
+/// the glass.
 ///
 /// Core Animation rather than boxes: the shape springs, the trace draws itself
 /// and breathes, and a shimmer slides along it. Every number was agreed by eye
@@ -52,9 +54,6 @@ final class IslandHUDRenderer: HUDRenderer {
   private var hasCapsules: Bool { style == .islandEdgeCapsules }
   private var traceWidth: CGFloat { isDrop ? IslandGeometry.dropTraceWidth : IslandGeometry.edgeTraceWidth }
   private var iconPointSize: CGFloat { isDrop ? 15 : 13 }
-  /// Without a notch the tab is all ours and arrives and leaves with the rest.
-  /// Over a real notch its closed state is the notch itself, so it stays opaque.
-  private var fadesShape: Bool { !notch.isReal }
 
   init(style: HUDStyle) {
     precondition(style.isIsland)
@@ -140,25 +139,26 @@ final class IslandHUDRenderer: HUDRenderer {
     sheen.frame = contentView.bounds
     closed = IslandGeometry.closedTab(notch: notch, panel: panelFrame)
     open = isDrop ? IslandGeometry.openTab(notch: notch, panel: panelFrame) : closed
-    let glass = IslandGeometry.glass(notch: notch, panel: panelFrame)
-    // A drawn notch is ours to draw; a real one is glass. The drop always owns its tab.
-    if !isDrop, notch.isReal {
-      shape.removeFromSuperlayer()
-    } else if shape.superlayer == nil {
-      contentView.layer!.insertSublayer(shape, at: 0)
-    }
+    // Over a real notch the closed tab is hidden by the glass; without one it
+    // has no height. Either way it stays opaque and shows only as it opens.
     shape.path = Self.path(IslandGeometry.tabPath(closed))
-    shape.opacity = !fadesShape || trace.opacity > 0 ? 1 : 0
-    let outline: CGPath = isDrop
-      ? Self.path(IslandGeometry.outline(around: open))
-      : Self.path(IslandGeometry.edgeOutline(
-          panelWidth: panelFrame.width, top: panelFrame.height - traceWidth / 2 - 1,
-          around: IslandGeometry.glassOutlineRect(closedGlass: glass, lineWidth: traceWidth)))
+    let outline: CGPath
+    if isDrop {
+      outline = Self.path(IslandGeometry.outline(around: open))
+    } else {
+      let top = panelFrame.height - traceWidth / 2 - 1
+      outline = notch.isReal
+        ? Self.path(IslandGeometry.edgeOutline(
+            panelWidth: panelFrame.width, top: top,
+            around: IslandGeometry.glassOutlineRect(
+              closedGlass: IslandGeometry.glass(notch: notch, panel: panelFrame), lineWidth: traceWidth)))
+        : Self.path(IslandGeometry.straightEdge(panelWidth: panelFrame.width, top: top))
+    }
     for layer in [under, track, trace, sheenMask] { layer.path = outline }
-    layOutContent(glass: glass)
+    layOutContent()
   }
 
-  private func layOutContent(glass: CGRect) {
+  private func layOutContent() {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     defer { CATransaction.commit() }
@@ -176,15 +176,16 @@ final class IslandHUDRenderer: HUDRenderer {
       for layer in [icon, readout, name] { host.addSublayer(layer) }
       return
     }
-    // Beside the notch: the name's measured width, an 8 pt gap, the icon box.
+    // Beside the flank: the name's measured width, an 8 pt gap, the icon box.
+    let flank = IslandGeometry.flank(notch: notch, panel: panelFrame)
     let measured = ceil(NSAttributedString(string: name.string as? String ?? "", attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .medium)]).size().width) + 2
     let nameWidth = min(measured, Self.maxNameWidth)
     let readoutWidth = ceil(NSAttributedString(string: "Muted", attributes: [.font: Self.roundedFont(14, .semibold)]).size().width) + 2
     let h = Self.capsuleHeight, pad = Self.capsulePad
     let leftWidth = pad + nameWidth + 8 + Self.iconBox + pad
     let rightWidth = pad + readoutWidth + pad
-    let leftRect = CGRect(x: glass.minX - Self.capsuleGap - leftWidth, y: glass.midY - h / 2, width: leftWidth, height: h)
-    let rightRect = CGRect(x: glass.maxX + Self.capsuleGap, y: glass.midY - h / 2, width: rightWidth, height: h)
+    let leftRect = CGRect(x: flank.minX - Self.capsuleGap - leftWidth, y: flank.midY - h / 2, width: leftWidth, height: h)
+    let rightRect = CGRect(x: flank.maxX + Self.capsuleGap, y: flank.midY - h / 2, width: rightWidth, height: h)
     let hostLeft: CALayer, hostRight: CALayer
     let lx: CGFloat, ly: CGFloat, rx: CGFloat, ry: CGFloat
     if hasCapsules {
@@ -199,10 +200,10 @@ final class IslandHUDRenderer: HUDRenderer {
       for layer in [icon, readout, name] { layer.shadowOpacity = 0 }
     } else {
       hostLeft = host; hostRight = host
-      // Bare against the desktop: 16 off the glass, a soft shadow for legibility.
-      lx = glass.minX - Self.bareInset - Self.iconBox - 8 - nameWidth - pad
+      // Bare against the desktop: 16 off the flank, a soft shadow for legibility.
+      lx = flank.minX - Self.bareInset - Self.iconBox - 8 - nameWidth - pad
       ly = leftRect.midY
-      rx = glass.maxX + Self.bareInset - pad
+      rx = flank.maxX + Self.bareInset - pad
       ry = rightRect.midY
       for layer in [icon, readout, name] {
         layer.shadowColor = NSColor.black.cgColor
@@ -249,7 +250,7 @@ final class IslandHUDRenderer: HUDRenderer {
     // Content first: the side layout measures the name.
     if name.string as? String != content.title {
       name.string = content.title
-      if !isDrop { layOutContent(glass: IslandGeometry.glass(notch: notch, panel: panelFrame)) }
+      if !isDrop { layOutContent() }
     }
     let isVolume = content.kind == .volume || muted
     let tint = isVolume ? Self.volumeTint : Self.brightnessTint
@@ -294,7 +295,6 @@ final class IslandHUDRenderer: HUDRenderer {
                             damping: Self.widenDamping, stiffness: Self.widenStiffness), forKey: "path")
       shape.path = openPath
       for layer in [icon, readout, name] { Self.fade(layer, to: 1, duration: 0.22, delay: 0.2) }
-      if fadesShape { Self.fade(shape, to: 1, duration: 0.22, delay: 0.2) }
       // Only once the shape has landed, so the outline is never seen off the edge.
       for layer in [under, track, trace, sheen] { Self.fade(layer, to: 1, duration: 0.25, delay: 0.5) }
       for layer in [trace, sheenMask, under] {
@@ -302,7 +302,6 @@ final class IslandHUDRenderer: HUDRenderer {
       }
     } else {
       for view in capsules { Self.fade(view, to: 1, duration: 0.3) }
-      if fadesShape { Self.fade(shape, to: 1, duration: 0.3) }
       for layer in [icon, readout, name] { Self.fade(layer, to: 1, duration: 0.3, delay: 0.05) }
       for layer in [under, track, trace, sheen] { Self.fade(layer, to: 1, duration: 0.25) }
       for layer in [trace, sheenMask, under] {
@@ -337,12 +336,10 @@ final class IslandHUDRenderer: HUDRenderer {
     if reduceMotion {
       shape.path = closedPath
       for layer in [icon, readout, name, under, track, trace, sheen] { layer.opacity = 0 }
-      shape.opacity = fadesShape ? 0 : 1
       capsules.forEach { $0.alphaValue = 0 }
       return .selfAnimated(0)
     }
     for layer in [icon, readout, name, under, track, trace, sheen] { Self.fade(layer, to: 0, duration: 0.14) }
-    if fadesShape { Self.fade(shape, to: 0, duration: 0.14) }
     for view in capsules { Self.fade(view, to: 0, duration: 0.25) }
     if isDrop {
       shape.add(Self.spring("path", from: shape.presentation()?.path ?? shape.path, to: closedPath,
