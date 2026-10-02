@@ -34,7 +34,6 @@ final class HDRShortcutAction {
     self.isSynthesized = isSynthesized
   }
 
-  /// What a press over the pointer's screen is about.
   enum PointerTarget: Equatable {
     case display(CGDirectDisplayID)
     /// No external display: nothing under the pointer, or a screen that is not

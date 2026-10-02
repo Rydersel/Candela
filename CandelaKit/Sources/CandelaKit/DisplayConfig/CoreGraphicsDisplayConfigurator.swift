@@ -335,16 +335,12 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
 
   /// The settle and its verdict together.
   ///
-  /// A mode that can be withheld polls until it verifies or the window closes,
-  /// and a mismatch needs the last two readings to agree. The record can lag
-  /// past the window: a mode picked within about a second of the previous
-  /// apply starts from the old timing, and the PREVIOUS apply's late timing can
-  /// then land inside this window. Stopping at the first moved reading judged
-  /// the new mode on its predecessor's timing and withheld it for the session.
-  ///
-  /// Two agreeing polls 50 ms apart do not rule that out either, so a steady
-  /// mismatch waits `scanoutMismatchSettle` and reads once more, and withholds
-  /// only when that reading has not moved.
+  /// A withholdable mode polls until it verifies or the window closes. The
+  /// record can lag past the window: pick a mode within about a second of the
+  /// previous apply and that apply's late timing can land here. Stopping at the
+  /// first moved reading once withheld a good mode for the session, and two
+  /// agreeing polls do not rule it out either, so a steady mismatch waits
+  /// `scanoutMismatchSettle`, reads again, and withholds only if nothing moved.
   func settledScanout(
     requested: DisplayMode, nativePixels: (width: Int, height: Int)?,
     before: ScanoutTiming?, read: () -> ScanoutTiming?

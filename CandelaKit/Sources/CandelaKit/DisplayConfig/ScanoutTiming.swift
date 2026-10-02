@@ -168,16 +168,13 @@ public enum ScanoutVerification {
   /// The post-apply verdict, given the reading taken before the apply.
   ///
   /// The controller can keep reporting the outgoing timing after CoreGraphics
-  /// already reports the new mode, and a stale record holds steady, so it
-  /// passes the reader's own double read. A reading identical to the pre-apply
-  /// one therefore proves nothing unless the request expects exactly that
-  /// timing. With no pre-apply reading there is nothing to tell a stale record
-  /// from a fresh one, so only a verified reading counts.
+  /// reports the new mode, steadily enough to pass a double read. So a reading
+  /// equal to the pre-apply one proves nothing unless the request expects that
+  /// timing, and with no pre-apply reading only a verified one counts.
   ///
-  /// The price is a blind spot: a wrong timing that equals the outgoing one
-  /// (a revealed 3440x1440 at 2x and 120 Hz applied from a published 2560x1440
-  /// at 120 Hz, the measured crop) reads as not verifiable. The configurator
-  /// logs that verdict at error level for the modes it could withhold.
+  /// Blind spot: a wrong timing equal to the outgoing one (the measured crop, a
+  /// revealed 3440x1440 at 2x and 120 Hz applied from a published 2560x1440 at
+  /// 120 Hz) reads as not verifiable. The configurator logs it at error level.
   public static func verdict(
     requested: DisplayMode, nativePixels: (width: Int, height: Int)?,
     before: ScanoutTiming?, after: ScanoutTiming?
@@ -212,16 +209,11 @@ public enum ScanoutVerification {
     return requested.isNative ? .unexpected : .notVerifiable
   }
 
-  /// A synthesized size's mirror slave after the engage tail re-timed it onto
-  /// `retimedOnto`, the twin of a mode the panel publishes for itself. That
-  /// mode need not be native (a person running 2560x1440 on a 3440x1440 panel
-  /// is re-timed onto 2560x1440), so its framebuffer is a correct wire as well
-  /// as the native size; anything else is the wrong timing.
-  ///
-  /// The target's framebuffer and its refresh count only when the re-time is
-  /// known to have landed. Otherwise the slave sits on a mode and rate of the
-  /// mirror's choosing, and a target-sized wire there is the measured crop
-  /// (2560x1440 on a 3440x1440 panel), not the re-time.
+  /// A synthesized size's mirror slave, re-timed onto `retimedOnto`. That mode
+  /// need not be native (2560x1440 on a 3440x1440 panel), so once the re-time
+  /// has landed its framebuffer and refresh are a correct wire too. Unlanded,
+  /// the slave sits on the mirror's mode and rate, and a target-sized wire
+  /// there is the measured crop.
   public static func retimeVerdict(
     retimedOnto target: DisplayMode?, landed: Bool,
     nativePixels: (width: Int, height: Int)?, timing: ScanoutTiming?

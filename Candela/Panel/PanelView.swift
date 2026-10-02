@@ -553,13 +553,9 @@ struct PanelView: View {
     } ?? "Keep display awake"
   }
 
-  /// A choice on the slider always starts the hold, the current stop included:
-  /// a stop hold keeps the name it started with and a custom hold shows the
-  /// stop nearest the time left, so re-choosing the shown stop is how a person
-  /// asks for that full duration from now. `start(for:)` replaces
-  /// the deadline on the one assertion, so a repeat never takes a second.
-  /// Nil when macOS refuses the assertion, so the row never names a stop that
-  /// is not holding the display awake.
+  /// Re-choosing the shown stop restarts its full duration from now, because a
+  /// custom hold shows the nearest stop. Nil when macOS refuses the assertion,
+  /// so the row never names a stop that is not holding the display awake.
   @discardableResult
   static func chooseAwakeDuration(_ value: Double, keepAwake: KeepAwake) -> KeepAwakeDuration? {
     guard let duration = KeepAwakeDuration(rawValue: Int(value.rounded())) else { return nil }
@@ -573,9 +569,8 @@ struct PanelView: View {
     isCustom && isOn ? "Custom" : duration.title
   }
 
-  /// What the native slider speaks for a stop. The `NSSlider` is its own
-  /// accessibility element, so a SwiftUI value on the representable may never
-  /// reach it, and its default value is the bare stop index.
+  /// The `NSSlider` is its own accessibility element, so a SwiftUI value never
+  /// reaches it, and on its own it speaks the bare stop index.
   nonisolated static func keepAwakeStopTitle(_ value: Double) -> String {
     KeepAwakeDuration(rawValue: Int(value.rounded()))?.title ?? ""
   }
@@ -692,9 +687,8 @@ enum PanelMenu {
   }
 
   static func refitAfterDisclosureChange() {
-    // Called after the click changes state, outside SwiftUI's update callbacks.
-    // Reading the new layout here is safe and lets the host and native menu
-    // resize together before any intermediate frame is presented.
+    // Runs after the click, outside SwiftUI's update pass, so the host and the
+    // native menu resize together before any intermediate frame shows.
     guard !isClosing, let menu, let item = menu.items.first, let view = item.view,
           let window = view.window, window.isVisible else { return }
     let fitted = view.fittingSize
@@ -706,10 +700,9 @@ enum PanelMenu {
     var destination = before
     destination.size.height = fitted.height + verticalInsets
     destination.origin.y = before.maxY - destination.height
-    // AppKit lays the menu's scroll container out at the final height
-    // before the window animates. Its default bottom anchor would move
-    // every existing control by the disclosure's height during that resize.
-    // Pin that container to the content view's top edge instead.
+    // AppKit lays the scroll container out at the final height before the
+    // window animates; its default bottom anchor would slide every control by
+    // the disclosure's height during the resize. Pin it to the top instead.
     var container = view
     while let parent = container.superview, parent !== window.contentView {
       container = parent
@@ -749,7 +742,6 @@ extension PanelView {
       care: model.oledCare, safeMode: model.isSafeMode)
   }
 
-  /// The rows the care disclosure opens to, in order.
   enum CareAction: CaseIterable {
     case resume, pauseQuarterHour, pauseHour, pauseUntil
 
@@ -842,13 +834,10 @@ extension PanelView {
       now: now, calendar: calendar, locale: locale)
   }
 
-  /// A suspension outranks the user's pause, as it does in the engine, so a
-  /// mirrored display or one showing a checkup field gets the ordinary care
-  /// line rather than a pause that is not what holds dimming off. The line has
-  /// no room for the suspension's reason; the display's OLED Care page states it.
-  /// The paused form stands alone because it is the one thing the row has to
-  /// say, and with the hours beside it the widest end time no longer fit one
-  /// line (`PanelSizingTests` pins the width). The hours return with the dimming.
+  /// A suspension outranks the pause, as in the engine, so a mirrored or
+  /// checkup display shows its ordinary line; its OLED Care page says why.
+  /// The paused form drops the hours: beside them the widest end time no
+  /// longer fit one line (`PanelSizingTests` pins the width).
   static func careLine(
     enrolled: Bool, hours: Double, summary: PanelHealthSummary?, safeMode: Bool,
     suspended: Bool, pausedUntil: Date?,
@@ -1116,10 +1105,8 @@ private struct FooterIconButtonStyle: ButtonStyle {
   }
 }
 
-/// An end time short enough for a one-line panel row: the time alone today,
-/// "tomorrow", a weekday within the week, a month and day further out, and the
-/// year only where a deadline a year out would otherwise read as today's date.
-/// Names are English whatever the system language (`EnglishDates`).
+/// Fits a one-line panel row. The year shows only where a deadline a year out
+/// would otherwise read as today's date. Names stay English (`EnglishDates`).
 enum CompactEndTimeText {
   static func string(
     _ deadline: Date, now: Date = Date(), calendar: Calendar = .current, locale: Locale = .current

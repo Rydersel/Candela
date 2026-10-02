@@ -822,13 +822,9 @@ final class DisplayModeCoordinator {
       arrivals.release(display.id)
     }
     let pending = displays.filter { !previewed.contains($0.id) }
-    // Synchronous on the main actor, per display. An honoured apply costs the
-    // native lookup, the commit and one read. The worst case stacks the native
-    // lookup, the commit, up to 0.5 s for the mode to settle, up to 0.5 s for
-    // the scan-out reading to settle, a further 0.75 s read when the mismatch
-    // holds, then the restore with its own settle. Kept here rather than moved
-    // off the main actor: the alternative is reporting a restore that did not
-    // happen.
+    // Synchronous on the main actor. A steady mismatch stacks the mode settle,
+    // the scan-out settle, a further read and a restore here, but moving off the
+    // main actor would mean reporting a restore that had not happened.
     for (index, display) in pending.enumerated() {
       // Synthesis reapply runs AFTER the stored-mode decision for the same
       // display, never beside it: engaging makes the panel a mirror slave, and a
@@ -1337,20 +1333,14 @@ final class DisplayModeCoordinator {
     return await performResolve(answered, keeping: false, intent: .standDown) == .reverted
   }
 
-  /// Ends a recovery preview, one standing on a commit the display did not
-  /// honour, so a settings reset can claim the gate. A recovery whose restore
-  /// keeps failing would otherwise hold the claim, and block the reset, until
-  /// the display is unplugged.
+  /// Ends a recovery preview (one standing on a commit the display did not
+  /// honour) so a settings reset can claim the gate. A restore that keeps
+  /// failing would otherwise hold the claim until the display is unplugged.
   ///
-  /// Reverts first: that is what the recovery's own countdown would have done,
-  /// and dropping it unreverted left the display on the unhonoured mode with no
-  /// countdown. Only a revert that fails discards, and then the display stays
-  /// where the failed rollback left it, since nothing here can move it back.
-  /// An ordinary preview is left alone; it refuses the reset by its claim.
-  ///
-  /// `resetDisplayID` scopes a per-display reset to its own display: a
-  /// recovery on another display is neither reverted nor discarded, and still
-  /// refuses the reset by its claim. nil is the whole-app reset, which claims any.
+  /// Reverts first, as the recovery's countdown would; dropping it unreverted
+  /// once left the display on the unhonoured mode with no countdown. Only a
+  /// failed revert discards. An ordinary preview, or a recovery on a display
+  /// other than `resetDisplayID`, keeps refusing the reset by its claim.
   func discardRecoveryForReset(on resetDisplayID: CGDirectDisplayID? = nil) async {
     await queue.enqueueReturning {
       guard let outstanding = await self.session.previewedMode,

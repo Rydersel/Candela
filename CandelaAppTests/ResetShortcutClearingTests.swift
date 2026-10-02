@@ -2,12 +2,8 @@ import Foundation
 import KeyboardShortcuts
 import Testing
 
-/// The settings reset's shortcut step: `ShortcutManager.clearAssignmentsForReset()`,
-/// called from the reset before the domain wipe. Driven through the library's
-/// public API in this test process's own defaults domain. No `ShortcutManager`
-/// is built here, so no name carries a handler and no Carbon hotkey is ever
-/// registered. Proves the reset step removes a recorded HDR chord from the
-/// library's store; it does not exercise the rest of the reset sequence.
+/// Builds no `ShortcutManager`, so no Carbon hotkey is ever registered. Covers
+/// only the reset's shortcut step, not the rest of the reset sequence.
 @Suite("Settings reset clears recorded shortcuts", .serialized) @MainActor
 struct ResetShortcutClearingTests {
   private static let prefix = "KeyboardShortcuts_"

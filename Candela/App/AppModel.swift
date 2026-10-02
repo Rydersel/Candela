@@ -62,10 +62,8 @@ final class AppModel {
     }
   }
 
-  /// One gate for display modes, mirroring, rotation, arrangement, HDR,
-  /// checkups and settings resets. Each coordinator takes this shared gate;
-  /// a defaulted gate would give each
-  /// coordinator a private one, which compiles, runs, and excludes nobody.
+  /// Shared by every display-changing coordinator. A defaulted gate would give
+  /// each one a private gate, which compiles, runs, and excludes nobody.
   let reconfigurationGate = DisplayReconfigurationGate()
 
   @ObservationIgnored private(set) lazy var hdrAction = HDRShortcutAction(

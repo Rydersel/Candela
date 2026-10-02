@@ -46,11 +46,10 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     /// display in HDR for twice as long as the sequence the eyes verification
     /// watched.
     var hdrHeld: Duration
-    /// The scan-out check's settle, the configurator's shape: polls this far
-    /// apart until two readings agree, then one further `timingSettle` and a
-    /// last read before a mismatch counts. The record can lag the re-time, and
-    /// a single read of it would bounce or unwind a link that was fine. Zero
-    /// unless set, so a test pays no wall clock; `production` sets both.
+    /// The configurator's scan-out settle: poll until two readings agree, then
+    /// read once more after `timingSettle`. The record lags the re-time, so one
+    /// read would bounce or unwind a good link. Zero by default so tests pay no
+    /// wall clock.
     var timingPoll: Duration = .zero
     var timingSettle: Duration = .zero
 
@@ -100,26 +99,18 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     case let .success(pairing):
       let target = retimeTarget(
         for: displayID, ownMode: ownMode, master: pairing.virtualDisplayID)
-      // Judged against the re-time target's framebuffer as well as the
-      // pre-mirror panel size: the target is the twin of the panel's own mode,
-      // which need not be native, and the bounce cannot move a timing the
-      // re-time chose on purpose.
-      // A wrong timing after the re-time is a link the bounce can renegotiate,
-      // so it takes the bounce rather than ending the engagement here. The
-      // check below judges what the bounce left.
+      // The target twins the panel's own mode, which need not be native, so its
+      // framebuffer is a correct wire too. A wrong timing goes to the bounce,
+      // which can renegotiate the link; the check below judges what it left.
       var landed = await retime(displayID, to: target)
       if !landed {
         await bounce(displayID)
       } else if let timing = await steadyMismatch(
         on: displayID, retimedOnto: target, landed: landed, nativePixels: nativePixels) {
         Self.log.info("synthesis.retime display \(displayID) landed on the wrong timing (\(timing.diagnosticDescription, privacy: .public)); bouncing")
-        // The HDR round trip can drop the re-time, and a target-sized wire on a
-        // mode of the mirror's choosing is the measured crop, not the re-time.
-        // A bounce that issued no leg moved nothing, so the landing it found
-        // still stands; after one that did, only a positive read of the target
-        // keeps it. Without the landing only the size is judged, not the
-        // refresh: a native-sized wire at the mirror's own rate is a slower
-        // link, not the crop.
+        // The HDR round trip can drop the re-time, leaving a target-sized wire
+        // on the mirror's mode: the measured crop. A bounce that issued no leg
+        // keeps the landing; after one that did, only a read of the target does.
         if await bounce(displayID), await stillOn(target, displayID) != true {
           landed = false
           Self.log.info("synthesis.retime display \(displayID) is not confirmed on its re-time target after the bounce")
@@ -137,10 +128,9 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     return result
   }
 
-  /// A mismatch only when it holds: two agreeing readings, then the same
-  /// reading again after `timingSettle`. The controller record lags a
-  /// reconfiguration, so anything less judges the link on a timing that was
-  /// still landing. A reading that moves, or stops mismatching, is no verdict.
+  /// A mismatch only when it holds: two agreeing readings, then the same one
+  /// after `timingSettle`. The controller record lags a reconfiguration, so
+  /// anything less judges the link on a timing that was still landing.
   private func steadyMismatch(
     on displayID: CGDirectDisplayID, retimedOnto target: DisplayMode?, landed: Bool,
     nativePixels: (width: Int, height: Int)?
@@ -263,11 +253,9 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     return true
   }
 
-  /// Whether the display is still on `target` after the bounce, nil when no
-  /// mode can be read. The off leg has already waited out its settle, so a miss
-  /// takes only one more read a `timingPoll` later. Unknown is treated as not
-  /// on the target by the caller: the measured crop is a target-sized wire on a
-  /// mode the mirror chose, and an unreadable mode cannot rule it out.
+  /// nil when no mode can be read, which the caller treats as off target: an
+  /// unreadable mode cannot rule out the measured crop. One retry is enough
+  /// because the off leg has already waited out its settle.
   private func stillOn(_ target: DisplayMode?, _ displayID: CGDirectDisplayID) async -> Bool? {
     if isOn(target, displayID) { return true }
     try? await Task.sleep(for: durations.timingPoll)

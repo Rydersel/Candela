@@ -7,18 +7,15 @@ import SwiftUI
 import Testing
 import UniformTypeIdentifiers
 
-/// Opt-in evidence collection for ImageRenderer's intermittent glyph movement.
-/// Differences are recorded, not accepted through a tolerance or warm-up rule.
+/// Opt-in evidence for ImageRenderer's intermittent glyph movement; differences
+/// are recorded, never absorbed by a tolerance or warm-up rule.
 ///
-/// Every test here runs only with `CANDELA_RENDER_PROBE_DIR` set to a writable
-/// directory. They write PNG captures and a JSON report there for a person to
-/// look at, and open windows to capture from, so they prove nothing unattended
-/// and stay out of `make check` and CI. The controller runs them by hand before
-/// a release and reads the captures.
+/// Runs only with `CANDELA_RENDER_PROBE_DIR` set to a writable directory. The
+/// tests open windows and write captures for a person to review, so they prove
+/// nothing unattended and stay out of `make check` and CI. Run them by hand
+/// before a release.
 @Suite("Panel render probe") @MainActor
 struct PanelRenderProbeTests {
-  /// Gated on `CANDELA_RENDER_PROBE_DIR`: writes four ImageRenderer captures
-  /// and a comparison report there. Run by hand before a release.
   @Test(.enabled(if: ProcessInfo.processInfo.environment["CANDELA_RENDER_PROBE_DIR"] != nil))
   func captureConsecutivePanels() throws {
     let directory = URL(fileURLWithPath: try #require(
@@ -56,8 +53,6 @@ struct PanelRenderProbeTests {
     try data.write(to: directory.appendingPathComponent("report.json"))
   }
 
-  /// Gated on `CANDELA_RENDER_PROBE_DIR`: opens off-screen windows and writes
-  /// the paused panel and settings captures there. Run by hand before a release.
   @Test(.enabled(if: ProcessInfo.processInfo.environment["CANDELA_RENDER_PROBE_DIR"] != nil))
   func captureNativePauseControls() async throws {
     let directory = URL(fileURLWithPath: try #require(
@@ -141,11 +136,8 @@ struct PanelRenderProbeTests {
     }
   }
 
-  /// Gated on `CANDELA_RENDER_PROBE_DIR`: opens the end-time dialog and writes
-  /// its captures there. Dark only: `EndTimePickerView` pins the dark scheme
-  /// itself, so a light capture would show the same window. Run by hand before
-  /// a release. Its accessibility labels are checked in every run by
-  /// `EndTimePickerAccessibilityTests`.
+  /// Dark only: `EndTimePickerView` pins the dark scheme itself.
+  /// `EndTimePickerAccessibilityTests` checks its labels in every run.
   @Test(.enabled(if: ProcessInfo.processInfo.environment["CANDELA_RENDER_PROBE_DIR"] != nil))
   func captureCustomEndTimeDialogs() async throws {
     let directory = URL(fileURLWithPath: try #require(
@@ -173,8 +165,6 @@ struct PanelRenderProbeTests {
     }
   }
 
-  /// Gated on `CANDELA_RENDER_PROBE_DIR`: writes the calendar popover
-  /// capture there. Run by hand before a release.
   @Test(.enabled(if: ProcessInfo.processInfo.environment["CANDELA_RENDER_PROBE_DIR"] != nil))
   func captureCustomCalendar() async throws {
     let directory = URL(fileURLWithPath: try #require(

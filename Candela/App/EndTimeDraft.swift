@@ -101,10 +101,8 @@ struct EndTimeCalendarMonth {
 enum EnglishDates {
   static func locale(clockFrom locale: Locale = .current) -> Locale {
     var names = Locale.Components(locale: Locale(identifier: "en_US"))
-    // The draft's hour fields count 1 to 12 and 0 to 23; a clock that counts
-    // 0 to 11 or 1 to 24 would make the readouts disagree with the fields
-    // (0:30 beside a field reading 12, or 24:30 beside 0), so both map onto
-    // the field's own cycle.
+    // Fold 0-to-11 and 1-to-24 clocks onto the draft's 1-to-12 and 0-to-23
+    // hour fields, or the readout says 0:30 beside a field reading 12.
     names.hourCycle = switch locale.hourCycle {
     case .zeroToEleven: .oneToTwelve
     case .oneToTwentyFour: .zeroToTwentyThree

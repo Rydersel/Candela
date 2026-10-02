@@ -407,8 +407,6 @@ struct OledCareDisplayPage: View {
     return .engine
   }
 
-  /// The Dimming section's first row: the pause's state, Resume Now while one
-  /// runs, and a menu named for what it does to the pause.
   struct PauseRow: Equatable {
     let label: String
     let menuTitle: String

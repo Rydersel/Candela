@@ -35,15 +35,12 @@ enum KeepAwakeDuration: Int, CaseIterable {
     } ?? .oneHour
   }
 
-  /// A stop the time left lands within a minute of, or nil when no stop
-  /// describes it.
   static func matching(remaining: TimeInterval) -> Self? {
     allCases.first { $0.seconds.map { abs($0 - remaining) <= 60 } ?? false }
   }
 
-  /// The stop the panel's Duration row names for a running hold, or nil for
-  /// "Custom". The name is decided once, when the hold starts, so the same
-  /// hold keeps one name as its time left runs down.
+  /// nil means "Custom". The name is fixed when the hold starts so it does not
+  /// change as the time left runs down.
   @MainActor static func describing(_ keepAwake: KeepAwake) -> Self? {
     guard keepAwake.isOn else { return nil }
     guard let expiresAt = keepAwake.expiresAt else { return .untilTurnedOff }

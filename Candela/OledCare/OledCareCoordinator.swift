@@ -61,10 +61,8 @@ final class OledCareCoordinator: CheckupCareHolding {
   private var dimmingPauseDeadlines: [String: Date] = [:]
   @ObservationIgnored private var dimmingResumePending: Set<String> = []
   @ObservationIgnored private let now: () -> Date
-  /// Where enrollment and the other per-display care prefs are read. Settable
-  /// rather than an init argument because `AppModel` builds this lazily with
-  /// no arguments; the test bundle swaps in an in-memory store before
-  /// anything reads it, so no test touches the real defaults domain.
+  /// Settable, not an init argument, because `AppModel` builds this lazily.
+  /// Tests swap in an in-memory store before any read, so none touch real defaults.
   @ObservationIgnored var prefsDefaults: UserDefaults = .standard
 
   private func prefs(for key: String) -> DisplayPrefs {

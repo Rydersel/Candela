@@ -376,11 +376,9 @@ enum CheckupLiveEnvironment {
   }
 }
 
-/// HDR writes that stop for good once the checkup's display stops being the
-/// panel the run picked. A dock cycle can hand the display ID to another panel
-/// while the HDR leg waits on a settle, and the leg's last write would then
-/// put its prior state on that other panel. Reads pass through: they move
-/// nothing.
+/// HDR writes stop for good once the display ID stops naming the panel the run
+/// picked: a dock cycle can hand the ID to another panel mid-settle, and the
+/// leg's restore would land there. Reads pass through.
 ///
 /// `@unchecked Sendable`: `gone` is behind `lock`; the rest is immutable.
 final class IdentityCheckedHDRToggling: HDRToggling, @unchecked Sendable {

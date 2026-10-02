@@ -130,11 +130,9 @@ struct PanelSizingTests {
       "The Keep Awake header must keep its position relative to the display content")
   }
 
-  /// Opt-in: runs only with `CANDELA_NATIVE_MENU_TEST=1` in the test
-  /// environment. It pops up a real `NSMenu` and runs AppKit's tracking loop,
-  /// which takes the screen and the pointer's menu for several seconds, so it
-  /// cannot run unattended in `make check` or CI. The controller runs it by hand
-  /// before a release.
+  /// Opt-in: AppKit's real menu tracking loop takes over the screen and pointer
+  /// for several seconds, so this stays out of `make check` and CI. Run by hand
+  /// with `CANDELA_NATIVE_MENU_TEST=1` before a release.
   @Test(.enabled(if: ProcessInfo.processInfo.environment["CANDELA_NATIVE_MENU_TEST"] == "1"),
     arguments: [(false, false), (false, true), (true, true)])
   func theTrackingMenuGrowsAndKeepsTheFooterVisible(withExternal: Bool, withBanner: Bool) async throws {
