@@ -129,8 +129,11 @@ page only — Candela has never written them and has no accessor for them.
   `contrast.<pk>` are the saved levels. Readable brightness values update the
   saved brightness. If readback is unavailable, the saved value records app
   intent, not a verified display state. Deleting these values loses that history.
-  See [brightness readback](evidence/brightness-readback.md) for the refresh policy
-  and combined-brightness cases.
+  External brightness is read at launch, after the menu closes, on wake and
+  after a display reconfiguration, so a change made in the monitor's own menu
+  is adopted on the next of those. Reads are skipped for displays using
+  software or native brightness, while a temporary dim is engaged, and in Safe
+  Mode. A missing or invalid answer keeps the saved value.
 - `muted.<pk>` is engine state, not a preference.
 - `temporaryDimEngaged.<pk>` records that a temporary dim was engaged on that
   display, so a launch after a crash can put the brightness back. It is engine
