@@ -13,7 +13,16 @@ import UniformTypeIdentifiers
 /// Runs only with `CANDELA_RENDER_PROBE_DIR` set to a writable directory. The
 /// tests open windows and write captures for a person to review, so they prove
 /// nothing unattended and stay out of `make check` and CI. Run them by hand
-/// before a release.
+/// before a release, inside the full app suite (a cold isolated run has not
+/// reliably reproduced the movement):
+///
+///     TEST_RUNNER_CANDELA_RENDER_PROBE_DIR=/tmp/candela-panel-render-probe make test-app
+///
+/// Xcode strips the `TEST_RUNNER_` prefix on the way to the runner. Use a fresh
+/// directory per pass and confirm it holds `report.json` and `panel-0.png`
+/// through `panel-3.png`: a suite pass without them means the probe never ran.
+/// Identical captures do not disprove the movement. The one-pixel offset
+/// capture is the comparison's positive control.
 @Suite("Panel render probe") @MainActor
 struct PanelRenderProbeTests {
   @Test(.enabled(if: ProcessInfo.processInfo.environment["CANDELA_RENDER_PROBE_DIR"] != nil))

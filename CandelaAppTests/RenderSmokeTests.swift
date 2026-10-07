@@ -162,11 +162,10 @@ struct RenderSmokeTests {
   // passes over scaling code. Only a person at a large accessibility size can
   // tell you.
   //
-  // Repeated panel captures can differ despite a discarded capture. On macOS
-  // 26.7 the footer's SF Symbols moved one pixel, with unchanged glyph shapes
-  // and alpha totals. Cold isolated captures can also agree; neither the first
-  // capture nor a fixed warm-up count defines a reliable comparison contract.
-  // See docs/evidence/panel-rendering.md for the unresolved investigation (#94).
+  // Repeated panel captures can differ even after a discarded warm-up: on macOS
+  // 26.7 the footer's SF Symbols moved 1 to 85 px with identical glyphs, so no
+  // warm-up count makes a comparison reliable. The live menu showed no movement;
+  // `PanelRenderProbeTests` collects the renderer evidence.
 
   // MARK: - The settings window
 
