@@ -13,8 +13,8 @@ a color change.
 
 Cold isolated runs could produce identical captures. Disabling animations and
 fixing the icon height did not eliminate the full-suite difference. The
-framework trigger and any corresponding visible change in the running menu
-remain unknown.
+framework trigger remains unknown. The running menu showed no corresponding
+change; see the native menu check of October 7 at the end of this document.
 
 ## A discarded capture is not a stability guarantee
 
@@ -52,8 +52,9 @@ positive control for the comparison instrument.
 
 Remove the restored diagnostic file afterwards. Do not increase the tolerance
 or the discarded-capture count to turn an unexplained result into a passing
-regression test. Issue #94 remains open until the cause is understood or the
-first-render behavior is fixed.
+regression test. Issue #94 is closed as not planned: the movement is confined to
+the offscreen renderer (see the native menu check of October 7), and this
+procedure stays here for anyone who wants to find the framework trigger.
 
 ## Bounded follow-up, September 27, 2026
 
@@ -238,3 +239,30 @@ screen and banner. A separate regression checks disclosure layout while the
 host still has its old height.
 
 The scripted display does not add physical external-display verification.
+
+## Native menu check, October 7
+
+This check asked the question the renderer captures could not answer: does a
+person see the first opening of the menu differ from later ones? The installed
+1.0.5 Release build ran on macOS 26.7 (build 25G229) with the built-in display,
+MAG 341C OLED and Dell U2725QE connected. The app was quit and relaunched twice.
+After each launch, with eight seconds for start-up to settle, the menu was opened
+three times through the status item's accessibility press and closed with an
+accessibility cancel. Each opening was captured twice: the screen region the
+menu occupies, which is what a person sees, and the menu window by its id.
+
+| Comparison | Region captures | Window captures |
+| --- | --- | --- |
+| First to second opening, both launches | identical | identical |
+| Second to third opening, both launches | identical | 2 pixels differ by 1 unit |
+| First opening, launch one to launch two | identical | identical |
+| Deliberate one-pixel offset | 209,650 pixels, maximum 199 | 51,189 pixels, maximum 250 |
+
+The two differing pixels sit in the Keep Awake switch, on a later opening rather
+than the first, and are below anything visible. The footer's gear and power
+glyphs occupied the same position in every capture.
+
+The movement recorded above is therefore confined to the offscreen renderer used
+by the tests. Two limits remain: the renderer movement was intermittent and this
+check covered two launches, and no opening was attempted within the first
+seconds after launch.
