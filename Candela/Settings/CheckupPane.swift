@@ -392,6 +392,9 @@ struct CheckupPane: View {
     panel.allowedContentTypes = [.json]
     panel.allowsMultipleSelection = false
     panel.canChooseDirectories = false
+    // macOS 27 can recompute both chooser flags from allowedContentTypes.
+    // Keep the final intent explicit: this import accepts JSON files only.
+    panel.canChooseFiles = true
     guard panel.runModal() == .OK else { return nil }
     return panel.url
   }

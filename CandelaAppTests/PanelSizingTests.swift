@@ -550,16 +550,26 @@ struct PanelSizingTests {
     #expect(bounded.frame.height < 700)
   }
 
-  @Test func theSameHostAdaptsToEachOpeningHeight() async {
+  @Test func theSameHostAdaptsToEachOpeningHeight() async throws {
     let model = await populatedModel()
     let host = PanelHostingView(rootView: PanelView().environment(model))
-    let naturalHeight = host.fittingSize.height
-    #expect(naturalHeight > 600)
+    #expect(host.fittingSize.height > 600)
+    host.setFrameSize(host.fittingSize)
+    let window = mount(host)
+    defer { window.contentView = nil; window.close() }
     for height in [CGFloat(400), 600, 300, 2000] {
       host.rootView = PanelView(maximumHeight: height).environment(model)
       host.setFrameSize(host.fittingSize)
       host.layoutSubtreeIfNeeded()
-      #expect(abs(host.frame.height - min(height, naturalHeight)) <= 1)
+      #expect(host.frame.height <= height)
+      if height < 2000 {
+        #expect(abs(host.frame.height - height) <= 1)
+      } else {
+        let scroll = try #require(descendants(host).compactMap { $0 as? NSScrollView }.first)
+        let document = try #require(scroll.documentView)
+        #expect(document.frame.height <= scroll.contentView.bounds.height + 1,
+          "The natural-height reopening must show the full display list")
+      }
     }
   }
 

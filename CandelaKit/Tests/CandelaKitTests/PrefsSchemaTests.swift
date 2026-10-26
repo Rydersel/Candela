@@ -37,7 +37,7 @@ struct PrefsSchemaTests {
 
   /// Counts writes: asserting on the stored value cannot tell a no-op from a
   /// rewrite of the same value.
-  private final class WriteCountingDefaults: InMemoryDefaults {
+  private final class WriteCountingDefaults: InMemoryDefaults, @unchecked Sendable {
     private(set) var writes: [String] = []
     override func set(_ value: Any?, forKey key: String) {
       writes.append(key)
