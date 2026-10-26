@@ -2997,8 +2997,9 @@ final class RegressInstruments {
   private static let decoyWindowNames = [
     "Candela Gamma Activity Enforcer", "Candela OLED Care Overlay",
   ]
+  private static let settingsWindowIdentifier = "com_apple_SwiftUI_Settings_window"
 
-  /// Binding the settings window, and the three traps it has to survive.
+  /// Binding the settings window across AppKit and SwiftUI accessibility trees.
   ///
   /// Filter on the ROLE first: the windows attribute has been measured holding
   /// elements whose role is AXApplication, and binding one of those walks the
@@ -3033,9 +3034,21 @@ final class RegressInstruments {
     let realWindows = windows.filter {
       read($0, kAXRoleAttribute as String).presentText == "AXWindow"
     }
+    // On macOS 27 a 27-SDK-linked app also publishes an AppKit-owned "Window"
+    // with identifier `_NS:8` and a WindowSharingSessionButton. It is not the
+    // settings scene. Prefer the scene's own stable identifier when available.
+    let identified = realWindows.filter {
+      read($0, kAXIdentifierAttribute as String).presentText == Self.settingsWindowIdentifier
+    }
+    if identified.count == 1 {
+      lastAXError = nil
+      return identified[0]
+    }
     let candidates = realWindows.filter { window in
       let name = read(window, kAXTitleAttribute as String).presentText ?? ""
+      let identifier = read(window, kAXIdentifierAttribute as String).presentText ?? ""
       return !Self.decoyWindowNames.contains { name.hasPrefix($0) }
+        && !(name == "Window" && identifier.hasPrefix("_NS:"))
     }
     guard candidates.count == 1 else {
       let seen = realWindows

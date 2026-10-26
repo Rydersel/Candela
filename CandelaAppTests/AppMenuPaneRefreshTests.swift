@@ -56,28 +56,46 @@ struct AppMenuPaneRefreshTests {
     var seen = Seen()
     for _ in 0..<100 {
       host.layoutSubtreeIfNeeded()
-      let position = popUp(in: host, label: "Brightness indicator position:")
+      let position = control(in: host, label: "Brightness indicator position:")
       seen = Seen(
-        title: popUp(in: host, label: "Indicator style:")?.accessibilityValue() as? String,
-        positionEnabled: position?.isAccessibilityEnabled(),
-        positionHint: position?.accessibilityHelp())
+        title: axObjectValue(control(in: host, label: "Indicator style:"), selector: "accessibilityValue") as? String,
+        positionEnabled: axEnabled(position),
+        positionHint: axObjectValue(position, selector: "accessibilityHelp") as? String)
       if seen == wanted { return }
       try await Task.sleep(for: .milliseconds(10))
     }
     #expect(seen == wanted, "host \(round): the retained pane must show the \(style) style")
   }
 
-  private func popUp(in root: Any, label: String, depth: Int = 0) -> (any NSAccessibilityProtocol)? {
+  /// SwiftUI's AX node need not conform to NSAccessibilityProtocol, and the
+  /// Picker's AppKit implementation changes with the macOS 27 SDK. The user
+  /// contract is its label and readable value, not the native control class.
+  private func control(in root: Any, label: String, depth: Int = 0) -> AnyObject? {
     guard depth < 60 else { return nil }
     let object = root as AnyObject
-    if (object.accessibilityRole?() ?? nil) == .popUpButton,
-       (object.accessibilityLabel?() ?? nil) == label,
-       let found = object as? any NSAccessibilityProtocol {
-      return found
+    if (object.accessibilityLabel?() ?? nil) == label,
+       (object as? NSObject)?.responds(to: NSSelectorFromString("accessibilityValue")) == true {
+      return object
     }
     for child in (object.accessibilityChildren?() ?? nil) ?? [] {
-      if let found = popUp(in: child, label: label, depth: depth + 1) { return found }
+      if let found = control(in: child, label: label, depth: depth + 1) { return found }
     }
     return nil
+  }
+
+  private func axObjectValue(_ object: AnyObject?, selector name: String) -> AnyObject? {
+    guard let object = object as? NSObject else { return nil }
+    let selector = NSSelectorFromString(name)
+    guard object.responds(to: selector) else { return nil }
+    return object.perform(selector)?.takeUnretainedValue()
+  }
+
+  private func axEnabled(_ object: AnyObject?) -> Bool? {
+    guard let object = object as? NSObject else { return nil }
+    let selector = NSSelectorFromString("isAccessibilityEnabled")
+    guard object.responds(to: selector) else { return nil }
+    typealias Getter = @convention(c) (AnyObject, Selector) -> Bool
+    let getter = unsafeBitCast(object.method(for: selector), to: Getter.self)
+    return getter(object, selector)
   }
 }

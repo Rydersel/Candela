@@ -70,18 +70,15 @@ jobs:
   test:
     needs: scope
     if: needs.scope.outputs.app == 'true'
-    # Pinned to macos-26, not macos-latest, and matched to the dev machine's
-    # major version on purpose. The label decides which Swift compiler runs, and
-    # a compiler older than the one the code is written against produces reds
-    # that describe the runner rather than the diff. macos-15 carries Xcode 16
-    # (Swift 6.0/6.1) against Xcode 26 locally, which is a real gap to gamble on
-    # for no benefit. `latest` is the same gamble with the added property that it
-    # moves without a commit.
-    #
-    # The cost of pinning is that this line needs a bump when the image is
-    # retired, which GitHub announces and which fails loudly rather than
-    # silently. That is the cheaper failure.
-    runs-on: macos-26
+    # Keep the established macOS 26 compiler gate while checking the SDK 27
+    # toolchain that now builds local releases. Explicit labels avoid a silent
+    # compiler change when macos-latest advances. Finish both runs even if one
+    # fails so the PR shows whether the failure is shared or SDK-specific.
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -173,10 +170,9 @@ jobs:
   #
   # Measured on the runner, 2026-08-11: macos-26-arm64 image 20260728.0273 runs
   # macOS 26.5.2 on arm64 with Xcode 26.6 (17F113) selected, Swift 6.3.3, and the
-  # macOS 26.5 SDK. Every Xcode from 26.0.1 to 26.6 is installed. That is AHEAD
-  # of the dev machine (Xcode 26.4, Swift 6.3), same major version and same
-  # architecture, so the job compiles what a developer compiles. It built clean
-  # in 49 seconds.
+  # macOS 26.5 SDK. Every Xcode from 26.0.1 to 26.6 was installed. It built
+  # clean in 49 seconds. The xcode-27 matrix leg adds the SDK used for the
+  # macOS 27 compatibility audit; the toolchain step records its exact version.
   #
   # What this job is for: the Kit suite cannot see the app target at all.
   # CandelaKit is barred from importing SwiftUI, so every SwiftUI view, every
@@ -205,7 +201,11 @@ jobs:
     # parallel answers both on every push, where chaining would hide a build
     # break behind an unrelated test failure and cost a second round trip to
     # find it. Neither job is long enough for the sequencing to save anything.
-    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -390,7 +390,11 @@ jobs:
   release-build:
     needs: scope
     if: needs.scope.outputs.app == 'true'
-    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4

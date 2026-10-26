@@ -461,11 +461,14 @@ for record in records {
 // Dictionary order is not stable between runs of the same binary on the same log, so
 // every ranking and printed list breaks ties on the key. Without it a run-to-run diff
 // is noise.
-let orderedDisplays = byDisplay.map { (key: $0.key, records: $0.value) }
-  .sorted {
-    $0.records.count == $1.records.count
-      ? $0.key < $1.key : $0.records.count > $1.records.count
-  }
+typealias DisplayGroup = (key: String, records: [ModelReplayRecord])
+var orderedDisplays: [DisplayGroup] = byDisplay.map { key, group in
+  (key: key, records: group)
+}
+orderedDisplays.sort { lhs, rhs in
+  if lhs.records.count == rhs.records.count { return lhs.key < rhs.key }
+  return lhs.records.count > rhs.records.count
+}
 
 let identities = Set(records.map(\.display.persistenceKey))
 if byDisplay.count > identities.count {
