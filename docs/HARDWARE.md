@@ -27,5 +27,4 @@ Candela remembering the last value it wrote.
 | LG UltraFine 5K | 5120 x 2880, 60 Hz | Thunderbolt 3, direct | MacBook Pro 14 inch (M1 Pro, 2021) | 26.7 | 1.0.4 | yes | yes (USB audio) | not tried | n/a | yes |
 | Kuycon P27U | 27 inch, 4K | USB-C / Thunderbolt, direct | Mac mini (M4) | 26.6.2 | 1.0.3 | yes | yes | yes | not tried | yes |
 | Kuycon P32U | 32 inch, 4K | USB-C / Thunderbolt, direct | Mac mini (M4) | 26.6.2 | 1.0.3 | yes | yes | yes | not tried | yes |
-| GIGABYTE M27Q2 | 2560 x 1440, 200 Hz | DisplayPort | MacBook Pro 14 inch (M1 Pro, 2021) | 27.0.1 | 1.0.5 | yes | not tried | not tried | yes | yes |
 | GIGABYTE M27Q2 | 2560 x 1440, 200 Hz | USB-C, direct | MacBook Pro 14 inch (M1 Pro, 2021) | 27.0.1 | 1.0.5 | yes | yes | yes | yes | yes |
