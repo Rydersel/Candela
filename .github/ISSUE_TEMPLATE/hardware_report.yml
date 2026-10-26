@@ -83,5 +83,7 @@ body:
       description: >
         Anything that did not work, anything that needed a particular setting,
         and the capabilities line from Diagnostics if the display reports one.
+        If you used Prepare Hardware Report in Candela, review the copied
+        Diagnostics report for custom display or audio names, then paste it here.
     validations:
       required: false

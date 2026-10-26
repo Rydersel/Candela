@@ -50,6 +50,10 @@ clipboard and **Save Report...** writes it to a file you choose. Either one
 covers every connected display, not only the one you are looking at, which is
 what makes it useful on an issue where two displays interact.
 
+**Prepare Hardware Report...** copies a fresh report and opens the GitHub
+hardware form. Review custom display and audio names before pasting the report
+into Notes. Candela does not submit the form.
+
 For a support request, reproduce the issue and then save or copy the report.
 There is no need to copy the raw capability description separately. Both
 buttons use the same report format and take a new snapshot when used. The report
