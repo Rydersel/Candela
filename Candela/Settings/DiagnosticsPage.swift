@@ -686,9 +686,8 @@ private struct KeyRequirementRow: View {
   }
 }
 
-/// The Copy/Save pair and its transient confirmation, in one component because
-/// they exist here and in About: two copies of a clipboard write and an
-/// `NSSavePanel` are two things to keep in agreement.
+/// The report actions live here and in About, so both entry points use the
+/// same snapshot, clipboard and save behavior.
 @MainActor
 struct DiagnosticsReportActions: View {
   @Environment(AppModel.self) private var model
@@ -699,24 +698,40 @@ struct DiagnosticsReportActions: View {
   /// seconds instead of letting the first click's timer clear the label early.
   @State private var confirmationTask: Task<Void, Never>?
   @State private var saveError: String?
+  @State private var hardwareReportError: HardwareReportHandoff.Outcome?
 
   var body: some View {
-    HStack(spacing: 8) {
-      // Copy takes the primary: pasting the report into a message is what a
-      // person came here to do, and Save is the fallback for one too long to
-      // paste.
-      Button(DiagnosticsPageCopy.copyReport) { copyReport() }
-        .buttonStyle(SettingsPrimaryButtonStyle())
-        .accessibilityLabel(Text(DiagnosticsPageCopy.copyReport))
-      Button(DiagnosticsPageCopy.saveReport) { saveReport() }
-        .buttonStyle(SettingsSecondaryButtonStyle())
-        .accessibilityLabel(Text(DiagnosticsPageCopy.saveReport))
-      if justCopied {
-        Text(DiagnosticsPageCopy.copied)
-          .foregroundStyle(SettingsTheme.bodyColor)
-          .transition(.opacity)
-          .accessibilityLabel(Text(DiagnosticsPageCopy.copiedAccessibly))
+    VStack(alignment: .leading, spacing: 8) {
+      HStack(spacing: 8) {
+        Button(DiagnosticsPageCopy.copyReport) { copyReport() }
+          .buttonStyle(SettingsPrimaryButtonStyle())
+          .accessibilityLabel(Text(DiagnosticsPageCopy.copyReport))
+        Button(DiagnosticsPageCopy.saveReport) { saveReport() }
+          .buttonStyle(SettingsSecondaryButtonStyle())
+          .accessibilityLabel(Text(DiagnosticsPageCopy.saveReport))
+        if justCopied {
+          Text(DiagnosticsPageCopy.copied)
+            .foregroundStyle(SettingsTheme.bodyColor)
+            .transition(.opacity)
+            .accessibilityLabel(Text(DiagnosticsPageCopy.copiedAccessibly))
+        }
       }
+      Button(DiagnosticsPageCopy.hardwareReport) { prepareHardwareReport() }
+        .buttonStyle(SettingsSecondaryButtonStyle())
+        .accessibilityLabel(Text(DiagnosticsPageCopy.hardwareReport))
+        .help(DiagnosticsPageCopy.hardwareReportHelp)
+        .alert(
+          DiagnosticsPageCopy.hardwareReportNotice,
+          isPresented: Binding(
+            get: { hardwareReportError != nil },
+            set: { if !$0 { hardwareReportError = nil } })
+        ) {
+          Button(DiagnosticsPageCopy.acknowledge) { hardwareReportError = nil }
+        } message: {
+          Text(verbatim: hardwareReportError == .clipboardFailed
+            ? DiagnosticsPageCopy.hardwareReportCopyFailed
+            : DiagnosticsPageCopy.hardwareReportOpenFailed)
+        }
     }
     .alert(
       DiagnosticsPageCopy.saveFailed,
@@ -738,6 +753,11 @@ struct DiagnosticsReportActions: View {
       guard !Task.isCancelled else { return }
       withAnimation(Motion.notice(reduceMotion: reduceMotion)) { justCopied = false }
     }
+  }
+
+  private func prepareHardwareReport() {
+    let outcome = HardwareReportHandoff.prepare(snapshot: model.diagnosticsSnapshot())
+    if outcome != .opened { hardwareReportError = outcome }
   }
 
   /// The snapshot is taken AFTER the panel is dismissed, not before it opens:

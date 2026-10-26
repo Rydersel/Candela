@@ -239,6 +239,13 @@ enum DiagnosticsPageCopy {
 
   static var copyReport: LocalizedStringKey { "Copy Report" }
   static var saveReport: LocalizedStringKey { "Save Report…" }
+  static var hardwareReport: LocalizedStringKey { "Prepare Hardware Report…" }
+  static var hardwareReportHelp: LocalizedStringKey {
+    "Copies a fresh report and opens GitHub's hardware form. Review custom display and audio names before pasting."
+  }
+  static var hardwareReportNotice: LocalizedStringKey { "Hardware report" }
+  static let hardwareReportCopyFailed = "Candela could not copy the report. Try Copy Report again."
+  static let hardwareReportOpenFailed = "The report is on the clipboard, but GitHub's form did not open. Open the hardware report form from the website."
   static var copied: LocalizedStringKey { "Copied" }
   static var copiedAccessibly: LocalizedStringKey { "Report copied to the clipboard" }
   static var saveFailed: LocalizedStringKey { "The report could not be saved." }
