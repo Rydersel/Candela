@@ -1,24 +1,3 @@
-# Tested hardware
-
-The monitors, connections and Macs Candela has been used on, one row per
-monitor and connection. Rows come from
-[hardware reports](https://github.com/Rydersel/Candela/issues/new?template=hardware_report.yml)
-and from the maintainers' own displays; the columns match what the report form
-asks for, so a report becomes a row without translation.
-
-Every row is self-reported: the person who filed it observed the behaviour on
-their own panel. Maintainers do not re-verify rows they cannot reproduce. If
-your monitor is here and behaves differently for you, that difference is
-exactly what a report is for.
-
-The capability columns say what actually changed the display, not what the
-spec sheet promises. `yes` means the control worked, `no` means it did
-nothing, `n/a` means the monitor declares that it has no such control, and
-`not tried` means nobody has checked yet. **DDC reads** is the "Reading values
-back" line on the display's Diagnostics page: a monitor that answers reads
-lets Candela confirm what it set, and one that does not is driven blind, with
-Candela remembering the last value it wrote.
-
 | Monitor | Panel | Connection | Mac | macOS | Candela | Brightness | Volume | Contrast | HDR toggle | DDC reads |
 |---|---|---|---|---|---|---|---|---|---|---|
 | MSI MAG 341CQP QD-OLED (reports as "MAG 341C OLED") | 34 inch QD-OLED, 3440 x 1440, 175 Hz | DisplayPort | MacBook Pro 14 inch (M1 Pro, 2021) | 26.6 | 1.0.0 | yes | yes | yes | yes | no |
@@ -30,14 +9,3 @@ Candela remembering the last value it wrote.
 | Kuycon P27U | 27 inch, 4K | USB-C / Thunderbolt, direct | Mac mini (M4) | 26.6.2 | 1.0.3 | yes | yes | yes | not tried | yes |
 | Kuycon P32U | 32 inch, 4K | USB-C / Thunderbolt, direct | Mac mini (M4) | 26.6.2 | 1.0.3 | yes | yes | yes | not tried | yes |
 | GIGABYTE M27Q2 | 2560 x 1440, 200 Hz | USB-C, direct | MacBook Pro 14 inch (M1 Pro, 2021) | 27.0.1 | 1.0.5 | yes | yes | yes | yes | yes |
-
-The macOS 27 hub rows were tested with both monitors connected at once. The
-MSI ran at 3440 x 1440, 60 Hz for the DDC and dimming checks; a reversible
-refresh sweep also reached 100, 144, and 175 Hz before restoring 60 Hz. The
-Dell ran at 120 Hz in portrait orientation. The Mac's USB4 link negotiated
-40 Gb/s. macOS reported no HDR modes for the Dell. Unlike the earlier direct
-connection reports, the MSI returned DDC brightness, volume, and contrast
-values even with HDR on. Its DDC writes and combined dimming checks ran with
-HDR off, then HDR was restored. Candela's timed mirroring preview and a kept
-2580 x 1080 rendered size both returned to the original three-display layout;
-the rendered size required HDR off.
