@@ -1,49 +1,27 @@
 #!/bin/zsh
 # AX helpers for driving the Candela settings window during a hardware pass.
-# The settings window must be found by exclusion: Candela also owns a 1x1
-# "Candela Gamma Activity Enforcer" window whose presence shifts window indices.
-
-# Select by EXCLUSION, not by geometry and not by index. Candela also owns a 1x1
-# gamma enforcer window and a full-screen OLED care overlay, both of which come
-# and go and shift every index.
-#
-# NEVER select on size. AppKit autosaves this window's frame under `NSWindow
-# Frame com_apple_SwiftUI_Settings_window` in com.rydersel.Candela and restores
-# it ahead of anything SwiftUI computes, so the size is not a property of the app
-# and any resize sticks for good.
-#
-# A `name does not start with "Candela "` rule has its own hole: the window is
-# usually named for its current pane, but it was measured reporting "Candela
-# Settings", the scene default, while it was the app's only window. So the decoys
-# are excluded by their OWN names, which admits the window under either name.
-#
-# That trades one fragility for another, since this rule does not survive a new
-# decoy. Hence the count check below: a zero-match selector reports every control
-# missing, which reads exactly like a real defect in the app, and that has
-# already cost one issue filed against a defect that did not exist.
-# The keep/revert countdown windows and the checkup windows are excluded too:
-# transient, legitimate, and open exactly when a pick or a checkup just landed,
-# so a bind that errors on them misdiagnoses success as a selector failure
-# (measured 2026-09-01: both cases read as the settings window being gone).
-# axprobe reaches INTO them, which is how Keep is pressed. Any window that can
-# be open beside settings belongs on this list.
-BIND='set cands to (every window whose name does not start with "Candela Gamma Activity Enforcer" and name does not start with "Candela OLED Care Overlay" and name does not start with "Candela Window Shade" and name does not start with "Display resolution" and name does not start with "Display orientation" and name does not start with "Display mirroring" and name does not start with "Candela Checkup" and name is not "Display Health" and name is not "Heat Map" and name is not "Candela Setup")
+# The title changes with the selected pane. macOS 27 also publishes an AppKit
+# window titled "Window" beside Settings, so a title exclusion is ambiguous.
+# The SwiftUI Settings scene keeps this AX identifier across those states.
+# Never select by geometry: AppKit autosaves the window's size and position.
+BIND='set cands to (every window whose value of attribute "AXIdentifier" is "com_apple_SwiftUI_Settings_window")
     if (count of cands) is not 1 then
       set seen to ""
       repeat with x in windows
         set nm to "(unnamed)"
+        set ident to "(none)"
         try
           set nm to name of x as text
         end try
-        set seen to seen & "  [" & nm & "]" & linefeed
+        try
+          set ident to value of attribute "AXIdentifier" of x as text
+        end try
+        set seen to seen & "  [" & nm & "] id=" & ident & linefeed
       end repeat
       error "ax.sh: settings window not uniquely identified: " & (count of cands) & " candidates. Open windows:" & linefeed & seen
     end if
     set w to item 1 of cands'
-# MEASURED 2026-08-20 against the hand-built shell: the window is one
-# AXGroup holding two scroll areas, sidebar first, detail second. The map window
-# coexists with settings and is excluded under BOTH its titles, so this
-# selector keeps working against an older installed build.
+# The window holds two scroll areas, sidebar first and detail second.
 SB="UI element 1 of UI element 1 of w"
 DETAIL="UI element 2 of UI element 1 of w"
 
