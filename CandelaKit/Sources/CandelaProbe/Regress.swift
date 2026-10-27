@@ -364,8 +364,8 @@ enum Regress {
     // 5. Are the controls addressable by identifier? Layer B is built on this,
     //    and the accessibility layer has answered confidently and wrongly about
     //    a different attribute twice, so the reader shows both answers every
-    //    run: present on a control that must carry one, absent on the close
-    //    button.
+    //    run: present on a control that must carry one, absent on a known
+    //    untagged control.
     let identifiersCheck = identifierInstrumentCheck(instruments: instruments)
     checks.append(identifiersCheck)
 
@@ -580,27 +580,27 @@ enum Regress {
 
     // The control is the READER, not the app: it must answer both ways in the
     // same walk before either answer is believed. Present comes from any element
-    // carrying an identifier, absent from the window's close button, which
-    // carries none. An unreadable answer counts as neither.
+    // carrying an identifier, absent from a known untagged control. An
+    // unreadable answer counts as neither.
     let control: Control
-    switch audit.closeButtonIdentifier {
+    switch audit.negativeControlIdentifier {
     case _ where audit.walked == 0:
       control = .didNotFire("the accessibility walk reached zero elements, so nothing was read")
     case _ where audit.identifiersSeen == 0:
       control = .didNotFire(
         "not one of the \(audit.walked) elements walked carries a readable accessibility identifier (\(audit.identifiersUnreadable) answered unreadably), so the reader was never shown a present one and present cannot be told from absent")
-    case _ where !audit.closeButtonFound:
+    case _ where !audit.negativeControlFound:
       control = .didNotFire(
-        "the window's close button was not found, so the reader was never shown an element that must have no identifier")
+        "neither the window's close button nor the Care sidebar label was found, so the reader was never shown an element that must have no identifier")
     case let .text(carried):
       control = .didNotFire(
-        "the window's close button carries the identifier \(carried), so an absent reading can no longer be told from a present one on this platform")
+        "\(audit.negativeControlDescription) carries the identifier \(carried), so an absent reading can no longer be told from a present one on this platform")
     case let .unreadable(reason):
       control = .didNotFire(
-        "the window's close button's identifier came back unreadable (\(reason)), so the absent half of the reader is unproven")
+        "\(audit.negativeControlDescription)'s identifier came back unreadable (\(reason)), so the absent half of the reader is unproven")
     default:
       control = .fired(
-        "\(audit.identifiersSeen) of \(audit.walked) walked elements carry an identifier and the close button carries none, so the reader answers both ways")
+        "\(audit.identifiersSeen) of \(audit.walked) walked elements carry an identifier and \(audit.negativeControlDescription) carries none, so the reader answers both ways")
     }
 
     return controlledCheck(name: name, control: control) {
@@ -3129,12 +3129,13 @@ final class RegressInstruments {
     /// The value of the element carrying the wanted identifier, or nil when no
     /// element carries it.
     let targetValue: String?
-    let closeButtonFound: Bool
-    /// Non-nil only when the close button carries a present identifier, which
+    let negativeControlFound: Bool
+    let negativeControlDescription: String
+    /// Non-nil only when the control carries a present identifier, which
     /// would mean an absent reading can no longer be distinguished. An
-    /// unreadable close-button identifier reports here as unreadable, so the
-    /// control refuses to fire on it.
-    let closeButtonIdentifier: Reading?
+    /// unreadable identifier reports here as unreadable, so the control
+    /// refuses to fire on it.
+    let negativeControlIdentifier: Reading?
   }
 
   private func walk(_ element: AXUIElement, depth: Int, visit: (AXUIElement) -> Void) {
@@ -3151,7 +3152,9 @@ final class RegressInstruments {
     var unreadableIdentifiers = 0
     var targetValue: String?
     var closeButtonFound = false
-    var closeButtonIdentifier: Reading?
+    var negativeControlFound = false
+    var negativeControlDescription = "the window's close button"
+    var negativeControlIdentifier: Reading?
     walk(window, depth: 0) { element in
       walked += 1
       let carried = read(element, kAXIdentifierAttribute as String)
@@ -3165,7 +3168,15 @@ final class RegressInstruments {
       }
       if read(element, kAXSubroleAttribute as String).presentText == "AXCloseButton" {
         closeButtonFound = true
-        closeButtonIdentifier = carried
+        negativeControlFound = true
+        negativeControlDescription = "the window's close button"
+        negativeControlIdentifier = carried
+      } else if !closeButtonFound,
+                read(element, kAXRoleAttribute as String).presentText == "AXStaticText",
+                read(element, kAXValueAttribute as String).presentText == "Care" {
+        negativeControlFound = true
+        negativeControlDescription = "the Care sidebar label"
+        negativeControlIdentifier = carried
       }
     }
     return AXAudit(
@@ -3173,8 +3184,9 @@ final class RegressInstruments {
       identifiersSeen: carriers,
       identifiersUnreadable: unreadableIdentifiers,
       targetValue: targetValue,
-      closeButtonFound: closeButtonFound,
-      closeButtonIdentifier: closeButtonIdentifier
+      negativeControlFound: negativeControlFound,
+      negativeControlDescription: negativeControlDescription,
+      negativeControlIdentifier: negativeControlIdentifier
     )
   }
 
