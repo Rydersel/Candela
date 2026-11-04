@@ -1080,6 +1080,125 @@ struct OnboardingFlowModelTests {
     ])
   }
 
+  // MARK: - Enrollment ahead of the Screen Recording request
+
+  /// Granting Screen Recording can relaunch the app before the care page is
+  /// advanced past, so the page's choices must already be on disk when the
+  /// request goes out.
+  @Test func requestCommitsEnrollmentFirst() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED"),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      ]))
+    walk(model, to: .oledCare)
+    var log: [String] = []
+    model.onCommit = { log.append("\($0)") }
+    model.onRequestScreenRecording = { log.append("request") }
+    model.requestScreenRecording()
+    #expect(log == [
+      "\(OnboardingCommit.enrollInCare(displayKey: "dell"))",
+      "\(OnboardingCommit.enableMeasuredTelemetry(displayKey: "dell"))",
+      "\(OnboardingCommit.enrollInCare(displayKey: "mag"))",
+      "\(OnboardingCommit.enableMeasuredTelemetry(displayKey: "mag"))",
+      "request",
+    ])
+  }
+
+  /// The care page's Continue requests and advances in one click, so an
+  /// unchanged page must not write everything a second time.
+  @Test func advanceAfterRequestDoesNotRepeat() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED"),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      ]))
+    walk(model, to: .oledCare)
+    model.requestScreenRecording()
+    model.advance()
+    #expect(model.committed == [
+      .enrollInCare(displayKey: "dell"),
+      .enableMeasuredTelemetry(displayKey: "dell"),
+      .enrollInCare(displayKey: "mag"),
+      .enableMeasuredTelemetry(displayKey: "mag"),
+    ])
+  }
+
+  /// A first run's harvest says the display was never enrolled, but the
+  /// request enrolled it, so turning it off afterwards is an un-enrollment.
+  @Test func changeAfterRequestStillCommits() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED"),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      ]))
+    walk(model, to: .oledCare)
+    model.requestScreenRecording()
+    let afterRequest = model.committed.count
+    model.careEnabled.remove("mag")
+    model.advance()
+    #expect(Array(model.committed.dropFirst(afterRequest)) == [
+      .unenrollFromCare(displayKey: "mag")
+    ])
+  }
+
+  /// Same baseline for the measurement choice: the request wrote measured, so
+  /// estimated afterwards turns it back off even on a first run.
+  @Test func estimatedAfterRequestTurnsMeasurementBackOff() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledCare)
+    model.requestScreenRecording()
+    let afterRequest = model.committed.count
+    model.measuredTelemetry = false
+    model.advance()
+    #expect(Array(model.committed.dropFirst(afterRequest)) == [
+      .disableMeasuredTelemetry(displayKey: "mag")
+    ])
+  }
+
+  /// The deselect takes the care page out of the plan, so the designation
+  /// page's arm is the only one left to undo what the request enrolled.
+  @Test func aDeselectAfterTheRequestUnenrolls() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledCare)
+    model.requestScreenRecording()
+    let afterRequest = model.committed.count
+    model.back()
+    #expect(model.currentPage == .oledSelect)
+    model.designatedOleds.remove("mag")
+    #expect(!model.pages.contains(.oledCare))
+    model.advance()
+    #expect(Array(model.committed.dropFirst(afterRequest)) == [
+      .unenrollFromCare(displayKey: "mag")
+    ])
+  }
+
+  /// Turning protection back on after the request had it off re-enrolls.
+  @Test func reenablingAfterTheRequestEnrollsAgain() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledCare)
+    model.careEnabled.remove("mag")
+    model.requestScreenRecording()
+    #expect(model.committed.isEmpty)
+    model.careEnabled.insert("mag")
+    model.advance()
+    #expect(model.committed == [
+      .enrollInCare(displayKey: "mag"),
+      .enableMeasuredTelemetry(displayKey: "mag"),
+    ])
+  }
+
+  @Test func aRequestOffTheCarePageCommitsNothing() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledSelect)
+    model.requestScreenRecording()
+    #expect(model.committed.isEmpty)
+  }
+
   // MARK: - Display names
 
   @Test func aRenameThatTrimsToEmptyFallsBackToTheEnvironmentName() {

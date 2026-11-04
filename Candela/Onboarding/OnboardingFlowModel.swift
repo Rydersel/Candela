@@ -182,7 +182,11 @@ final class OnboardingFlowModel {
   var screenRecordingRequested = false
   private(set) var screenRecordingGranted = false
 
+  /// Granting Screen Recording makes macOS offer Quit & Reopen, which
+  /// relaunches the app before the care page is ever advanced past, so the
+  /// page's choices are written ahead of the ask rather than on the advance.
   func requestScreenRecording() {
+    if currentPage == .oledCare { commitCarePage() }
     screenRecordingRequested = true
     onRequestScreenRecording()
     refreshScreenRecordingGranted()
@@ -233,6 +237,14 @@ final class OnboardingFlowModel {
   var applierCountdownSeconds = OnboardingFlowModel.applyCountdownSeconds
 
   private(set) var committed: [OnboardingCommit] = []
+
+  /// What this flow has already written for each display's enrollment and
+  /// measurement. The harvest is read once, so after the care page commits
+  /// early (ahead of the Screen Recording ask) it no longer says what is on
+  /// disk: a first run's display reads as never enrolled although the flow
+  /// just enrolled it. The care arms compare against this first.
+  private var writtenEnrollment: [String: Bool] = [:]
+  private var writtenMeasurement: [String: Bool] = [:]
 
   init(environment: OnboardingEnvironment) {
     self.environment = environment
@@ -582,8 +594,8 @@ final class OnboardingFlowModel {
       // designation, the care arm the ones still in it with their toggle off.
       // The two sets cannot overlap, so nothing is written twice.
       for entry in environment.displays
-      where entry.enrolledInCare && !designatedOleds.contains(entry.persistenceKey) {
-        onCommit(.unenrollFromCare(displayKey: entry.persistenceKey))
+      where isEnrolled(entry.persistenceKey) && !designatedOleds.contains(entry.persistenceKey) {
+        commitCare(.unenrollFromCare(displayKey: entry.persistenceKey))
       }
     case .detection:
       for (key, newName) in renames {
@@ -611,24 +623,53 @@ final class OnboardingFlowModel {
         break
       }
     case .oledCare:
-      for key in designatedOleds.sorted() {
-        let harvested = display(forKey: key)
-        if careEnabled.contains(key) {
-          onCommit(.enrollInCare(displayKey: key))
-          if measuredTelemetry {
-            onCommit(.enableMeasuredTelemetry(displayKey: key))
-          } else if harvested?.measuredTelemetry == true {
-            // Differs-only, against the harvested pref rather than the flow's
-            // default: a first run that picks estimated writes nothing, so an
-            // absent key keeps meaning "no decision made yet".
-            onCommit(.disableMeasuredTelemetry(displayKey: key))
-          }
-        } else if harvested?.enrolledInCare == true {
-          onCommit(.unenrollFromCare(displayKey: key))
-        }
-      }
+      commitCarePage()
     case .finish:
       onCommit(.setLaunchAtLogin(launchAtLogin))
+    }
+  }
+
+  /// Runs twice when the Screen Recording ask precedes the advance (the
+  /// Continue click does both), so a write this flow already made is never
+  /// repeated; anything changed in between is written on the second run.
+  private func commitCarePage() {
+    for key in designatedOleds.sorted() {
+      if careEnabled.contains(key) {
+        if writtenEnrollment[key] != true {
+          commitCare(.enrollInCare(displayKey: key))
+        }
+        if measuredTelemetry {
+          if writtenMeasurement[key] != true {
+            commitCare(.enableMeasuredTelemetry(displayKey: key))
+          }
+        } else if isMeasured(key) {
+          // Differs-only, against the pref rather than the flow's default: a
+          // first run that picks estimated writes nothing, so an absent key
+          // keeps meaning "no decision made yet".
+          commitCare(.disableMeasuredTelemetry(displayKey: key))
+        }
+      } else if isEnrolled(key) {
+        commitCare(.unenrollFromCare(displayKey: key))
+      }
+    }
+  }
+
+  private func isEnrolled(_ key: String) -> Bool {
+    writtenEnrollment[key] ?? (display(forKey: key)?.enrolledInCare == true)
+  }
+
+  private func isMeasured(_ key: String) -> Bool {
+    writtenMeasurement[key] ?? (display(forKey: key)?.measuredTelemetry == true)
+  }
+
+  private func commitCare(_ commit: OnboardingCommit) {
+    onCommit(commit)
+    switch commit {
+    case let .enrollInCare(key): writtenEnrollment[key] = true
+    case let .unenrollFromCare(key): writtenEnrollment[key] = false
+    case let .enableMeasuredTelemetry(key): writtenMeasurement[key] = true
+    case let .disableMeasuredTelemetry(key): writtenMeasurement[key] = false
+    default: break
     }
   }
 }
