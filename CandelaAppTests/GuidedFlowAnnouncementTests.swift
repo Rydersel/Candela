@@ -244,6 +244,18 @@ struct GuidedFlowAnnouncementTests {
       .accessibility, step: 4, of: 7, externalDisplayCount: 2).contains("won't"))
   }
 
+  /// Finish says there is something to fine-tune only when its list has items;
+  /// an empty list is a normal finish and is announced as one.
+  @Test func finishMentionsFineTuningOnlyWhenItOffersSome() {
+    let offered = OnboardingAnnouncements.pageAnnouncement(
+      .finish, step: 7, of: 7, offersFineTune: true)
+    #expect(offered.contains("fine-tune"))
+    #expect(!offered.contains(OnboardingTitles.finish))
+    #expect(!offered.contains("\u{2014}"))
+    #expect(!OnboardingAnnouncements.pageAnnouncement(.finish, step: 7, of: 7)
+      .contains("fine-tune"))
+  }
+
   /// Every title a setup page can draw. The pages draw these same constants, so
   /// a retitled page moves its heading here rather than leaving this list stale.
   private static func setupHeadings(_ page: OnboardingPage) -> [String] {

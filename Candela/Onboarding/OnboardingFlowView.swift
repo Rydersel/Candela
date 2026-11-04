@@ -30,7 +30,8 @@ struct OnboardingFlowView: View {
           page, step: model.index + 1, of: model.pages.count,
           displayName: sizePageDisplayName(page),
           keysGranted: model.accessibilityGranted,
-          externalDisplayCount: model.environment.displays.count))
+          externalDisplayCount: model.environment.displays.count,
+          offersFineTune: !model.fineTuneItems.isEmpty))
     }
     .frame(minWidth: 760, minHeight: 560)
     .preferredColorScheme(.dark)

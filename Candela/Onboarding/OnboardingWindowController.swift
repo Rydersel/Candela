@@ -145,6 +145,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     flow.onKeepSize = { [weak applier] in applier?.keep() }
     flow.onRevertSize = { [weak applier] in applier?.revert() }
     flow.onClose = { [weak self] in self?.window?.performClose(nil) }
+    flow.onOpenSettings = { SettingsOpener.open(at: $0) }
     self.flowModel = flow
     self.applier = applier
     window.contentView = NSHostingView(rootView: OnboardingFlowView(model: flow))

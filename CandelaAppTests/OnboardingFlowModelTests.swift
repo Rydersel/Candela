@@ -1490,4 +1490,140 @@ struct OnboardingFlowModelTests {
     #expect(model.currentPage == .size(displayKey: "dell"))
     #expect(model.pages.contains(.oledCare))
   }
+
+  // MARK: - Finish: what to fine-tune
+
+  /// Opening an item is Finish's own advance plus a destination: launch at
+  /// login is committed, the window closes, and only then does Settings open,
+  /// so Settings never comes up behind a Setup window still on screen.
+  @Test func openingAnItemCommitsFinishFirst() {
+    let model = OnboardingFlowModel(environment: environment([entry(key: "dell")]))
+    var log: [String] = []
+    model.onCommit = { log.append("commit \($0)") }
+    model.onClose = { log.append("close") }
+    model.onOpenSettings = { log.append("open \($0)") }
+    walk(model, to: .finish)
+    log.removeAll()
+    model.finish(opening: .checkup)
+    #expect(log == [
+      "commit \(OnboardingCommit.setLaunchAtLogin(true))",
+      "close",
+      "open \(SettingsDestination.pane(.checkup))",
+    ])
+  }
+
+  /// Off Finish there is nothing to open from, and an item must not ride a
+  /// page's advance as though it were Continue.
+  @Test func openingAnItemOffFinishDoesNothing() {
+    let model = OnboardingFlowModel(environment: environment([entry(key: "dell")]))
+    var opened: [SettingsDestination] = []
+    model.onOpenSettings = { opened.append($0) }
+    let start = model.index
+    model.finish(opening: .checkup)
+    #expect(opened.isEmpty)
+    #expect(model.committed.isEmpty)
+    #expect(model.index == start)
+  }
+
+  /// The rig walked straight through: the guessed OLED protected, the grant
+  /// given on the keys page, two externals plus the built-in.
+  @Test func aGrantedRigIsOfferedEveryItem() {
+    let model = OnboardingFlowModel(environment: environment([
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      entry(key: "dell"),
+    ]))
+    walk(model, to: .accessibility)
+    model.accessibilityGranted = true
+    walk(model, to: .finish)
+    #expect(model.keyboardControlOn)
+    #expect(model.fineTuneItems == [.oledCare, .shortcuts, .checkup, .arrangement])
+  }
+
+  /// The keys page's skip turns the keys off, and Finish follows it: no
+  /// shortcuts to review, and the summary says the keys are off.
+  @Test func aKeysSkipDropsTheShortcutsItem() {
+    let model = modelOnKeysPage()
+    model.skipKeys()
+    walk(model, to: .finish)
+    #expect(!model.keyboardControlOn)
+    #expect(!model.fineTuneItems.contains(.shortcuts))
+    #expect(model.fineTuneItems.contains(.checkup))
+  }
+
+  /// A skip undone by a later grant puts the keys back, so the item returns.
+  @Test func aGrantAfterASkipBringsTheShortcutsItemBack() {
+    let model = modelOnKeysPage()
+    model.skipKeys()
+    model.accessibilityGranted = true
+    walk(model, to: .finish)
+    #expect(model.keyboardControlOn)
+    #expect(model.fineTuneItems.contains(.shortcuts))
+  }
+
+  /// After the skip, a re-harvest reads the disable this flow wrote. It must
+  /// not outlive the restore: once the grant has put the modes back, the keys
+  /// are on even though that harvest said otherwise.
+  @Test func aReharvestOfTheSkipsOwnWriteDoesNotOutliveTheRestore() {
+    let model = modelOnKeysPage()
+    model.skipKeys()
+    model.update(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")],
+      keyModesRequireGrant: false))
+    #expect(!model.keyboardControlOn)
+    model.accessibilityGranted = true
+    #expect(model.keyboardControlOn)
+  }
+
+  /// With no skip of this flow's outstanding, the harvest is the stored
+  /// modes' own answer: keys turned off in Settings mid-flow read as off.
+  @Test func aReharvestWithTheKeysOffElsewhereReadsOff() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "dell")], accessibilityGranted: true))
+    #expect(model.keyboardControlOn)
+    model.update(environment: environment(
+      [entry(key: "dell")], accessibilityGranted: true, keyModesRequireGrant: false))
+    #expect(!model.keyboardControlOn)
+    walk(model, to: .finish)
+    #expect(!model.fineTuneItems.contains(.shortcuts))
+  }
+
+  /// A flow resumed after the relaunch lands on Finish without passing the
+  /// keys or care pages in this process. The list comes from the harvest: the
+  /// enrolled OLED, and keys a previous skip left off in the stored modes.
+  @Test func aResumedFlowDerivesItsItemsFromCurrentState() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell"),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true),
+      ],
+      accessibilityGranted: false, keyModesRequireGrant: false))
+    model.resumeAfterCare()
+    #expect(model.currentPage == .finish)
+    #expect(model.fineTuneItems == [.oledCare, .checkup, .arrangement])
+    #expect(
+      OnboardingFinishCopy.keysLine(
+        keysOn: model.keyboardControlOn, accessibilityGranted: model.accessibilityGranted
+      ).text == OnboardingFinishCopy.keysOff)
+  }
+
+  /// The resumed flow's protection count is what the previous process wrote:
+  /// a guessed OLED the person turned off is not counted as protected.
+  @Test func aResumedFlowCountsOnlyTheEnrolledOled() {
+    let model = OnboardingFlowModel(environment: environment([
+      entry(key: "dell", productName: "DELL OLED"),
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true),
+    ]))
+    model.resumeAfterCare()
+    #expect(model.protectedOledCount == 1)
+  }
+
+  /// Built-in only: nothing about displays to tune, and with the grant live
+  /// the shortcuts are all that is left.
+  @Test func aBuiltInOnlyFlowOffersOnlyTheShortcuts() {
+    let model = OnboardingFlowModel(environment: OnboardingEnvironment(
+      accessibilityGranted: true, loginItemEnabled: false, isFirstRun: true,
+      keyModesRequireGrant: true, arrangedDisplayCount: 1, displays: []))
+    walk(model, to: .finish)
+    #expect(model.fineTuneItems == [.shortcuts])
+  }
 }
