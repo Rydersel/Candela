@@ -7,6 +7,7 @@ final class PermissionGuideRow: NSView, NSDraggingSource {
   static let height: CGFloat = 44
 
   private let bundleURL: URL
+  private var ownsCursor = false
 
   init(frame: NSRect, bundleURL: URL, displayName: String) {
     self.bundleURL = bundleURL
@@ -35,8 +36,10 @@ final class PermissionGuideRow: NSView, NSDraggingSource {
     setAccessibilityRole(.image)
     setAccessibilityLabel(displayName + ".app")
     setAccessibilityHelp("Drag this row into the list above.")
+    // Not cursor rects or `.cursorUpdate`: both need a key window or the active
+    // app, and this panel is neither. `.activeAlways` covers entered/exited only.
     addTrackingArea(NSTrackingArea(
-      rect: .zero, options: [.cursorUpdate, .activeAlways, .inVisibleRect], owner: self))
+      rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
   }
 
   @available(*, unavailable)
@@ -64,8 +67,20 @@ final class PermissionGuideRow: NSView, NSDraggingSource {
   // Never key; without this the first press is swallowed.
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-  // Cursor rects only fire in a key window of the active app, which this never is.
-  override func cursorUpdate(with event: NSEvent) { NSCursor.openHand.set() }
+  override func mouseEntered(with event: NSEvent) {
+    ownsCursor = true
+    NSCursor.openHand.set()
+  }
+
+  override func mouseExited(with event: NSEvent) { releaseCursor() }
+
+  /// An ordered-out window gets no exit event, so hiding under the pointer
+  /// would leave the open hand over System Settings.
+  func releaseCursor() {
+    guard ownsCursor else { return }
+    ownsCursor = false
+    NSCursor.arrow.set()
+  }
 
   override func mouseDragged(with event: NSEvent) {
     guard let rep = bitmapImageRepForCachingDisplay(in: bounds) else { return }

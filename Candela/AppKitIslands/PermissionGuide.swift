@@ -28,13 +28,30 @@ final class PermissionGuide {
   private var tickCount = 0
   private var settingsSeen = false
   private var lastSettingsWindow: CGRect?
-  private var fadeGeneration = 0
+  private var lineOnly = false
+  private(set) var lineField: NSTextField?
   private var observers: [any NSObjectProtocol] = []
+
+  enum Cadence {
+    /// Settings is frontmost: tracking a window the person may be dragging.
+    case following
+    /// Settings is behind another app: nothing to follow, only the grant to
+    /// watch. Its return is caught by the activation observer, not by this rate.
+    case idle
+
+    var interval: TimeInterval {
+      switch self {
+      case .following: 1.0 / 30
+      case .idle: 0.5
+      }
+    }
+  }
+
+  /// nil when not tracking.
+  private(set) var cadence: Cadence?
 
   var isTracking: Bool { timer != nil }
   var isRowShown: Bool { row != nil }
-  /// nil when not tracking.
-  var trackingInterval: TimeInterval? { timer?.timeInterval }
 
   var openURL: (URL) -> Void
   /// Front to back, as `PermissionGuideGeometry.settingsWindowBounds` requires.
@@ -45,17 +62,15 @@ final class PermissionGuide {
   var requestSystemPrompt: (PermissionPane) -> Void
 
   nonisolated private static let settingsBundleID = "com.apple.systempreferences"
-  /// Tracking a window the person may be dragging.
-  static let followInterval: TimeInterval = 1.0 / 30
-  /// Settings is behind another app: nothing to follow, only the grant to
-  /// watch. Its return is caught by the activation observer, not by this rate.
-  static let idleInterval: TimeInterval = 0.5
   /// The grant reads are calls into the privacy database; while following,
   /// every sixth tick (five a second) is already quicker than a person can look
   /// back from the switch they flipped. While idle, every tick reads.
   static let ticksPerGrantRead = 6
   private static let fadeDuration: TimeInterval = 0.18
-  private static let lineOnlyHeight: CGFloat = 40
+  /// The System Settings window width measured on 27.2; the guide is laid out
+  /// for it until the real window has been seen.
+  private static let assumedSettingsWidth: CGFloat = 757
+  private static let lineFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
   private static let bobKey = "bob"
 
   init() {
@@ -101,9 +116,10 @@ final class PermissionGuide {
   func show(_ pane: PermissionPane, requestFirst: Bool = false) {
     showing = pane
     tickCount = 0
+    lineOnly = requestFirst
     if requestFirst { requestSystemPrompt(pane) }
     openURL(pane.deepLink)
-    buildContent(lineOnly: requestFirst)
+    buildContent()
     // A visible retarget changes the height; waiting for the next tick shows
     // one frame at the old frame.
     if isPanelShown { reposition() }
@@ -120,11 +136,13 @@ final class PermissionGuide {
 
   /// One tracking step. Grant is checked before visibility so the guide closes
   /// even while the person is in another app.
-  func tick() {
+  ///
+  /// `activatedBundleID` is the app an activation notification names, which
+  /// is authoritative before the frontmost read catches up with it.
+  func tick(activatedBundleID: String? = nil) {
     guard let pane = showing else { return }
-    let following = trackingInterval == Self.followInterval
     defer { tickCount &+= 1 }
-    if !following || tickCount % Self.ticksPerGrantRead == 0, isGranted(pane) {
+    if cadence != .following || tickCount % Self.ticksPerGrantRead == 0, isGranted(pane) {
       close()
       return
     }
@@ -137,8 +155,8 @@ final class PermissionGuide {
       close()
       return
     }
-    let settingsFront = frontmostBundleID() == Self.settingsBundleID
-    schedule(settingsFront ? Self.followInterval : Self.idleInterval)
+    let settingsFront = (activatedBundleID ?? frontmostBundleID()) == Self.settingsBundleID
+    schedule(settingsFront ? .following : .idle)
     guard settingsFront,
       let window = PermissionGuideGeometry.settingsWindowBounds(windowList: windowList(), settingsPID: pid)
     else {
@@ -146,6 +164,7 @@ final class PermissionGuide {
       return
     }
     lastSettingsWindow = window
+    if panel == nil { buildContent() }
     reposition()
     setPanelShown(true)
   }
@@ -157,26 +176,46 @@ final class PermissionGuide {
   }
 
   private func reposition() {
-    guard let panel, let window = lastSettingsWindow else { return }
+    guard let window = lastSettingsWindow else { return }
+    let width = Self.panelWidth(forSettingsWidth: window.width)
+    // The line wraps, so a new width can mean a new height.
+    if panel?.frame.width != width { buildContent() }
+    guard let panel else { return }
     let frame = PermissionGuideGeometry.panelFrame(
       settingsWindowCG: window, mainScreenHeight: Self.primaryScreenHeight, panelHeight: panel.frame.height)
     if panel.frame != frame { panel.setFrame(frame, display: true) }
   }
 
+  private static func panelWidth(forSettingsWidth width: CGFloat) -> CGFloat {
+    PermissionGuideGeometry.panelFrame(
+      settingsWindowCG: CGRect(x: 0, y: 0, width: width, height: 0), mainScreenHeight: 0, panelHeight: 0
+    ).width
+  }
+
+  /// After a drop, macOS 27.2 adds Candela already switched on (measured), so
+  /// the line never asks for the switch; Screen Recording then offers Quit &
+  /// Reopen.
+  static func line(for pane: PermissionPane, lineOnly: Bool) -> String {
+    if lineOnly { return "Switch Candela on in the list above." }
+    switch pane {
+    case .accessibility: return "Drag this row into the list above."
+    case .screenRecording: return "Drag this row into the list above, then choose Quit & Reopen when macOS asks."
+    }
+  }
+
   // MARK: - Tracking
 
   private func startTracking() {
-    let followNow = frontmostBundleID() == Self.settingsBundleID
-    schedule(followNow ? Self.followInterval : Self.idleInterval)
+    schedule(frontmostBundleID() == Self.settingsBundleID ? .following : .idle)
     let workspace = NSWorkspace.shared.notificationCenter
     observers = [
       workspace.addObserver(
         forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
       ) { [weak self] note in
         let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-        guard app?.bundleIdentifier == PermissionGuide.settingsBundleID else { return }
+        guard let bundleID = app?.bundleIdentifier, bundleID == PermissionGuide.settingsBundleID else { return }
         // Delivered on the main queue.
-        MainActor.assumeIsolated { self?.tick() }
+        MainActor.assumeIsolated { self?.tick(activatedBundleID: bundleID) }
       },
       workspace.addObserver(
         forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
@@ -192,13 +231,16 @@ final class PermissionGuide {
   private func stopTracking() {
     timer?.invalidate()
     timer = nil
+    cadence = nil
     let workspace = NSWorkspace.shared.notificationCenter
     for observer in observers { workspace.removeObserver(observer) }
     observers.removeAll()
   }
 
-  private func schedule(_ interval: TimeInterval) {
-    guard trackingInterval != interval else { return }
+  private func schedule(_ cadence: Cadence) {
+    guard self.cadence != cadence else { return }
+    self.cadence = cadence
+    let interval = cadence.interval
     timer?.invalidate()
     // `.common` so the guide keeps tracking while a menu is open. The block is
     // `@Sendable`-typed, so `assumeIsolated` traps if this timer ever lands on
@@ -216,12 +258,9 @@ final class PermissionGuide {
   private func setPanelShown(_ shown: Bool) {
     guard shown != isPanelShown, let panel else { return }
     isPanelShown = shown
-    fadeGeneration &+= 1
-    let generation = fadeGeneration
     let reduceMotion = Motion.systemReduceMotion
     let duration = reduceMotion ? 0 : Self.fadeDuration
     if shown {
-      panel.ignoresMouseEvents = false
       if duration == 0 { panel.alphaValue = 1 }
       panel.orderFrontRegardless()
       updateBob(reduceMotion: reduceMotion)
@@ -231,26 +270,35 @@ final class PermissionGuide {
         panel.animator().alphaValue = 1
       }
     } else {
-      // At once, not after the fade: alpha does not stop hit-testing, and a
-      // click just after Done belongs to the Settings list underneath.
-      panel.ignoresMouseEvents = true
-      arrow?.layer?.removeAnimation(forKey: Self.bobKey)
-      guard duration > 0 else {
-        panel.alphaValue = 0
-        panel.orderOut(nil)
-        return
-      }
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = duration
-        panel.animator().alphaValue = 0
-      } completionHandler: { [weak self] in
-        // Typed `@Sendable`, but fires on the main thread where the panel lives.
-        MainActor.assumeIsolated {
-          // A show that arrived mid-fade owns the window now.
-          guard let self, self.fadeGeneration == generation else { return }
-          panel.orderOut(nil)
-        }
-      }
+      fadeOutAndDiscard(panel, duration: duration)
+    }
+  }
+
+  /// The outgoing panel is never shown again; the next appearance builds a new
+  /// one. Alpha does not stop hit-testing, so the fading panel has to ignore the
+  /// mouse or a click just after Done never reaches the Settings list. And
+  /// `ignoresMouseEvents` cannot be handed back: setting it false explicitly
+  /// (measured) also stops clicks on the transparent rounded corners passing
+  /// through, which only the never-set default does.
+  private func fadeOutAndDiscard(_ panel: NSPanel, duration: TimeInterval) {
+    panel.ignoresMouseEvents = true
+    row?.releaseCursor()
+    arrow?.layer?.removeAnimation(forKey: Self.bobKey)
+    self.panel = nil
+    row = nil
+    arrow = nil
+    doneControl = nil
+    lineField = nil
+    guard duration > 0 else {
+      panel.orderOut(nil)
+      return
+    }
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = duration
+      panel.animator().alphaValue = 0
+    } completionHandler: {
+      // Typed `@Sendable`, but fires on the main thread where the panel lives.
+      MainActor.assumeIsolated { panel.orderOut(nil) }
     }
   }
 
@@ -291,11 +339,32 @@ final class PermissionGuide {
     return panel
   }
 
-  private func buildContent(lineOnly: Bool) {
+  /// Laid out for one width: the line wraps, so the height follows the width,
+  /// and `reposition` rebuilds when the Settings window's width changes.
+  private func buildContent() {
+    guard let pane = showing else { return }
     let panel = self.panel ?? makePanel()
     self.panel = panel
-    let height = lineOnly ? Self.lineOnlyHeight : PermissionGuideGeometry.panelHeight
-    let size = NSSize(width: panel.frame.width, height: height)
+    let width = lastSettingsWindow.map { Self.panelWidth(forSettingsWidth: $0.width) }
+      ?? Self.panelWidth(forSettingsWidth: Self.assumedSettingsWidth)
+
+    let done = PermissionGuideDoneControl()
+    done.action = { [weak self] in self?.close() }
+    let doneSize = done.intrinsicContentSize
+    let doneInset = PermissionGuideDoneControl.hitPadding
+    let capsuleMinX = width - 10 - (doneSize.width - doneInset * 2)
+
+    let line = NSTextField(wrappingLabelWithString: Self.line(for: pane, lineOnly: lineOnly))
+    line.font = Self.lineFont
+    line.isSelectable = false
+    let lineWidth = max(0, capsuleMinX - 8 - 34)
+    let lineHeight = ceil(
+      line.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: lineWidth, height: .greatestFiniteMagnitude)).height
+        ?? 16)
+    // The arrow's 18 pt box sets the minimum; each extra line adds its own height.
+    let block = max(18, lineHeight + 1)
+    let height = lineOnly ? block + 22 : block + 74
+    let size = NSSize(width: width, height: height)
     // Bottom-left origin kept: the bottom edge is the one docked to the window.
     panel.setFrame(NSRect(origin: panel.frame.origin, size: size), display: false)
 
@@ -308,12 +377,12 @@ final class PermissionGuide {
     blur.layer?.masksToBounds = true
     blur.autoresizingMask = [.width, .height]
 
-    let lineY = height - 10 - 18
+    let firstLineY = height - 10 - 18
     let arrow = NSImageView(
       image: NSImage(systemSymbolName: "arrow.up", accessibilityDescription: nil) ?? NSImage())
     arrow.symbolConfiguration = .init(pointSize: 13, weight: .bold)
     arrow.contentTintColor = .controlAccentColor
-    arrow.frame = NSRect(x: 12, y: lineY, width: 18, height: 18)
+    arrow.frame = NSRect(x: 12, y: firstLineY, width: 18, height: 18)
     arrow.wantsLayer = true
     // Decoration: the line beside it says "above". The cell is what VoiceOver
     // reads for an image view, so hiding the view alone still announces "Up".
@@ -321,33 +390,20 @@ final class PermissionGuide {
     arrow.cell?.setAccessibilityElement(false)
     blur.addSubview(arrow)
 
-    let done = PermissionGuideDoneControl()
-    done.action = { [weak self] in self?.close() }
-    let doneSize = done.intrinsicContentSize
-    let doneInset = PermissionGuideDoneControl.hitPadding
-    done.frame = NSRect(
-      x: size.width - doneSize.width - 10 + doneInset, y: lineY + (18 - doneSize.height) / 2,
-      width: doneSize.width, height: doneSize.height)
-    done.autoresizingMask = [.minXMargin]
-
-    let line = NSTextField(
-      labelWithString: lineOnly
-        ? "Switch Candela on in the list above."
-        : "Drag this row into the list above, then switch it on.")
-    line.font = .systemFont(ofSize: 12, weight: .semibold)
-    line.lineBreakMode = .byTruncatingTail
-    line.frame = NSRect(x: 34, y: lineY, width: max(0, done.frame.minX + doneInset - 34 - 8), height: 17)
-    line.autoresizingMask = [.width]
+    line.frame = NSRect(x: 34, y: height - 11 - lineHeight, width: lineWidth, height: lineHeight)
     blur.addSubview(line)
-    // Added after the line so its padded hit area wins where they overlap.
+
+    // Level with the first line however many the text wraps to.
+    done.frame = NSRect(
+      x: capsuleMinX - doneInset, y: firstLineY + (18 - doneSize.height) / 2,
+      width: doneSize.width, height: doneSize.height)
     blur.addSubview(done)
 
     var row: PermissionGuideRow?
     if !lineOnly {
       let newRow = PermissionGuideRow(
-        frame: NSRect(x: 8, y: 10, width: size.width - 16, height: PermissionGuideRow.height),
+        frame: NSRect(x: 8, y: 10, width: width - 16, height: PermissionGuideRow.height),
         bundleURL: Bundle.main.bundleURL, displayName: Self.displayName)
-      newRow.autoresizingMask = [.width]
       blur.addSubview(newRow)
       row = newRow
     }
@@ -355,6 +411,7 @@ final class PermissionGuide {
     panel.contentView = blur
     self.arrow = arrow
     self.row = row
+    lineField = line
     doneControl = done
     if isPanelShown { updateBob(reduceMotion: Motion.systemReduceMotion) }
   }

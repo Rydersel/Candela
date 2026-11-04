@@ -149,7 +149,7 @@ struct PermissionGuideTests {
     }
     defer { guide.close() }
     guide.show(.accessibility)
-    #expect(guide.trackingInterval == PermissionGuide.followInterval)
+    #expect(guide.cadence == .following)
     guide.tick()
     #expect(reads == 1)
     for _ in 1...5 { guide.tick() }
@@ -172,18 +172,80 @@ struct PermissionGuideTests {
     }
     defer { guide.close() }
     guide.show(.accessibility)
-    #expect(guide.trackingInterval == PermissionGuide.idleInterval)
+    #expect(guide.cadence == .idle)
     for _ in 1...3 { guide.tick() }
     // Idle ticks are rare, so each one reads the grant.
     #expect(reads == 3)
-    #expect(guide.trackingInterval == PermissionGuide.idleInterval)
+    #expect(guide.cadence == .idle)
     frontmost = "com.apple.systempreferences"
     guide.tick()
-    #expect(guide.trackingInterval == PermissionGuide.followInterval)
+    #expect(guide.cadence == .following)
     frontmost = "com.apple.finder"
     guide.tick()
-    #expect(guide.trackingInterval == PermissionGuide.idleInterval)
-    #expect(PermissionGuide.idleInterval >= 0.2)
+    #expect(guide.cadence == .idle)
+    #expect(PermissionGuide.Cadence.idle.interval >= 0.2)
+  }
+
+  /// The notification names the app that came forward; a frontmost read that
+  /// has not caught up yet must not leave the guide idle.
+  @Test func activationOfSettingsFollowsEvenBeforeTheFrontmostReadAgrees() {
+    let calls = Calls()
+    let guide = makeGuide(calls: calls, frontmost: "com.apple.finder")
+    guide.windowList = { [] }
+    defer { guide.close() }
+    guide.show(.accessibility)
+    #expect(guide.cadence == .idle)
+    guide.tick(activatedBundleID: "com.apple.systempreferences")
+    #expect(guide.cadence == .following)
+  }
+
+  @Test func closeClearsTheCadence() {
+    let calls = Calls()
+    let guide = makeGuide(calls: calls)
+    guide.show(.accessibility)
+    #expect(guide.cadence != nil)
+    guide.close()
+    #expect(guide.cadence == nil)
+  }
+
+  @Test func eachPaneHasItsOwnLine() throws {
+    let calls = Calls()
+    let guide = makeGuide(calls: calls)
+    defer { guide.close() }
+    guide.show(.accessibility)
+    #expect(try #require(guide.lineField).stringValue == "Drag this row into the list above.")
+    guide.show(.screenRecording)
+    #expect(
+      try #require(guide.lineField).stringValue
+        == "Drag this row into the list above, then choose Quit & Reopen when macOS asks.")
+    guide.show(.screenRecording, requestFirst: true)
+    #expect(try #require(guide.lineField).stringValue == "Switch Candela on in the list above.")
+  }
+
+  /// The guide is laid out for the 757 pt Settings window before it has seen
+  /// the real one; the Screen Recording line is longer than one line there and
+  /// must wrap, not truncate.
+  @Test(arguments: [PermissionPane.accessibility, .screenRecording])
+  func theLineFitsAtTheNarrowestSettingsWindow(pane: PermissionPane) throws {
+    let calls = Calls()
+    let guide = makeGuide(calls: calls)
+    defer { guide.close() }
+    guide.show(pane)
+    let panel = try #require(guide.panel)
+    let field = try #require(guide.lineField)
+    // The narrowest panel: 757 - 269 - 21 + 16.
+    #expect(abs(panel.frame.width - 483) < 1)
+    let needed = try #require(field.cell?.cellSize(
+      forBounds: NSRect(x: 0, y: 0, width: field.frame.width, height: .greatestFiniteMagnitude)))
+    #expect(needed.height <= field.frame.height)
+    let done = try #require(guide.doneControl)
+    #expect(field.frame.maxX <= done.frame.minX + PermissionGuideDoneControl.hitPadding)
+    #expect(field.frame.maxY <= panel.frame.height)
+    if pane == .accessibility {
+      #expect(panel.frame.height == PermissionGuideGeometry.panelHeight)
+    } else {
+      #expect(panel.frame.height > PermissionGuideGeometry.panelHeight)
+    }
   }
 
   /// VoiceOver hears the line, the row once by name, and Done; the arrow and
