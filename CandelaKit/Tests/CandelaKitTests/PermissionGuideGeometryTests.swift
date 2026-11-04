@@ -45,6 +45,24 @@ struct PermissionGuideGeometryTests {
     #expect(PermissionGuideGeometry.settingsWindowBounds(windowList: list, settingsPID: 42) != nil)
   }
 
+  /// A sheet is its own layer-0 window of the same process, listed in front of
+  /// the window it hangs from; docking to it would put the guide mid-window.
+  @Test func ignoresASheetInsideTheSettingsWindow() {
+    let sheet: [String: Any] = [
+      kCGWindowOwnerPID as String: 42,
+      kCGWindowLayer as String: 0,
+      kCGWindowBounds as String: ["X": -1200, "Y": 77, "Width": 480, "Height": 400],
+    ]
+    let list = [sheet, entry(pid: 42, layer: 0, width: 757)]
+    let bounds = PermissionGuideGeometry.settingsWindowBounds(windowList: list, settingsPID: 42)
+    #expect(bounds == CGRect(x: -1362, y: 25, width: 757, height: 1032))
+  }
+
+  @Test func identicalBoundsDoNotCancelEachOther() {
+    let list = [entry(pid: 42, layer: 0, width: 757), entry(pid: 42, layer: 0, width: 757)]
+    #expect(PermissionGuideGeometry.settingsWindowBounds(windowList: list, settingsPID: 42) != nil)
+  }
+
   @Test func panelSitsOnTheListEdgesAtTheWindowBottom() {
     let f = PermissionGuideGeometry.panelFrame(
       settingsWindowCG: CGRect(x: -1362, y: 25, width: 757, height: 1032),
