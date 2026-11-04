@@ -152,6 +152,19 @@ struct DisplayPrefsTests {
     }
   }
 
+  /// Absent reads false, so an older domain needs no migration.
+  @Test func theHDRReportIsPerDisplayUnderItsOwnKey() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "one")
+      let other = DisplayPrefs(defaults: defaults, persistenceKey: "two")
+      #expect(prefs.hasReportedHDR == false)
+      prefs.hasReportedHDR = true
+      #expect(prefs.hasReportedHDR)
+      #expect(other.hasReportedHDR == false)
+      #expect(defaults.object(forKey: "hasReportedHDR.one") as? Bool == true)
+    }
+  }
+
   @Test func unknownStoredHDRModeFallsBackToOff() {
     withSuite { defaults in
       defaults.set(42, forKey: "hdrMode.pk")

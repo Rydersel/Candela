@@ -24,11 +24,6 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
-    # The default is `arm64 x86_64`; builds were arm64 only because xcodebuild
-    # picks that destination first. An archive or generic build would ship a
-    # universal binary at twice the size, and its Intel slice has no DDC path.
-    # The Sparkle trim phase reads this value.
-    ARCHS: arm64
     # Ad-hoc is the PROJECT-wide default, which now means the test bundle only:
     # the app target overrides it below. CandelaAppTests is never deployed and
     # holds no TCC grant, so a real identity would buy it nothing and would make
@@ -135,25 +130,6 @@ targets:
           # since it needs Apple's timestamp server on every signing and would
           # otherwise put the network in the path of every Debug build.
           OTHER_CODE_SIGN_FLAGS: "--timestamp"
-          # The default strip settings only run with postprocessing on, which a
-          # plain `build` leaves off (Archive turns it on). Measured 2026-11-03
-          # on 1.0.5: 18.3 MB unstripped (59k symbols, 114k debug-map entries,
-          # 11.8 MB __LINKEDIT), about 7 MB stripped. Safe because every dlsym
-          # targets a system framework, never the app's own symbols. The dSYM
-          # is generated before the strip, so a release must keep Candela.app.dSYM.
-          DEPLOYMENT_POSTPROCESSING: YES
-    # Must run after Embed Frameworks and before the app's own seal. Every
-    # configuration, because Debug shares the TCC grant and a framework trimmed
-    # in one build only would give it two code identities. No declared outputs,
-    # so no dependency analysis; on a no-op build the script only verifies.
-    postBuildScripts:
-      - name: Trim Sparkle
-        shell: /bin/bash
-        basedOnDependencyAnalysis: false
-        script: |
-          "$SRCROOT/tools/build/trim-sparkle.sh" \
-            "$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/Sparkle.framework" \
-            "${EXPANDED_CODE_SIGN_IDENTITY:--}" ${OTHER_CODE_SIGN_FLAGS:-}
     info:
       path: Candela/Info.plist
       properties:

@@ -316,7 +316,7 @@ struct PanelRowModelTests {
   @Test func theHDRButtonExplainsItselfWhileASynthesizedSizeIsShowing() {
     let reason = PanelView.hdrRefusalReason(
       isShowingSynthesizedSize: true, isHDREngaged: false,
-      supportsHDR: true, capabilityProbed: true
+      supportsHDR: true, capabilityProbed: true, hasReportedHDR: true
     )
     #expect(reason == SynthesisCopy.hdrBlockedBySynthesizedSize)
   }
@@ -324,11 +324,11 @@ struct PanelRowModelTests {
   @Test func theHDRButtonIsUnrefusedWithNoSizeEngaged() {
     #expect(PanelView.hdrRefusalReason(
       isShowingSynthesizedSize: false, isHDREngaged: false,
-      supportsHDR: true, capabilityProbed: true
+      supportsHDR: true, capabilityProbed: true, hasReportedHDR: true
     ) == nil)
     #expect(PanelView.hdrRefusalReason(
       isShowingSynthesizedSize: false, isHDREngaged: true,
-      supportsHDR: true, capabilityProbed: true
+      supportsHDR: true, capabilityProbed: true, hasReportedHDR: true
     ) == nil)
   }
 
@@ -337,7 +337,7 @@ struct PanelRowModelTests {
   @Test func theHDRExitIsOfferedEvenWithASizeEngaged() {
     #expect(PanelView.hdrRefusalReason(
       isShowingSynthesizedSize: true, isHDREngaged: true,
-      supportsHDR: true, capabilityProbed: true
+      supportsHDR: true, capabilityProbed: true, hasReportedHDR: true
     ) == nil)
   }
 
@@ -346,7 +346,7 @@ struct PanelRowModelTests {
   @Test func theHDRButtonExplainsItselfOnADisplayThatReportsNoHDRModes() {
     #expect(PanelView.hdrRefusalReason(
       isShowingSynthesizedSize: false, isHDREngaged: false,
-      supportsHDR: false, capabilityProbed: true
+      supportsHDR: false, capabilityProbed: true, hasReportedHDR: false
     ) == PanelView.hdrNoModesCaption)
   }
 
@@ -355,16 +355,16 @@ struct PanelRowModelTests {
   @Test func theHDRButtonSaysNothingBeforeTheCapabilityRefreshLands() {
     #expect(PanelView.hdrRefusalReason(
       isShowingSynthesizedSize: false, isHDREngaged: false,
-      supportsHDR: false, capabilityProbed: false
+      supportsHDR: false, capabilityProbed: false, hasReportedHDR: false
     ) == nil)
   }
 
-  /// A size engaged on a display with no HDR modes: dropping the size would not
-  /// bring HDR, so the caption names the capability rather than the size.
+  /// A size engaged on a panel that has never listed HDR modes: dropping the size
+  /// would not bring HDR, so the caption names the capability rather than the size.
   @Test func theCapabilityRefusalOutranksTheSizeRefusal() {
     #expect(PanelView.hdrRefusalReason(
       isShowingSynthesizedSize: true, isHDREngaged: false,
-      supportsHDR: false, capabilityProbed: true
+      supportsHDR: false, capabilityProbed: true, hasReportedHDR: false
     ) == PanelView.hdrNoModesCaption)
   }
 
@@ -373,7 +373,7 @@ struct PanelRowModelTests {
   @Test func theHDRExitIsOfferedEvenWhenTheProbeSaysNoHDR() {
     #expect(PanelView.hdrRefusalReason(
       isShowingSynthesizedSize: false, isHDREngaged: true,
-      supportsHDR: false, capabilityProbed: true
+      supportsHDR: false, capabilityProbed: true, hasReportedHDR: false
     ) == nil)
   }
 
@@ -385,7 +385,7 @@ struct PanelRowModelTests {
         isHDREngaged: false, capabilityProbed: probed, supportsHDR: supportsHDR,
         refusalReason: PanelView.hdrRefusalReason(
           isShowingSynthesizedSize: false, isHDREngaged: false,
-          supportsHDR: supportsHDR, capabilityProbed: probed
+          supportsHDR: supportsHDR, capabilityProbed: probed, hasReportedHDR: probed && supportsHDR
         )
       )
     }
@@ -414,11 +414,131 @@ struct PanelRowModelTests {
           isHDREngaged: true, capabilityProbed: probed, supportsHDR: supportsHDR,
           refusalReason: PanelView.hdrRefusalReason(
             isShowingSynthesizedSize: true, isHDREngaged: true,
-            supportsHDR: supportsHDR, capabilityProbed: probed
+            supportsHDR: supportsHDR, capabilityProbed: probed, hasReportedHDR: probed && supportsHDR
           )
         ))
       }
     }
+  }
+
+  // MARK: - The HDR button's presence
+
+  /// Unanswered is not no: hiding here would drop the button only to bring it
+  /// back when an HDR display's probe lands, and grey is what pending looks like.
+  @Test func theHDRButtonStaysWhileTheProbeIsPending() {
+    #expect(PanelView.hdrButtonIsVisible(
+      isHDREngaged: false, capabilityProbed: false, hasReportedHDR: false))
+  }
+
+  @Test func theHDRButtonLeavesOnceTheProbeFindsAPanelThatNeverListedHDR() {
+    #expect(!PanelView.hdrButtonIsVisible(
+      isHDREngaged: false, capabilityProbed: true, hasReportedHDR: false))
+  }
+
+  @Test func theHDRButtonStaysWhereThePanelHasListedHDR() {
+    #expect(PanelView.hdrButtonIsVisible(
+      isHDREngaged: false, capabilityProbed: true, hasReportedHDR: true))
+  }
+
+  /// `supportsHDR` follows the engaged mode, so a panel that listed HDR at native
+  /// reads false on a mode without it; the caption must not claim it has no HDR.
+  @Test func anHDRPanelOnAModeWithoutHDRKeepsAGreyedButton() {
+    let reason = PanelView.hdrRefusalReason(
+      isShowingSynthesizedSize: false, isHDREngaged: false,
+      supportsHDR: false, capabilityProbed: true, hasReportedHDR: true)
+    #expect(reason == PanelView.hdrUnavailableInThisModeCaption)
+    #expect(reason != PanelView.hdrNoModesCaption)
+    #expect(PanelView.hdrButtonIsVisible(
+      isHDREngaged: false, capabilityProbed: true, hasReportedHDR: true))
+    #expect(!PanelView.hdrButtonIsEnabled(
+      isHDREngaged: false, capabilityProbed: true, supportsHDR: false,
+      refusalReason: reason))
+  }
+
+  /// A size refusal is temporary, so the button stays and greys, and its caption
+  /// has a control to sit under.
+  @Test func aRefusedButCapableHDRButtonStaysGreyedRatherThanLeaving() {
+    let reason = PanelView.hdrRefusalReason(
+      isShowingSynthesizedSize: true, isHDREngaged: false,
+      supportsHDR: true, capabilityProbed: true, hasReportedHDR: true)
+    #expect(reason == SynthesisCopy.hdrBlockedBySynthesizedSize)
+    #expect(PanelView.hdrButtonIsVisible(
+      isHDREngaged: false, capabilityProbed: true, hasReportedHDR: true))
+    #expect(!PanelView.hdrButtonIsEnabled(
+      isHDREngaged: false, capabilityProbed: true, supportsHDR: true,
+      refusalReason: reason))
+  }
+
+  /// The mirrored panel reads no HDR modes under the size, but dropping the size
+  /// brings HDR back, so the size caption names that move.
+  @Test func aSizeOnAPanelThatHasListedHDRIsCaptionedByTheSize() {
+    let reason = PanelView.hdrRefusalReason(
+      isShowingSynthesizedSize: true, isHDREngaged: false,
+      supportsHDR: false, capabilityProbed: true, hasReportedHDR: true)
+    #expect(reason == SynthesisCopy.hdrBlockedBySynthesizedSize)
+    #expect(PanelView.hdrButtonIsVisible(
+      isHDREngaged: false, capabilityProbed: true, hasReportedHDR: true))
+    #expect(!PanelView.hdrButtonIsEnabled(
+      isHDREngaged: false, capabilityProbed: true, supportsHDR: false,
+      refusalReason: reason))
+  }
+
+  /// The same size on a panel that never listed HDR: the capability caption wins,
+  /// and the button it would explain is hidden.
+  @Test func aSizeOnAPanelThatNeverListedHDRIsCaptionedByTheCapability() {
+    #expect(PanelView.hdrRefusalReason(
+      isShowingSynthesizedSize: true, isHDREngaged: false,
+      supportsHDR: false, capabilityProbed: true, hasReportedHDR: false
+    ) == PanelView.hdrNoModesCaption)
+    #expect(!PanelView.hdrButtonIsVisible(
+      isHDREngaged: false, capabilityProbed: true, hasReportedHDR: false))
+  }
+
+  /// With HDR live this button is the only way out, so no probe answer, stale or
+  /// fresh, may take it away.
+  @Test func theHDRExitIsNeverHidden() {
+    for probed in [false, true] {
+      for reported in [false, true] {
+        #expect(PanelView.hdrButtonIsVisible(
+          isHDREngaged: true, capabilityProbed: probed, hasReportedHDR: reported))
+      }
+    }
+  }
+
+  /// `reported` is derived as the latch derives it: a probe that saw HDR modes has
+  /// reported them, whatever came before.
+  @Test func theHDRButtonHidesExactlyWhenNothingKeepsItAndNeverWhenItCouldAct() {
+    for engaged in [false, true] {
+      for probed in [false, true] {
+        for supportsHDR in [false, true] {
+          for reportedEarlier in [false, true] {
+            for size in [false, true] {
+              let reported = reportedEarlier || (probed && supportsHDR)
+              let reason = PanelView.hdrRefusalReason(
+                isShowingSynthesizedSize: size, isHDREngaged: engaged,
+                supportsHDR: supportsHDR, capabilityProbed: probed, hasReportedHDR: reported)
+              let visible = PanelView.hdrButtonIsVisible(
+                isHDREngaged: engaged, capabilityProbed: probed, hasReportedHDR: reported)
+              let enabled = PanelView.hdrButtonIsEnabled(
+                isHDREngaged: engaged, capabilityProbed: probed, supportsHDR: supportsHDR,
+                refusalReason: reason)
+              let keptVisible = !probed || reported || engaged
+              #expect(visible == keptVisible)
+              if !visible { #expect(!enabled) }
+              // A visible, refused button under a size on a panel that has
+              // listed HDR always names the size, the move that brings HDR back.
+              if size, reported, !engaged { #expect(reason == SynthesisCopy.hdrBlockedBySynthesizedSize) }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  @Test func theCurrentModeCaptionIsPinned() {
+    #expect(PanelView.hdrUnavailableInThisModeCaption
+      == "HDR isn't available in this display's current mode.")
+    #expect(!PanelView.hdrUnavailableInThisModeCaption.contains("\u{2014}"))
   }
 
   /// Says what was looked for and not found, never that the app does not know.

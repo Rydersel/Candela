@@ -42,6 +42,8 @@ struct PrefPropagationTests {
     // No pane writes it, and a reset that cleared it as a setting would discard
     // the recovery signal.
     #expect(PrefName(rawValue: "temporaryDimEngaged") == nil)
+    // Written by the controller, never by a pane.
+    #expect(PrefName(rawValue: "hasReportedHDR") == nil)
   }
 
   @Test func oledEngineStateIsNotAPrefName() {
