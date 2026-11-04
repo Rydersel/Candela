@@ -75,7 +75,6 @@ struct PermissionGuideTests {
     guide.show(.accessibility)
     guide.tick()
     #expect(!guide.isPanelShown)
-    #expect(guide.panel?.isVisible != true)
     #expect(guide.showing == .accessibility)
     #expect(guide.isTracking)
   }
@@ -87,7 +86,6 @@ struct PermissionGuideTests {
     guide.show(.accessibility)
     guide.tick()
     #expect(!guide.isPanelShown)
-    #expect(guide.panel?.isVisible != true)
     #expect(guide.showing == .accessibility)
   }
 
@@ -136,6 +134,81 @@ struct PermissionGuideTests {
     let done = try #require(guide.doneControl)
     #expect(done.accessibilityPerformPress())
     #expect(guide.showing == nil)
+  }
+
+  /// While following, only every sixth tick asks the privacy database.
+  @Test func followingTicksOneToFiveSkipTheGrantRead() {
+    var reads = 0
+    let calls = Calls()
+    let guide = makeGuide(calls: calls)
+    // No window, so nothing is ordered on screen; Settings frontmost keeps it following.
+    guide.windowList = { [] }
+    guide.isGranted = { _ in
+      reads += 1
+      return false
+    }
+    defer { guide.close() }
+    guide.show(.accessibility)
+    #expect(guide.trackingInterval == PermissionGuide.followInterval)
+    guide.tick()
+    #expect(reads == 1)
+    for _ in 1...5 { guide.tick() }
+    #expect(reads == 1)
+    guide.tick()
+    #expect(reads == 2)
+  }
+
+  /// Settings left open behind another app must not cost thirty wakeups a second.
+  @Test func cadenceDropsWhileSettingsIsBehindAndReturnsWhenItIsFront() {
+    var reads = 0
+    var frontmost = "com.apple.finder"
+    let calls = Calls()
+    let guide = makeGuide(calls: calls)
+    guide.windowList = { [] }
+    guide.frontmostBundleID = { frontmost }
+    guide.isGranted = { _ in
+      reads += 1
+      return false
+    }
+    defer { guide.close() }
+    guide.show(.accessibility)
+    #expect(guide.trackingInterval == PermissionGuide.idleInterval)
+    for _ in 1...3 { guide.tick() }
+    // Idle ticks are rare, so each one reads the grant.
+    #expect(reads == 3)
+    #expect(guide.trackingInterval == PermissionGuide.idleInterval)
+    frontmost = "com.apple.systempreferences"
+    guide.tick()
+    #expect(guide.trackingInterval == PermissionGuide.followInterval)
+    frontmost = "com.apple.finder"
+    guide.tick()
+    #expect(guide.trackingInterval == PermissionGuide.idleInterval)
+    #expect(PermissionGuide.idleInterval >= 0.2)
+  }
+
+  /// VoiceOver hears the line, the row once by name, and Done; the arrow and
+  /// the row's grip, icon and label are not separate stops.
+  @Test func accessibilityTreeIsTheLineTheRowAndDone() throws {
+    let calls = Calls()
+    let guide = makeGuide(calls: calls)
+    defer { guide.close() }
+    guide.show(.accessibility)
+    let content = try #require(guide.panel?.contentView)
+    var elements: [any NSAccessibilityProtocol] = []
+    func walk(_ node: Any) {
+      guard let node = node as? any NSAccessibilityProtocol else { return }
+      if node.isAccessibilityElement() { elements.append(node) }
+      for child in node.accessibilityChildren() ?? [] { walk(child) }
+    }
+    for child in content.accessibilityChildren() ?? [] { walk(child) }
+    let roles = elements.compactMap { $0.accessibilityRole() }
+    #expect(roles.filter { $0 == .image }.count == 1)
+    #expect(roles.filter { $0 == .button }.count == 1)
+    #expect(roles.filter { $0 == .staticText }.count == 1)
+    #expect(elements.count == 3)
+    let row = try #require(elements.first { $0.accessibilityRole() == .image })
+    #expect(row.accessibilityLabel()?.hasSuffix(".app") == true)
+    #expect(row.accessibilityHelp() == "Drag this row into the list above.")
   }
 
   /// The reason Done is drawn by hand: a borderless panel never becomes key, so

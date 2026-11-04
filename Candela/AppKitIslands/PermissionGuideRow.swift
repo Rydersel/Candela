@@ -35,6 +35,8 @@ final class PermissionGuideRow: NSView, NSDraggingSource {
     setAccessibilityRole(.image)
     setAccessibilityLabel(displayName + ".app")
     setAccessibilityHelp("Drag this row into the list above.")
+    addTrackingArea(NSTrackingArea(
+      rect: .zero, options: [.cursorUpdate, .activeAlways, .inVisibleRect], owner: self))
   }
 
   @available(*, unavailable)
@@ -51,15 +53,19 @@ final class PermissionGuideRow: NSView, NSDraggingSource {
     }
   }
 
+  // One element: the grip, icon and name would otherwise each be read, the name twice.
+  override func accessibilityChildren() -> [Any]? { [] }
+
   // The grip, icon and label must not swallow the drag.
   override func hitTest(_ point: NSPoint) -> NSView? {
     frame.contains(point) ? self : nil
   }
 
-  // The panel is never key; without this the first press only focuses it.
+  // Never key; without this the first press is swallowed.
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-  override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
+  // Cursor rects only fire in a key window of the active app, which this never is.
+  override func cursorUpdate(with event: NSEvent) { NSCursor.openHand.set() }
 
   override func mouseDragged(with event: NSEvent) {
     guard let rep = bitmapImageRepForCachingDisplay(in: bounds) else { return }
