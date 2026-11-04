@@ -35,11 +35,13 @@ struct OnboardingFlowModelTests {
 
   private func environment(
     _ displays: [OnboardingDisplayEntry], firstRun: Bool = true,
-    accessibilityGranted: Bool = false, keyModesRequireGrant: Bool = true
+    accessibilityGranted: Bool = false, keyModesRequireGrant: Bool = true,
+    keyModesOff: Bool = false
   ) -> OnboardingEnvironment {
     OnboardingEnvironment(
       accessibilityGranted: accessibilityGranted, loginItemEnabled: false,
       isFirstRun: firstRun, keyModesRequireGrant: keyModesRequireGrant,
+      keyModesOff: keyModesOff,
       arrangedDisplayCount: displays.count + 1,
       displays: displays)
   }
@@ -1500,16 +1502,28 @@ struct OnboardingFlowModelTests {
     let model = OnboardingFlowModel(environment: environment([entry(key: "dell")]))
     var log: [String] = []
     model.onCommit = { log.append("commit \($0)") }
-    model.onClose = { log.append("close") }
+    // The window's close handling reads this to skip the first-run callout,
+    // so it must already be set when the close arrives.
+    model.onClose = { log.append("close into settings \(model.closesIntoSettings)") }
     model.onOpenSettings = { log.append("open \($0)") }
     walk(model, to: .finish)
     log.removeAll()
     model.finish(opening: .checkup)
     #expect(log == [
       "commit \(OnboardingCommit.setLaunchAtLogin(true))",
-      "close",
+      "close into settings true",
       "open \(SettingsDestination.pane(.checkup))",
     ])
+  }
+
+  /// Start Using closes into nothing, so the first-run callout still shows.
+  @Test func finishingWithoutAnItemDoesNotCloseIntoSettings() {
+    let model = OnboardingFlowModel(environment: environment([entry(key: "dell")]))
+    var closedIntoSettings: Bool?
+    model.onClose = { closedIntoSettings = model.closesIntoSettings }
+    walk(model, to: .finish)
+    model.advance()
+    #expect(closedIntoSettings == false)
   }
 
   /// Off Finish there is nothing to open from, and an item must not ride a
@@ -1566,25 +1580,98 @@ struct OnboardingFlowModelTests {
   @Test func aReharvestOfTheSkipsOwnWriteDoesNotOutliveTheRestore() {
     let model = modelOnKeysPage()
     model.skipKeys()
+    // What the default all-media modes read as after the skip: both disabled.
     model.update(environment: environment(
       [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")],
-      keyModesRequireGrant: false))
+      keyModesRequireGrant: false, keyModesOff: true))
     #expect(!model.keyboardControlOn)
     model.accessibilityGranted = true
     #expect(model.keyboardControlOn)
+    #expect(model.keysGrantInPlace)
   }
 
   /// With no skip of this flow's outstanding, the harvest is the stored
-  /// modes' own answer: keys turned off in Settings mid-flow read as off.
-  @Test func aReharvestWithTheKeysOffElsewhereReadsOff() {
+  /// modes' own answer: both families set to nothing in Settings mid-flow read
+  /// as off.
+  @Test func aReharvestWithBothModesDisabledElsewhereReadsOff() {
     let model = OnboardingFlowModel(environment: environment(
       [entry(key: "dell")], accessibilityGranted: true))
     #expect(model.keyboardControlOn)
     model.update(environment: environment(
-      [entry(key: "dell")], accessibilityGranted: true, keyModesRequireGrant: false))
+      [entry(key: "dell")], accessibilityGranted: true,
+      keyModesRequireGrant: false, keyModesOff: true))
     #expect(!model.keyboardControlOn)
     walk(model, to: .finish)
     #expect(!model.fineTuneItems.contains(.shortcuts))
+  }
+
+  /// Switching to custom shortcuts mid-flow is not turning the keys off: they
+  /// need no grant, so they read as ready with or without one.
+  @Test func aReharvestToAllCustomReadsOn() {
+    let model = OnboardingFlowModel(environment: environment([entry(key: "dell")]))
+    model.update(environment: environment([entry(key: "dell")], keyModesRequireGrant: false))
+    #expect(model.keyboardControlOn)
+    #expect(model.keysGrantInPlace)
+  }
+
+  /// All custom shortcuts, granted or not: Carbon hotkeys need no grant, so the
+  /// keys are ready and the shortcuts are worth reviewing. The control is the
+  /// default all-media rig skipping the keys page, which reads off.
+  @Test func anAllCustomRigIsReadyAndOffersItsShortcuts() {
+    for granted in [false, true] {
+      let model = OnboardingFlowModel(environment: environment(
+        [entry(key: "dell")], accessibilityGranted: granted, keyModesRequireGrant: false))
+      walk(model, to: .finish)
+      #expect(model.fineTuneItems.contains(.shortcuts), "granted \(granted)")
+      #expect(
+        OnboardingFinishCopy.keysLine(
+          keysOn: model.keyboardControlOn, grantInPlace: model.keysGrantInPlace
+        ).text == OnboardingFinishCopy.keysReady, "granted \(granted)")
+    }
+    let skipped = modelOnKeysPage()
+    skipped.skipKeys()
+    walk(skipped, to: .finish)
+    #expect(!skipped.fineTuneItems.contains(.shortcuts))
+    #expect(
+      OnboardingFinishCopy.keysLine(
+        keysOn: skipped.keyboardControlOn, grantInPlace: skipped.keysGrantInPlace
+      ).text == OnboardingFinishCopy.keysOff)
+  }
+
+  /// The whole table, one row per stored-mode case, read where Finish reads it.
+  @Test func theKeysLineAndShortcutsItemFollowTheStoredModes() {
+    struct Row {
+      var granted: Bool, needsGrant: Bool, off: Bool
+      var line: String, offersShortcuts: Bool
+    }
+    let rows = [
+      // Media keys on, no grant.
+      Row(granted: false, needsGrant: true, off: false,
+          line: OnboardingFinishCopy.keysAwaitAccess, offersShortcuts: false),
+      // Media keys on, granted.
+      Row(granted: true, needsGrant: true, off: false,
+          line: OnboardingFinishCopy.keysReady, offersShortcuts: true),
+      // Both modes disabled (a resumed default skip, or set so in Settings).
+      Row(granted: false, needsGrant: false, off: true,
+          line: OnboardingFinishCopy.keysOff, offersShortcuts: false),
+      Row(granted: true, needsGrant: false, off: true,
+          line: OnboardingFinishCopy.keysOff, offersShortcuts: false),
+    ]
+    for row in rows {
+      // No external, so no keys page: the rows read the stored modes alone,
+      // and the skip's own rows are the tests above.
+      let model = OnboardingFlowModel(environment: environment(
+        [], accessibilityGranted: row.granted,
+        keyModesRequireGrant: row.needsGrant, keyModesOff: row.off))
+      walk(model, to: .finish)
+      #expect(
+        OnboardingFinishCopy.keysLine(
+          keysOn: model.keyboardControlOn, grantInPlace: model.keysGrantInPlace
+        ).text == row.line, "\(row.granted) \(row.needsGrant) \(row.off)")
+      #expect(
+        model.fineTuneItems.contains(.shortcuts) == row.offersShortcuts,
+        "\(row.granted) \(row.needsGrant) \(row.off)")
+    }
   }
 
   /// A flow resumed after the relaunch lands on Finish without passing the
@@ -1596,13 +1683,14 @@ struct OnboardingFlowModelTests {
         entry(key: "dell"),
         entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true),
       ],
-      accessibilityGranted: false, keyModesRequireGrant: false))
+      // The default all-media modes after the previous process's skip.
+      accessibilityGranted: false, keyModesRequireGrant: false, keyModesOff: true))
     model.resumeAfterCare()
     #expect(model.currentPage == .finish)
     #expect(model.fineTuneItems == [.oledCare, .checkup, .arrangement])
     #expect(
       OnboardingFinishCopy.keysLine(
-        keysOn: model.keyboardControlOn, accessibilityGranted: model.accessibilityGranted
+        keysOn: model.keyboardControlOn, grantInPlace: model.keysGrantInPlace
       ).text == OnboardingFinishCopy.keysOff)
   }
 
@@ -1624,6 +1712,19 @@ struct OnboardingFlowModelTests {
       accessibilityGranted: true, loginItemEnabled: false, isFirstRun: true,
       keyModesRequireGrant: true, arrangedDisplayCount: 1, displays: []))
     walk(model, to: .finish)
+    #expect(model.fineTuneItems == [.shortcuts])
+  }
+
+  /// The list can go from empty to not while Finish is up: built-in only with
+  /// the grant still out offers nothing, and the grant landing there adds the
+  /// shortcuts. The page's reveal has to let that show.
+  @Test func theListCanGainAnItemWhileFinishShows() {
+    let model = OnboardingFlowModel(environment: OnboardingEnvironment(
+      accessibilityGranted: false, loginItemEnabled: false, isFirstRun: true,
+      keyModesRequireGrant: true, arrangedDisplayCount: 1, displays: []))
+    walk(model, to: .finish)
+    #expect(model.fineTuneItems.isEmpty)
+    model.accessibilityGranted = true
     #expect(model.fineTuneItems == [.shortcuts])
   }
 }

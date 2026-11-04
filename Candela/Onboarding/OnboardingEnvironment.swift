@@ -12,6 +12,9 @@ struct OnboardingEnvironment: Equatable, Sendable {
   /// Whether the stored key modes want the event tap. Custom shortcuts are
   /// Carbon hotkeys and need no grant, so an all-custom rig answers false.
   var keyModesRequireGrant: Bool
+  /// Both key families set to nothing: no media key and no custom shortcut
+  /// reaches a display. Defaulted so a fixture carries no decision.
+  var keyModesOff: Bool = false
   /// Displays the arrangement map draws, the built-in included: a mirror set
   /// is one, and so is a synthesized size's stand-in with its panel.
   var arrangedDisplayCount: Int

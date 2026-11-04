@@ -18,45 +18,46 @@ enum OnboardingFineTuneItem: CaseIterable, Hashable, Identifiable {
     }
   }
 
-  var detail: String {
+  /// Only the Checkup line names displays, so only it reads the count.
+  func detail(externalDisplays: Int) -> String {
     switch self {
     case .oledCare: "Idle dimming and static-region protection"
     case .shortcuts: "Brightness, volume and contrast"
-    case .checkup: "Look for defects and wear on your display"
+    case .checkup:
+      "Look for defects and wear on your \(externalDisplays >= 2 ? "displays" : "display")"
     case .arrangement: "How your displays sit next to each other"
     }
   }
 
-  var destination: SettingsDestination {
+  var pane: PaneID {
     switch self {
-    case .oledCare: .pane(.oledCare)
-    case .shortcuts: .pane(.keyboard)
-    case .checkup: .pane(.checkup)
-    case .arrangement: .pane(.arrangement)
+    case .oledCare: .oledCare
+    case .shortcuts: .keyboard
+    case .checkup: .checkup
+    case .arrangement: .arrangement
     }
   }
 
+  var destination: SettingsDestination { .pane(pane) }
+
   /// The destination pane's own sidebar glyph, so the row and the place it
   /// opens look like the same thing.
-  @MainActor var symbol: String {
-    guard case let .pane(id) = destination else { return "gearshape" }
-    return SettingsRegistry.descriptor(for: id).symbol
-  }
+  @MainActor var symbol: String { SettingsRegistry.descriptor(for: pane).symbol }
 
   /// Each item appears only when its fact holds; the list never pads itself.
   ///
   /// `arrangedDisplays` is the Arrangement pane's tile count, built-in
   /// included, so a mirror set or a lone external in clamshell has nothing to
-  /// arrange. Shortcuts need the grant and the keys on together: a skip turns
-  /// the keys off, and with them off there is nothing to review.
+  /// arrange. Shortcuts need the keys on and `grantInPlace`: the grant given,
+  /// or not needed because no family watches the media keys.
   static func items(
-    enrolledOleds: Int, keysOn: Bool, accessibilityGranted: Bool,
+    enrolledOleds: Int, keysOn: Bool, grantInPlace: Bool,
     externalDisplays: Int, arrangedDisplays: Int
   ) -> [OnboardingFineTuneItem] {
     allCases.filter { item in
       switch item {
       case .oledCare: enrolledOleds > 0
-      case .shortcuts: keysOn && accessibilityGranted
+      case .shortcuts: keysOn && grantInPlace
       case .checkup: externalDisplays > 0
       case .arrangement: arrangedDisplays > 1
       }
@@ -76,21 +77,22 @@ enum OnboardingFinishCopy {
   static let keysReady = "Keyboard keys are ready to use"
   static let keysOff = "Brightness and volume keys are off; turn them on in Settings > Keyboard"
   static let keysAwaitAccess = "Keyboard access can be granted later in Settings"
-  static let fineTuneHeading = "Fine-tune in Settings"
+  static let fineTuneHeading = "Next, in Settings"
 
   /// Off wins over the grant: with the modes off, access changes nothing the
-  /// keys do, and "ready" would be untrue.
-  static func keysLine(keysOn: Bool, accessibilityGranted: Bool) -> Line {
+  /// keys do, and "ready" would be untrue. `grantInPlace` is true for modes
+  /// that need no grant, so custom shortcuts read as ready without one.
+  static func keysLine(keysOn: Bool, grantInPlace: Bool) -> Line {
     if !keysOn { return Line(text: keysOff, done: false) }
-    return accessibilityGranted
+    return grantInPlace
       ? Line(text: keysReady, done: true)
       : Line(text: keysAwaitAccess, done: false)
   }
 
   static func summary(
-    keysOn: Bool, accessibilityGranted: Bool, externalDisplays: Int, protectedOleds: Int
+    keysOn: Bool, grantInPlace: Bool, externalDisplays: Int, protectedOleds: Int
   ) -> [Line] {
-    var lines = [keysLine(keysOn: keysOn, accessibilityGranted: accessibilityGranted)]
+    var lines = [keysLine(keysOn: keysOn, grantInPlace: grantInPlace)]
     if externalDisplays > 0 {
       lines.append(Line(
         text: externalDisplays == 1

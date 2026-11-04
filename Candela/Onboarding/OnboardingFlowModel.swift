@@ -142,16 +142,21 @@ final class OnboardingFlowModel {
   /// Skip, Back, skip again is one decision, so its disable is committed once,
   /// and only a committed disable has anything for the grant to restore.
   private var keysDisableCommitted = false
-  /// Whether the stored key modes send the Mac's brightness and volume keys to
-  /// the display. While this flow's disable stands, a harvest reads that disable
-  /// back, so it is not taken here: the skip already says the keys are off, and
-  /// the restore puts the modes back to what this held.
-  private var storedMediaKeysOn: Bool
+  /// The stored key modes as last harvested. While this flow's disable
+  /// stands, a harvest reads that disable back, so neither is taken then: the
+  /// skip already says the keys are off, and the restore puts the modes back to
+  /// what these held.
+  private var storedKeyModesOff: Bool
+  private var storedModesNeedGrant: Bool
 
-  /// Whether the brightness and volume keys control the display once setup
-  /// ends. Read from current state rather than from pages passed through, so a
-  /// flow resumed straight onto Finish answers the same way.
-  var keyboardControlOn: Bool { !keysDeclined && storedMediaKeysOn }
+  /// Whether the keys do anything once setup ends. Read from current state
+  /// rather than from pages passed through, so a flow resumed straight onto
+  /// Finish answers the same way.
+  var keyboardControlOn: Bool { !keysDeclined && !storedKeyModesOff }
+
+  /// The grant the stored modes need is in place: given, or not needed because
+  /// no family watches the media keys (custom shortcuts need none).
+  var keysGrantInPlace: Bool { accessibilityGranted || !storedModesNeedGrant }
 
   /// Designated displays whose protection is on: after the care page, what is
   /// enrolled. A resumed flow seeds both sets from the harvest.
@@ -162,7 +167,7 @@ final class OnboardingFlowModel {
     OnboardingFineTuneItem.items(
       enrolledOleds: protectedOledCount,
       keysOn: keyboardControlOn,
-      accessibilityGranted: accessibilityGranted,
+      grantInPlace: keysGrantInPlace,
       externalDisplays: environment.displays.count,
       arrangedDisplays: environment.arrangedDisplayCount)
   }
@@ -175,6 +180,10 @@ final class OnboardingFlowModel {
   /// Live mode opens the Settings window there; the mock and tests leave it
   /// inert, so a rehearsal never opens the real window.
   var onOpenSettings: (SettingsDestination) -> Void = { _ in }
+  /// True from the moment a fine-tune item starts closing the window: the
+  /// close is on its way to Settings, so the window's close handling can tell
+  /// it from every other close.
+  private(set) var closesIntoSettings = false
   /// Permission actions, injected: live mode binds `AccessibilityPermission`,
   /// the mock presenter simulates a grant so the page's states are clickable.
   var onRequestAccessibility: () -> Void = {}
@@ -341,7 +350,8 @@ final class OnboardingFlowModel {
       }
     }
     accessibilityGranted = environment.accessibilityGranted
-    storedMediaKeysOn = environment.keyModesRequireGrant
+    storedKeyModesOff = environment.keyModesOff
+    storedModesNeedGrant = environment.keyModesRequireGrant
     onCommit = { _ in }
     onApplySize = { _, _, _ in }
     onKeepSize = {}
@@ -403,6 +413,7 @@ final class OnboardingFlowModel {
   /// behind a Setup window still on screen.
   func finish(opening item: OnboardingFineTuneItem) {
     guard currentPage == .finish else { return }
+    closesIntoSettings = true
     advance()
     onOpenSettings(item.destination)
   }
@@ -446,7 +457,8 @@ final class OnboardingFlowModel {
     }
     self.environment = environment
     if !keysDisableCommitted {
-      storedMediaKeysOn = environment.keyModesRequireGrant
+      storedKeyModesOff = environment.keyModesOff
+      storedModesNeedGrant = environment.keyModesRequireGrant
     }
     if let pending = pendingApply,
       !environment.displays.contains(where: { $0.persistenceKey == pending.displayKey })

@@ -7,12 +7,11 @@ import Testing
 @MainActor
 struct OnboardingFineTuneTests {
   private func items(
-    _ enrolledOleds: Int, _ keysOn: Bool, _ accessibilityGranted: Bool,
+    _ enrolledOleds: Int, _ keysOn: Bool, _ grantInPlace: Bool,
     _ externalDisplays: Int, _ arrangedDisplays: Int
   ) -> [OnboardingFineTuneItem] {
     OnboardingFineTuneItem.items(
-      enrolledOleds: enrolledOleds, keysOn: keysOn,
-      accessibilityGranted: accessibilityGranted,
+      enrolledOleds: enrolledOleds, keysOn: keysOn, grantInPlace: grantInPlace,
       externalDisplays: externalDisplays, arrangedDisplays: arrangedDisplays)
   }
 
@@ -30,7 +29,7 @@ struct OnboardingFineTuneTests {
     #expect(items(1, true, true, 1, 2).contains(.shortcuts))
   }
 
-  @Test func noShortcutsWithoutTheGrant() {
+  @Test func noShortcutsWithoutTheGrantInPlace() {
     #expect(!items(1, true, false, 1, 2).contains(.shortcuts))
   }
 
@@ -65,16 +64,41 @@ struct OnboardingFineTuneTests {
   }
 
   @Test func theCopyIsTheApprovedWords() {
-    let copy = OnboardingFineTuneItem.allCases.map { [$0.title, $0.detail] }
+    let copy = OnboardingFineTuneItem.allCases.map {
+      [$0.title, $0.detail(externalDisplays: 1)]
+    }
     #expect(copy == [
       ["Fine-tune OLED care", "Idle dimming and static-region protection"],
       ["Review your key shortcuts", "Brightness, volume and contrast"],
       ["Run a Checkup", "Look for defects and wear on your display"],
       ["Check the arrangement", "How your displays sit next to each other"],
     ])
+    #expect(OnboardingFinishCopy.fineTuneHeading == "Next, in Settings")
     for line in copy.joined() + [OnboardingFinishCopy.fineTuneHeading] {
       #expect(!line.contains("\u{2014}"), "\(line)")
     }
+  }
+
+  /// Only the Checkup line names displays; two or more externals read plural.
+  @Test func theCheckupDetailPluralizesFromTwoExternals() {
+    #expect(OnboardingFineTuneItem.checkup.detail(externalDisplays: 2)
+      == "Look for defects and wear on your displays")
+    #expect(OnboardingFineTuneItem.checkup.detail(externalDisplays: 0)
+      == "Look for defects and wear on your display")
+    for item in OnboardingFineTuneItem.allCases where item != .checkup {
+      #expect(item.detail(externalDisplays: 1) == item.detail(externalDisplays: 3), "\(item)")
+    }
+  }
+
+  /// The cascade ends past every threshold the page can ask for, so a line or
+  /// the list arriving after the page appeared still shows.
+  @Test func theRevealEndsPastEveryLaterThreshold() {
+    let opened = OnboardingFinishPage.revealSequence(summaryLines: 1, offersFineTune: false)
+    #expect(Array(opened.dropLast()) == [1, 2])
+    // The fullest page's list threshold: three summary lines, then the list.
+    let fullestListThreshold = 3 + 1
+    #expect(opened.last! > fullestListThreshold)
+    #expect(opened == opened.sorted())
   }
 
   // MARK: - The Finish summary's keys line
@@ -82,7 +106,7 @@ struct OnboardingFineTuneTests {
   /// Skipping the keys page turns them off, and Finish must say so plainly
   /// rather than suggest access is merely pending.
   @Test func keysOffSaysSoAndWhereToTurnThemOn() {
-    let line = OnboardingFinishCopy.keysLine(keysOn: false, accessibilityGranted: false)
+    let line = OnboardingFinishCopy.keysLine(keysOn: false, grantInPlace: false)
     #expect(line == .init(text: OnboardingFinishCopy.keysOff, done: false))
     #expect(line.text.contains("Brightness and volume keys are off"))
     #expect(line.text.contains("Settings > Keyboard"))
@@ -91,27 +115,27 @@ struct OnboardingFineTuneTests {
   }
 
   @Test func grantedKeysReadAsReady() {
-    let line = OnboardingFinishCopy.keysLine(keysOn: true, accessibilityGranted: true)
+    let line = OnboardingFinishCopy.keysLine(keysOn: true, grantInPlace: true)
     #expect(line == .init(text: OnboardingFinishCopy.keysReady, done: true))
   }
 
   /// Keys still on but no grant: reached with no external attached, where the
   /// keys page never asked.
   @Test func keysOnWithoutTheGrantSayAccessCanComeLater() {
-    let line = OnboardingFinishCopy.keysLine(keysOn: true, accessibilityGranted: false)
+    let line = OnboardingFinishCopy.keysLine(keysOn: true, grantInPlace: false)
     #expect(line == .init(text: OnboardingFinishCopy.keysAwaitAccess, done: false))
   }
 
   /// Stored modes off and the grant live: the grant changes nothing for the
   /// keys, so the page must not call them ready.
   @Test func keysOffStaysOffWithTheGrant() {
-    let line = OnboardingFinishCopy.keysLine(keysOn: false, accessibilityGranted: true)
+    let line = OnboardingFinishCopy.keysLine(keysOn: false, grantInPlace: true)
     #expect(line.text == OnboardingFinishCopy.keysOff)
   }
 
   @Test func theSummaryCountsDisplaysAndProtectedOleds() {
     let lines = OnboardingFinishCopy.summary(
-      keysOn: true, accessibilityGranted: true, externalDisplays: 2, protectedOleds: 1)
+      keysOn: true, grantInPlace: true, externalDisplays: 2, protectedOleds: 1)
     #expect(lines.map(\.text) == [
       OnboardingFinishCopy.keysReady,
       "2 displays configured",
@@ -119,7 +143,7 @@ struct OnboardingFineTuneTests {
     ])
     #expect(
       OnboardingFinishCopy.summary(
-        keysOn: false, accessibilityGranted: false, externalDisplays: 0, protectedOleds: 0
+        keysOn: false, grantInPlace: false, externalDisplays: 0, protectedOleds: 0
       ).map(\.text) == [OnboardingFinishCopy.keysOff])
   }
 }

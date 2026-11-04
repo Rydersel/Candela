@@ -293,6 +293,7 @@ struct OnboardingFinishPage: View {
   static let columnWidth: CGFloat = 440
 
   private var fineTuneItems: [OnboardingFineTuneItem] { model.fineTuneItems }
+  private var externalDisplays: Int { model.environment.displays.count }
 
   private func summaryRow(_ line: OnboardingFinishCopy.Line) -> some View {
     HStack(spacing: 10) {
@@ -349,7 +350,7 @@ struct OnboardingFinishPage: View {
         Text(item.title)
           .font(.callout.weight(.medium))
           .foregroundStyle(OnboardingStyle.titleColor.opacity(0.9))
-        Text(item.detail)
+        Text(item.detail(externalDisplays: externalDisplays))
           .font(.caption)
           .foregroundStyle(OnboardingStyle.faintColor)
           .lineLimit(1)
@@ -366,28 +367,39 @@ struct OnboardingFinishPage: View {
     // The title is the action; the detail is what it is about, and the
     // arrow says only that it leaves the page.
     .accessibilityLabel(item.title)
-    .accessibilityHint("\(item.detail). Closes setup and opens Settings.")
+    .accessibilityHint(
+      "\(item.detail(externalDisplays: externalDisplays)). Closes setup and opens Settings.")
   }
 
   private var summaryLines: [OnboardingFinishCopy.Line] {
     OnboardingFinishCopy.summary(
       keysOn: model.keyboardControlOn,
-      accessibilityGranted: model.accessibilityGranted,
-      externalDisplays: model.environment.displays.count,
+      grantInPlace: model.keysGrantInPlace,
+      externalDisplays: externalDisplays,
       protectedOleds: model.protectedOledCount)
   }
 
-  private func reveal() {
+  /// The values `revealed` steps through on appear. It ends past every
+  /// threshold rather than at the last one counted: a summary line or the
+  /// list can arrive while the page is up (the grant landing, a display
+  /// plugged in), and a count taken on appear would leave it invisible.
+  static func revealSequence(summaryLines: Int, offersFineTune: Bool) -> [Int] {
     // The fine-tune list is the cascade's last step, after the summary.
-    let steps = summaryLines.count + (fineTuneItems.isEmpty ? 0 : 1) + 1
+    let steps = summaryLines + (offersFineTune ? 1 : 0) + 1
+    return Array(1...steps) + [Int.max]
+  }
+
+  private func reveal() {
+    let sequence = Self.revealSequence(
+      summaryLines: summaryLines.count, offersFineTune: !fineTuneItems.isEmpty)
     guard !reduceMotion else {
-      revealed = steps + 1
+      revealed = Int.max
       return
     }
     revealed = 0
-    for step in 1...(steps + 1) {
-      withAnimation(.spring(duration: 0.5).delay(0.15 * Double(step))) {
-        revealed = step
+    for (offset, value) in sequence.enumerated() {
+      withAnimation(.spring(duration: 0.5).delay(0.15 * Double(offset + 1))) {
+        revealed = value
       }
     }
   }

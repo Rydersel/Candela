@@ -67,6 +67,7 @@ enum OnboardingEnvironmentBuilder {
     loginItemEnabled: Bool,
     isFirstRun: Bool,
     keyModesRequireGrant: Bool,
+    keyModesOff: Bool,
     arrangedDisplayCount: Int
   ) -> OnboardingEnvironment {
     OnboardingEnvironment(
@@ -74,6 +75,7 @@ enum OnboardingEnvironmentBuilder {
       loginItemEnabled: loginItemEnabled,
       isFirstRun: isFirstRun,
       keyModesRequireGrant: keyModesRequireGrant,
+      keyModesOff: keyModesOff,
       arrangedDisplayCount: arrangedDisplayCount,
       // Input order is the app's display-list order, and the flow renders and
       // paginates in exactly that order.
@@ -243,12 +245,21 @@ enum OnboardingLiveEnvironment {
       // so the page and those surfaces cannot disagree about whether the keys
       // need the grant.
       keyModesRequireGrant: AccessibilityPermission.storedModesRequireGrant(),
+      keyModesOff: storedKeyModesOff(defaults: defaults),
       // The arrangement map's tiles rather than a raw online count: the online
       // list carries mirror slaves and a synthesized size's virtual display,
       // which would count a lone external mirrored or resized as two displays
       // to arrange where the Arrangement pane draws one.
       arrangedDisplayCount: model.arrangement.arrangement.tiles.count
     )
+  }
+
+  /// The same app-level modes the grant predicate reads, asked whether they
+  /// leave the keys anything to do at all.
+  private static func storedKeyModesOff(defaults: UserDefaults) -> Bool {
+    let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "app")
+    return KeyModePolicy.keysOff(
+      brightness: prefs.keyboardBrightness, volume: prefs.keyboardVolume)
   }
 
   private static func input(

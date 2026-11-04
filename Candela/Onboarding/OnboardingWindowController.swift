@@ -270,8 +270,11 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     // Before `onCompletion`, which records the schema version that makes a later
     // read say "not a first run".
     let wasFirstRun = flowModel?.environment.isFirstRun ?? false
+    // Closing into Settings leaves a window up, which is what the first-run
+    // callout makes up for; over Settings opening it would only be noise.
+    let closesIntoSettings = flowModel?.closesIntoSettings ?? false
     onCompletion()
-    if wasFirstRun {
+    if wasFirstRun, !closesIntoSettings {
       onFirstRunClosed?()
     }
     // The window is reused, so its hosting view would keep the finish and care

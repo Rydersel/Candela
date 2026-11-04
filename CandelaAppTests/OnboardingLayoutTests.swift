@@ -102,12 +102,13 @@ struct OnboardingLayoutTests {
     let fullest = finishPageHeight(OnboardingFixtures.rig, grant: true)
     #expect(fullest.items == 4)
     #expect(fullest.height <= Self.windowHeight)
-    // The control: the rows are in that height. Built-in only and keys
-    // skipped has no item at all, and asks for measurably less.
+    // The control: the rows are in that height. Built-in only with the keys
+    // off has no item at all, and asks for measurably less.
     let empty = finishPageHeight(
       OnboardingEnvironment(
         accessibilityGranted: false, loginItemEnabled: false, isFirstRun: true,
-        keyModesRequireGrant: false, arrangedDisplayCount: 1, displays: []),
+        keyModesRequireGrant: false, keyModesOff: true, arrangedDisplayCount: 1,
+        displays: []),
       grant: false)
     #expect(empty.items == 0)
     #expect(fullest.height > empty.height + 100)
