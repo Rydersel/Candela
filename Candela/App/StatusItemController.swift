@@ -709,7 +709,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // A resume and a first run can both be true (a relaunch mid first run has
       // recorded no completion), and both mean the same window, so one
       // presentation answers both and the resume decides where it opens.
-      let resumesSetup = OnboardingWindowController.isResumeAfterCarePending
+      let resumesSetup = OnboardingWindowController.consumeResumeAfterCare()
       if isFirstRun || resumesSetup {
         presentOnboarding(resumingAfterCare: resumesSetup)
       }

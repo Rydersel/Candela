@@ -164,7 +164,20 @@ struct DisplayPrefsTests {
       #expect(defaults.object(forKey: "onboardingResumeAfterCare.app") == nil)
       #expect(DisplayPrefs(defaults: defaults, persistenceKey: "AAAA").onboardingResumeAfterCare)
       prefs.onboardingResumeAfterCare = false
-      #expect(defaults.object(forKey: "onboardingResumeAfterCare") as? Bool == false)
+      #expect(defaults.object(forKey: "onboardingResumeAfterCare") == nil)
+    }
+  }
+
+  /// The read clears before the caller presents anything, so a presentation
+  /// that traps cannot be retried by the next launch.
+  @Test func consumingTheSetupResumeMarkerClearsItInTheSameStep() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "app")
+      prefs.onboardingResumeAfterCare = true
+      #expect(prefs.consumeOnboardingResumeAfterCare())
+      #expect(defaults.object(forKey: "onboardingResumeAfterCare") == nil)
+      #expect(!prefs.consumeOnboardingResumeAfterCare())
+      #expect(defaults.object(forKey: "onboardingResumeAfterCare") == nil)
     }
   }
 

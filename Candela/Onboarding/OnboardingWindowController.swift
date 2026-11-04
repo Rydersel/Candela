@@ -38,9 +38,10 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
   }
 
   /// Setup asked for Screen Recording and macOS may have relaunched the app to
-  /// apply the grant. Read once at launch, alongside the first-run check.
-  static var isResumeAfterCarePending: Bool {
-    DisplayPrefs(persistenceKey: "app").onboardingResumeAfterCare
+  /// apply the grant. Read once at launch, alongside the first-run check, and
+  /// cleared by the read itself so a trap while presenting cannot loop.
+  static func consumeResumeAfterCare() -> Bool {
+    DisplayPrefs(persistenceKey: "app").consumeOnboardingResumeAfterCare()
   }
 
   /// `resumingAfterCare` opens a fresh flow on the page after the care page
@@ -77,12 +78,6 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     // would never have a stored version to advance.
     if !window.isVisible {
       onCompletion()
-    }
-    // Consumed once the flow is up, so a later launch does not resume again.
-    // Cleared on a failed presentation too, for the safety net's reason: a
-    // marker nothing consumes would retry the resume on every launch.
-    if resumingAfterCare {
-      DisplayPrefs(persistenceKey: "app").onboardingResumeAfterCare = false
     }
   }
 
