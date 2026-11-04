@@ -333,7 +333,8 @@ final class OnboardingFlowModel {
   }
 
   /// Skip Setup: close without committing the current page. Everything
-  /// already applied stays applied, and an unconfirmed preview is not
+  /// already applied stays applied, including the care page's choices committed
+  /// ahead of a Screen Recording request, and an unconfirmed preview is not
   /// applied: it is reverted before the window goes.
   func skip() {
     if case .counting = applyState { revertSize() }

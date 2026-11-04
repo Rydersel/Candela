@@ -119,8 +119,9 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     }
     // The request and nothing else. The return value means "already
     // granted", not "granted now" (it is false when the dialog was merely
-    // shown), so nothing may gate on it; the telemetry pref itself is written
-    // later through the commit router when the care page is advanced past.
+    // shown), so nothing may gate on it. The model commits the care page's
+    // choices, the telemetry pref among them, ahead of this call, because
+    // granting relaunches the app.
     flow.onRequestScreenRecording = { _ = CGRequestScreenCaptureAccess() }
     // Achieved state for the care page's copy: the preflight, never the
     // request's return value.

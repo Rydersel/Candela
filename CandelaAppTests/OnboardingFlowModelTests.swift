@@ -1191,6 +1191,84 @@ struct OnboardingFlowModelTests {
     ])
   }
 
+  /// A re-run's harvest already says enrolled and measured, so the request's
+  /// re-affirming writes must not turn the later off path into two writes.
+  @Test func aReRunRequestThenEstimatedWritesOneDisable() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(
+        key: "mag", productName: "MAG 341CQPX QD-OLED",
+        enrolled: true, measuredTelemetry: true)],
+      firstRun: false))
+    walk(model, to: .oledCare)
+    model.requestScreenRecording()
+    let afterRequest = model.committed.count
+    model.measuredTelemetry = false
+    model.advance()
+    #expect(Array(model.committed.dropFirst(afterRequest)) == [
+      .disableMeasuredTelemetry(displayKey: "mag")
+    ])
+  }
+
+  @Test func aReRunRequestThenToggleOffWritesOneUnenroll() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(
+        key: "mag", productName: "MAG 341CQPX QD-OLED",
+        enrolled: true, measuredTelemetry: true)],
+      firstRun: false))
+    walk(model, to: .oledCare)
+    model.requestScreenRecording()
+    let afterRequest = model.committed.count
+    model.careEnabled.remove("mag")
+    model.advance()
+    #expect(Array(model.committed.dropFirst(afterRequest)) == [
+      .unenrollFromCare(displayKey: "mag")
+    ])
+  }
+
+  /// The live topology loop can re-harvest between the request and the
+  /// advance, and that harvest reads the prefs the request just wrote.
+  @Test func aReharvestBetweenRequestAndAdvanceRepeatsNothing() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED"),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      ]))
+    walk(model, to: .oledCare)
+    model.requestScreenRecording()
+    let afterRequest = model.committed.count
+    model.update(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED", enrolled: true, measuredTelemetry: true),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true, measuredTelemetry: true),
+      ]))
+    #expect(model.currentPage == .oledCare)
+    model.advance()
+    #expect(model.committed.count == afterRequest)
+  }
+
+  /// A harvest that has not caught up with the request's writes must not make
+  /// a later toggle-off look like a display that was never enrolled.
+  @Test func aStaleReharvestBetweenRequestAndAdvanceLosesNothing() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED"),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      ]))
+    walk(model, to: .oledCare)
+    model.requestScreenRecording()
+    let afterRequest = model.committed.count
+    model.update(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED"),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      ]))
+    model.careEnabled.remove("mag")
+    model.advance()
+    #expect(Array(model.committed.dropFirst(afterRequest)) == [
+      .unenrollFromCare(displayKey: "mag")
+    ])
+  }
+
   @Test func aRequestOffTheCarePageCommitsNothing() {
     let model = OnboardingFlowModel(environment: environment(
       [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
