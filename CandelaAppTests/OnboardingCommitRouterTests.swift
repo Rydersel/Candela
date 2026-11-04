@@ -212,4 +212,20 @@ struct OnboardingCommitRouterTests {
       }
     }
   }
+
+  /// A family still holding what the skip wrote gets its old mode back; one
+  /// changed since (the Keyboard pane, mid-flow) keeps the newer choice.
+  @Test func aRestoreBringsBackOnlyWhatTheSkipStillHolds() {
+    for saved in KeyMode.allCases {
+      #expect(
+        OnboardingCommitRouter.modeAfterRestore(
+          current: OnboardingCommitRouter.modeAfterSkip(saved), saved: saved) == saved,
+        "\(saved)")
+      for current in KeyMode.allCases where current != OnboardingCommitRouter.modeAfterSkip(saved) {
+        #expect(
+          OnboardingCommitRouter.modeAfterRestore(current: current, saved: saved) == current,
+          "\(saved) then \(current)")
+      }
+    }
+  }
 }

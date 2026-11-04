@@ -195,13 +195,21 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
         actions.prefsDidChange([.keyboardBrightness, .keyboardVolume])
       },
       // Only ever after the grant, so the batched recheck finds it live and
-      // raises no alert.
+      // raises no alert. No snapshot means no disable this run wrote, so there
+      // is nothing of this flow's to undo.
       restoreKeyboardControl: {
-        let prefs = DisplayPrefs(persistenceKey: "app")
-        let saved = skippedKeyModes.saved ?? (brightness: .media, volume: .media)
+        guard let saved = skippedKeyModes.saved else { return }
         skippedKeyModes.saved = nil
-        prefs.keyboardBrightness = saved.brightness
-        prefs.keyboardVolume = saved.volume
+        let prefs = DisplayPrefs(persistenceKey: "app")
+        let brightness = OnboardingCommitRouter.modeAfterRestore(
+          current: prefs.keyboardBrightness, saved: saved.brightness)
+        let volume = OnboardingCommitRouter.modeAfterRestore(
+          current: prefs.keyboardVolume, saved: saved.volume)
+        guard brightness != prefs.keyboardBrightness || volume != prefs.keyboardVolume else {
+          return
+        }
+        prefs.keyboardBrightness = brightness
+        prefs.keyboardVolume = volume
         ShortcutManager.syncRegistration()
         actions.prefsDidChange([.keyboardBrightness, .keyboardVolume])
       }

@@ -45,6 +45,13 @@ struct OnboardingCommitRouter {
     }
   }
 
+  /// What a restore writes for one family: the mode the skip replaced, but only
+  /// while the family still holds what the skip wrote. Anything else is a
+  /// change made since (the Keyboard pane, mid-flow) and outranks the snapshot.
+  static func modeAfterRestore(current: KeyMode, saved: KeyMode) -> KeyMode {
+    current == modeAfterSkip(saved) ? saved : current
+  }
+
   func route(_ commit: OnboardingCommit) {
     switch commit {
     case let .rename(displayKey, name):

@@ -121,14 +121,23 @@ final class OnboardingFlowModel {
   var launchAtLogin: Bool
   /// Simulated grant state in fixture mode; live mode mirrors the real
   /// permission object instead.
-  var accessibilityGranted: Bool
+  var accessibilityGranted: Bool {
+    didSet {
+      // The restore rides the grant's arrival, not an advance: once granted,
+      // the page says the keys work, and Skip Setup, the close button or a grant
+      // landing on a later page would otherwise leave them off behind that.
+      guard accessibilityGranted, !oldValue, keysDisableCommitted else { return }
+      onCommit(.restoreKeyboardControl)
+      keysDeclined = false
+      keysDisableCommitted = false
+    }
+  }
   var accessibilityRequested = false
-  /// Set by the keys page's own skip; cleared when a later visit ends in the
-  /// grant and the skip is undone.
+  /// Set by the keys page's own skip; cleared when the grant arrives and the
+  /// skip is undone.
   private(set) var keysDeclined = false
-  /// Skip, Back, skip again is one decision, so its disable is committed once.
-  /// A second commit would also overwrite the live leg's snapshot of the modes
-  /// with the already-disabled ones, and a later restore would bring back off.
+  /// Skip, Back, skip again is one decision, so its disable is committed once,
+  /// and only a committed disable has anything for the grant to restore.
   private var keysDisableCommitted = false
 
   /// The commit seam. Fixture mode records; live mode writes.
@@ -561,19 +570,11 @@ final class OnboardingFlowModel {
     case .welcome, .noDisplays:
       break
     case .accessibility:
-      // A grant after a skip means the person came back and granted, and the
-      // skip had already turned the keys off on the way past. Advancing from the
-      // granted page has to turn them back on, or they leave setup granted with
-      // the keys still off.
-      guard keysDeclined else { break }
-      if accessibilityGranted {
-        if keysDisableCommitted { onCommit(.restoreKeyboardControl) }
-        keysDeclined = false
-        keysDisableCommitted = false
-      } else if !keysDisableCommitted {
-        onCommit(.disableKeyboardControl)
-        keysDisableCommitted = true
-      }
+      // The disable only. Undoing it belongs to the grant's arrival (see
+      // `accessibilityGranted`), which can happen on any page or none.
+      guard keysDeclined, !accessibilityGranted, !keysDisableCommitted else { break }
+      onCommit(.disableKeyboardControl)
+      keysDisableCommitted = true
     case .oledSelect:
       // Un-enrollment is split across two pages on purpose: a deselect can be
       // the very thing that takes the care page out of the plan, so the care arm

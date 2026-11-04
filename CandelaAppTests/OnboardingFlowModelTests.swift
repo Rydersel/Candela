@@ -545,16 +545,62 @@ struct OnboardingFlowModelTests {
   }
 
   /// A grant that lands after a skip and a step back: the skip already turned
-  /// the keys off, so moving on from the granted page turns them back on.
+  /// the keys off, so the grant's arrival turns them back on, before any
+  /// advance, and Continue adds nothing.
   @Test func aGrantAfterGoingBackRestoresTheKeys() {
     let model = modelOnKeysPage()
     model.skipKeys()
     model.back()
     #expect(model.currentPage == .accessibility)
     model.accessibilityGranted = true
-    model.advance()
     #expect(model.committed == [.disableKeyboardControl, .restoreKeyboardControl])
     #expect(!model.keysDeclined)
+    model.advance()
+    #expect(model.committed == [.disableKeyboardControl, .restoreKeyboardControl])
+  }
+
+  /// The grant can land after the person has moved on (the guide was still up).
+  @Test func aGrantOnALaterPageAfterASkipRestoresTheKeys() {
+    let model = modelOnKeysPage()
+    model.skipKeys()
+    #expect(model.currentPage != .accessibility)
+    model.accessibilityGranted = true
+    #expect(model.committed == [.disableKeyboardControl, .restoreKeyboardControl])
+  }
+
+  /// Skip Setup commits nothing of its own, so the restore must already have
+  /// happened by the time the granted page offers it.
+  @Test func skipSetupAfterAGrantedSkipLeavesTheKeysRestored() {
+    let model = modelOnKeysPage()
+    var closed = false
+    model.onClose = { closed = true }
+    model.skipKeys()
+    model.back()
+    model.accessibilityGranted = true
+    model.skip()
+    #expect(closed)
+    #expect(model.committed == [.disableKeyboardControl, .restoreKeyboardControl])
+  }
+
+  /// Revoked and granted again, then advanced through the granted page: one
+  /// restore for one disable.
+  @Test func theRestoreIsCommittedOnce() {
+    let model = modelOnKeysPage()
+    model.skipKeys()
+    model.accessibilityGranted = true
+    model.accessibilityGranted = false
+    model.accessibilityGranted = true
+    model.back()
+    model.advance()
+    #expect(model.committed == [.disableKeyboardControl, .restoreKeyboardControl])
+  }
+
+  /// A grant with no skip behind it has nothing to restore.
+  @Test func aGrantWithoutASkipRestoresNothing() {
+    let model = modelOnKeysPage()
+    model.accessibilityGranted = true
+    model.advance()
+    #expect(model.committed.isEmpty)
   }
 
   /// Skip, Back, skip again is one decision. A second disable would also
