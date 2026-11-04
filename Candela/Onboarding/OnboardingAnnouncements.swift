@@ -58,7 +58,8 @@ enum OnboardingAnnouncements {
       "The start of setup: what \(AppInfo.productName) does for an external display, and "
         + "what the next few pages ask."
     case .accessibility:
-      "Accessibility access, so the brightness, volume and mute keys reach \(AppInfo.productName)."
+      "Whether your keyboard's brightness and volume keys control your external display. "
+        + "macOS allows that only with Accessibility access; without it, those keys won't."
     case .detection:
       // Spoken on arrival, while the scan still runs, and never re-announced
       // when the heading flips to a count. So: no past tense, no number.
@@ -83,7 +84,7 @@ enum OnboardingAnnouncements {
 /// still being checked.
 enum OnboardingTitles {
   static let welcome = "Welcome to \(AppInfo.productName)"
-  static let accessibility = "Your keyboard, everywhere"
+  static let accessibility = "Use your Mac's keys on your monitor"
   /// The detection page draws two titles: this one while the scan runs, the
   /// count below once the cards resolve.
   static let detectionScanning = "Looking at your displays"

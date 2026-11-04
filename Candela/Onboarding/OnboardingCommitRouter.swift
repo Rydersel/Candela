@@ -28,6 +28,8 @@ struct OnboardingCommitRouter {
   /// record has somewhere to land (a log line, a suggestion dismissal); it must
   /// never apply a mode.
   var acknowledgeAppliedSize: (_ displayKey: String, _ looksLikeWidth: Int, _ looksLikeHeight: Int) -> Void
+  /// Both key modes to off, through the Keyboard pane's own write shape.
+  var disableKeyboardControl: () -> Void
 
   func route(_ commit: OnboardingCommit) {
     switch commit {
@@ -66,6 +68,9 @@ struct OnboardingCommitRouter {
       // buys nothing.
       guard enabled != isLoginItemEnabled() else { return }
       setLaunchAtLogin(enabled)
+
+    case .disableKeyboardControl:
+      disableKeyboardControl()
     }
   }
 }

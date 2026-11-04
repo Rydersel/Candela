@@ -17,6 +17,7 @@ struct OnboardingCommitRouterTests {
       case telemetryOff(String)
       case launchAtLogin(Bool)
       case acknowledgeSize(String, Int, Int)
+      case disableKeyboardControl
     }
 
     private(set) var calls: [Call] = []
@@ -39,7 +40,8 @@ struct OnboardingCommitRouterTests {
         setLaunchAtLogin: { on in self.calls.append(.launchAtLogin(on)) },
         acknowledgeAppliedSize: { key, width, height in
           self.calls.append(.acknowledgeSize(key, width, height))
-        })
+        },
+        disableKeyboardControl: { self.calls.append(.disableKeyboardControl) })
     }
   }
 
@@ -169,5 +171,11 @@ struct OnboardingCommitRouterTests {
     recorder.router.route(
       .applySize(displayKey: "MAG-1", looksLikeWidth: 2560, looksLikeHeight: 1080))
     #expect(recorder.calls == [.acknowledgeSize("MAG-1", 2560, 1080)])
+  }
+
+  @Test func routerSendsDisableToItsLeg() {
+    let recorder = Recorder()
+    recorder.router.route(.disableKeyboardControl)
+    #expect(recorder.calls == [.disableKeyboardControl])
   }
 }

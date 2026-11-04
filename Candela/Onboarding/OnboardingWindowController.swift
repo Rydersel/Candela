@@ -101,8 +101,16 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     let router = liveRouter()
     let permission = model.accessibility
     flow.onCommit = { router.route($0) }
-    flow.onRequestAccessibility = { permission.promptIfNeeded() }
-    flow.onOpenAccessibilitySettings = { permission.openSystemSettings() }
+    // The guide replaces the system alert, which would add Candela to the list
+    // switched off and stack a second dialog over the pane. The backstop still
+    // has to hear that someone was sent to System Settings, or it rests at its
+    // slow cadence while the person is granting.
+    let showGuide = {
+      permission.noteSentToSystemSettings()
+      PermissionGuide.shared.show(.accessibility)
+    }
+    flow.onRequestAccessibility = showGuide
+    flow.onOpenAccessibilitySettings = showGuide
     // The request and nothing else. The return value means "already
     // granted", not "granted now" (it is false when the dialog was merely
     // shown), so nothing may gate on it; the telemetry pref itself is written
@@ -163,7 +171,19 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
       // Deliberately nothing: a kept preview already wrote
       // `sizeAppliedByUser` inside the coordinator, and a second record would
       // be redundant.
-      acknowledgeAppliedSize: { _, _, _ in }
+      acknowledgeAppliedSize: { _, _, _ in },
+      // The Keyboard pane's two mode setters, with both writes ahead of either
+      // notification: each `prefDidChange` rechecks permissions, and a check run
+      // between the writes would see volume still wanting the tap and raise the
+      // system alert the person just declined.
+      disableKeyboardControl: {
+        let prefs = DisplayPrefs(persistenceKey: "app")
+        prefs.keyboardBrightness = .disabled
+        prefs.keyboardVolume = .disabled
+        ShortcutManager.syncRegistration()
+        actions.prefDidChange(.keyboardBrightness)
+        actions.prefDidChange(.keyboardVolume)
+      }
     )
   }
 

@@ -17,6 +17,9 @@ enum OnboardingCommit: Equatable {
   /// nothing and absent keeps meaning "no decision".
   case disableMeasuredTelemetry(displayKey: String)
   case setLaunchAtLogin(Bool)
+  /// The keys page's skip: both key modes off, so nothing waits on a grant the
+  /// person declined and no warning nags them for it.
+  case disableKeyboardControl
 }
 
 /// What the user chose on a size page.
@@ -116,6 +119,9 @@ final class OnboardingFlowModel {
   /// permission object instead.
   var accessibilityGranted: Bool
   var accessibilityRequested = false
+  /// Set by the keys page's own skip and never cleared: a later visit that
+  /// ends in the grant commits nothing, so the flag can stay.
+  private(set) var keysDeclined = false
 
   /// The commit seam. Fixture mode records; live mode writes.
   var onCommit: (OnboardingCommit) -> Void
@@ -134,6 +140,15 @@ final class OnboardingFlowModel {
 
   func openAccessibilitySettings() {
     onOpenAccessibilitySettings()
+  }
+
+  /// The keys page's consequence-labeled way past. Rides `advance()` so the
+  /// disable is committed by the page's own arm, the same commit-on-advance
+  /// route as every other decision, and Skip Setup (which commits nothing)
+  /// stays distinct from it.
+  func skipKeys() {
+    keysDeclined = true
+    advance()
   }
 
   /// The Screen Recording ask, injected like the accessibility actions: live mode calls
@@ -535,8 +550,14 @@ final class OnboardingFlowModel {
 
   private func commitCurrentPage() {
     switch currentPage {
-    case .welcome, .accessibility, .noDisplays:
+    case .welcome, .noDisplays:
       break
+    case .accessibility:
+      // The grant outranks an earlier skip: the person came back and granted,
+      // and the keys they kept off on the way past are already written.
+      if keysDeclined, !accessibilityGranted {
+        onCommit(.disableKeyboardControl)
+      }
     case .oledSelect:
       // Un-enrollment is split across two pages on purpose: a deselect can be
       // the very thing that takes the care page out of the plan, so the care arm

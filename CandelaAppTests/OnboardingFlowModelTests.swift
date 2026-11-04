@@ -513,6 +513,87 @@ struct OnboardingFlowModelTests {
     #expect(!model.pages.contains(.accessibility))
   }
 
+  // MARK: - The keys page's answers
+
+  /// The consequence-labeled skip is a decision: it turns keyboard control off,
+  /// so the stored modes stop wanting a grant the person just declined.
+  @Test func skipKeysCommitsKeyboardOffAndAdvances() {
+    let model = modelOnKeysPage()
+    let keysIndex = model.index
+    model.skipKeys()
+    #expect(model.committed == [.disableKeyboardControl])
+    #expect(model.index == keysIndex + 1)
+    #expect(model.keysDeclined)
+  }
+
+  @Test func grantedPageCommitsNothing() {
+    let model = modelOnKeysPage()
+    model.accessibilityGranted = true
+    model.advance()
+    #expect(model.committed.isEmpty)
+  }
+
+  /// Skip Setup ends the flow without answering the page it is on, so it must
+  /// not read as the keys page's own skip.
+  @Test func skipSetupOnKeysPageWritesNothing() {
+    let model = modelOnKeysPage()
+    var closed = false
+    model.onClose = { closed = true }
+    model.skip()
+    #expect(closed)
+    #expect(model.committed.isEmpty)
+  }
+
+  /// A grant that lands after a skip and a step back: the page shows granted,
+  /// and moving on from it repeats no disable.
+  @Test func aGrantAfterGoingBackCommitsNoSecondDisable() {
+    let model = modelOnKeysPage()
+    model.skipKeys()
+    model.back()
+    #expect(model.currentPage == .accessibility)
+    model.accessibilityGranted = true
+    model.advance()
+    #expect(model.committed == [.disableKeyboardControl])
+  }
+
+  /// The page's presence is latched, so it outlives the last external display
+  /// unplugging mid-flow. It must still read correctly and still answer.
+  @Test func theKeysPageSurvivesTheLastDisplayLeavingAndStillSkips() {
+    let model = modelOnKeysPage()
+    model.update(environment: environment([]))
+    #expect(model.currentPage == .accessibility)
+    let count = model.environment.displays.count
+    #expect(count == 0)
+    #expect(OnboardingKeysCopy.skipLabel(externalDisplayCount: count)
+      == "Skip: my keys won't control my monitor")
+    #expect(!OnboardingKeysCopy.body(externalDisplayCount: count).contains("MAG"))
+    model.skipKeys()
+    #expect(model.committed == [.disableKeyboardControl])
+  }
+
+  @Test func theSkipLabelPluralizesFromTwoExternalDisplays() {
+    #expect(OnboardingKeysCopy.skipLabel(externalDisplayCount: 0)
+      == "Skip: my keys won't control my monitor")
+    #expect(OnboardingKeysCopy.skipLabel(externalDisplayCount: 1)
+      == "Skip: my keys won't control my monitor")
+    #expect(OnboardingKeysCopy.skipLabel(externalDisplayCount: 2)
+      == "Skip: my keys won't control my monitors")
+    #expect(OnboardingKeysCopy.skipLabel(externalDisplayCount: 3)
+      == "Skip: my keys won't control my monitors")
+  }
+
+  /// The drop adds Candela already switched on (measured on 27.2), so the
+  /// caption asks for the drag alone and names the pane per macOS version.
+  @Test func theWaitingCaptionNamesThePaneAndAsksOnlyForTheDrag() {
+    let renamed = OnboardingKeysCopy.waitingCaption(macOSMajor: 27)
+    #expect(renamed == "Drag \(AppInfo.productName) into the list in "
+      + "System Settings > Privacy & Security > Device Control and Data Access. "
+      + "This page updates on its own.")
+    #expect(OnboardingKeysCopy.waitingCaption(macOSMajor: 15)
+      .contains("System Settings > Privacy & Security > Accessibility."))
+    #expect(!renamed.contains("switch it on"))
+  }
+
   // MARK: - Screen Recording achieved state
 
   @Test func screenRecordingGrantTracksThePreflightNeverTheClick() {

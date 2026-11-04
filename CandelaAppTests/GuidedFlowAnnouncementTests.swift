@@ -218,6 +218,16 @@ struct GuidedFlowAnnouncementTests {
     }
   }
 
+  /// The keys page pushes for the grant, so what VoiceOver hears on arrival
+  /// carries the same stake the body states: the keys, and the access they need.
+  @Test func theKeysPageAnnouncementSpeaksTheKeysAndTheirCost() {
+    let text = OnboardingAnnouncements.pageAnnouncement(.accessibility, step: 4, of: 7)
+    #expect(text.contains("brightness and volume keys"))
+    #expect(text.contains("Accessibility access"))
+    #expect(text.contains("won't"))
+    #expect(!text.contains("\u{2014}"))
+  }
+
   /// Every title a setup page can draw. The pages draw these same constants, so
   /// a retitled page moves its heading here rather than leaving this list stale.
   private static func setupHeadings(_ page: OnboardingPage) -> [String] {

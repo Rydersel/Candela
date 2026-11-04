@@ -1,3 +1,4 @@
+import CandelaKit
 import SwiftUI
 
 /// Welcome: one large softly-lit display object under ambient light, the
@@ -52,11 +53,44 @@ struct OnboardingWelcomePage: View {
   }
 }
 
-/// Accessibility: the why in one line before the ask, the prompt, and the
-/// live granted state. Skippable; the app warns later where it matters.
+/// The keys page's words, outside the view so the corpus scan and the tests
+/// read the same strings the page draws.
+///
+/// Counts are external displays at the moment of drawing. The page's presence
+/// is latched at flow start, so it can still be up after every external display
+/// is unplugged; zero reads as singular and nothing here names a display.
+enum OnboardingKeysCopy {
+  static func body(externalDisplayCount: Int) -> String {
+    let plural = externalDisplayCount >= 2
+    return "\(AppInfo.productName) lets your keyboard's brightness and volume keys control "
+      + "your external \(plural ? "displays" : "display"). macOS only allows that with "
+      + "Accessibility access, so without it those keys won't control your "
+      + "\(plural ? "monitors" : "monitor")."
+  }
+
+  static let allow = "Allow Keyboard Control"
+
+  /// Asks for the drag alone: on 27.2 the dropped row arrives switched on.
+  static func waitingCaption(macOSMajor: Int) -> String {
+    "Drag \(AppInfo.productName) into the list in "
+      + "\(PermissionPane.accessibility.settingsPath(macOSMajor: macOSMajor)). "
+      + "This page updates on its own."
+  }
+
+  /// The label states the cost, so nobody leaves believing the keys still work.
+  static func skipLabel(externalDisplayCount: Int) -> String {
+    "Skip: my keys won't control my \(externalDisplayCount >= 2 ? "monitors" : "monitor")"
+  }
+}
+
+/// The keys page: pushes for the Accessibility grant, because the Mac's own
+/// brightness and volume keys reach an external display only through it. The
+/// way past turns keyboard control off and says so in its label.
 struct OnboardingAccessibilityPage: View {
   @Bindable var model: OnboardingFlowModel
   let accent: Color
+
+  private var externalDisplayCount: Int { model.environment.displays.count }
 
   var body: some View {
     VStack(spacing: 0) {
@@ -67,7 +101,7 @@ struct OnboardingAccessibilityPage: View {
         keycaps
         OnboardingHeading(
           title: OnboardingTitles.accessibility,
-          subtitle: "macOS delivers the brightness, volume and mute keys through Accessibility. \(AppInfo.productName) needs that access to see those key presses, and it reads nothing else."
+          subtitle: OnboardingKeysCopy.body(externalDisplayCount: externalDisplayCount)
         )
       }
       Spacer()
@@ -76,8 +110,10 @@ struct OnboardingAccessibilityPage: View {
       VStack(spacing: 12) {
         permissionState
         if !model.accessibilityGranted {
-          Button("Not Now") { model.advance() }
-            .buttonStyle(OnboardingLinkButtonStyle())
+          Button(OnboardingKeysCopy.skipLabel(externalDisplayCount: externalDisplayCount)) {
+            model.skipKeys()
+          }
+          .buttonStyle(OnboardingLinkButtonStyle())
         }
         OnboardingSkipLink(model: model)
       }
@@ -129,20 +165,27 @@ struct OnboardingAccessibilityPage: View {
           .keyboardShortcut(.defaultAction)
       }
       .transition(.opacity)
-    } else if model.accessibilityRequested {
-      VStack(spacing: 10) {
-        Button("Open System Settings…") { model.openAccessibilitySettings() }
-          .buttonStyle(OnboardingPrimaryButtonStyle(accent: accent))
-        Text("Turn \(AppInfo.productName) on under Privacy & Security, Accessibility. This page updates on its own once you do.")
-          .font(.caption)
-          .foregroundStyle(OnboardingStyle.faintColor)
-          .multilineTextAlignment(.center)
-          .frame(maxWidth: 380)
-      }
     } else {
-      Button("Allow Accessibility Access") { model.requestAccessibility() }
+      VStack(spacing: 10) {
+        // One label in both states: a second press after closing System
+        // Settings brings the pane and its guide back.
+        Button(OnboardingKeysCopy.allow) {
+          if model.accessibilityRequested {
+            model.openAccessibilitySettings()
+          } else {
+            model.requestAccessibility()
+          }
+        }
         .buttonStyle(OnboardingPrimaryButtonStyle(accent: accent))
         .keyboardShortcut(.defaultAction)
+        if model.accessibilityRequested {
+          Text(OnboardingKeysCopy.waitingCaption(macOSMajor: PermissionPane.currentMacOSMajor))
+            .font(.caption)
+            .foregroundStyle(OnboardingStyle.faintColor)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 380)
+        }
+      }
     }
   }
 }

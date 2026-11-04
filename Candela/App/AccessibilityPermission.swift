@@ -96,6 +96,12 @@ final class AccessibilityPermission {
     )
   }
 
+  /// Someone else opened the Accessibility list (the permission guide). Same
+  /// edge as `openSystemSettings()`, without opening anything a second time.
+  func noteSentToSystemSettings() {
+    reevaluateBackstop(after: .sentToSystemSettings)
+  }
+
   /// The tap was re-armed. Every pref carrying the re-arm reaches here, most of them
   /// nothing to do with keys (a DDC availability switch, an audio-routing override),
   /// and so does the settings reset, which is the route that leaves an all-custom rig
