@@ -34,10 +34,13 @@ struct OnboardingFlowModelTests {
   }
 
   private func environment(
-    _ displays: [OnboardingDisplayEntry], firstRun: Bool = true
+    _ displays: [OnboardingDisplayEntry], firstRun: Bool = true,
+    accessibilityGranted: Bool = false, keyModesRequireGrant: Bool = true
   ) -> OnboardingEnvironment {
     OnboardingEnvironment(
-      accessibilityGranted: false, loginItemEnabled: false, isFirstRun: firstRun,
+      accessibilityGranted: accessibilityGranted, loginItemEnabled: false,
+      isFirstRun: firstRun, keyModesRequireGrant: keyModesRequireGrant,
+      arrangedDisplayCount: displays.count + 1,
       displays: displays)
   }
 
@@ -443,6 +446,71 @@ struct OnboardingFlowModelTests {
     #expect(model.sizeChoices["dell"] == nil)
     #expect(!model.pages.contains { if case .size = $0 { true } else { false } })
     #expect(model.index < model.pages.count)
+  }
+
+  // MARK: - The keys page's presence
+
+  private func modelOnKeysPage() -> OnboardingFlowModel {
+    let model = OnboardingFlowModel(environment: environment([
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED")
+    ]))
+    #expect(model.includesKeysPage)
+    for _ in 0..<10 where model.currentPage != .accessibility {
+      model.advance()
+    }
+    #expect(model.currentPage == .accessibility)
+    return model
+  }
+
+  /// The grant lands while the page is up. A re-derived plan would say the
+  /// page is no longer wanted; the page has to stay and show its granted
+  /// state instead of vanishing under the pointer.
+  @Test func grantMidPageKeepsTheKeysPage() {
+    let model = modelOnKeysPage()
+    model.update(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")],
+      accessibilityGranted: true))
+    #expect(model.currentPage == .accessibility)
+    #expect(model.pages.contains(.accessibility))
+  }
+
+  /// Turning the keys off writes key modes that no longer want the grant, and
+  /// the next harvest carries that. The page the person just answered stays.
+  @Test func keysTurnedOffMidPageKeepsTheKeysPage() {
+    let model = modelOnKeysPage()
+    model.update(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")],
+      keyModesRequireGrant: false))
+    #expect(model.currentPage == .accessibility)
+    #expect(model.pages.contains(.accessibility))
+  }
+
+  /// The designation set replans too, and must read the same latched answer:
+  /// after a granted harvest, a designation change cannot drop the page.
+  @Test func aDesignationChangeAfterTheGrantKeepsTheKeysPage() {
+    let model = modelOnKeysPage()
+    model.update(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")],
+      accessibilityGranted: true))
+    model.designatedOleds = []
+    #expect(model.pages.contains(.accessibility))
+    model.designatedOleds = ["mag"]
+    #expect(model.pages.contains(.accessibility))
+    #expect(model.currentPage == .accessibility)
+  }
+
+  /// Presence is decided once, when the flow opens, so the page list does not
+  /// shift under the person as the grant and the key modes move during setup.
+  @Test func aFlowThatOpenedWithoutTheKeysPageNeverGainsIt() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag")], accessibilityGranted: true))
+    #expect(!model.includesKeysPage)
+    #expect(!model.pages.contains(.accessibility))
+    // The grant is revoked mid-flow; the plan still has no keys page.
+    model.update(environment: environment([entry(key: "mag")]))
+    #expect(!model.pages.contains(.accessibility))
+    model.designatedOleds = ["mag"]
+    #expect(!model.pages.contains(.accessibility))
   }
 
   // MARK: - Screen Recording achieved state

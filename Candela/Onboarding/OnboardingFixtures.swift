@@ -14,6 +14,9 @@
         accessibilityGranted: false,
         loginItemEnabled: false,
         isFirstRun: true,
+        keyModesRequireGrant: true,
+        // The two externals plus the built-in.
+        arrangedDisplayCount: 3,
         displays: [
           OnboardingDisplayEntry(
             persistenceKey: "fixture-mag",
@@ -67,6 +70,7 @@
     static var threeExternals: OnboardingEnvironment {
       var environment = rig
       environment.displays.append(sixteenByNine)
+      environment.arrangedDisplayCount += 1
       return environment
     }
 
@@ -75,6 +79,7 @@
     static var fourExternals: OnboardingEnvironment {
       var environment = threeExternals
       environment.displays.append(superUltrawide)
+      environment.arrangedDisplayCount += 1
       return environment
     }
 

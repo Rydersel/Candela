@@ -9,6 +9,12 @@ struct OnboardingEnvironment: Equatable, Sendable {
   /// A first run arrives with launch at login checked as the presented
   /// recommendation; a re-run arrives at the live registration state.
   var isFirstRun: Bool
+  /// Whether the stored key modes want the event tap. Custom shortcuts are
+  /// Carbon hotkeys and need no grant, so an all-custom rig answers false.
+  var keyModesRequireGrant: Bool
+  /// Displays the arrangement map draws, the built-in included: a mirror set
+  /// is one, and so is a synthesized size's stand-in with its panel.
+  var arrangedDisplayCount: Int
   var displays: [OnboardingDisplayEntry]
 }
 

@@ -61,6 +61,11 @@ final class OnboardingFlowModel {
   private(set) var environment: OnboardingEnvironment
   private(set) var pages: [OnboardingPage]
   private(set) var index: Int = 0
+  /// Decided once, from the opening environment, and passed to every replan.
+  /// The grant landing while the keys page is up, or the keys being turned
+  /// off, makes a fresh harvest say the page is unwanted; re-deriving would
+  /// drop the page the person is on.
+  let includesKeysPage: Bool
 
   /// Displays currently marked as OLEDs on the designation page. Changing it
   /// re-derives the plan, which is how the care page appears and disappears.
@@ -199,6 +204,7 @@ final class OnboardingFlowModel {
 
   init(environment: OnboardingEnvironment) {
     self.environment = environment
+    includesKeysPage = OnboardingPlan.wantsKeysPage(environment)
     let designated = OnboardingPlan.initialDesignation(for: environment)
     designatedOleds = designated
     careEnabled = designated
@@ -222,7 +228,8 @@ final class OnboardingFlowModel {
     onApplySize = { _, _, _ in }
     onKeepSize = {}
     onRevertSize = {}
-    pages = OnboardingPlan.pages(for: environment, designatedOleds: designated)
+    pages = OnboardingPlan.pages(
+      for: environment, designatedOleds: designated, includesKeysPage: includesKeysPage)
     onCommit = { [weak self] in self?.committed.append($0) }
     // Fixture preflight: granted once asked, so the mock flow's measured card
     // reaches its enabled state without a real TCC grant.
@@ -517,7 +524,8 @@ final class OnboardingFlowModel {
 
   private func replan() {
     let current = currentPage
-    pages = OnboardingPlan.pages(for: environment, designatedOleds: designatedOleds)
+    pages = OnboardingPlan.pages(
+      for: environment, designatedOleds: designatedOleds, includesKeysPage: includesKeysPage)
     if let stillThere = pages.firstIndex(of: current) {
       index = stillThere
     } else {

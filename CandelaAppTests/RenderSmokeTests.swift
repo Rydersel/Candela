@@ -463,7 +463,8 @@ struct RenderSmokeTests {
   /// second page of that flow draws.
   @Test func theOnboardingNoDisplaysPageRenders() {
     let empty = OnboardingEnvironment(
-      accessibilityGranted: false, loginItemEnabled: false, isFirstRun: true, displays: [])
+      accessibilityGranted: false, loginItemEnabled: false, isFirstRun: true,
+      keyModesRequireGrant: true, arrangedDisplayCount: 1, displays: [])
     renderFlow(.noDisplays, environment: empty)
   }
 

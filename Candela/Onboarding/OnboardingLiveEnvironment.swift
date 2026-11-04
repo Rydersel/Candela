@@ -65,12 +65,16 @@ enum OnboardingEnvironmentBuilder {
     displays: [OnboardingDisplayInput],
     accessibilityGranted: Bool,
     loginItemEnabled: Bool,
-    isFirstRun: Bool
+    isFirstRun: Bool,
+    keyModesRequireGrant: Bool,
+    arrangedDisplayCount: Int
   ) -> OnboardingEnvironment {
     OnboardingEnvironment(
       accessibilityGranted: accessibilityGranted,
       loginItemEnabled: loginItemEnabled,
       isFirstRun: isFirstRun,
+      keyModesRequireGrant: keyModesRequireGrant,
+      arrangedDisplayCount: arrangedDisplayCount,
       // Input order is the app's display-list order, and the flow renders and
       // paginates in exactly that order.
       displays: displays.map(entry(for:))
@@ -234,7 +238,16 @@ enum OnboardingLiveEnvironment {
       loginItemEnabled: loginItem.isEnabled,
       // The schema marker: an unwritten schema version is the only record that this
       // launch is the first one.
-      isFirstRun: PrefsSchema.storedVersion(in: defaults) == nil
+      isFirstRun: PrefsSchema.storedVersion(in: defaults) == nil,
+      // The predicate the Keyboard pane's warning and the panel banner gate on,
+      // so the page and those surfaces cannot disagree about whether the keys
+      // need the grant.
+      keyModesRequireGrant: AccessibilityPermission.storedModesRequireGrant(),
+      // The arrangement map's tiles rather than a raw online count: the online
+      // list carries mirror slaves and a synthesized size's virtual display,
+      // which would count a lone external mirrored or resized as two displays
+      // to arrange where the Arrangement pane draws one.
+      arrangedDisplayCount: model.arrangement.arrangement.tiles.count
     )
   }
 
