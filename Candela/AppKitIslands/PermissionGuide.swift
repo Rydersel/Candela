@@ -60,6 +60,11 @@ final class PermissionGuide {
   var frontmostBundleID: () -> String?
   var isGranted: (PermissionPane) -> Bool
   var requestSystemPrompt: (PermissionPane) -> Void
+  /// Told when the guide closes on a live grant read. The guide's own read
+  /// can be the only one running: the app's Accessibility backstop stands down
+  /// once no key mode wants the event tap, so without this the grant could
+  /// land with nothing in the app noticing.
+  var onGranted: (PermissionPane) -> Void = { _ in }
 
   nonisolated private static let settingsBundleID = "com.apple.systempreferences"
   /// The grant reads are calls into the privacy database; while following,
@@ -144,6 +149,7 @@ final class PermissionGuide {
     defer { tickCount &+= 1 }
     if cadence != .following || tickCount % Self.ticksPerGrantRead == 0, isGranted(pane) {
       close()
+      onGranted(pane)
       return
     }
     let pid = settingsPID()

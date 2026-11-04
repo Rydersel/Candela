@@ -1,3 +1,4 @@
+import CandelaKit
 import Testing
 
 // The guided setup flow's commit routing: each recorded decision lands on
@@ -18,6 +19,7 @@ struct OnboardingCommitRouterTests {
       case launchAtLogin(Bool)
       case acknowledgeSize(String, Int, Int)
       case disableKeyboardControl
+      case restoreKeyboardControl
     }
 
     private(set) var calls: [Call] = []
@@ -41,7 +43,8 @@ struct OnboardingCommitRouterTests {
         acknowledgeAppliedSize: { key, width, height in
           self.calls.append(.acknowledgeSize(key, width, height))
         },
-        disableKeyboardControl: { self.calls.append(.disableKeyboardControl) })
+        disableKeyboardControl: { self.calls.append(.disableKeyboardControl) },
+        restoreKeyboardControl: { self.calls.append(.restoreKeyboardControl) })
     }
   }
 
@@ -177,5 +180,36 @@ struct OnboardingCommitRouterTests {
     let recorder = Recorder()
     recorder.router.route(.disableKeyboardControl)
     #expect(recorder.calls == [.disableKeyboardControl])
+  }
+
+  @Test func routerSendsRestoreToItsLeg() {
+    let recorder = Recorder()
+    recorder.router.route(.restoreKeyboardControl)
+    #expect(recorder.calls == [.restoreKeyboardControl])
+  }
+
+  /// The skip takes away only what needs the grant: media keys go, custom
+  /// shortcuts (Carbon hotkeys, no grant) stay. Every mode, so a new one has
+  /// to be decided here.
+  @Test func theSkipTurnsOffOnlyTheMediaKeyHalf() {
+    let expected: [KeyMode: KeyMode] = [
+      .media: .disabled, .both: .custom, .custom: .custom, .disabled: .disabled,
+    ]
+    #expect(Set(expected.keys) == Set(KeyMode.allCases))
+    for mode in KeyMode.allCases {
+      #expect(OnboardingCommitRouter.modeAfterSkip(mode) == expected[mode], "\(mode)")
+    }
+  }
+
+  /// After the skip, no family wants the event tap, which is what stops the
+  /// warning banner and the backstop asking for the grant.
+  @Test func noModeWantsTheTapAfterTheSkip() {
+    for brightness in KeyMode.allCases {
+      for volume in KeyMode.allCases {
+        #expect(!KeyModePolicy.requiresAccessibility(
+          brightness: OnboardingCommitRouter.modeAfterSkip(brightness),
+          volume: OnboardingCommitRouter.modeAfterSkip(volume)))
+      }
+    }
   }
 }

@@ -68,6 +68,32 @@ struct PermissionGuideTests {
     #expect(!guide.isTracking)
   }
 
+  /// The grant read that closes the guide is reported, so the app can recheck
+  /// even when its own poll has stood down.
+  @Test func aGrantCloseReportsThePane() {
+    let calls = Calls()
+    let guide = makeGuide(calls: calls, granted: true)
+    defer { guide.close() }
+    var reported: [PermissionPane] = []
+    guide.onGranted = { reported.append($0) }
+    guide.show(.accessibility)
+    guide.tick()
+    #expect(reported == [.accessibility])
+  }
+
+  /// The control: Done closes the guide without a grant and reports nothing.
+  @Test func aCloseWithoutTheGrantReportsNothing() {
+    let calls = Calls()
+    let guide = makeGuide(calls: calls, granted: false)
+    defer { guide.close() }
+    var reported: [PermissionPane] = []
+    guide.onGranted = { reported.append($0) }
+    guide.show(.accessibility)
+    guide.tick()
+    guide.close()
+    #expect(reported.isEmpty)
+  }
+
   @Test func hiddenWithoutAVisibleSettingsWindow() {
     let calls = Calls()
     let guide = makeGuide(calls: calls, pid: nil)

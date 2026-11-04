@@ -102,6 +102,14 @@ final class AccessibilityPermission {
     reevaluateBackstop(after: .sentToSystemSettings)
   }
 
+  /// Another live read saw the grant (the permission guide closing on it).
+  /// A recheck rather than trusting the caller, so `isGranted` only ever
+  /// moves on this object's own read; it also serves when the backstop has
+  /// stood down because no key mode wants the tap.
+  func recheckNow() {
+    recheck()
+  }
+
   /// The tap was re-armed. Every pref carrying the re-arm reaches here, most of them
   /// nothing to do with keys (a DDC availability switch, an audio-routing override),
   /// and so does the settings reset, which is the route that leaves an all-custom rig

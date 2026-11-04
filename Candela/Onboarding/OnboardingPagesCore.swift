@@ -68,6 +68,12 @@ enum OnboardingKeysCopy {
       + "\(plural ? "monitors" : "monitor")."
   }
 
+  /// Replaces the body once the grant is live: the cost it warned about is gone.
+  static func grantedBody(externalDisplayCount: Int) -> String {
+    "Your keyboard's brightness and volume keys now control your external "
+      + "\(externalDisplayCount >= 2 ? "displays" : "display")."
+  }
+
   static let allow = "Allow Keyboard Control"
 
   /// Asks for the drag alone: on 27.2 the dropped row arrives switched on.
@@ -101,7 +107,9 @@ struct OnboardingAccessibilityPage: View {
         keycaps
         OnboardingHeading(
           title: OnboardingTitles.accessibility,
-          subtitle: OnboardingKeysCopy.body(externalDisplayCount: externalDisplayCount)
+          subtitle: model.accessibilityGranted
+            ? OnboardingKeysCopy.grantedBody(externalDisplayCount: externalDisplayCount)
+            : OnboardingKeysCopy.body(externalDisplayCount: externalDisplayCount)
         )
       }
       Spacer()
@@ -114,10 +122,20 @@ struct OnboardingAccessibilityPage: View {
             model.skipKeys()
           }
           .buttonStyle(OnboardingLinkButtonStyle())
+          // Apart from Skip Setup, so the two quiet links do not read as a
+          // pair of answers to one question.
+          .padding(.bottom, 10)
         }
         OnboardingSkipLink(model: model)
       }
       .padding(.bottom, 44)
+    }
+    // A grant landing while the page is up changes what the page says, and
+    // the arrival announcement has already been spoken.
+    .onChange(of: model.accessibilityGranted) { _, granted in
+      guard granted else { return }
+      GuidedFlowAnnouncement.queued(
+        OnboardingKeysCopy.grantedBody(externalDisplayCount: externalDisplayCount))
     }
   }
 

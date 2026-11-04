@@ -544,16 +544,51 @@ struct OnboardingFlowModelTests {
     #expect(model.committed.isEmpty)
   }
 
-  /// A grant that lands after a skip and a step back: the page shows granted,
-  /// and moving on from it repeats no disable.
-  @Test func aGrantAfterGoingBackCommitsNoSecondDisable() {
+  /// A grant that lands after a skip and a step back: the skip already turned
+  /// the keys off, so moving on from the granted page turns them back on.
+  @Test func aGrantAfterGoingBackRestoresTheKeys() {
     let model = modelOnKeysPage()
     model.skipKeys()
     model.back()
     #expect(model.currentPage == .accessibility)
     model.accessibilityGranted = true
     model.advance()
+    #expect(model.committed == [.disableKeyboardControl, .restoreKeyboardControl])
+    #expect(!model.keysDeclined)
+  }
+
+  /// Skip, Back, skip again is one decision. A second disable would also
+  /// re-snapshot already-disabled modes in the live leg.
+  @Test func skipBackSkipCommitsTheDisableOnce() {
+    let model = modelOnKeysPage()
+    model.skipKeys()
+    model.back()
+    model.skipKeys()
     #expect(model.committed == [.disableKeyboardControl])
+    #expect(model.keysDeclined)
+  }
+
+  /// A restore closes the decision, so a skip after it is a new one.
+  @Test func aSkipAfterARestoreDisablesAgain() {
+    let model = modelOnKeysPage()
+    model.skipKeys()
+    model.back()
+    model.accessibilityGranted = true
+    model.advance()
+    model.back()
+    model.accessibilityGranted = false
+    model.skipKeys()
+    #expect(model.committed
+      == [.disableKeyboardControl, .restoreKeyboardControl, .disableKeyboardControl])
+  }
+
+  @Test func theGrantedBodyPluralizesLikeTheSkip() {
+    #expect(OnboardingKeysCopy.grantedBody(externalDisplayCount: 0)
+      == "Your keyboard's brightness and volume keys now control your external display.")
+    #expect(OnboardingKeysCopy.grantedBody(externalDisplayCount: 1)
+      == "Your keyboard's brightness and volume keys now control your external display.")
+    #expect(OnboardingKeysCopy.grantedBody(externalDisplayCount: 2)
+      == "Your keyboard's brightness and volume keys now control your external displays.")
   }
 
   /// The page's presence is latched, so it outlives the last external display

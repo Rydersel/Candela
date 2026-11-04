@@ -28,7 +28,9 @@ struct OnboardingFlowView: View {
       GuidedFlowAnnouncement.queued(
         OnboardingAnnouncements.pageAnnouncement(
           page, step: model.index + 1, of: model.pages.count,
-          displayName: sizePageDisplayName(page)))
+          displayName: sizePageDisplayName(page),
+          keysGranted: model.accessibilityGranted,
+          externalDisplayCount: model.environment.displays.count))
     }
     .frame(minWidth: 760, minHeight: 560)
     .preferredColorScheme(.dark)

@@ -1234,6 +1234,13 @@ struct CopyBuilderTests {
     for count in counts {
       add("OnboardingKeysCopy.body(\(count))", OnboardingKeysCopy.body(externalDisplayCount: count))
       add("OnboardingKeysCopy.skipLabel(\(count))", OnboardingKeysCopy.skipLabel(externalDisplayCount: count))
+      add("OnboardingKeysCopy.grantedBody(\(count))", OnboardingKeysCopy.grantedBody(externalDisplayCount: count))
+      for granted in [false, true] {
+        add(
+          "OnboardingAnnouncements.keys(\(granted), \(count))",
+          OnboardingAnnouncements.pageAnnouncement(
+            .accessibility, step: 1, of: 2, keysGranted: granted, externalDisplayCount: count))
+      }
     }
     for major in [14, 26, 27] {
       add("OnboardingKeysCopy.waitingCaption(\(major))", OnboardingKeysCopy.waitingCaption(macOSMajor: major))

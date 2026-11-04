@@ -46,20 +46,32 @@ enum AnnouncementThresholds {
 enum OnboardingAnnouncements {
   /// `displayName` tells consecutive size pages apart. The caller passes a name
   /// only when it has one, never `OnboardingPage.id` or a persistence key.
+  ///
+  /// `keysGranted` and `externalDisplayCount` shape only the keys page, which
+  /// says a different thing once the grant is live (reached again with Back).
   static func pageAnnouncement(
-    _ page: OnboardingPage, step: Int, of total: Int, displayName: String? = nil
+    _ page: OnboardingPage, step: Int, of total: Int, displayName: String? = nil,
+    keysGranted: Bool = false, externalDisplayCount: Int = 1
   ) -> String {
-    "\(purpose(page, displayName: displayName)) Step \(step) of \(total)."
+    let purpose = purpose(
+      page, displayName: displayName, keysGranted: keysGranted,
+      externalDisplayCount: externalDisplayCount)
+    return "\(purpose) Step \(step) of \(total)."
   }
 
-  private static func purpose(_ page: OnboardingPage, displayName: String?) -> String {
+  private static func purpose(
+    _ page: OnboardingPage, displayName: String?, keysGranted: Bool, externalDisplayCount: Int
+  ) -> String {
     switch page {
     case .welcome:
       "The start of setup: what \(AppInfo.productName) does for an external display, and "
         + "what the next few pages ask."
     case .accessibility:
-      "Whether your keyboard's brightness and volume keys control your external display. "
-        + "macOS allows that only with Accessibility access; without it, those keys won't."
+      keysGranted
+        ? OnboardingKeysCopy.grantedBody(externalDisplayCount: externalDisplayCount)
+        : "Whether your keyboard's brightness and volume keys control your external "
+          + "\(externalDisplayCount >= 2 ? "displays" : "display"). macOS allows that only "
+          + "with Accessibility access; without it, those keys won't."
     case .detection:
       // Spoken on arrival, while the scan still runs, and never re-announced
       // when the heading flips to a count. So: no past tense, no number.

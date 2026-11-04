@@ -111,6 +111,12 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     }
     flow.onRequestAccessibility = showGuide
     flow.onOpenAccessibilitySettings = showGuide
+    // With every media-key family off (a skip, then Back), the backstop has
+    // stood down and the grant notification can be missed, so the guide's own
+    // grant read is what tells the permission object, and through it this page.
+    PermissionGuide.shared.onGranted = { pane in
+      if pane == .accessibility { permission.recheckNow() }
+    }
     // The request and nothing else. The return value means "already
     // granted", not "granted now" (it is false when the dialog was merely
     // shown), so nothing may gate on it; the telemetry pref itself is written
@@ -136,6 +142,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
   /// SMAppService read and setter.
   private func liveRouter() -> OnboardingCommitRouter {
     let actions = actions
+    let skippedKeyModes = SkippedKeyModes()
     let loginItem = loginItem
     return OnboardingCommitRouter(
       writeFriendlyName: { key, name in
@@ -172,17 +179,31 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
       // `sizeAppliedByUser` inside the coordinator, and a second record would
       // be redundant.
       acknowledgeAppliedSize: { _, _, _ in },
-      // The Keyboard pane's two mode setters, with both writes ahead of either
-      // notification: each `prefDidChange` rechecks permissions, and a check run
-      // between the writes would see volume still wanting the tap and raise the
-      // system alert the person just declined.
+      // The Keyboard pane's two mode setters, with both writes ahead of the one
+      // batched notification: it rechecks permissions, and a check run between
+      // the writes would see volume still wanting the tap and raise the system
+      // alert the person just declined.
       disableKeyboardControl: {
         let prefs = DisplayPrefs(persistenceKey: "app")
-        prefs.keyboardBrightness = .disabled
-        prefs.keyboardVolume = .disabled
+        let prior = (brightness: prefs.keyboardBrightness, volume: prefs.keyboardVolume)
+        // The flow commits the disable once per skip, but a snapshot taken over
+        // already-disabled modes would make a restore bring back off.
+        if skippedKeyModes.saved == nil { skippedKeyModes.saved = prior }
+        prefs.keyboardBrightness = OnboardingCommitRouter.modeAfterSkip(prior.brightness)
+        prefs.keyboardVolume = OnboardingCommitRouter.modeAfterSkip(prior.volume)
         ShortcutManager.syncRegistration()
-        actions.prefDidChange(.keyboardBrightness)
-        actions.prefDidChange(.keyboardVolume)
+        actions.prefsDidChange([.keyboardBrightness, .keyboardVolume])
+      },
+      // Only ever after the grant, so the batched recheck finds it live and
+      // raises no alert.
+      restoreKeyboardControl: {
+        let prefs = DisplayPrefs(persistenceKey: "app")
+        let saved = skippedKeyModes.saved ?? (brightness: .media, volume: .media)
+        skippedKeyModes.saved = nil
+        prefs.keyboardBrightness = saved.brightness
+        prefs.keyboardVolume = saved.volume
+        ShortcutManager.syncRegistration()
+        actions.prefsDidChange([.keyboardBrightness, .keyboardVolume])
       }
     )
   }
@@ -238,4 +259,11 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
       self.flowModel = nil
     }
   }
+}
+
+/// The key modes a setup skip replaced, shared by the router's disable and
+/// restore legs. One per router, so a fresh flow never restores an old run's.
+@MainActor
+private final class SkippedKeyModes {
+  var saved: (brightness: KeyMode, volume: KeyMode)?
 }
