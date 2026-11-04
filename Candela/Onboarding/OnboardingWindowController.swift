@@ -37,7 +37,15 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     super.init()
   }
 
-  func present() {
+  /// Setup asked for Screen Recording and macOS may have relaunched the app to
+  /// apply the grant. Read once at launch, alongside the first-run check.
+  static var isResumeAfterCarePending: Bool {
+    DisplayPrefs(persistenceKey: "app").onboardingResumeAfterCare
+  }
+
+  /// `resumingAfterCare` opens a fresh flow on the page after the care page
+  /// rather than at Welcome; see `OnboardingFlowModel.resumeAfterCare()`.
+  func present(resumingAfterCare: Bool = false) {
     let window = window ?? makeWindow()
     self.window = window
     // A fresh presentation gets a fresh flow over a fresh harvest; a present()
@@ -45,6 +53,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     // user's place.
     if !window.isVisible {
       installFlow(in: window)
+      if resumingAfterCare { flowModel?.resumeAfterCare() }
     }
     // On top of the live read and `LoginItem`'s didBecomeActive observer: a
     // presentation is the one moment we know the toggle is about to be looked
@@ -68,6 +77,12 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     // would never have a stored version to advance.
     if !window.isVisible {
       onCompletion()
+    }
+    // Consumed once the flow is up, so a later launch does not resume again.
+    // Cleared on a failed presentation too, for the safety net's reason: a
+    // marker nothing consumes would retry the resume on every launch.
+    if resumingAfterCare {
+      DisplayPrefs(persistenceKey: "app").onboardingResumeAfterCare = false
     }
   }
 
@@ -123,6 +138,9 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     // choices, the telemetry pref among them, ahead of this call, because
     // granting relaunches the app.
     flow.onRequestScreenRecording = { _ = CGRequestScreenCaptureAccess() }
+    flow.onSetResumeAfterCare = {
+      DisplayPrefs(persistenceKey: "app").onboardingResumeAfterCare = $0
+    }
     // Achieved state for the care page's copy: the preflight, never the
     // request's return value.
     flow.onPreflightScreenRecording = { CGPreflightScreenCaptureAccess() }
@@ -249,6 +267,10 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     // observation loop dies rather than staying armed behind a closed window. An
     // answer still waiting on its first preview observation survives this.
     applier?.cancel()
+    // Every close route lands here, the flow's own and the window's, so this is
+    // where the resume marker is cleared. Quit & Reopen terminates without
+    // closing the window, which is what lets the marker survive the relaunch.
+    flowModel?.didClose()
     // Before `onCompletion`, which records the schema version that makes a later
     // read say "not a first run".
     let wasFirstRun = flowModel?.environment.isFirstRun ?? false

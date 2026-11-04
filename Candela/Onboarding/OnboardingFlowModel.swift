@@ -101,6 +101,7 @@ final class OnboardingFlowModel {
       // mistaking it for an unseeded key.
       declinedCare.formUnion(oldValue.subtracting(careEnabled))
       declinedCare.subtract(careEnabled)
+      commitCarePageIfRelaunchPending()
     }
   }
 
@@ -111,7 +112,9 @@ final class OnboardingFlowModel {
   private var declinedCare: Set<String> = []
 
   /// True when the user took the recommended measured path.
-  var measuredTelemetry: Bool = true
+  var measuredTelemetry: Bool = true {
+    didSet { commitCarePageIfRelaunchPending() }
+  }
   /// The size decision per display. A kept apply records `.recommended` or
   /// `.custom`; a revert (clicked or by expiry) records `.keepCurrent`. Set
   /// through the apply reports below, never directly by the countdown UI.
@@ -182,14 +185,57 @@ final class OnboardingFlowModel {
   var screenRecordingRequested = false
   private(set) var screenRecordingGranted = false
 
+  /// Records, on disk, that a relaunch should reopen setup after the care
+  /// page. Live mode binds the app-level `onboardingResumeAfterCare` pref; the
+  /// mock and tests leave it a no-op, because a mock writing the real key would
+  /// make the next real launch resume a setup nobody was in.
+  var onSetResumeAfterCare: (Bool) -> Void = { _ in }
+  /// True once this flow has written the resume marker: from then on a
+  /// relaunch can arrive at any moment, so care page edits are written as they
+  /// are made instead of waiting for Continue.
+  private var relaunchPending = false
+
   /// Granting Screen Recording makes macOS offer Quit & Reopen, which
   /// relaunches the app before the care page is ever advanced past, so the
-  /// page's choices are written ahead of the ask rather than on the advance.
+  /// page's choices are written ahead of the ask rather than on the advance,
+  /// and the marker that brings setup back after the care page goes with them.
   func requestScreenRecording() {
-    if currentPage == .oledCare { commitCarePage() }
+    if currentPage == .oledCare {
+      commitCarePage()
+      relaunchPending = true
+      onSetResumeAfterCare(true)
+    }
     screenRecordingRequested = true
     onRequestScreenRecording()
     refreshScreenRecordingGranted()
+  }
+
+  /// The window closed, by any route. The marker is cleared whether or not
+  /// this flow wrote it: a resumed flow inherits one from the previous process.
+  func didClose() {
+    relaunchPending = false
+    onSetResumeAfterCare(false)
+  }
+
+  /// A relaunch after the Screen Recording grant: open on the page after the
+  /// care page, which already did its work in the previous process. The plan is
+  /// derived fresh, so a care page that no longer exists (its display unplugged
+  /// across the relaunch) leaves Finish.
+  ///
+  /// The care choices are re-seeded from the harvest, which now holds what the
+  /// care page wrote, so Back shows the person's own answers rather than the
+  /// fresh-flow defaults that Continue would then write over them.
+  func resumeAfterCare() {
+    let enrolled = environment.displays.filter(\.enrolledInCare)
+    careEnabled = designatedOleds.intersection(enrolled.map(\.persistenceKey))
+    if !enrolled.isEmpty {
+      measuredTelemetry = enrolled.contains(where: \.measuredTelemetry)
+    }
+    if let care = pages.firstIndex(of: .oledCare) {
+      index = min(care + 1, pages.count - 1)
+    } else {
+      index = pages.count - 1
+    }
   }
 
   /// Re-read the grant. Called after the request and on care page appearance:
@@ -628,6 +674,14 @@ final class OnboardingFlowModel {
     case .finish:
       onCommit(.setLaunchAtLogin(launchAtLogin))
     }
+  }
+
+  /// Only the care page owns these choices, and only an outstanding relaunch
+  /// makes waiting for Continue lossy. The record in `commitCarePage` keeps an
+  /// unchanged choice from being written again.
+  private func commitCarePageIfRelaunchPending() {
+    guard relaunchPending, currentPage == .oledCare else { return }
+    commitCarePage()
   }
 
   /// Runs twice when the Screen Recording ask precedes the advance (the

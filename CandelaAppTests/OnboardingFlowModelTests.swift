@@ -1277,6 +1277,144 @@ struct OnboardingFlowModelTests {
     #expect(model.committed.isEmpty)
   }
 
+  // MARK: - Resuming after the Screen Recording relaunch
+
+  /// The relaunch can land the instant the grant is switched on, so the marker
+  /// has to be on disk before the ask goes out, and after the care page's
+  /// choices it promises are already written.
+  @Test func requestWritesTheResumeMarkerBetweenTheCareCommitAndTheAsk() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledCare)
+    var log: [String] = []
+    model.onCommit = { log.append("\($0)") }
+    model.onSetResumeAfterCare = { log.append("resume \($0)") }
+    model.onRequestScreenRecording = { log.append("request") }
+    model.requestScreenRecording()
+    #expect(log == [
+      "\(OnboardingCommit.enrollInCare(displayKey: "mag"))",
+      "\(OnboardingCommit.enableMeasuredTelemetry(displayKey: "mag"))",
+      "resume true",
+      "request",
+    ])
+  }
+
+  /// Off the care page nothing was committed early, so a resume would skip
+  /// pages whose choices were never written.
+  @Test func aRequestOffTheCarePageWritesNoResumeMarker() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledSelect)
+    var marks: [Bool] = []
+    model.onSetResumeAfterCare = { marks.append($0) }
+    model.requestScreenRecording()
+    #expect(marks.isEmpty)
+  }
+
+  @Test func closingClearsTheResumeMarker() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledCare)
+    var marks: [Bool] = []
+    model.onSetResumeAfterCare = { marks.append($0) }
+    model.requestScreenRecording()
+    model.didClose()
+    #expect(marks == [true, false])
+  }
+
+  /// A marker left by an earlier process is this flow's to clear as well, so
+  /// the clear does not depend on this flow having made the request.
+  @Test func closingClearsTheResumeMarkerWithoutARequest() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    var marks: [Bool] = []
+    model.onSetResumeAfterCare = { marks.append($0) }
+    model.didClose()
+    #expect(marks == [false])
+  }
+
+  /// The relaunched app re-harvests: the request enrolled the display, so the
+  /// fresh plan still has a care page, and the flow opens on the page after it.
+  @Test func resumeStartsAfterCare() throws {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(
+        key: "mag", productName: "MAG 341CQPX QD-OLED",
+        enrolled: true, measuredTelemetry: true)]))
+    model.resumeAfterCare()
+    let care = try #require(model.pages.firstIndex(of: .oledCare))
+    #expect(model.index == care + 1)
+    #expect(model.currentPage == .finish)
+    #expect(model.committed.isEmpty)
+  }
+
+  /// The OLED was unplugged across the relaunch (or the care page was turned
+  /// off for a display nothing guesses is an OLED): no care page to follow.
+  @Test func resumeWithNoCarePageStartsAtFinish() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "dell", suggestion: suggestion)]))
+    #expect(!model.pages.contains(.oledCare))
+    model.resumeAfterCare()
+    #expect(model.currentPage == .finish)
+    #expect(model.committed.isEmpty)
+  }
+
+  /// Back from the resumed page shows the care page again. It must show what
+  /// was written before the relaunch, not the fresh-flow seeds, or Continue
+  /// would re-enroll a declined display and turn measurement back on.
+  @Test func aResumedFlowShowsTheCareChoicesAlreadyWritten() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED"),
+        entry(
+          key: "mag", productName: "MAG 341CQPX QD-OLED",
+          enrolled: true, measuredTelemetry: false),
+      ]))
+    model.resumeAfterCare()
+    #expect(model.careEnabled == ["mag"])
+    #expect(!model.measuredTelemetry)
+    model.back()
+    #expect(model.currentPage == .oledCare)
+    model.advance()
+    #expect(!model.committed.contains(.enrollInCare(displayKey: "dell")))
+    #expect(!model.committed.contains(.enableMeasuredTelemetry(displayKey: "mag")))
+  }
+
+  /// A relaunch can land before Continue, so an edit after the request is
+  /// written as it is made, through the same record, once.
+  @Test func anEditAfterTheRequestIsCommittedWithoutContinue() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED"),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      ]))
+    walk(model, to: .oledCare)
+    model.requestScreenRecording()
+    let afterRequest = model.committed.count
+    model.careEnabled.remove("dell")
+    model.measuredTelemetry = false
+    // Re-asserting a choice already written writes nothing.
+    model.measuredTelemetry = false
+    model.careEnabled.remove("dell")
+    #expect(Array(model.committed.dropFirst(afterRequest)) == [
+      .unenrollFromCare(displayKey: "dell"),
+      .disableMeasuredTelemetry(displayKey: "mag"),
+    ])
+    model.advance()
+    #expect(model.committed.count == afterRequest + 2)
+  }
+
+  /// Without an outstanding request the care page keeps commit-on-advance:
+  /// nothing can relaunch the app under it.
+  @Test func anEditBeforeTheRequestWaitsForContinue() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledCare)
+    model.measuredTelemetry = false
+    model.careEnabled.remove("mag")
+    model.careEnabled.insert("mag")
+    #expect(model.committed.isEmpty)
+  }
+
   // MARK: - Display names
 
   @Test func aRenameThatTrimsToEmptyFallsBackToTheEnvironmentName() {

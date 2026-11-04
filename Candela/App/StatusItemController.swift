@@ -706,8 +706,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // end of launch raced discovery and produced the slim no-displays flow on a
       // desk with two externals [MEASURED].
       self.onboardingController?.displayTopologyChanged()
-      if isFirstRun {
-        presentOnboarding()
+      // A resume and a first run can both be true (a relaunch mid first run has
+      // recorded no completion), and both mean the same window, so one
+      // presentation answers both and the resume decides where it opens.
+      let resumesSetup = OnboardingWindowController.isResumeAfterCarePending
+      if isFirstRun || resumesSetup {
+        presentOnboarding(resumingAfterCare: resumesSetup)
       }
       // Here rather than at the top of launch for the same reason as the setup
       // flow: the window's display rows derive over the discovered list.
@@ -848,7 +852,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   }
 
   /// The Setup window (user-facing name; "onboarding" is internal only).
-  private func presentOnboarding() {
+  private func presentOnboarding(resumingAfterCare: Bool = false) {
     let controller = onboardingController ?? OnboardingWindowController(
       model: model,
       actions: settingsActions,
@@ -871,7 +875,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       }
     }
     onboardingController = controller
-    controller.present()
+    controller.present(resumingAfterCare: resumingAfterCare)
   }
 
   /// Post-Setup "the app lives up here" callout. A borderless non-activating

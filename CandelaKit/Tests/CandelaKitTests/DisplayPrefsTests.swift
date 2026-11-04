@@ -152,6 +152,22 @@ struct DisplayPrefsTests {
     }
   }
 
+  /// App-level and unsuffixed: setup is one flow, not one per display, and the
+  /// launch that reads it has no display key to suffix with. Absent reads false,
+  /// so an older domain needs no migration.
+  @Test func theSetupResumeMarkerIsAppLevel() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "app")
+      #expect(prefs.onboardingResumeAfterCare == false)
+      prefs.onboardingResumeAfterCare = true
+      #expect(defaults.object(forKey: "onboardingResumeAfterCare") as? Bool == true)
+      #expect(defaults.object(forKey: "onboardingResumeAfterCare.app") == nil)
+      #expect(DisplayPrefs(defaults: defaults, persistenceKey: "AAAA").onboardingResumeAfterCare)
+      prefs.onboardingResumeAfterCare = false
+      #expect(defaults.object(forKey: "onboardingResumeAfterCare") as? Bool == false)
+    }
+  }
+
   @Test func unknownStoredHDRModeFallsBackToOff() {
     withSuite { defaults in
       defaults.set(42, forKey: "hdrMode.pk")
