@@ -429,9 +429,8 @@ private struct MeasurementControls: View {
         Toggle("Measure how bright each part of this display is", isOn: Binding(
           get: { prefs.oledTelemetry },
           set: { on in
-            // One of two sites that raise the Screen Recording prompt (guided
-            // setup is the other); the sampler itself is preflight-only, so no
-            // background loop raises a TCC dialog unexplained.
+            // Prompts only from a user action; the sampler itself is
+            // preflight-only, so no background loop raises a TCC dialog unexplained.
             //
             // The pref is written whether or not the grant arrives: macOS
             // returns false from the request that merely SHOWS the dialog, so
