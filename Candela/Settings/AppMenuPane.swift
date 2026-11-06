@@ -183,7 +183,7 @@ struct AppMenuPane: View {
   }
 
   private var contrastRow: some View {
-    SettingRow("DDC-controlled displays only, and results vary by monitor.") {
+    SettingRow("Works only on external displays whose contrast \(AppInfo.productName) can control. Results vary by display.") {
       Toggle("Show a contrast slider", isOn: Binding(
         get: { prefs.showContrast },
         set: { shown in

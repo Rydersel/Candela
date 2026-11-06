@@ -112,13 +112,13 @@ struct KeyboardTargetingPage: View {
       // "A normal press" is load-bearing, not hedging: `DimmingMath.step`
       // branches on `isFine` BEFORE it reads the chiclet count, so a fine step
       // is a flat ±0.01 on both scales and this toggle does nothing to it.
-      SettingRow("Halves how far a normal press moves on a display that is dimming past its minimum; fine steps are unchanged.") {
-        Toggle("Extra-fine steps while combined dimming is active", isOn: Binding(
+      SettingRow("Halves how far a normal press moves on displays that dim past their minimum; fine steps are unchanged.") {
+        Toggle("Extra-fine steps on displays that dim past their minimum", isOn: Binding(
           get: { prefs.separateCombinedScale },
           set: { setSeparateCombinedScale($0) }
         ))
         .themedSwitch()
-        .accessibilityLabel("Extra-fine steps while combined dimming is active")
+        .accessibilityLabel("Extra-fine steps on displays that dim past their minimum")
         .prefIdentifier(.separateCombinedScale)
         .disabled(prefs.keyboardBrightness == .disabled)
       }
