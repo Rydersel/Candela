@@ -109,13 +109,17 @@ final class HDRShortcutAction {
     }
     let controller = state.controller
     if !controller.isHDREngaged {
-      if isSynthesized(state.id) {
-        return .refused(SynthesisCopy.hdrBlockedBySynthesizedSize)
+      // The panel button's own answer, so the two never disagree about why.
+      if let reason = PanelView.hdrRefusalReason(
+        isShowingSynthesizedSize: isSynthesized(state.id), isHDREngaged: false,
+        supportsHDR: controller.supportsHDR,
+        capabilityProbed: controller.hdrCapabilityProbed,
+        hasReportedHDR: controller.hasReportedHDR) {
+        return .refused(reason)
       }
       guard controller.hdrCapabilityProbed else {
         return .refused("HDR support is still being checked. Try again shortly.")
       }
-      guard controller.supportsHDR else { return .refused(PanelView.hdrNoModesCaption) }
     }
     let enabled = !controller.isHDREngaged
     await controller.setHDRMode(enabled ? .alwaysOn : .off)

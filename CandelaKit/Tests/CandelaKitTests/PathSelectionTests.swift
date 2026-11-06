@@ -50,6 +50,8 @@ actor FakeHDR: HDRToggling {
   func displaysReconfigured() {}
 
   func stubSetResult(_ value: Bool) { setResult = value }
+  /// The engaged mode changes what the display lists, not the panel itself.
+  func stubSupports(_ value: Bool) { supports = value }
   /// The panel's HDR state changes with nothing telling the controller: a
   /// System Settings toggle whose reconfigure has not been delivered yet. The
   /// backend's own cache is deliberately NOT refreshed, because that is the

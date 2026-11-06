@@ -47,4 +47,84 @@ struct HDRCapabilityProbeTests {
     h.controller.rebind(writer: h.ddc, panelIdentity: nil)
     #expect(h.controller.hdrCapabilityProbed)
   }
+
+  // MARK: - The latch
+
+  @Test func nothingHasBeenReportedBeforeTheFirstRefresh() {
+    let h = Harness(hdrSupported: true)
+    #expect(h.controller.hasReportedHDR == false)
+  }
+
+  @Test func aDisplayWithNoHDRNeverReportsIt() async {
+    let h = Harness(hdrSupported: false)
+    await h.prime()
+    #expect(h.controller.hasReportedHDR == false)
+  }
+
+  /// A mode without HDR modes on a panel that has them: `supportsHDR` follows the
+  /// mode, the latch keeps what the panel showed.
+  @Test func aModeWithoutHDRDoesNotRetractTheReport() async {
+    let h = Harness(hdrSupported: true)
+    await h.prime()
+    #expect(h.controller.hasReportedHDR)
+
+    await h.hdr!.stubSupports(false)
+    await h.controller.noteHDRStateMayHaveChanged()
+    #expect(h.controller.supportsHDR == false)
+    #expect(h.controller.hasReportedHDR)
+  }
+
+  /// First seen on a mode without HDR, then switched to one that has it.
+  @Test func aLaterRefreshCanStillReportHDR() async {
+    let h = Harness(hdrSupported: false)
+    await h.prime()
+    #expect(h.controller.hasReportedHDR == false)
+
+    await h.hdr!.stubSupports(true)
+    await h.controller.noteHDRStateMayHaveChanged()
+    #expect(h.controller.hasReportedHDR)
+  }
+
+  @Test func aPanelSwapClearsTheReport() async {
+    let h = Harness(hdrSupported: true)
+    await h.prime()
+
+    h.controller.rebind(writer: h.ddc, panelIdentity: "a-different-panel")
+    #expect(h.controller.hasReportedHDR == false)
+  }
+
+  @Test func aPlainRebindKeepsTheReport() async {
+    let h = Harness(hdrSupported: true)
+    await h.prime()
+
+    h.controller.rebind(writer: h.ddc, panelIdentity: nil)
+    #expect(h.controller.hasReportedHDR)
+  }
+
+  // MARK: - The stored report
+
+  /// A launch can find the display mirrored behind a synthesized size, listing no
+  /// HDR modes; the stored report is what keeps its button.
+  @Test func aStoredReportSeedsTheLatchBeforeAnyRefresh() async {
+    let h = Harness(hdrSupported: false, configure: { prefs, _ in prefs.hasReportedHDR = true })
+    #expect(h.controller.hasReportedHDR)
+    #expect(h.controller.hdrCapabilityProbed == false)
+
+    await h.prime()
+    #expect(h.controller.supportsHDR == false)
+    #expect(h.controller.hasReportedHDR)
+  }
+
+  @Test func theFirstRefreshThatSeesHDRStoresTheReport() async {
+    let h = Harness(hdrSupported: true)
+    #expect(h.prefs.hasReportedHDR == false)
+    await h.prime()
+    #expect(h.prefs.hasReportedHDR)
+  }
+
+  @Test func aDisplayWithNoHDRStoresNoReport() async {
+    let h = Harness(hdrSupported: false)
+    await h.prime()
+    #expect(h.prefs.hasReportedHDR == false)
+  }
 }
