@@ -26,6 +26,9 @@
       model.onClose = {
         Self.window?.close()
       }
+      // Stated rather than left to the default: a mock that opened the real
+      // Settings would select panes in the window the daily driver restores.
+      model.onOpenSettings = { _ in }
 
       let hosting = NSHostingController(rootView: OnboardingFlowView(model: model))
       let window = NSWindow(contentViewController: hosting)

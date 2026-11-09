@@ -1,3 +1,4 @@
+import CandelaKit
 import SwiftUI
 
 /// Welcome: one large softly-lit display object under ambient light, the
@@ -52,11 +53,50 @@ struct OnboardingWelcomePage: View {
   }
 }
 
-/// Accessibility: the why in one line before the ask, the prompt, and the
-/// live granted state. Skippable; the app warns later where it matters.
+/// The keys page's words, outside the view so the corpus scan and the tests
+/// read the same strings the page draws.
+///
+/// Counts are external displays at the moment of drawing. The page's presence
+/// is latched at flow start, so it can still be up after every external display
+/// is unplugged; zero reads as singular and nothing here names a display.
+enum OnboardingKeysCopy {
+  static func body(externalDisplayCount: Int) -> String {
+    let plural = externalDisplayCount >= 2
+    return "\(AppInfo.productName) lets your keyboard's brightness and volume keys control "
+      + "your external \(plural ? "displays" : "display"). macOS only allows that with "
+      + "Accessibility access, so without it those keys won't control your "
+      + "\(plural ? "monitors" : "monitor")."
+  }
+
+  /// Replaces the body once the grant is live: the cost it warned about is gone.
+  static func grantedBody(externalDisplayCount: Int) -> String {
+    "Your keyboard's brightness and volume keys now control your external "
+      + "\(externalDisplayCount >= 2 ? "displays" : "display")."
+  }
+
+  static let allow = "Allow Keyboard Control"
+
+  /// Asks for the drag alone: on 27.2 the dropped row arrives switched on.
+  static func waitingCaption(macOSMajor: Int) -> String {
+    "Drag \(AppInfo.productName) into the list in "
+      + "\(PermissionPane.accessibility.settingsPath(macOSMajor: macOSMajor)). "
+      + "This page updates on its own."
+  }
+
+  /// The label states the cost, so nobody leaves believing the keys still work.
+  static func skipLabel(externalDisplayCount: Int) -> String {
+    "Skip: my keys won't control my \(externalDisplayCount >= 2 ? "monitors" : "monitor")"
+  }
+}
+
+/// The keys page: pushes for the Accessibility grant, because the Mac's own
+/// brightness and volume keys reach an external display only through it. The
+/// way past turns keyboard control off and says so in its label.
 struct OnboardingAccessibilityPage: View {
   @Bindable var model: OnboardingFlowModel
   let accent: Color
+
+  private var externalDisplayCount: Int { model.environment.displays.count }
 
   var body: some View {
     VStack(spacing: 0) {
@@ -67,7 +107,9 @@ struct OnboardingAccessibilityPage: View {
         keycaps
         OnboardingHeading(
           title: OnboardingTitles.accessibility,
-          subtitle: "macOS delivers the brightness, volume and mute keys through Accessibility. \(AppInfo.productName) needs that access to see those key presses, and it reads nothing else."
+          subtitle: model.accessibilityGranted
+            ? OnboardingKeysCopy.grantedBody(externalDisplayCount: externalDisplayCount)
+            : OnboardingKeysCopy.body(externalDisplayCount: externalDisplayCount)
         )
       }
       Spacer()
@@ -76,12 +118,24 @@ struct OnboardingAccessibilityPage: View {
       VStack(spacing: 12) {
         permissionState
         if !model.accessibilityGranted {
-          Button("Not Now") { model.advance() }
-            .buttonStyle(OnboardingLinkButtonStyle())
+          Button(OnboardingKeysCopy.skipLabel(externalDisplayCount: externalDisplayCount)) {
+            model.skipKeys()
+          }
+          .buttonStyle(OnboardingLinkButtonStyle())
+          // Apart from Skip Setup, so the two quiet links do not read as a
+          // pair of answers to one question.
+          .padding(.bottom, 10)
         }
         OnboardingSkipLink(model: model)
       }
       .padding(.bottom, 44)
+    }
+    // A grant landing while the page is up changes what the page says, and
+    // the arrival announcement has already been spoken.
+    .onChange(of: model.accessibilityGranted) { _, granted in
+      guard granted else { return }
+      GuidedFlowAnnouncement.queued(
+        OnboardingKeysCopy.grantedBody(externalDisplayCount: externalDisplayCount))
     }
   }
 
@@ -129,20 +183,27 @@ struct OnboardingAccessibilityPage: View {
           .keyboardShortcut(.defaultAction)
       }
       .transition(.opacity)
-    } else if model.accessibilityRequested {
-      VStack(spacing: 10) {
-        Button("Open System Settings…") { model.openAccessibilitySettings() }
-          .buttonStyle(OnboardingPrimaryButtonStyle(accent: accent))
-        Text("Turn \(AppInfo.productName) on under Privacy & Security, Accessibility. This page updates on its own once you do.")
-          .font(.caption)
-          .foregroundStyle(OnboardingStyle.faintColor)
-          .multilineTextAlignment(.center)
-          .frame(maxWidth: 380)
-      }
     } else {
-      Button("Allow Accessibility Access") { model.requestAccessibility() }
+      VStack(spacing: 10) {
+        // One label in both states: a second press after closing System
+        // Settings brings the pane and its guide back.
+        Button(OnboardingKeysCopy.allow) {
+          if model.accessibilityRequested {
+            model.openAccessibilitySettings()
+          } else {
+            model.requestAccessibility()
+          }
+        }
         .buttonStyle(OnboardingPrimaryButtonStyle(accent: accent))
         .keyboardShortcut(.defaultAction)
+        if model.accessibilityRequested {
+          Text(OnboardingKeysCopy.waitingCaption(macOSMajor: PermissionPane.currentMacOSMajor))
+            .font(.caption)
+            .foregroundStyle(OnboardingStyle.faintColor)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 380)
+        }
+      }
     }
   }
 }
@@ -174,8 +235,8 @@ struct OnboardingNoDisplaysPage: View {
   }
 }
 
-/// Finish: the green bloom, a cascade of what was configured, and the
-/// launch at login decision.
+/// Finish: the green bloom, a cascade of what was configured, what to
+/// fine-tune next, and the launch at login decision.
 struct OnboardingFinishPage: View {
   @Bindable var model: OnboardingFlowModel
   let accent: Color
@@ -201,7 +262,12 @@ struct OnboardingFinishPage: View {
             .offset(x: revealed > pair.offset + 1 ? 0 : -8)
         }
       }
-      .frame(maxWidth: 400, alignment: .leading)
+      .frame(maxWidth: Self.columnWidth, alignment: .leading)
+      if !fineTuneItems.isEmpty {
+        Spacer(minLength: 18)
+        fineTuneSection
+          .opacity(revealed > summaryLines.count + 1 ? 1 : 0)
+      }
       Spacer(minLength: 18)
       // A switch, not a checkbox: a checked box under a page of green
       // checks reads as one more completed item, not a decision to make.
@@ -222,44 +288,142 @@ struct OnboardingFinishPage: View {
     .onAppear { reveal() }
   }
 
-  private func summaryRow(_ line: String) -> some View {
+  /// Wide enough that the keys-off line and every fine-tune row stay on one
+  /// line, which is what keeps four rows inside the fixed window.
+  static let columnWidth: CGFloat = 440
+
+  private var fineTuneItems: [OnboardingFineTuneItem] { model.fineTuneItems }
+  private var externalDisplays: Int { model.environment.displays.count }
+
+  private func summaryRow(_ line: OnboardingFinishCopy.Line) -> some View {
     HStack(spacing: 10) {
-      Image(systemName: "checkmark.circle.fill")
-        .foregroundStyle(accent)
-      Text(line)
+      Image(systemName: line.done ? "checkmark.circle.fill" : "minus.circle")
+        .foregroundStyle(line.done ? accent : OnboardingStyle.faintColor)
+        .accessibilityHidden(true)
+      Text(line.text)
         .foregroundStyle(OnboardingStyle.bodyColor)
     }
     .font(.callout)
   }
 
-  private var summaryLines: [String] {
-    var lines: [String] = []
-    lines.append(
-      model.accessibilityGranted
-        ? "Keyboard keys are ready to use"
-        : "Keyboard access can be granted later in Settings")
-    let displayCount = model.environment.displays.count
-    if displayCount > 0 {
-      lines.append(displayCount == 1 ? "1 display configured" : "\(displayCount) displays configured")
+  private var fineTuneSection: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(OnboardingFinishCopy.fineTuneHeading)
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(OnboardingStyle.faintColor)
+        .accessibilityAddTraits(.isHeader)
+        .padding(.leading, 4)
+      VStack(spacing: 0) {
+        ForEach(Array(fineTuneItems.enumerated()), id: \.element) { pair in
+          if pair.offset > 0 {
+            Rectangle()
+              .fill(OnboardingStyle.cardStroke)
+              .frame(height: 0.5)
+              .padding(.leading, 42)
+          }
+          fineTuneRow(pair.element)
+        }
+      }
+      .background(
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+          .fill(OnboardingStyle.cardFill)
+      )
+      // The end rows' hover wash would square off the card's corners.
+      .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+      .overlay(
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+          .stroke(OnboardingStyle.cardStroke, lineWidth: 0.5)
+      )
     }
-    let protected = model.designatedOleds.intersection(model.careEnabled).count
-    if protected > 0 {
-      lines.append(protected == 1 ? "OLED care is protecting 1 display" : "OLED care is protecting \(protected) displays")
+    .frame(maxWidth: Self.columnWidth)
+  }
+
+  private func fineTuneRow(_ item: OnboardingFineTuneItem) -> some View {
+    Button {
+      model.finish(opening: item)
+    } label: {
+      HStack(spacing: 10) {
+        Image(systemName: item.symbol)
+          .font(.system(size: 13, weight: .medium))
+          .foregroundStyle(accent)
+          .frame(width: 22)
+        Text(item.title)
+          .font(.callout.weight(.medium))
+          .foregroundStyle(OnboardingStyle.titleColor.opacity(0.9))
+        Text(item.detail(externalDisplays: externalDisplays))
+          .font(.caption)
+          .foregroundStyle(OnboardingStyle.faintColor)
+          .lineLimit(1)
+        Spacer(minLength: 8)
+        Image(systemName: "arrow.up.forward")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(OnboardingStyle.faintColor)
+      }
+      .padding(.horizontal, 10)
+      .padding(.vertical, 7)
+      .contentShape(Rectangle())
     }
-    return lines
+    .buttonStyle(OnboardingFineTuneRowStyle())
+    // The title is the action; the detail is what it is about, and the
+    // arrow says only that it leaves the page.
+    .accessibilityLabel(item.title)
+    .accessibilityHint(
+      "\(item.detail(externalDisplays: externalDisplays)). Closes setup and opens Settings.")
+  }
+
+  private var summaryLines: [OnboardingFinishCopy.Line] {
+    OnboardingFinishCopy.summary(
+      keysOn: model.keyboardControlOn,
+      grantInPlace: model.keysGrantInPlace,
+      externalDisplays: externalDisplays,
+      protectedOleds: model.protectedOledCount)
+  }
+
+  /// The values `revealed` steps through on appear. It ends past every
+  /// threshold rather than at the last one counted: a summary line or the
+  /// list can arrive while the page is up (the grant landing, a display
+  /// plugged in), and a count taken on appear would leave it invisible.
+  static func revealSequence(summaryLines: Int, offersFineTune: Bool) -> [Int] {
+    // The fine-tune list is the cascade's last step, after the summary.
+    let steps = summaryLines + (offersFineTune ? 1 : 0) + 1
+    return Array(1...steps) + [Int.max]
   }
 
   private func reveal() {
-    let steps = summaryLines.count + 1
+    let sequence = Self.revealSequence(
+      summaryLines: summaryLines.count, offersFineTune: !fineTuneItems.isEmpty)
     guard !reduceMotion else {
-      revealed = steps + 1
+      revealed = Int.max
       return
     }
     revealed = 0
-    for step in 1...(steps + 1) {
-      withAnimation(.spring(duration: 0.5).delay(0.15 * Double(step))) {
-        revealed = step
+    for (offset, value) in sequence.enumerated() {
+      withAnimation(.spring(duration: 0.5).delay(0.15 * Double(offset + 1))) {
+        revealed = value
       }
+    }
+  }
+}
+
+/// A fine-tune row: flat at rest, a faint wash on hover so the whole row reads
+/// as one target before it is clicked.
+private struct OnboardingFineTuneRowStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    HoverLabel(configuration: configuration)
+  }
+
+  private struct HoverLabel: View {
+    let configuration: Configuration
+    @State private var hovering = false
+
+    var body: some View {
+      configuration.label
+        .background(
+          Rectangle().fill(
+            Color.white.opacity(configuration.isPressed ? 0.10 : (hovering ? 0.06 : 0)))
+        )
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.15), value: hovering)
     }
   }
 }

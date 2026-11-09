@@ -331,19 +331,32 @@ struct OnboardingLiveEnvironmentTests {
   @Test func displayOrderFollowsInputOrder() {
     let environment = OnboardingEnvironmentBuilder.environment(
       displays: [Self.input(key: "first"), Self.input(key: "second"), Self.input(key: "third")],
-      accessibilityGranted: false, loginItemEnabled: false, isFirstRun: true)
+      accessibilityGranted: false, loginItemEnabled: false, isFirstRun: true,
+      keyModesRequireGrant: true, keyModesOff: false, arrangedDisplayCount: 4)
 
     #expect(environment.displays.map(\.persistenceKey) == ["first", "second", "third"])
   }
 
   @Test func globalInputsArriveUnchanged() {
     let environment = OnboardingEnvironmentBuilder.environment(
-      displays: [], accessibilityGranted: true, loginItemEnabled: true, isFirstRun: false)
+      displays: [], accessibilityGranted: true, loginItemEnabled: true, isFirstRun: false,
+      keyModesRequireGrant: false, keyModesOff: true, arrangedDisplayCount: 1)
 
     #expect(environment.accessibilityGranted)
     #expect(environment.loginItemEnabled)
     #expect(!environment.isFirstRun)
+    #expect(!environment.keyModesRequireGrant)
+    #expect(environment.keyModesOff)
+    #expect(environment.arrangedDisplayCount == 1)
     #expect(environment.displays.isEmpty)
+
+    // The other polarity, so neither field can pass by holding a constant.
+    let flipped = OnboardingEnvironmentBuilder.environment(
+      displays: [], accessibilityGranted: false, loginItemEnabled: false, isFirstRun: true,
+      keyModesRequireGrant: true, keyModesOff: false, arrangedDisplayCount: 3)
+    #expect(flipped.keyModesRequireGrant)
+    #expect(!flipped.keyModesOff)
+    #expect(flipped.arrangedDisplayCount == 3)
   }
 
   @Test func theEntryCarriesTheFastestOfferedRateNotTheRunningOne() {
@@ -380,9 +393,12 @@ struct OnboardingLiveEnvironmentTests {
           key: "correction", looksLike: (3840, 2160),
           recommendation: Self.recommendation(2560, 1440), curatedRows: Self.ladder),
       ],
-      accessibilityGranted: true, loginItemEnabled: false, isFirstRun: true)
+      accessibilityGranted: true, loginItemEnabled: false, isFirstRun: true,
+      keyModesRequireGrant: true, keyModesOff: false, arrangedDisplayCount: 3)
 
-    let pages = OnboardingPlan.pages(for: environment, designatedOleds: [])
+    let pages = OnboardingPlan.pages(
+      for: environment, designatedOleds: [],
+      includesKeysPage: OnboardingPlan.wantsKeysPage(environment))
     #expect(pages.contains(.size(displayKey: "correction")))
     #expect(!pages.contains(.size(displayKey: "no-correction")))
   }

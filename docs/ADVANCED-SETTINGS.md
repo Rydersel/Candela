@@ -138,6 +138,10 @@ page only — Candela has never written them and has no accessor for them.
 - `temporaryDimEngaged.<pk>` records that a temporary dim was engaged on that
   display, so a launch after a crash can put the brightness back. It is engine
   state, not a preference.
+- `onboardingResumeAfterCare` (Bool) is set while Setup waits on a Screen
+  Recording grant, so a relaunch reopens Setup after its care page; the next
+  launch or closing Setup clears it. `defaults delete com.rydersel.Candela onboardingResumeAfterCare`
+  stops a pending resume.
 - `hasReportedHDR.<pk>` records that the display has listed HDR modes at least
   once, so the menu bar keeps its HDR button while the current mode has none
   (for example while a size Candela renders is in use). It is engine state, not

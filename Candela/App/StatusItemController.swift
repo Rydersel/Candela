@@ -612,6 +612,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     }
 
     let permission = model.accessibility
+    // The guide can observe a grant while the key-mode backstop is stopped.
+    PermissionGuide.shared.onGranted = { [weak permission] pane in
+      if pane == .accessibility { permission?.recheckNow() }
+    }
     // On a first run the Setup window owns the Accessibility ask so it can
     // explain WHY first. Prompting here would fire the system dialog before that
     // window is on screen. `prefsSchemaVersion` is the trigger and is written at
@@ -706,8 +710,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // end of launch raced discovery and produced the slim no-displays flow on a
       // desk with two externals [MEASURED].
       self.onboardingController?.displayTopologyChanged()
-      if isFirstRun {
-        presentOnboarding()
+      // A resume and a first run can both be true (a relaunch mid first run has
+      // recorded no completion), and both mean the same window, so one
+      // presentation answers both and the resume decides where it opens.
+      let resumesSetup = OnboardingWindowController.consumeResumeAfterCare()
+      if isFirstRun || resumesSetup {
+        presentOnboarding(resumingAfterCare: resumesSetup)
       }
       // Here rather than at the top of launch for the same reason as the setup
       // flow: the window's display rows derive over the discovered list.
@@ -848,7 +856,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   }
 
   /// The Setup window (user-facing name; "onboarding" is internal only).
-  private func presentOnboarding() {
+  private func presentOnboarding(resumingAfterCare: Bool = false) {
     let controller = onboardingController ?? OnboardingWindowController(
       model: model,
       actions: settingsActions,
@@ -871,7 +879,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       }
     }
     onboardingController = controller
-    controller.present()
+    controller.present(resumingAfterCare: resumingAfterCare)
   }
 
   /// Post-Setup "the app lives up here" callout. A borderless non-activating
@@ -1017,6 +1025,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         }
       }
     }
+  }
+
+  func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
+    onboardingController?.prepareForTermination()
+    return .terminateNow
   }
 
   /// Remove software dimming, then hand the DDC register the full-range

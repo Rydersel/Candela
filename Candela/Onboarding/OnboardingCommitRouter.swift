@@ -28,6 +28,29 @@ struct OnboardingCommitRouter {
   /// record has somewhere to land (a log line, a suggestion dismissal); it must
   /// never apply a mode.
   var acknowledgeAppliedSize: (_ displayKey: String, _ looksLikeWidth: Int, _ looksLikeHeight: Int) -> Void
+  /// The media-key half of both key modes off (`modeAfterSkip`), through the
+  /// Keyboard pane's own write shape.
+  var disableKeyboardControl: () -> Void
+  /// The modes `disableKeyboardControl` replaced, written back.
+  var restoreKeyboardControl: () -> Void
+
+  /// What the keys page's skip turns one key family's mode into. Only the
+  /// media keys need the grant; custom shortcuts are Carbon hotkeys that never
+  /// did, so the skip leaves them working.
+  static func modeAfterSkip(_ mode: KeyMode) -> KeyMode {
+    switch mode {
+    case .media: .disabled
+    case .both: .custom
+    case .custom, .disabled: mode
+    }
+  }
+
+  /// What a restore writes for one family: the mode the skip replaced, but only
+  /// while the family still holds what the skip wrote. Anything else is a
+  /// change made since (the Keyboard pane, mid-flow) and outranks the snapshot.
+  static func modeAfterRestore(current: KeyMode, saved: KeyMode) -> KeyMode {
+    current == modeAfterSkip(saved) ? saved : current
+  }
 
   func route(_ commit: OnboardingCommit) {
     switch commit {
@@ -66,6 +89,12 @@ struct OnboardingCommitRouter {
       // buys nothing.
       guard enabled != isLoginItemEnabled() else { return }
       setLaunchAtLogin(enabled)
+
+    case .disableKeyboardControl:
+      disableKeyboardControl()
+
+    case .restoreKeyboardControl:
+      restoreKeyboardControl()
     }
   }
 }

@@ -46,19 +46,34 @@ enum AnnouncementThresholds {
 enum OnboardingAnnouncements {
   /// `displayName` tells consecutive size pages apart. The caller passes a name
   /// only when it has one, never `OnboardingPage.id` or a persistence key.
+  ///
+  /// `keysGranted` and `externalDisplayCount` shape only the keys page, which
+  /// says a different thing once the grant is live (reached again with Back).
+  /// `offersFineTune` shapes only Finish, whose list of follow-ups can be empty.
   static func pageAnnouncement(
-    _ page: OnboardingPage, step: Int, of total: Int, displayName: String? = nil
+    _ page: OnboardingPage, step: Int, of total: Int, displayName: String? = nil,
+    keysGranted: Bool = false, externalDisplayCount: Int = 1, offersFineTune: Bool = false
   ) -> String {
-    "\(purpose(page, displayName: displayName)) Step \(step) of \(total)."
+    let purpose = purpose(
+      page, displayName: displayName, keysGranted: keysGranted,
+      externalDisplayCount: externalDisplayCount, offersFineTune: offersFineTune)
+    return "\(purpose) Step \(step) of \(total)."
   }
 
-  private static func purpose(_ page: OnboardingPage, displayName: String?) -> String {
+  private static func purpose(
+    _ page: OnboardingPage, displayName: String?, keysGranted: Bool, externalDisplayCount: Int,
+    offersFineTune: Bool
+  ) -> String {
     switch page {
     case .welcome:
       "The start of setup: what \(AppInfo.productName) does for an external display, and "
         + "what the next few pages ask."
     case .accessibility:
-      "Accessibility access, so the brightness, volume and mute keys reach \(AppInfo.productName)."
+      keysGranted
+        ? OnboardingKeysCopy.grantedBody(externalDisplayCount: externalDisplayCount)
+        : "Whether your keyboard's brightness and volume keys control your external "
+          + "\(externalDisplayCount >= 2 ? "displays" : "display"). macOS allows that only "
+          + "with Accessibility access; without it, those keys won't."
     case .detection:
       // Spoken on arrival, while the scan still runs, and never re-announced
       // when the heading flips to a count. So: no past tense, no number.
@@ -73,7 +88,10 @@ enum OnboardingAnnouncements {
     case .oledCare:
       "Burn-in protection for the displays marked as OLED."
     case .finish:
-      "Setup is done, with a summary of what changed."
+      offersFineTune
+        ? "Setup is done, with a summary of what changed and what you can fine-tune "
+          + "next in Settings."
+        : "Setup is done, with a summary of what changed."
     }
   }
 }
@@ -83,7 +101,7 @@ enum OnboardingAnnouncements {
 /// still being checked.
 enum OnboardingTitles {
   static let welcome = "Welcome to \(AppInfo.productName)"
-  static let accessibility = "Your keyboard, everywhere"
+  static let accessibility = "Use your Mac's keys on your monitor"
   /// The detection page draws two titles: this one while the scan runs, the
   /// count below once the cards resolve.
   static let detectionScanning = "Looking at your displays"

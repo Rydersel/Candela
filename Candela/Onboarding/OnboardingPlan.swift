@@ -36,9 +36,14 @@ enum OnboardingPage: Equatable, Hashable, Identifiable {
 /// of in-flow state that reshapes it (the OLED designation set). The flow model
 /// calls this, and nothing else decides pages.
 enum OnboardingPlan {
+  /// `includesKeysPage` is passed in rather than derived here: the flow
+  /// decides it once from `wantsKeysPage` and holds it, because a grant or a
+  /// key-mode change landing mid-flow would otherwise pull the page out from
+  /// under the person answering it.
   static func pages(
     for environment: OnboardingEnvironment,
-    designatedOleds: Set<String>
+    designatedOleds: Set<String>,
+    includesKeysPage: Bool
   ) -> [OnboardingPage] {
     // Displays lead: detection and the size suggestion are the payoff pages, so
     // they come before the permission ask.
@@ -51,7 +56,9 @@ enum OnboardingPlan {
         pages.append(.size(displayKey: display.persistenceKey))
       }
     }
-    pages.append(.accessibility)
+    if includesKeysPage {
+      pages.append(.accessibility)
+    }
     if !environment.displays.isEmpty {
       pages.append(.oledSelect)
       if environment.displays.contains(where: { designatedOleds.contains($0.persistenceKey) }) {
@@ -60,6 +67,15 @@ enum OnboardingPlan {
     }
     pages.append(.finish)
     return pages
+  }
+
+  /// The keys page asks only when the answer can matter: the keys control an
+  /// external display, so one has to be attached; the stored modes have to
+  /// want the event tap; and the grant must not already be live.
+  static func wantsKeysPage(_ environment: OnboardingEnvironment) -> Bool {
+    !environment.displays.isEmpty
+      && environment.keyModesRequireGrant
+      && !environment.accessibilityGranted
   }
 
   /// A display whose reported product name contains "OLED" arrives

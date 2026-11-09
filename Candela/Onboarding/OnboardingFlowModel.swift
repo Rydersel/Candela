@@ -17,6 +17,13 @@ enum OnboardingCommit: Equatable {
   /// nothing and absent keeps meaning "no decision".
   case disableMeasuredTelemetry(displayKey: String)
   case setLaunchAtLogin(Bool)
+  /// The keys page's skip: the media-key half of each key mode off, so nothing
+  /// waits on a grant the person declined and no warning nags them for it.
+  /// Custom shortcuts never needed the grant and stay as they were.
+  case disableKeyboardControl
+  /// A skip undone: the person came back to the keys page and granted, so the
+  /// modes the skip turned off go back to what they were.
+  case restoreKeyboardControl
 }
 
 /// What the user chose on a size page.
@@ -61,6 +68,11 @@ final class OnboardingFlowModel {
   private(set) var environment: OnboardingEnvironment
   private(set) var pages: [OnboardingPage]
   private(set) var index: Int = 0
+  /// Decided once, from the opening environment, and passed to every replan.
+  /// The grant landing while the keys page is up, or the keys being turned
+  /// off, makes a fresh harvest say the page is unwanted; re-deriving would
+  /// drop the page the person is on.
+  let includesKeysPage: Bool
 
   /// Displays currently marked as OLEDs on the designation page. Changing it
   /// re-derives the plan, which is how the care page appears and disappears.
@@ -89,6 +101,7 @@ final class OnboardingFlowModel {
       // mistaking it for an unseeded key.
       declinedCare.formUnion(oldValue.subtracting(careEnabled))
       declinedCare.subtract(careEnabled)
+      commitCarePageIfRelaunchPending()
     }
   }
 
@@ -99,7 +112,9 @@ final class OnboardingFlowModel {
   private var declinedCare: Set<String> = []
 
   /// True when the user took the recommended measured path.
-  var measuredTelemetry: Bool = true
+  var measuredTelemetry: Bool = true {
+    didSet { commitCarePageIfRelaunchPending() }
+  }
   /// The size decision per display. A kept apply records `.recommended` or
   /// `.custom`; a revert (clicked or by expiry) records `.keepCurrent`. Set
   /// through the apply reports below, never directly by the countdown UI.
@@ -109,14 +124,67 @@ final class OnboardingFlowModel {
   var launchAtLogin: Bool
   /// Simulated grant state in fixture mode; live mode mirrors the real
   /// permission object instead.
-  var accessibilityGranted: Bool
+  var accessibilityGranted: Bool {
+    didSet {
+      // The restore rides the grant's arrival, not an advance: once granted,
+      // the page says the keys work, and Skip Setup, the close button or a grant
+      // landing on a later page would otherwise leave them off behind that.
+      guard accessibilityGranted, !oldValue, keysDisableCommitted else { return }
+      onCommit(.restoreKeyboardControl)
+      keysDeclined = false
+      keysDisableCommitted = false
+    }
+  }
   var accessibilityRequested = false
+  /// Set by the keys page's own skip; cleared when the grant arrives and the
+  /// skip is undone.
+  private(set) var keysDeclined = false
+  /// Skip, Back, skip again is one decision, so its disable is committed once,
+  /// and only a committed disable has anything for the grant to restore.
+  private var keysDisableCommitted = false
+  /// The stored key modes as last harvested. While this flow's disable
+  /// stands, a harvest reads that disable back, so neither is taken then: the
+  /// skip already says the keys are off, and the restore puts the modes back to
+  /// what these held.
+  private var storedKeyModesOff: Bool
+  private var storedModesNeedGrant: Bool
+  private var storedCustomShortcutsOn: Bool
+
+  /// Whether the keys do anything once setup ends. Read from current state
+  /// rather than from pages passed through, so a flow resumed straight onto
+  /// Finish answers the same way.
+  var keyboardControlOn: Bool { keysDeclined ? storedCustomShortcutsOn : !storedKeyModesOff }
+
+  /// The grant the stored modes need is in place: given, or not needed because
+  /// no family watches the media keys (custom shortcuts need none).
+  var keysGrantInPlace: Bool { keysDeclined || accessibilityGranted || !storedModesNeedGrant }
+
+  /// Designated displays whose protection is on: after the care page, what is
+  /// enrolled. A resumed flow seeds both sets from the harvest.
+  var protectedOledCount: Int { designatedOleds.intersection(careEnabled).count }
+
+  /// What the Finish page suggests fine-tuning next.
+  var fineTuneItems: [OnboardingFineTuneItem] {
+    OnboardingFineTuneItem.items(
+      enrolledOleds: protectedOledCount,
+      keysOn: keyboardControlOn,
+      grantInPlace: keysGrantInPlace,
+      externalDisplays: environment.displays.count,
+      arrangedDisplays: environment.arrangedDisplayCount)
+  }
 
   /// The commit seam. Fixture mode records; live mode writes.
   var onCommit: (OnboardingCommit) -> Void
   /// Close the hosting window, recording completion (the commit-on-advance
   /// rule keeps everything already committed).
   var onClose: () -> Void = {}
+  /// Live mode opens the Settings window there; the mock and tests leave it
+  /// inert, so a rehearsal never opens the real window.
+  var onOpenSettings: (SettingsDestination) -> Void = { _ in }
+  /// True from the moment a fine-tune item starts closing the window: the
+  /// close is on its way to Settings, so the window's close handling can tell
+  /// it from every other close.
+  private(set) var closesIntoSettings = false
   /// Permission actions, injected: live mode binds `AccessibilityPermission`,
   /// the mock presenter simulates a grant so the page's states are clickable.
   var onRequestAccessibility: () -> Void = {}
@@ -131,8 +199,17 @@ final class OnboardingFlowModel {
     onOpenAccessibilitySettings()
   }
 
+  /// The keys page's consequence-labeled way past. Rides `advance()` so the
+  /// disable is committed by the page's own arm, the same commit-on-advance
+  /// route as every other decision, and Skip Setup (which commits nothing)
+  /// stays distinct from it.
+  func skipKeys() {
+    keysDeclined = true
+    advance()
+  }
+
   /// The Screen Recording ask, injected like the accessibility actions: live mode calls
-  /// `CGRequestScreenCaptureAccess`, the mock records the click.
+  /// opens the permission guide; the mock records the click.
   var onRequestScreenRecording: () -> Void = {}
   /// Achieved-state check for the Screen Recording grant, injected like the
   /// ask above: live mode binds `CGPreflightScreenCaptureAccess`, because the
@@ -145,10 +222,59 @@ final class OnboardingFlowModel {
   var screenRecordingRequested = false
   private(set) var screenRecordingGranted = false
 
+  /// Records, on disk, that a relaunch should reopen setup after the care
+  /// page. Live mode binds the app-level `onboardingResumeAfterCare` pref; the
+  /// mock and tests leave it a no-op, because a mock writing the real key would
+  /// make the next real launch resume a setup nobody was in.
+  var onSetResumeAfterCare: (Bool) -> Void = { _ in }
+  /// True once this flow has written the resume marker: from then on a
+  /// relaunch can arrive at any moment, so care page edits are written as they
+  /// are made instead of waiting for Continue.
+  private var relaunchPending = false
+
+  /// Granting Screen Recording makes macOS offer Quit & Reopen, which
+  /// relaunches the app before the care page is ever advanced past, so the
+  /// page's choices are written ahead of the ask rather than on the advance,
+  /// and the marker that brings setup back after the care page goes with them.
   func requestScreenRecording() {
+    if currentPage == .oledCare {
+      commitCarePage()
+      relaunchPending = true
+      onSetResumeAfterCare(true)
+    }
     screenRecordingRequested = true
     onRequestScreenRecording()
     refreshScreenRecordingGranted()
+  }
+
+  /// AppKit also closes windows during termination. Preserve the pending
+  /// relaunch in that case; an intentional window close clears it even when
+  /// this flow inherited the marker from the previous process.
+  func didClose(isTerminating: Bool = false) {
+    guard !isTerminating else { return }
+    relaunchPending = false
+    onSetResumeAfterCare(false)
+  }
+
+  /// A relaunch after the Screen Recording grant: open on the page after the
+  /// care page, which already did its work in the previous process. The plan is
+  /// derived fresh, so a care page that no longer exists (its display unplugged
+  /// across the relaunch) leaves Finish.
+  ///
+  /// The care choices are re-seeded from the harvest, which now holds what the
+  /// care page wrote, so Back shows the person's own answers rather than the
+  /// fresh-flow defaults that Continue would then write over them.
+  func resumeAfterCare() {
+    let enrolled = environment.displays.filter(\.enrolledInCare)
+    careEnabled = designatedOleds.intersection(enrolled.map(\.persistenceKey))
+    if !enrolled.isEmpty {
+      measuredTelemetry = enrolled.contains(where: \.measuredTelemetry)
+    }
+    if let care = pages.firstIndex(of: .oledCare) {
+      index = min(care + 1, pages.count - 1)
+    } else {
+      index = pages.count - 1
+    }
   }
 
   /// Re-read the grant. Called after the request and on care page appearance:
@@ -197,8 +323,17 @@ final class OnboardingFlowModel {
 
   private(set) var committed: [OnboardingCommit] = []
 
+  /// What this flow has already written for each display's enrollment and
+  /// measurement. The harvest is read once, so after the care page commits
+  /// early (ahead of the Screen Recording ask) it no longer says what is on
+  /// disk: a first run's display reads as never enrolled although the flow
+  /// just enrolled it. The care arms compare against this first.
+  private var writtenEnrollment: [String: Bool] = [:]
+  private var writtenMeasurement: [String: Bool] = [:]
+
   init(environment: OnboardingEnvironment) {
     self.environment = environment
+    includesKeysPage = OnboardingPlan.wantsKeysPage(environment)
     let designated = OnboardingPlan.initialDesignation(for: environment)
     designatedOleds = designated
     careEnabled = designated
@@ -218,11 +353,15 @@ final class OnboardingFlowModel {
       }
     }
     accessibilityGranted = environment.accessibilityGranted
+    storedKeyModesOff = environment.keyModesOff
+    storedModesNeedGrant = environment.keyModesRequireGrant
+    storedCustomShortcutsOn = environment.keyModesHaveCustomShortcuts
     onCommit = { _ in }
     onApplySize = { _, _, _ in }
     onKeepSize = {}
     onRevertSize = {}
-    pages = OnboardingPlan.pages(for: environment, designatedOleds: designated)
+    pages = OnboardingPlan.pages(
+      for: environment, designatedOleds: designated, includesKeysPage: includesKeysPage)
     onCommit = { [weak self] in self?.committed.append($0) }
     // Fixture preflight: granted once asked, so the mock flow's measured card
     // reaches its enabled state without a real TCC grant.
@@ -273,6 +412,16 @@ final class OnboardingFlowModel {
     }
   }
 
+  /// A fine-tune item on Finish: Finish's own advance (launch at login
+  /// committed, the window closed), and only then Settings, so it never opens
+  /// behind a Setup window still on screen.
+  func finish(opening item: OnboardingFineTuneItem) {
+    guard currentPage == .finish else { return }
+    closesIntoSettings = true
+    advance()
+    onOpenSettings(item.destination)
+  }
+
   func back() {
     guard canGoBack else { return }
     if case .counting = applyState { revertSize() }
@@ -282,7 +431,8 @@ final class OnboardingFlowModel {
   }
 
   /// Skip Setup: close without committing the current page. Everything
-  /// already applied stays applied, and an unconfirmed preview is not
+  /// already applied stays applied, including the care page's choices committed
+  /// ahead of a Screen Recording request, and an unconfirmed preview is not
   /// applied: it is reverted before the window goes.
   func skip() {
     if case .counting = applyState { revertSize() }
@@ -310,6 +460,11 @@ final class OnboardingFlowModel {
       environment.displays[present].sizeSuggestion = prior
     }
     self.environment = environment
+    if !keysDisableCommitted {
+      storedKeyModesOff = environment.keyModesOff
+      storedModesNeedGrant = environment.keyModesRequireGrant
+      storedCustomShortcutsOn = environment.keyModesHaveCustomShortcuts
+    }
     if let pending = pendingApply,
       !environment.displays.contains(where: { $0.persistenceKey == pending.displayKey })
     {
@@ -517,7 +672,8 @@ final class OnboardingFlowModel {
 
   private func replan() {
     let current = currentPage
-    pages = OnboardingPlan.pages(for: environment, designatedOleds: designatedOleds)
+    pages = OnboardingPlan.pages(
+      for: environment, designatedOleds: designatedOleds, includesKeysPage: includesKeysPage)
     if let stillThere = pages.firstIndex(of: current) {
       index = stillThere
     } else {
@@ -527,8 +683,14 @@ final class OnboardingFlowModel {
 
   private func commitCurrentPage() {
     switch currentPage {
-    case .welcome, .accessibility, .noDisplays:
+    case .welcome, .noDisplays:
       break
+    case .accessibility:
+      // The disable only. Undoing it belongs to the grant's arrival (see
+      // `accessibilityGranted`), which can happen on any page or none.
+      guard keysDeclined, !accessibilityGranted, !keysDisableCommitted else { break }
+      onCommit(.disableKeyboardControl)
+      keysDisableCommitted = true
     case .oledSelect:
       // Un-enrollment is split across two pages on purpose: a deselect can be
       // the very thing that takes the care page out of the plan, so the care arm
@@ -536,8 +698,8 @@ final class OnboardingFlowModel {
       // designation, the care arm the ones still in it with their toggle off.
       // The two sets cannot overlap, so nothing is written twice.
       for entry in environment.displays
-      where entry.enrolledInCare && !designatedOleds.contains(entry.persistenceKey) {
-        onCommit(.unenrollFromCare(displayKey: entry.persistenceKey))
+      where isEnrolled(entry.persistenceKey) && !designatedOleds.contains(entry.persistenceKey) {
+        commitCare(.unenrollFromCare(displayKey: entry.persistenceKey))
       }
     case .detection:
       for (key, newName) in renames {
@@ -565,24 +727,61 @@ final class OnboardingFlowModel {
         break
       }
     case .oledCare:
-      for key in designatedOleds.sorted() {
-        let harvested = display(forKey: key)
-        if careEnabled.contains(key) {
-          onCommit(.enrollInCare(displayKey: key))
-          if measuredTelemetry {
-            onCommit(.enableMeasuredTelemetry(displayKey: key))
-          } else if harvested?.measuredTelemetry == true {
-            // Differs-only, against the harvested pref rather than the flow's
-            // default: a first run that picks estimated writes nothing, so an
-            // absent key keeps meaning "no decision made yet".
-            onCommit(.disableMeasuredTelemetry(displayKey: key))
-          }
-        } else if harvested?.enrolledInCare == true {
-          onCommit(.unenrollFromCare(displayKey: key))
-        }
-      }
+      commitCarePage()
     case .finish:
       onCommit(.setLaunchAtLogin(launchAtLogin))
+    }
+  }
+
+  /// Only the care page owns these choices, and only an outstanding relaunch
+  /// makes waiting for Continue lossy. The record in `commitCarePage` keeps an
+  /// unchanged choice from being written again.
+  private func commitCarePageIfRelaunchPending() {
+    guard relaunchPending, currentPage == .oledCare else { return }
+    commitCarePage()
+  }
+
+  /// Runs twice when the Screen Recording ask precedes the advance (the
+  /// Continue click does both), so a write this flow already made is never
+  /// repeated; anything changed in between is written on the second run.
+  private func commitCarePage() {
+    for key in designatedOleds.sorted() {
+      if careEnabled.contains(key) {
+        if writtenEnrollment[key] != true {
+          commitCare(.enrollInCare(displayKey: key))
+        }
+        if measuredTelemetry {
+          if writtenMeasurement[key] != true {
+            commitCare(.enableMeasuredTelemetry(displayKey: key))
+          }
+        } else if isMeasured(key) {
+          // Differs-only, against the pref rather than the flow's default: a
+          // first run that picks estimated writes nothing, so an absent key
+          // keeps meaning "no decision made yet".
+          commitCare(.disableMeasuredTelemetry(displayKey: key))
+        }
+      } else if isEnrolled(key) {
+        commitCare(.unenrollFromCare(displayKey: key))
+      }
+    }
+  }
+
+  private func isEnrolled(_ key: String) -> Bool {
+    writtenEnrollment[key] ?? (display(forKey: key)?.enrolledInCare == true)
+  }
+
+  private func isMeasured(_ key: String) -> Bool {
+    writtenMeasurement[key] ?? (display(forKey: key)?.measuredTelemetry == true)
+  }
+
+  private func commitCare(_ commit: OnboardingCommit) {
+    onCommit(commit)
+    switch commit {
+    case let .enrollInCare(key): writtenEnrollment[key] = true
+    case let .unenrollFromCare(key): writtenEnrollment[key] = false
+    case let .enableMeasuredTelemetry(key): writtenMeasurement[key] = true
+    case let .disableMeasuredTelemetry(key): writtenMeasurement[key] = false
+    default: break
     }
   }
 }

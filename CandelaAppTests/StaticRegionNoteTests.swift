@@ -64,7 +64,7 @@ struct StaticRegionNoteTests {
 
     let bothAsk = try #require(Self.gap(Self.note(telemetry: false, windowObservation: false, granted: false)))
     #expect(bothAsk.message.hasSuffix(
-      "Measuring brightness needs Screen Recording, so macOS may ask to allow it. Nothing is recorded or stored as an image, and nothing leaves this Mac."))
+      "Measuring brightness needs Screen Recording, so System Settings opens to help you grant it. Nothing is recorded or stored as an image, and nothing leaves this Mac."))
 
     let alreadyGranted = try #require(Self.gap(Self.note(telemetry: false, granted: true)))
     #expect(!alreadyGranted.message.contains("Screen Recording"))
@@ -85,7 +85,7 @@ struct StaticRegionNoteTests {
   @Test func bothOnWithoutTheGrantSaysNothingIsDimmed() {
     #expect(Self.note(granted: false) == .screenRecordingMissing)
     #expect(OledCareDisplayPage.screenRecordingMissingText.contains(
-      "System Settings > Privacy & Security > Screen Recording"))
+      PermissionPane.screenRecording.settingsPath(macOSMajor: PermissionPane.currentMacOSMajor)))
     #expect(OledCareDisplayPage.screenRecordingMissingText.contains("no static regions are dimmed"))
   }
 

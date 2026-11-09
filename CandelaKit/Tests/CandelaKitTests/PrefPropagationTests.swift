@@ -46,6 +46,12 @@ struct PrefPropagationTests {
     #expect(PrefName(rawValue: "hasReportedHDR") == nil)
   }
 
+  @Test func theSetupResumeMarkerIsNotAPrefName() {
+    // Setup writes it ahead of the Screen Recording ask and clears it on close.
+    // No pane writes it, and nothing it changes needs propagating.
+    #expect(PrefName(rawValue: "onboardingResumeAfterCare") == nil)
+  }
+
   @Test func oledEngineStateIsNotAPrefName() {
     // Hours accumulation is engine state written by the tracker, not a
     // setting a pane may route through (same rule as `muted`).

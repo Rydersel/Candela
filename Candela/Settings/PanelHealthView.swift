@@ -203,13 +203,9 @@ struct PanelHealthView: View {
       PanelHealthBanner(
         symbol: "exclamationmark.triangle",
         title: Text("Waiting on Screen Recording"),
-        message: summary.confidence == .measured
-          ? Text(
-            "Measuring is switched on for this display, but macOS has not granted \(AppInfo.productName) Screen Recording, so no new readings are being taken. What is shown below was recorded while the permission was in place. Grant it again in System Settings > Privacy & Security > Screen Recording."
-          )
-          : Text(
-            "Measuring is switched on for this display, but macOS has not granted \(AppInfo.productName) Screen Recording, so no readings are being taken. Grant it in System Settings > Privacy & Security > Screen Recording."
-          ))
+        message: Text(verbatim: ScreenRecordingCopy.message(
+          summary.confidence == .measured ? .healthWithHistory : .healthWithoutHistory)),
+        permission: .screenRecording)
     } else {
       switch summary.confidence {
       case .measured:
@@ -605,6 +601,7 @@ private struct PanelHealthBanner: View {
   let symbol: String
   let title: Text
   let message: Text
+  var permission: PermissionPane? = nil
 
   var body: some View {
     SettingsCard {
@@ -619,6 +616,10 @@ private struct PanelHealthBanner: View {
             .font(.callout)
             .foregroundStyle(SettingsTheme.bodyColor)
             .fixedSize(horizontal: false, vertical: true)
+          if let permission {
+            PermissionSettingsButton(pane: permission)
+              .padding(.top, 4)
+          }
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)

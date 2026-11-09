@@ -29,4 +29,21 @@ struct KeyModePolicyTests {
     #expect(!KeyModePolicy.requiresAccessibility(brightness: .custom, volume: .custom))
     #expect(!KeyModePolicy.requiresAccessibility(brightness: .disabled, volume: .disabled))
   }
+
+  @Test func keysAreOffOnlyWhenBothFamiliesAreDisabled() {
+    #expect(KeyModePolicy.keysOff(brightness: .disabled, volume: .disabled))
+    // Custom shortcuts are keys too: an all-custom setup is on without any grant.
+    #expect(!KeyModePolicy.keysOff(brightness: .custom, volume: .custom))
+    // Either family alone keeps the keys on, so both arguments are consulted.
+    #expect(!KeyModePolicy.keysOff(brightness: .media, volume: .disabled))
+    #expect(!KeyModePolicy.keysOff(brightness: .disabled, volume: .both))
+    #expect(!KeyModePolicy.keysOff(brightness: .disabled, volume: .custom))
+  }
+
+  @Test func enablingMediaKeysPreservesExistingCustomShortcuts() {
+    #expect(KeyModePolicy.enablingMediaKeys(.disabled) == .media)
+    #expect(KeyModePolicy.enablingMediaKeys(.media) == .media)
+    #expect(KeyModePolicy.enablingMediaKeys(.custom) == .both)
+    #expect(KeyModePolicy.enablingMediaKeys(.both) == .both)
+  }
 }

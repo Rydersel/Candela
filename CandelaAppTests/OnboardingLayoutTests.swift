@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import SwiftUI
 import Testing
@@ -71,5 +72,45 @@ struct OnboardingLayoutTests {
       #expect(metrics.height == baseHeight)
       #expect(metrics.spacing == Self.restingSpacing)
     }
+  }
+
+  // MARK: - Finish
+
+  /// The setup window's fixed content height. Finish has no scroll view, so
+  /// whatever it asks for beyond this is clipped rather than scrolled.
+  private static let windowHeight: CGFloat = 560
+
+  @MainActor
+  private func finishPageHeight(_ environment: OnboardingEnvironment, grant: Bool) -> (
+    height: CGFloat, items: Int
+  ) {
+    let model = OnboardingFlowModel(environment: environment)
+    for _ in 0..<12 where model.currentPage != .finish {
+      if model.currentPage == .accessibility, grant { model.accessibilityGranted = true }
+      model.advance()
+    }
+    let host = NSHostingView(rootView: OnboardingFinishPage(model: model, accent: .green))
+    return (host.fittingSize.height, model.fineTuneItems.count)
+  }
+
+  /// The longest Finish there is: three summary lines and all four fine-tune
+  /// rows. The page's spacers have minimums, so its fitting height is the
+  /// least it can be drawn in; above the window it would clip the primary
+  /// button.
+  @MainActor
+  @Test func theFullestFinishPageFitsTheWindow() {
+    let fullest = finishPageHeight(OnboardingFixtures.rig, grant: true)
+    #expect(fullest.items == 4)
+    #expect(fullest.height <= Self.windowHeight)
+    // The control: the rows are in that height. Built-in only with the keys
+    // off has no item at all, and asks for measurably less.
+    let empty = finishPageHeight(
+      OnboardingEnvironment(
+        accessibilityGranted: false, loginItemEnabled: false, isFirstRun: true,
+        keyModesRequireGrant: false, keyModesOff: true, arrangedDisplayCount: 1,
+        displays: []),
+      grant: false)
+    #expect(empty.items == 0)
+    #expect(fullest.height > empty.height + 100)
   }
 }

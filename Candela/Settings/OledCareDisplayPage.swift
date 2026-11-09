@@ -666,7 +666,10 @@ struct OledCareDisplayPage: View {
               .accessibilityLabel(Text(verbatim: gap.accessibilityLabel))
           }
         case .screenRecordingMissing:
-          OledInlineNote(Text(verbatim: Self.screenRecordingMissingText))
+          VStack(alignment: .leading, spacing: 8) {
+            OledInlineNote(Text(verbatim: Self.screenRecordingMissingText))
+            PermissionSettingsButton()
+          }
         case .heldAwake:
           OledInlineNote(Text("Something is holding the screen awake: video playback, a call, or Keep Display Awake. Nothing is dimmed here for as long as that lasts."))
         case nil:
@@ -676,15 +679,14 @@ struct OledCareDisplayPage: View {
     }
   }
 
-  /// Mirrors Health's measurement switch, request included; without the request
-  /// the display measures nothing and no dialog ever shows. The pref is written
-  /// regardless, because the request that shows the dialog returns false.
+  /// Save measurement choices before the guide opens, as Health does: a
+  /// permission grant may restart the app before the user returns here.
   private func turnOnMeasurement(_ gap: MeasurementGap) {
-    if gap.turnsOnTelemetry { _ = CGRequestScreenCaptureAccess() }
     writer.writeAll(gap.prefNames) { prefs in
       if gap.turnsOnTelemetry { prefs.oledTelemetry = true }
       if gap.turnsOnWindowObservation { prefs.oledWindowObservation = true }
     }
+    if gap.turnsOnTelemetry { PermissionGuide.shared.request(.screenRecording) }
   }
 
   enum DetectionNote: Equatable {
@@ -699,7 +701,7 @@ struct OledCareDisplayPage: View {
   static let safeModeNoteText = "Safe Mode is on for this session, so nothing is being measured or dimmed whatever this is set to, and Screen Recording is not needed until the next normal launch."
 
   /// Same path wording as Health's grant note.
-  static let screenRecordingMissingText = "macOS has not granted Screen Recording, so no static regions are dimmed. Grant it in System Settings > Privacy & Security > Screen Recording."
+  static var screenRecordingMissingText: String { ScreenRecordingCopy.message(.staticRegions) }
 
   struct MeasurementGap: Equatable {
     let turnsOnTelemetry: Bool
@@ -729,7 +731,7 @@ struct OledCareDisplayPage: View {
       return assertionHeld ? .heldAwake : nil
     }
     let permission = !telemetry && !screenRecordingGranted
-      ? " Measuring brightness needs Screen Recording, so macOS may ask to allow it. Nothing is recorded or stored as an image, and nothing leaves this Mac."
+      ? " Measuring brightness needs Screen Recording, so System Settings opens to help you grant it. Nothing is recorded or stored as an image, and nothing leaves this Mac."
       : ""
     let gap: MeasurementGap
     switch (telemetry, windowObservation) {

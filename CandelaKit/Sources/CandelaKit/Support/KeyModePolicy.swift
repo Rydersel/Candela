@@ -14,4 +14,15 @@ public enum KeyModePolicy {
   public static func requiresAccessibility(brightness: KeyMode, volume: KeyMode) -> Bool {
     watchesMediaKeys(brightness) || watchesMediaKeys(volume)
   }
+
+  /// Nothing the keys can do: no media key and no custom shortcut in either
+  /// family. Custom shortcuts count, because they reach the display without
+  /// any grant.
+  public static func keysOff(brightness: KeyMode, volume: KeyMode) -> Bool {
+    brightness == .disabled && volume == .disabled
+  }
+
+  public static func enablingMediaKeys(_ mode: KeyMode) -> KeyMode {
+    firesCustomShortcuts(mode) ? .both : .media
+  }
 }

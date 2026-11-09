@@ -697,6 +697,33 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: "wireTimingGuard") }
   }
 
+  /// Set by guided setup just before it asks for Screen Recording, cleared when
+  /// the setup window closes. Granting makes macOS offer Quit & Reopen, and the
+  /// relaunched app finds this set and reopens setup after its care page instead
+  /// of at the start.
+  ///
+  /// Engine state, not a setting: no `PrefName` case and no pane writes it.
+  /// Clearing removes the key, so a domain that never relaunched mid-setup
+  /// never carries it.
+  public var onboardingResumeAfterCare: Bool {
+    get { defaults.bool(forKey: "onboardingResumeAfterCare") }
+    set {
+      if newValue {
+        defaults.set(true, forKey: "onboardingResumeAfterCare")
+      } else {
+        defaults.removeObject(forKey: "onboardingResumeAfterCare")
+      }
+    }
+  }
+
+  /// The launch read: cleared in the same step, before anything is presented,
+  /// so a crash while showing the resumed page cannot repeat on every launch.
+  public func consumeOnboardingResumeAfterCare() -> Bool {
+    let pending = onboardingResumeAfterCare
+    onboardingResumeAfterCare = false
+    return pending
+  }
+
   // App-level keys. The key strings are shipped schema: never rename them.
 
   public var enableBrightnessSync: Bool {

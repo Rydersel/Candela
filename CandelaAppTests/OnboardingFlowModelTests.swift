@@ -34,10 +34,15 @@ struct OnboardingFlowModelTests {
   }
 
   private func environment(
-    _ displays: [OnboardingDisplayEntry], firstRun: Bool = true
+    _ displays: [OnboardingDisplayEntry], firstRun: Bool = true,
+    accessibilityGranted: Bool = false, keyModesRequireGrant: Bool = true,
+    keyModesOff: Bool = false
   ) -> OnboardingEnvironment {
     OnboardingEnvironment(
-      accessibilityGranted: false, loginItemEnabled: false, isFirstRun: firstRun,
+      accessibilityGranted: accessibilityGranted, loginItemEnabled: false,
+      isFirstRun: firstRun, keyModesRequireGrant: keyModesRequireGrant,
+      keyModesOff: keyModesOff,
+      arrangedDisplayCount: displays.count + 1,
       displays: displays)
   }
 
@@ -445,6 +450,233 @@ struct OnboardingFlowModelTests {
     #expect(model.index < model.pages.count)
   }
 
+  // MARK: - The keys page's presence
+
+  private func modelOnKeysPage() -> OnboardingFlowModel {
+    let model = OnboardingFlowModel(environment: environment([
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED")
+    ]))
+    #expect(model.includesKeysPage)
+    for _ in 0..<10 where model.currentPage != .accessibility {
+      model.advance()
+    }
+    #expect(model.currentPage == .accessibility)
+    return model
+  }
+
+  /// The grant lands while the page is up. A re-derived plan would say the
+  /// page is no longer wanted; the page has to stay and show its granted
+  /// state instead of vanishing under the pointer.
+  @Test func grantMidPageKeepsTheKeysPage() {
+    let model = modelOnKeysPage()
+    model.update(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")],
+      accessibilityGranted: true))
+    #expect(model.currentPage == .accessibility)
+    #expect(model.pages.contains(.accessibility))
+  }
+
+  /// Turning the keys off writes key modes that no longer want the grant, and
+  /// the next harvest carries that. The page the person just answered stays.
+  @Test func keysTurnedOffMidPageKeepsTheKeysPage() {
+    let model = modelOnKeysPage()
+    model.update(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")],
+      keyModesRequireGrant: false))
+    #expect(model.currentPage == .accessibility)
+    #expect(model.pages.contains(.accessibility))
+  }
+
+  /// The designation set replans too, and must read the same latched answer:
+  /// after a granted harvest, a designation change cannot drop the page.
+  @Test func aDesignationChangeAfterTheGrantKeepsTheKeysPage() {
+    let model = modelOnKeysPage()
+    model.update(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")],
+      accessibilityGranted: true))
+    model.designatedOleds = []
+    #expect(model.pages.contains(.accessibility))
+    model.designatedOleds = ["mag"]
+    #expect(model.pages.contains(.accessibility))
+    #expect(model.currentPage == .accessibility)
+  }
+
+  /// Presence is decided once, when the flow opens, so the page list does not
+  /// shift under the person as the grant and the key modes move during setup.
+  @Test func aFlowThatOpenedWithoutTheKeysPageNeverGainsIt() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag")], accessibilityGranted: true))
+    #expect(!model.includesKeysPage)
+    #expect(!model.pages.contains(.accessibility))
+    // The grant is revoked mid-flow; the plan still has no keys page.
+    model.update(environment: environment([entry(key: "mag")]))
+    #expect(!model.pages.contains(.accessibility))
+    model.designatedOleds = ["mag"]
+    #expect(!model.pages.contains(.accessibility))
+  }
+
+  // MARK: - The keys page's answers
+
+  /// The consequence-labeled skip is a decision: it turns keyboard control off,
+  /// so the stored modes stop wanting a grant the person just declined.
+  @Test func skipKeysCommitsKeyboardOffAndAdvances() {
+    let model = modelOnKeysPage()
+    let keysIndex = model.index
+    model.skipKeys()
+    #expect(model.committed == [.disableKeyboardControl])
+    #expect(model.index == keysIndex + 1)
+    #expect(model.keysDeclined)
+  }
+
+  @Test func grantedPageCommitsNothing() {
+    let model = modelOnKeysPage()
+    model.accessibilityGranted = true
+    model.advance()
+    #expect(model.committed.isEmpty)
+  }
+
+  /// Skip Setup ends the flow without answering the page it is on, so it must
+  /// not read as the keys page's own skip.
+  @Test func skipSetupOnKeysPageWritesNothing() {
+    let model = modelOnKeysPage()
+    var closed = false
+    model.onClose = { closed = true }
+    model.skip()
+    #expect(closed)
+    #expect(model.committed.isEmpty)
+  }
+
+  /// A grant that lands after a skip and a step back: the skip already turned
+  /// the keys off, so the grant's arrival turns them back on, before any
+  /// advance, and Continue adds nothing.
+  @Test func aGrantAfterGoingBackRestoresTheKeys() {
+    let model = modelOnKeysPage()
+    model.skipKeys()
+    model.back()
+    #expect(model.currentPage == .accessibility)
+    model.accessibilityGranted = true
+    #expect(model.committed == [.disableKeyboardControl, .restoreKeyboardControl])
+    #expect(!model.keysDeclined)
+    model.advance()
+    #expect(model.committed == [.disableKeyboardControl, .restoreKeyboardControl])
+  }
+
+  /// The grant can land after the person has moved on (the guide was still up).
+  @Test func aGrantOnALaterPageAfterASkipRestoresTheKeys() {
+    let model = modelOnKeysPage()
+    model.skipKeys()
+    #expect(model.currentPage != .accessibility)
+    model.accessibilityGranted = true
+    #expect(model.committed == [.disableKeyboardControl, .restoreKeyboardControl])
+  }
+
+  /// Skip Setup commits nothing of its own, so the restore must already have
+  /// happened by the time the granted page offers it.
+  @Test func skipSetupAfterAGrantedSkipLeavesTheKeysRestored() {
+    let model = modelOnKeysPage()
+    var closed = false
+    model.onClose = { closed = true }
+    model.skipKeys()
+    model.back()
+    model.accessibilityGranted = true
+    model.skip()
+    #expect(closed)
+    #expect(model.committed == [.disableKeyboardControl, .restoreKeyboardControl])
+  }
+
+  /// Revoked and granted again, then advanced through the granted page: one
+  /// restore for one disable.
+  @Test func theRestoreIsCommittedOnce() {
+    let model = modelOnKeysPage()
+    model.skipKeys()
+    model.accessibilityGranted = true
+    model.accessibilityGranted = false
+    model.accessibilityGranted = true
+    model.back()
+    model.advance()
+    #expect(model.committed == [.disableKeyboardControl, .restoreKeyboardControl])
+  }
+
+  /// A grant with no skip behind it has nothing to restore.
+  @Test func aGrantWithoutASkipRestoresNothing() {
+    let model = modelOnKeysPage()
+    model.accessibilityGranted = true
+    model.advance()
+    #expect(model.committed.isEmpty)
+  }
+
+  /// Skip, Back, skip again is one decision. A second disable would also
+  /// re-snapshot already-disabled modes in the live leg.
+  @Test func skipBackSkipCommitsTheDisableOnce() {
+    let model = modelOnKeysPage()
+    model.skipKeys()
+    model.back()
+    model.skipKeys()
+    #expect(model.committed == [.disableKeyboardControl])
+    #expect(model.keysDeclined)
+  }
+
+  /// A restore closes the decision, so a skip after it is a new one.
+  @Test func aSkipAfterARestoreDisablesAgain() {
+    let model = modelOnKeysPage()
+    model.skipKeys()
+    model.back()
+    model.accessibilityGranted = true
+    model.advance()
+    model.back()
+    model.accessibilityGranted = false
+    model.skipKeys()
+    #expect(model.committed
+      == [.disableKeyboardControl, .restoreKeyboardControl, .disableKeyboardControl])
+  }
+
+  @Test func theGrantedBodyPluralizesLikeTheSkip() {
+    #expect(OnboardingKeysCopy.grantedBody(externalDisplayCount: 0)
+      == "Your keyboard's brightness and volume keys now control your external display.")
+    #expect(OnboardingKeysCopy.grantedBody(externalDisplayCount: 1)
+      == "Your keyboard's brightness and volume keys now control your external display.")
+    #expect(OnboardingKeysCopy.grantedBody(externalDisplayCount: 2)
+      == "Your keyboard's brightness and volume keys now control your external displays.")
+  }
+
+  /// The page's presence is latched, so it outlives the last external display
+  /// unplugging mid-flow. It must still read correctly and still answer.
+  @Test func theKeysPageSurvivesTheLastDisplayLeavingAndStillSkips() {
+    let model = modelOnKeysPage()
+    model.update(environment: environment([]))
+    #expect(model.currentPage == .accessibility)
+    let count = model.environment.displays.count
+    #expect(count == 0)
+    #expect(OnboardingKeysCopy.skipLabel(externalDisplayCount: count)
+      == "Skip: my keys won't control my monitor")
+    #expect(!OnboardingKeysCopy.body(externalDisplayCount: count).contains("MAG"))
+    model.skipKeys()
+    #expect(model.committed == [.disableKeyboardControl])
+  }
+
+  @Test func theSkipLabelPluralizesFromTwoExternalDisplays() {
+    #expect(OnboardingKeysCopy.skipLabel(externalDisplayCount: 0)
+      == "Skip: my keys won't control my monitor")
+    #expect(OnboardingKeysCopy.skipLabel(externalDisplayCount: 1)
+      == "Skip: my keys won't control my monitor")
+    #expect(OnboardingKeysCopy.skipLabel(externalDisplayCount: 2)
+      == "Skip: my keys won't control my monitors")
+    #expect(OnboardingKeysCopy.skipLabel(externalDisplayCount: 3)
+      == "Skip: my keys won't control my monitors")
+  }
+
+  /// The drop adds Candela already switched on (measured on 27.2), so the
+  /// caption asks for the drag alone and names the pane per macOS version.
+  @Test func theWaitingCaptionNamesThePaneAndAsksOnlyForTheDrag() {
+    let renamed = OnboardingKeysCopy.waitingCaption(macOSMajor: 27)
+    #expect(renamed == "Drag \(AppInfo.productName) into the list in "
+      + "System Settings > Privacy & Security > Device Control and Data Access. "
+      + "This page updates on its own.")
+    #expect(OnboardingKeysCopy.waitingCaption(macOSMajor: 15)
+      .contains("System Settings > Privacy & Security > Accessibility."))
+    #expect(!renamed.contains("switch it on"))
+  }
+
   // MARK: - Screen Recording achieved state
 
   @Test func screenRecordingGrantTracksThePreflightNeverTheClick() {
@@ -850,6 +1082,352 @@ struct OnboardingFlowModelTests {
     ])
   }
 
+  // MARK: - Enrollment ahead of the Screen Recording request
+
+  /// Granting Screen Recording can relaunch the app before the care page is
+  /// advanced past, so the page's choices must already be on disk when the
+  /// request goes out.
+  @Test func requestCommitsEnrollmentFirst() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED"),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      ]))
+    walk(model, to: .oledCare)
+    var log: [String] = []
+    model.onCommit = { log.append("\($0)") }
+    model.onRequestScreenRecording = { log.append("request") }
+    model.requestScreenRecording()
+    #expect(log == [
+      "\(OnboardingCommit.enrollInCare(displayKey: "dell"))",
+      "\(OnboardingCommit.enableMeasuredTelemetry(displayKey: "dell"))",
+      "\(OnboardingCommit.enrollInCare(displayKey: "mag"))",
+      "\(OnboardingCommit.enableMeasuredTelemetry(displayKey: "mag"))",
+      "request",
+    ])
+  }
+
+  /// The care page's Continue requests and advances in one click, so an
+  /// unchanged page must not write everything a second time.
+  @Test func advanceAfterRequestDoesNotRepeat() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED"),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      ]))
+    walk(model, to: .oledCare)
+    model.requestScreenRecording()
+    model.advance()
+    #expect(model.committed == [
+      .enrollInCare(displayKey: "dell"),
+      .enableMeasuredTelemetry(displayKey: "dell"),
+      .enrollInCare(displayKey: "mag"),
+      .enableMeasuredTelemetry(displayKey: "mag"),
+    ])
+  }
+
+  /// A first run's harvest says the display was never enrolled, but the
+  /// request enrolled it, so turning it off afterwards is an un-enrollment.
+  @Test func changeAfterRequestStillCommits() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED"),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      ]))
+    walk(model, to: .oledCare)
+    model.requestScreenRecording()
+    let afterRequest = model.committed.count
+    model.careEnabled.remove("mag")
+    model.advance()
+    #expect(Array(model.committed.dropFirst(afterRequest)) == [
+      .unenrollFromCare(displayKey: "mag")
+    ])
+  }
+
+  /// Same baseline for the measurement choice: the request wrote measured, so
+  /// estimated afterwards turns it back off even on a first run.
+  @Test func estimatedAfterRequestTurnsMeasurementBackOff() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledCare)
+    model.requestScreenRecording()
+    let afterRequest = model.committed.count
+    model.measuredTelemetry = false
+    model.advance()
+    #expect(Array(model.committed.dropFirst(afterRequest)) == [
+      .disableMeasuredTelemetry(displayKey: "mag")
+    ])
+  }
+
+  /// The deselect takes the care page out of the plan, so the designation
+  /// page's arm is the only one left to undo what the request enrolled.
+  @Test func aDeselectAfterTheRequestUnenrolls() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledCare)
+    model.requestScreenRecording()
+    let afterRequest = model.committed.count
+    model.back()
+    #expect(model.currentPage == .oledSelect)
+    model.designatedOleds.remove("mag")
+    #expect(!model.pages.contains(.oledCare))
+    model.advance()
+    #expect(Array(model.committed.dropFirst(afterRequest)) == [
+      .unenrollFromCare(displayKey: "mag")
+    ])
+  }
+
+  /// Turning protection back on after the request had it off re-enrolls.
+  @Test func reenablingAfterTheRequestEnrollsAgain() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledCare)
+    model.careEnabled.remove("mag")
+    model.requestScreenRecording()
+    #expect(model.committed.isEmpty)
+    model.careEnabled.insert("mag")
+    model.advance()
+    #expect(model.committed == [
+      .enrollInCare(displayKey: "mag"),
+      .enableMeasuredTelemetry(displayKey: "mag"),
+    ])
+  }
+
+  /// A re-run's harvest already says enrolled and measured, so the request's
+  /// re-affirming writes must not turn the later off path into two writes.
+  @Test func aReRunRequestThenEstimatedWritesOneDisable() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(
+        key: "mag", productName: "MAG 341CQPX QD-OLED",
+        enrolled: true, measuredTelemetry: true)],
+      firstRun: false))
+    walk(model, to: .oledCare)
+    model.requestScreenRecording()
+    let afterRequest = model.committed.count
+    model.measuredTelemetry = false
+    model.advance()
+    #expect(Array(model.committed.dropFirst(afterRequest)) == [
+      .disableMeasuredTelemetry(displayKey: "mag")
+    ])
+  }
+
+  @Test func aReRunRequestThenToggleOffWritesOneUnenroll() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(
+        key: "mag", productName: "MAG 341CQPX QD-OLED",
+        enrolled: true, measuredTelemetry: true)],
+      firstRun: false))
+    walk(model, to: .oledCare)
+    model.requestScreenRecording()
+    let afterRequest = model.committed.count
+    model.careEnabled.remove("mag")
+    model.advance()
+    #expect(Array(model.committed.dropFirst(afterRequest)) == [
+      .unenrollFromCare(displayKey: "mag")
+    ])
+  }
+
+  /// The live topology loop can re-harvest between the request and the
+  /// advance, and that harvest reads the prefs the request just wrote.
+  @Test func aReharvestBetweenRequestAndAdvanceRepeatsNothing() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED"),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      ]))
+    walk(model, to: .oledCare)
+    model.requestScreenRecording()
+    let afterRequest = model.committed.count
+    model.update(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED", enrolled: true, measuredTelemetry: true),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true, measuredTelemetry: true),
+      ]))
+    #expect(model.currentPage == .oledCare)
+    model.advance()
+    #expect(model.committed.count == afterRequest)
+  }
+
+  /// A harvest that has not caught up with the request's writes must not make
+  /// a later toggle-off look like a display that was never enrolled.
+  @Test func aStaleReharvestBetweenRequestAndAdvanceLosesNothing() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED"),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      ]))
+    walk(model, to: .oledCare)
+    model.requestScreenRecording()
+    let afterRequest = model.committed.count
+    model.update(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED"),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      ]))
+    model.careEnabled.remove("mag")
+    model.advance()
+    #expect(Array(model.committed.dropFirst(afterRequest)) == [
+      .unenrollFromCare(displayKey: "mag")
+    ])
+  }
+
+  @Test func aRequestOffTheCarePageCommitsNothing() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledSelect)
+    model.requestScreenRecording()
+    #expect(model.committed.isEmpty)
+  }
+
+  // MARK: - Resuming after the Screen Recording relaunch
+
+  /// The relaunch can land the instant the grant is switched on, so the marker
+  /// has to be on disk before the ask goes out, and after the care page's
+  /// choices it promises are already written.
+  @Test func requestWritesTheResumeMarkerBetweenTheCareCommitAndTheAsk() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledCare)
+    var log: [String] = []
+    model.onCommit = { log.append("\($0)") }
+    model.onSetResumeAfterCare = { log.append("resume \($0)") }
+    model.onRequestScreenRecording = { log.append("request") }
+    model.requestScreenRecording()
+    #expect(log == [
+      "\(OnboardingCommit.enrollInCare(displayKey: "mag"))",
+      "\(OnboardingCommit.enableMeasuredTelemetry(displayKey: "mag"))",
+      "resume true",
+      "request",
+    ])
+  }
+
+  /// Off the care page nothing was committed early, so a resume would skip
+  /// pages whose choices were never written.
+  @Test func aRequestOffTheCarePageWritesNoResumeMarker() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledSelect)
+    var marks: [Bool] = []
+    model.onSetResumeAfterCare = { marks.append($0) }
+    model.requestScreenRecording()
+    #expect(marks.isEmpty)
+  }
+
+  @Test func closingClearsTheResumeMarker() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledCare)
+    var marks: [Bool] = []
+    model.onSetResumeAfterCare = { marks.append($0) }
+    model.requestScreenRecording()
+    model.didClose()
+    #expect(marks == [true, false])
+  }
+
+  @Test func quittingPreservesTheResumeMarkerWhenAppKitClosesTheWindow() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledCare)
+    var marks: [Bool] = []
+    model.onSetResumeAfterCare = { marks.append($0) }
+    model.requestScreenRecording()
+    model.didClose(isTerminating: true)
+    #expect(marks == [true])
+  }
+
+  /// A marker left by an earlier process is this flow's to clear as well, so
+  /// the clear does not depend on this flow having made the request.
+  @Test func closingClearsTheResumeMarkerWithoutARequest() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    var marks: [Bool] = []
+    model.onSetResumeAfterCare = { marks.append($0) }
+    model.didClose()
+    #expect(marks == [false])
+  }
+
+  /// The relaunched app re-harvests: the request enrolled the display, so the
+  /// fresh plan still has a care page, and the flow opens on the page after it.
+  @Test func resumeStartsAfterCare() throws {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(
+        key: "mag", productName: "MAG 341CQPX QD-OLED",
+        enrolled: true, measuredTelemetry: true)]))
+    model.resumeAfterCare()
+    let care = try #require(model.pages.firstIndex(of: .oledCare))
+    #expect(model.index == care + 1)
+    #expect(model.currentPage == .finish)
+    #expect(model.committed.isEmpty)
+  }
+
+  /// The OLED was unplugged across the relaunch (or the care page was turned
+  /// off for a display nothing guesses is an OLED): no care page to follow.
+  @Test func resumeWithNoCarePageStartsAtFinish() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "dell", suggestion: suggestion)]))
+    #expect(!model.pages.contains(.oledCare))
+    model.resumeAfterCare()
+    #expect(model.currentPage == .finish)
+    #expect(model.committed.isEmpty)
+  }
+
+  /// Back from the resumed page shows the care page again. It must show what
+  /// was written before the relaunch, not the fresh-flow seeds, or Continue
+  /// would re-enroll a declined display and turn measurement back on.
+  @Test func aResumedFlowShowsTheCareChoicesAlreadyWritten() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED"),
+        entry(
+          key: "mag", productName: "MAG 341CQPX QD-OLED",
+          enrolled: true, measuredTelemetry: false),
+      ]))
+    model.resumeAfterCare()
+    #expect(model.careEnabled == ["mag"])
+    #expect(!model.measuredTelemetry)
+    model.back()
+    #expect(model.currentPage == .oledCare)
+    model.advance()
+    #expect(!model.committed.contains(.enrollInCare(displayKey: "dell")))
+    #expect(!model.committed.contains(.enableMeasuredTelemetry(displayKey: "mag")))
+  }
+
+  /// A relaunch can land before Continue, so an edit after the request is
+  /// written as it is made, through the same record, once.
+  @Test func anEditAfterTheRequestIsCommittedWithoutContinue() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED"),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      ]))
+    walk(model, to: .oledCare)
+    model.requestScreenRecording()
+    let afterRequest = model.committed.count
+    model.careEnabled.remove("dell")
+    model.measuredTelemetry = false
+    // Re-asserting a choice already written writes nothing.
+    model.measuredTelemetry = false
+    model.careEnabled.remove("dell")
+    #expect(Array(model.committed.dropFirst(afterRequest)) == [
+      .unenrollFromCare(displayKey: "dell"),
+      .disableMeasuredTelemetry(displayKey: "mag"),
+    ])
+    model.advance()
+    #expect(model.committed.count == afterRequest + 2)
+  }
+
+  /// Without an outstanding request the care page keeps commit-on-advance:
+  /// nothing can relaunch the app under it.
+  @Test func anEditBeforeTheRequestWaitsForContinue() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledCare)
+    model.measuredTelemetry = false
+    model.careEnabled.remove("mag")
+    model.careEnabled.insert("mag")
+    #expect(model.committed.isEmpty)
+  }
+
   // MARK: - Display names
 
   @Test func aRenameThatTrimsToEmptyFallsBackToTheEnvironmentName() {
@@ -924,5 +1502,268 @@ struct OnboardingFlowModelTests {
     model.designatedOleds = ["plain"]
     #expect(model.currentPage == .size(displayKey: "dell"))
     #expect(model.pages.contains(.oledCare))
+  }
+
+  // MARK: - Finish: what to fine-tune
+
+  /// Opening an item is Finish's own advance plus a destination: launch at
+  /// login is committed, the window closes, and only then does Settings open,
+  /// so Settings never comes up behind a Setup window still on screen.
+  @Test func openingAnItemCommitsFinishFirst() {
+    let model = OnboardingFlowModel(environment: environment([entry(key: "dell")]))
+    var log: [String] = []
+    model.onCommit = { log.append("commit \($0)") }
+    // The window's close handling reads this to skip the first-run callout,
+    // so it must already be set when the close arrives.
+    model.onClose = { log.append("close into settings \(model.closesIntoSettings)") }
+    model.onOpenSettings = { log.append("open \($0)") }
+    walk(model, to: .finish)
+    log.removeAll()
+    model.finish(opening: .checkup)
+    #expect(log == [
+      "commit \(OnboardingCommit.setLaunchAtLogin(true))",
+      "close into settings true",
+      "open \(SettingsDestination.pane(.checkup))",
+    ])
+  }
+
+  /// Start Using closes into nothing, so the first-run callout still shows.
+  @Test func finishingWithoutAnItemDoesNotCloseIntoSettings() {
+    let model = OnboardingFlowModel(environment: environment([entry(key: "dell")]))
+    var closedIntoSettings: Bool?
+    model.onClose = { closedIntoSettings = model.closesIntoSettings }
+    walk(model, to: .finish)
+    model.advance()
+    #expect(closedIntoSettings == false)
+  }
+
+  /// Off Finish there is nothing to open from, and an item must not ride a
+  /// page's advance as though it were Continue.
+  @Test func openingAnItemOffFinishDoesNothing() {
+    let model = OnboardingFlowModel(environment: environment([entry(key: "dell")]))
+    var opened: [SettingsDestination] = []
+    model.onOpenSettings = { opened.append($0) }
+    let start = model.index
+    model.finish(opening: .checkup)
+    #expect(opened.isEmpty)
+    #expect(model.committed.isEmpty)
+    #expect(model.index == start)
+  }
+
+  /// The rig walked straight through: the guessed OLED protected, the grant
+  /// given on the keys page, two externals plus the built-in.
+  @Test func aGrantedRigIsOfferedEveryItem() {
+    let model = OnboardingFlowModel(environment: environment([
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      entry(key: "dell"),
+    ]))
+    walk(model, to: .accessibility)
+    model.accessibilityGranted = true
+    walk(model, to: .finish)
+    #expect(model.keyboardControlOn)
+    #expect(model.fineTuneItems == [.oledCare, .shortcuts, .checkup, .arrangement])
+  }
+
+  /// The keys page's skip turns the keys off, and Finish follows it: no
+  /// shortcuts to review, and the summary says the keys are off.
+  @Test func aKeysSkipDropsTheShortcutsItem() {
+    let model = modelOnKeysPage()
+    model.skipKeys()
+    walk(model, to: .finish)
+    #expect(!model.keyboardControlOn)
+    #expect(!model.fineTuneItems.contains(.shortcuts))
+    #expect(model.fineTuneItems.contains(.checkup))
+  }
+
+  @Test func skippingAccessKeepsTheCustomShortcutsThatNeedNoGrant() {
+    var snapshot = environment([entry(key: "dell")])
+    snapshot.keyModesHaveCustomShortcuts = true
+    let model = OnboardingFlowModel(environment: snapshot)
+    walk(model, to: .accessibility)
+    model.skipKeys()
+    // The skip removed the media-key half, leaving custom shortcuts enabled.
+    snapshot.keyModesRequireGrant = false
+    model.update(environment: snapshot)
+    walk(model, to: .finish)
+    #expect(model.keyboardControlOn)
+    #expect(model.keysGrantInPlace)
+    #expect(model.fineTuneItems.contains(.shortcuts))
+  }
+
+  @Test func grantingAfterASkipRestoresTheOriginalMixedModes() {
+    var snapshot = environment([entry(key: "dell")])
+    snapshot.keyModesHaveCustomShortcuts = true
+    let model = OnboardingFlowModel(environment: snapshot)
+    walk(model, to: .accessibility)
+    model.skipKeys()
+    model.accessibilityGranted = true
+    #expect(!model.keysDeclined)
+    #expect(model.keyboardControlOn)
+    #expect(model.keysGrantInPlace)
+    #expect(model.committed.contains(.restoreKeyboardControl))
+  }
+
+  /// A skip undone by a later grant puts the keys back, so the item returns.
+  @Test func aGrantAfterASkipBringsTheShortcutsItemBack() {
+    let model = modelOnKeysPage()
+    model.skipKeys()
+    model.accessibilityGranted = true
+    walk(model, to: .finish)
+    #expect(model.keyboardControlOn)
+    #expect(model.fineTuneItems.contains(.shortcuts))
+  }
+
+  /// After the skip, a re-harvest reads the disable this flow wrote. It must
+  /// not outlive the restore: once the grant has put the modes back, the keys
+  /// are on even though that harvest said otherwise.
+  @Test func aReharvestOfTheSkipsOwnWriteDoesNotOutliveTheRestore() {
+    let model = modelOnKeysPage()
+    model.skipKeys()
+    // What the default all-media modes read as after the skip: both disabled.
+    model.update(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")],
+      keyModesRequireGrant: false, keyModesOff: true))
+    #expect(!model.keyboardControlOn)
+    model.accessibilityGranted = true
+    #expect(model.keyboardControlOn)
+    #expect(model.keysGrantInPlace)
+  }
+
+  /// With no skip of this flow's outstanding, the harvest is the stored
+  /// modes' own answer: both families set to nothing in Settings mid-flow read
+  /// as off.
+  @Test func aReharvestWithBothModesDisabledElsewhereReadsOff() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "dell")], accessibilityGranted: true))
+    #expect(model.keyboardControlOn)
+    model.update(environment: environment(
+      [entry(key: "dell")], accessibilityGranted: true,
+      keyModesRequireGrant: false, keyModesOff: true))
+    #expect(!model.keyboardControlOn)
+    walk(model, to: .finish)
+    #expect(!model.fineTuneItems.contains(.shortcuts))
+  }
+
+  /// Switching to custom shortcuts mid-flow is not turning the keys off: they
+  /// need no grant, so they read as ready with or without one.
+  @Test func aReharvestToAllCustomReadsOn() {
+    let model = OnboardingFlowModel(environment: environment([entry(key: "dell")]))
+    model.update(environment: environment([entry(key: "dell")], keyModesRequireGrant: false))
+    #expect(model.keyboardControlOn)
+    #expect(model.keysGrantInPlace)
+  }
+
+  /// All custom shortcuts, granted or not: Carbon hotkeys need no grant, so the
+  /// keys are ready and the shortcuts are worth reviewing. The control is the
+  /// default all-media rig skipping the keys page, which reads off.
+  @Test func anAllCustomRigIsReadyAndOffersItsShortcuts() {
+    for granted in [false, true] {
+      let model = OnboardingFlowModel(environment: environment(
+        [entry(key: "dell")], accessibilityGranted: granted, keyModesRequireGrant: false))
+      walk(model, to: .finish)
+      #expect(model.fineTuneItems.contains(.shortcuts), "granted \(granted)")
+      #expect(
+        OnboardingFinishCopy.keysLine(
+          keysOn: model.keyboardControlOn, grantInPlace: model.keysGrantInPlace
+        ).text == OnboardingFinishCopy.keysReady, "granted \(granted)")
+    }
+    let skipped = modelOnKeysPage()
+    skipped.skipKeys()
+    walk(skipped, to: .finish)
+    #expect(!skipped.fineTuneItems.contains(.shortcuts))
+    #expect(
+      OnboardingFinishCopy.keysLine(
+        keysOn: skipped.keyboardControlOn, grantInPlace: skipped.keysGrantInPlace
+      ).text == OnboardingFinishCopy.keysOff)
+  }
+
+  /// The whole table, one row per stored-mode case, read where Finish reads it.
+  @Test func theKeysLineAndShortcutsItemFollowTheStoredModes() {
+    struct Row {
+      var granted: Bool, needsGrant: Bool, off: Bool
+      var line: String, offersShortcuts: Bool
+    }
+    let rows = [
+      // Media keys on, no grant.
+      Row(granted: false, needsGrant: true, off: false,
+          line: OnboardingFinishCopy.keysAwaitAccess, offersShortcuts: false),
+      // Media keys on, granted.
+      Row(granted: true, needsGrant: true, off: false,
+          line: OnboardingFinishCopy.keysReady, offersShortcuts: true),
+      // Both modes disabled (a resumed default skip, or set so in Settings).
+      Row(granted: false, needsGrant: false, off: true,
+          line: OnboardingFinishCopy.keysOff, offersShortcuts: false),
+      Row(granted: true, needsGrant: false, off: true,
+          line: OnboardingFinishCopy.keysOff, offersShortcuts: false),
+    ]
+    for row in rows {
+      // No external, so no keys page: the rows read the stored modes alone,
+      // and the skip's own rows are the tests above.
+      let model = OnboardingFlowModel(environment: environment(
+        [], accessibilityGranted: row.granted,
+        keyModesRequireGrant: row.needsGrant, keyModesOff: row.off))
+      walk(model, to: .finish)
+      #expect(
+        OnboardingFinishCopy.keysLine(
+          keysOn: model.keyboardControlOn, grantInPlace: model.keysGrantInPlace
+        ).text == row.line, "\(row.granted) \(row.needsGrant) \(row.off)")
+      #expect(
+        model.fineTuneItems.contains(.shortcuts) == row.offersShortcuts,
+        "\(row.granted) \(row.needsGrant) \(row.off)")
+    }
+  }
+
+  /// A flow resumed after the relaunch lands on Finish without passing the
+  /// keys or care pages in this process. The list comes from the harvest: the
+  /// enrolled OLED, and keys a previous skip left off in the stored modes.
+  @Test func aResumedFlowDerivesItsItemsFromCurrentState() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell"),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true),
+      ],
+      // The default all-media modes after the previous process's skip.
+      accessibilityGranted: false, keyModesRequireGrant: false, keyModesOff: true))
+    model.resumeAfterCare()
+    #expect(model.currentPage == .finish)
+    #expect(model.fineTuneItems == [.oledCare, .checkup, .arrangement])
+    #expect(
+      OnboardingFinishCopy.keysLine(
+        keysOn: model.keyboardControlOn, grantInPlace: model.keysGrantInPlace
+      ).text == OnboardingFinishCopy.keysOff)
+  }
+
+  /// The resumed flow's protection count is what the previous process wrote:
+  /// a guessed OLED the person turned off is not counted as protected.
+  @Test func aResumedFlowCountsOnlyTheEnrolledOled() {
+    let model = OnboardingFlowModel(environment: environment([
+      entry(key: "dell", productName: "DELL OLED"),
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true),
+    ]))
+    model.resumeAfterCare()
+    #expect(model.protectedOledCount == 1)
+  }
+
+  /// Built-in only: nothing about displays to tune, and with the grant live
+  /// the shortcuts are all that is left.
+  @Test func aBuiltInOnlyFlowOffersOnlyTheShortcuts() {
+    let model = OnboardingFlowModel(environment: OnboardingEnvironment(
+      accessibilityGranted: true, loginItemEnabled: false, isFirstRun: true,
+      keyModesRequireGrant: true, arrangedDisplayCount: 1, displays: []))
+    walk(model, to: .finish)
+    #expect(model.fineTuneItems == [.shortcuts])
+  }
+
+  /// The list can go from empty to not while Finish is up: built-in only with
+  /// the grant still out offers nothing, and the grant landing there adds the
+  /// shortcuts. The page's reveal has to let that show.
+  @Test func theListCanGainAnItemWhileFinishShows() {
+    let model = OnboardingFlowModel(environment: OnboardingEnvironment(
+      accessibilityGranted: false, loginItemEnabled: false, isFirstRun: true,
+      keyModesRequireGrant: true, arrangedDisplayCount: 1, displays: []))
+    walk(model, to: .finish)
+    #expect(model.fineTuneItems.isEmpty)
+    model.accessibilityGranted = true
+    #expect(model.fineTuneItems == [.shortcuts])
   }
 }

@@ -218,6 +218,44 @@ struct GuidedFlowAnnouncementTests {
     }
   }
 
+  /// The keys page pushes for the grant, so what VoiceOver hears on arrival
+  /// carries the same stake the body states: the keys, and the access they need.
+  @Test func theKeysPageAnnouncementSpeaksTheKeysAndTheirCost() {
+    let text = OnboardingAnnouncements.pageAnnouncement(.accessibility, step: 4, of: 7)
+    #expect(text.contains("brightness and volume keys"))
+    #expect(text.contains("Accessibility access"))
+    #expect(text.contains("won't"))
+    #expect(!text.contains("\u{2014}"))
+  }
+
+  /// Back onto the keys page after the grant: it says the keys work now, and
+  /// still never speaks its heading.
+  @Test func theGrantedKeysPageAnnouncesThatTheKeysWork() {
+    let one = OnboardingAnnouncements.pageAnnouncement(
+      .accessibility, step: 4, of: 7, keysGranted: true, externalDisplayCount: 1)
+    #expect(one.hasPrefix(OnboardingKeysCopy.grantedBody(externalDisplayCount: 1)))
+    #expect(!one.contains("won't"))
+    #expect(!one.contains(OnboardingTitles.accessibility))
+    let two = OnboardingAnnouncements.pageAnnouncement(
+      .accessibility, step: 4, of: 7, keysGranted: true, externalDisplayCount: 2)
+    #expect(two.contains("external displays"))
+    // The control: the ungranted arrival still states the cost.
+    #expect(OnboardingAnnouncements.pageAnnouncement(
+      .accessibility, step: 4, of: 7, externalDisplayCount: 2).contains("won't"))
+  }
+
+  /// Finish says there is something to fine-tune only when its list has items;
+  /// an empty list is a normal finish and is announced as one.
+  @Test func finishMentionsFineTuningOnlyWhenItOffersSome() {
+    let offered = OnboardingAnnouncements.pageAnnouncement(
+      .finish, step: 7, of: 7, offersFineTune: true)
+    #expect(offered.contains("fine-tune"))
+    #expect(!offered.contains(OnboardingTitles.finish))
+    #expect(!offered.contains("\u{2014}"))
+    #expect(!OnboardingAnnouncements.pageAnnouncement(.finish, step: 7, of: 7)
+      .contains("fine-tune"))
+  }
+
   /// Every title a setup page can draw. The pages draw these same constants, so
   /// a retitled page moves its heading here rather than leaving this list stale.
   private static func setupHeadings(_ page: OnboardingPage) -> [String] {

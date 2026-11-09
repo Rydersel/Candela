@@ -29,6 +29,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
   /// harvested at present time and a re-run starts from its first page.
   private var flowModel: OnboardingFlowModel?
   private var applier: OnboardingLiveApplier?
+  private var isTerminating = false
 
   init(model: AppModel, actions: SettingsActions, onCompletion: @escaping () -> Void) {
     self.model = model
@@ -37,7 +38,16 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     super.init()
   }
 
-  func present() {
+  /// Setup asked for Screen Recording and macOS may have relaunched the app to
+  /// apply the grant. Read once at launch, alongside the first-run check, and
+  /// cleared by the read itself so a trap while presenting cannot loop.
+  static func consumeResumeAfterCare() -> Bool {
+    DisplayPrefs(persistenceKey: "app").consumeOnboardingResumeAfterCare()
+  }
+
+  /// `resumingAfterCare` opens a fresh flow on the page after the care page
+  /// rather than at Welcome; see `OnboardingFlowModel.resumeAfterCare()`.
+  func present(resumingAfterCare: Bool = false) {
     let window = window ?? makeWindow()
     self.window = window
     // A fresh presentation gets a fresh flow over a fresh harvest; a present()
@@ -45,6 +55,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     // user's place.
     if !window.isVisible {
       installFlow(in: window)
+      if resumingAfterCare { flowModel?.resumeAfterCare() }
     }
     // On top of the live read and `LoginItem`'s didBecomeActive observer: a
     // presentation is the one moment we know the toggle is about to be looked
@@ -103,11 +114,12 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     flow.onCommit = { router.route($0) }
     flow.onRequestAccessibility = { permission.promptIfNeeded() }
     flow.onOpenAccessibilitySettings = { permission.openSystemSettings() }
-    // The request and nothing else. The return value means "already
-    // granted", not "granted now" (it is false when the dialog was merely
-    // shown), so nothing may gate on it; the telemetry pref itself is written
-    // later through the commit router when the care page is advanced past.
-    flow.onRequestScreenRecording = { _ = CGRequestScreenCaptureAccess() }
+    // The model saves care choices before opening Settings because granting
+    // Screen Recording can restart the app before this page advances.
+    flow.onRequestScreenRecording = { PermissionGuide.shared.request(.screenRecording) }
+    flow.onSetResumeAfterCare = {
+      DisplayPrefs(persistenceKey: "app").onboardingResumeAfterCare = $0
+    }
     // Achieved state for the care page's copy: the preflight, never the
     // request's return value.
     flow.onPreflightScreenRecording = { CGPreflightScreenCaptureAccess() }
@@ -117,6 +129,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     flow.onKeepSize = { [weak applier] in applier?.keep() }
     flow.onRevertSize = { [weak applier] in applier?.revert() }
     flow.onClose = { [weak self] in self?.window?.performClose(nil) }
+    flow.onOpenSettings = { SettingsOpener.open(at: $0) }
     self.flowModel = flow
     self.applier = applier
     window.contentView = NSHostingView(rootView: OnboardingFlowView(model: flow))
@@ -128,6 +141,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
   /// SMAppService read and setter.
   private func liveRouter() -> OnboardingCommitRouter {
     let actions = actions
+    let skippedKeyModes = SkippedKeyModes()
     let loginItem = loginItem
     return OnboardingCommitRouter(
       writeFriendlyName: { key, name in
@@ -163,7 +177,41 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
       // Deliberately nothing: a kept preview already wrote
       // `sizeAppliedByUser` inside the coordinator, and a second record would
       // be redundant.
-      acknowledgeAppliedSize: { _, _, _ in }
+      acknowledgeAppliedSize: { _, _, _ in },
+      // The Keyboard pane's two mode setters, with both writes ahead of the one
+      // batched notification: it rechecks permissions, and a check run between
+      // the writes would see volume still wanting the tap and raise the system
+      // alert the person just declined.
+      disableKeyboardControl: {
+        let prefs = DisplayPrefs(persistenceKey: "app")
+        let prior = (brightness: prefs.keyboardBrightness, volume: prefs.keyboardVolume)
+        // The flow commits the disable once per skip, but a snapshot taken over
+        // already-disabled modes would make a restore bring back off.
+        if skippedKeyModes.saved == nil { skippedKeyModes.saved = prior }
+        prefs.keyboardBrightness = OnboardingCommitRouter.modeAfterSkip(prior.brightness)
+        prefs.keyboardVolume = OnboardingCommitRouter.modeAfterSkip(prior.volume)
+        ShortcutManager.syncRegistration()
+        actions.prefsDidChange([.keyboardBrightness, .keyboardVolume])
+      },
+      // Only ever after the grant, so the batched recheck finds it live and
+      // raises no alert. No snapshot means no disable this run wrote, so there
+      // is nothing of this flow's to undo.
+      restoreKeyboardControl: {
+        guard let saved = skippedKeyModes.saved else { return }
+        skippedKeyModes.saved = nil
+        let prefs = DisplayPrefs(persistenceKey: "app")
+        let brightness = OnboardingCommitRouter.modeAfterRestore(
+          current: prefs.keyboardBrightness, saved: saved.brightness)
+        let volume = OnboardingCommitRouter.modeAfterRestore(
+          current: prefs.keyboardVolume, saved: saved.volume)
+        guard brightness != prefs.keyboardBrightness || volume != prefs.keyboardVolume else {
+          return
+        }
+        prefs.keyboardBrightness = brightness
+        prefs.keyboardVolume = volume
+        ShortcutManager.syncRegistration()
+        actions.prefsDidChange([.keyboardBrightness, .keyboardVolume])
+      }
     )
   }
 
@@ -190,6 +238,12 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     return window
   }
 
+  /// Called before AppKit begins closing windows for a normal quit, including
+  /// the Screen Recording pane's Quit & Reopen action.
+  func prepareForTermination() {
+    isTerminating = true
+  }
+
   func windowWillClose(_: Notification) {
     // The red close button and ⌘W bypass the flow's own skip route, so an open
     // countdown is answered here with the revert the model already owns.
@@ -199,11 +253,18 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     // observation loop dies rather than staying armed behind a closed window. An
     // answer still waiting on its first preview observation survives this.
     applier?.cancel()
+    flowModel?.didClose(isTerminating: isTerminating)
+    // Quitting is not finishing Setup. In particular, don't clear its resume
+    // marker or show a first-run callout as the process is going away.
+    guard !isTerminating else { return }
     // Before `onCompletion`, which records the schema version that makes a later
     // read say "not a first run".
     let wasFirstRun = flowModel?.environment.isFirstRun ?? false
+    // Closing into Settings leaves a window up, which is what the first-run
+    // callout makes up for; over Settings opening it would only be noise.
+    let closesIntoSettings = flowModel?.closesIntoSettings ?? false
     onCompletion()
-    if wasFirstRun {
+    if wasFirstRun, !closesIntoSettings {
       onFirstRunClosed?()
     }
     // The window is reused, so its hosting view would keep the finish and care
@@ -218,4 +279,11 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
       self.flowModel = nil
     }
   }
+}
+
+/// The key modes a setup skip replaced, shared by the router's disable and
+/// restore legs. One per router, so a fresh flow never restores an old run's.
+@MainActor
+private final class SkippedKeyModes {
+  var saved: (brightness: KeyMode, volume: KeyMode)?
 }

@@ -152,6 +152,35 @@ struct DisplayPrefsTests {
     }
   }
 
+  /// App-level and unsuffixed: setup is one flow, not one per display, and the
+  /// launch that reads it has no display key to suffix with. Absent reads false,
+  /// so an older domain needs no migration.
+  @Test func theSetupResumeMarkerIsAppLevel() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "app")
+      #expect(prefs.onboardingResumeAfterCare == false)
+      prefs.onboardingResumeAfterCare = true
+      #expect(defaults.object(forKey: "onboardingResumeAfterCare") as? Bool == true)
+      #expect(defaults.object(forKey: "onboardingResumeAfterCare.app") == nil)
+      #expect(DisplayPrefs(defaults: defaults, persistenceKey: "AAAA").onboardingResumeAfterCare)
+      prefs.onboardingResumeAfterCare = false
+      #expect(defaults.object(forKey: "onboardingResumeAfterCare") == nil)
+    }
+  }
+
+  /// The read clears before the caller presents anything, so a presentation
+  /// that traps cannot be retried by the next launch.
+  @Test func consumingTheSetupResumeMarkerClearsItInTheSameStep() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "app")
+      prefs.onboardingResumeAfterCare = true
+      #expect(prefs.consumeOnboardingResumeAfterCare())
+      #expect(defaults.object(forKey: "onboardingResumeAfterCare") == nil)
+      #expect(!prefs.consumeOnboardingResumeAfterCare())
+      #expect(defaults.object(forKey: "onboardingResumeAfterCare") == nil)
+    }
+  }
+
   /// Absent reads false, so an older domain needs no migration.
   @Test func theHDRReportIsPerDisplayUnderItsOwnKey() {
     withSuite { defaults in

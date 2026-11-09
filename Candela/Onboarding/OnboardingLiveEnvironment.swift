@@ -65,12 +65,20 @@ enum OnboardingEnvironmentBuilder {
     displays: [OnboardingDisplayInput],
     accessibilityGranted: Bool,
     loginItemEnabled: Bool,
-    isFirstRun: Bool
+    isFirstRun: Bool,
+    keyModesRequireGrant: Bool,
+    keyModesOff: Bool,
+    keyModesHaveCustomShortcuts: Bool = false,
+    arrangedDisplayCount: Int
   ) -> OnboardingEnvironment {
     OnboardingEnvironment(
       accessibilityGranted: accessibilityGranted,
       loginItemEnabled: loginItemEnabled,
       isFirstRun: isFirstRun,
+      keyModesRequireGrant: keyModesRequireGrant,
+      keyModesOff: keyModesOff,
+      keyModesHaveCustomShortcuts: keyModesHaveCustomShortcuts,
+      arrangedDisplayCount: arrangedDisplayCount,
       // Input order is the app's display-list order, and the flow renders and
       // paginates in exactly that order.
       displays: displays.map(entry(for:))
@@ -228,14 +236,36 @@ enum OnboardingLiveEnvironment {
     let inputs = model.displays.map { state in
       input(for: state, model: model, coordinator: coordinator, defaults: defaults)
     }
+    let keyPrefs = DisplayPrefs(defaults: defaults, persistenceKey: "app")
     return OnboardingEnvironmentBuilder.environment(
       displays: inputs,
       accessibilityGranted: model.accessibility.isGranted,
       loginItemEnabled: loginItem.isEnabled,
       // The schema marker: an unwritten schema version is the only record that this
       // launch is the first one.
-      isFirstRun: PrefsSchema.storedVersion(in: defaults) == nil
+      isFirstRun: PrefsSchema.storedVersion(in: defaults) == nil,
+      // The predicate the Keyboard pane's warning and the panel banner gate on,
+      // so the page and those surfaces cannot disagree about whether the keys
+      // need the grant.
+      keyModesRequireGrant: KeyModePolicy.requiresAccessibility(
+        brightness: keyPrefs.keyboardBrightness, volume: keyPrefs.keyboardVolume),
+      keyModesOff: storedKeyModesOff(defaults: defaults),
+      keyModesHaveCustomShortcuts: KeyModePolicy.firesCustomShortcuts(keyPrefs.keyboardBrightness)
+        || KeyModePolicy.firesCustomShortcuts(keyPrefs.keyboardVolume),
+      // The arrangement map's tiles rather than a raw online count: the online
+      // list carries mirror slaves and a synthesized size's virtual display,
+      // which would count a lone external mirrored or resized as two displays
+      // to arrange where the Arrangement pane draws one.
+      arrangedDisplayCount: model.arrangement.arrangement.tiles.count
     )
+  }
+
+  /// The same app-level modes the grant predicate reads, asked whether they
+  /// leave the keys anything to do at all.
+  private static func storedKeyModesOff(defaults: UserDefaults) -> Bool {
+    let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "app")
+    return KeyModePolicy.keysOff(
+      brightness: prefs.keyboardBrightness, volume: prefs.keyboardVolume)
   }
 
   private static func input(
