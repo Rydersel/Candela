@@ -70,7 +70,7 @@ struct KeyboardPane: View {
   /// banner end up disagreeing on an all-custom rig.
   @ViewBuilder private var accessibilitySection: some View {
     if !KeyModePolicy.requiresAccessibility(brightness: prefs.keyboardBrightness, volume: prefs.keyboardVolume) {
-      SettingsNotice {
+      SettingsNotice(symbol: "keyboard") {
         Text(KeyModePolicy.keysOff(brightness: prefs.keyboardBrightness, volume: prefs.keyboardVolume)
           ? "Your keyboard's brightness and volume keys are off, so they won't control your external display."
           : "Your keyboard's brightness and volume keys go straight to macOS. Custom shortcuts still work.")

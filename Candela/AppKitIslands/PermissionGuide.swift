@@ -417,6 +417,8 @@ final class PermissionGuide {
       row = newRow
     }
 
+    // Replacing a hovered row does not deliver its mouse-exit event.
+    self.row?.releaseCursor()
     panel.contentView = blur
     self.arrow = arrow
     self.row = row
