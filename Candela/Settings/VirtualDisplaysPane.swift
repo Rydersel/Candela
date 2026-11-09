@@ -264,10 +264,9 @@ struct VirtualDisplaysPane: View {
           ProgressView().controlSize(.small)
           Text("Working").foregroundStyle(SettingsTheme.bodyColor)
         } else if live != nil, let achieved = model.virtualDisplays.achievedMode(slot: slot) {
-          // ACHIEVED state, never the spec's claim: the Retina suffix appears
-          // only when the 2x mode engaged. `String(_:)` verbatim, or
-          // interpolation groups the digits (1,920 x 1,080).
-          Text("Running at \(String(achieved.width)) x \(String(achieved.height))\(achieved.hiDPI ? " (Retina)" : "")")
+          // Achieved mode, not the requested one. `String(_:)` stops interpolation
+          // grouping the digits (1,920 x 1,080).
+          Text("Running at \(String(achieved.width)) x \(String(achieved.height))\(achieved.hiDPI ? " (high resolution)" : "")")
             .foregroundStyle(SettingsTheme.bodyColor)
         } else if live != nil {
           Text("Running").foregroundStyle(SettingsTheme.bodyColor)
@@ -415,21 +414,20 @@ struct VirtualDisplaysPane: View {
     }
     SettingsCardDivider()
     SettingRow("Text renders at double resolution when the display is next created.") {
-      Toggle("Retina (HiDPI)", isOn: binding(slot: slot,
-                                             name: .virtualSlotHiDPI, keyPath: \.hiDPI))
+      Toggle("High Resolution", isOn: binding(slot: slot,
+                                              name: .virtualSlotHiDPI, keyPath: \.hiDPI))
         .themedSwitch()
-        .accessibilityLabel("Retina (HiDPI)")
+        .accessibilityLabel("High Resolution")
         .prefIdentifier(.virtualSlotHiDPI, slot: slot)
     }
   }
 
-  /// Off the engine's per-axis ceiling, so the caption cannot promise a height
-  /// the create path would cut back. Retina is drawn at double size, so the
-  /// doubled size is what has to fit.
+  /// Reads the engine's per-axis ceiling so the caption never promises a size the
+  /// create path cuts back. High Resolution draws at double size, so that has to fit.
   static var sizeRangeCaption: String {
     let (wide, high) = VirtualDisplayIdentity.maxPixels
     return "Width can be \(minimumPixels) to \(wide), height \(minimumPixels) to \(high); "
-      + "Retina is only available up to \(wide / 2) by \(high / 2), because the display is drawn at double the size."
+      + "High Resolution is only available up to \(wide / 2) by \(high / 2), because the display is drawn at double the size."
   }
 
   /// Something a desktop fits on. Ours: `normalized` has no lower bound.
@@ -503,7 +501,7 @@ struct VirtualDisplaysPane: View {
             .keyboardShortcut(.defaultAction)
           Button("Remove", role: .destructive) { remove(slot: slot) }
         } message: {
-          Text("The display stops and this slot goes back to its defaults: the name, the size, Retina and Come Back at Launch. Any windows on it move to your other displays.")
+          Text("The display stops and this slot goes back to its defaults: the name, the size, High Resolution and Come Back at Launch. Any windows on it move to your other displays.")
         }
     }
     .padding(.vertical, 8)

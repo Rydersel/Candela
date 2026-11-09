@@ -18,7 +18,7 @@ If the display is not running, **Create Display** starts it.
 - **Size** offers common presets. Type directly into **Width and Height** for
   another size; the picker then reads **Custom**. The caption below the fields
   gives the supported range.
-- **Retina (HiDPI)** renders text at double resolution when the display is next
+- **High Resolution** renders text at double resolution when the display is next
   created. The doubled size must fit within the supported range.
 - **Create Display** applies these choices. Once it is running, arrange it in
   [Arrangement](arrangement.md) or macOS Displays settings.
@@ -53,7 +53,7 @@ your saved settings are kept.
 
 Choose **Remove Display…**, then confirm **Remove**. The display stops, its
 windows move to your other displays, and the slot returns to its defaults,
-including its name, size, Retina setting, and launch choice.
+including its name, size, High Resolution setting, and launch choice.
 
 Use **Apply and Recreate** to change an existing display's size without
 resetting its other settings.
