@@ -429,14 +429,10 @@ private struct MeasurementControls: View {
         Toggle("Measure how bright each part of this display is", isOn: Binding(
           get: { prefs.oledTelemetry },
           set: { on in
-            // Prompts only from a user action; the sampler itself is
-            // preflight-only, so no background loop raises a TCC dialog unexplained.
-            //
-            // The pref is written whether or not the grant arrives: macOS
-            // returns false from the request that merely SHOWS the dialog, so
-            // gating the switch on the return value leaves it stuck off.
-            if on { _ = CGRequestScreenCaptureAccess() }
+            // Save the choice before opening Settings: macOS may restart the
+            // app when the grant lands. The sampler itself never requests access.
             writer.write(.oledTelemetry) { $0.oledTelemetry = on }
+            if on { PermissionGuide.shared.request(.screenRecording) }
           }
         ))
         .themedSwitch()
@@ -455,9 +451,11 @@ private struct MeasurementControls: View {
         if model.isSafeMode {
           OledInlineNote(Text("Safe Mode is on for this session, so nothing is being measured whatever this is set to, and Screen Recording is not needed until the next normal launch."))
         } else if prefs.oledTelemetry, !CGPreflightScreenCaptureAccess() {
-          OledInlineNote(Text("macOS has not granted Screen Recording, so no readings are being taken. Grant it in System Settings > Privacy & Security > Screen Recording."))
+          OledInlineNote(Text(verbatim: ScreenRecordingCopy.message(.measurement)))
+          PermissionSettingsButton()
         } else if isSamplingStalled {
-          OledInlineNote(Text("No reading in over 10 minutes while measurement is on. If this persists, macOS may have dropped the Screen Recording grant after an update to the app; check System Settings > Privacy & Security > Screen Recording."))
+          OledInlineNote(Text(verbatim: ScreenRecordingCopy.message(.stalled)))
+          PermissionSettingsButton()
         }
       }
     }

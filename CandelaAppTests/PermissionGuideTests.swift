@@ -45,6 +45,28 @@ struct PermissionGuideTests {
     #expect(guide.isRowShown)
   }
 
+  @Test func requestDoesNothingWhenTheGrantIsAlreadyPresent() {
+    let calls = Calls()
+    let guide = makeGuide(calls: calls, granted: true)
+    defer { guide.close() }
+    guide.request(.screenRecording)
+    #expect(calls.opened.isEmpty)
+    #expect(calls.prompted.isEmpty)
+    #expect(!guide.isTracking)
+    #expect(guide.showing == nil)
+  }
+
+  @Test func requestWithoutTheGrantOpensTheDragGuideWithoutASystemPrompt() {
+    let calls = Calls()
+    let guide = makeGuide(calls: calls)
+    defer { guide.close() }
+    guide.request(.screenRecording)
+    #expect(calls.opened == [PermissionPane.screenRecording.deepLink])
+    #expect(calls.prompted.isEmpty)
+    #expect(guide.isRowShown)
+    #expect(guide.isTracking)
+  }
+
   @Test func secondShowRetargetsOneGuide() {
     let calls = Calls()
     let guide = makeGuide(calls: calls)

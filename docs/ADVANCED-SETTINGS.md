@@ -140,7 +140,7 @@ page only — Candela has never written them and has no accessor for them.
   state, not a preference.
 - `onboardingResumeAfterCare` (Bool) is set while Setup waits on a Screen
   Recording grant, so a relaunch reopens Setup after its care page; the next
-  launch clears it. `defaults delete com.rydersel.Candela onboardingResumeAfterCare`
+  launch or closing Setup clears it. `defaults delete com.rydersel.Candela onboardingResumeAfterCare`
   stops a pending resume.
 - `hasReportedHDR.<pk>` records that the display has listed HDR modes at least
   once, so the menu bar keeps its HDR button while the current mode has none

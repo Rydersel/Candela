@@ -1,7 +1,5 @@
 import AppKit
-// @preconcurrency: `kAXTrustedCheckOptionPrompt` is a mutable C global that
-// Swift 6 refuses to reference. It is set once at framework load.
-@preconcurrency import ApplicationServices
+import ApplicationServices
 import CandelaKit
 import Foundation
 import Observation
@@ -44,22 +42,11 @@ final class AccessibilityPermission {
     missingSince = granted ? nil : ProcessInfo.processInfo.systemUptime
   }
 
-  /// Shows the system Accessibility prompt when the grant is missing. No NSAlert:
-  /// the system prompt plus the panel banner replace the fork's modal.
+  /// A live read avoids reopening Settings after the grant has already landed.
   func promptIfNeeded() {
+    applyGranted(AXIsProcessTrustedWithOptions(nil))
     guard !isGranted else { return }
-    // Deliberately the unmanaged constant, not a string literal.
-    let promptKey = kAXTrustedCheckOptionPrompt.takeRetainedValue() as String
-    let granted = AXIsProcessTrustedWithOptions([promptKey: true] as CFDictionary)
-    // Only where the prompt actually went up. A false answer IS the prompt being
-    // shown, and its button opens the Accessibility list; a true answer showed
-    // nothing and sent nobody anywhere, so the clock has no reason to move (and
-    // `applyGranted` clears it below in any case).
-    if !granted { reevaluateBackstop(after: .sentToSystemSettings) }
-    // Through `applyGranted`, not a bare assignment: if this call observes the
-    // grant already present, the transition still has to reach `onChange` or the
-    // tap never starts and `recheck` sees no change to report.
-    applyGranted(granted)
+    openSystemSettings()
   }
 
   /// Calls `onChange` on every TRANSITION, grant and revocation both. Never fires
@@ -91,15 +78,7 @@ final class AccessibilityPermission {
   /// user comes back rather than resting at thirty seconds.
   func openSystemSettings() {
     reevaluateBackstop(after: .sentToSystemSettings)
-    NSWorkspace.shared.open(
-      URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-    )
-  }
-
-  /// Someone else opened the Accessibility list (the permission guide). Same
-  /// edge as `openSystemSettings()`, without opening anything a second time.
-  func noteSentToSystemSettings() {
-    reevaluateBackstop(after: .sentToSystemSettings)
+    PermissionGuide.shared.show(.accessibility)
   }
 
   /// Another live read saw the grant (the permission guide closing on it).

@@ -39,4 +39,11 @@ struct KeyModePolicyTests {
     #expect(!KeyModePolicy.keysOff(brightness: .disabled, volume: .both))
     #expect(!KeyModePolicy.keysOff(brightness: .disabled, volume: .custom))
   }
+
+  @Test func enablingMediaKeysPreservesExistingCustomShortcuts() {
+    #expect(KeyModePolicy.enablingMediaKeys(.disabled) == .media)
+    #expect(KeyModePolicy.enablingMediaKeys(.media) == .media)
+    #expect(KeyModePolicy.enablingMediaKeys(.custom) == .both)
+    #expect(KeyModePolicy.enablingMediaKeys(.both) == .both)
+  }
 }

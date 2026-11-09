@@ -1564,6 +1564,34 @@ struct OnboardingFlowModelTests {
     #expect(model.fineTuneItems.contains(.checkup))
   }
 
+  @Test func skippingAccessKeepsTheCustomShortcutsThatNeedNoGrant() {
+    var snapshot = environment([entry(key: "dell")])
+    snapshot.keyModesHaveCustomShortcuts = true
+    let model = OnboardingFlowModel(environment: snapshot)
+    walk(model, to: .accessibility)
+    model.skipKeys()
+    // The skip removed the media-key half, leaving custom shortcuts enabled.
+    snapshot.keyModesRequireGrant = false
+    model.update(environment: snapshot)
+    walk(model, to: .finish)
+    #expect(model.keyboardControlOn)
+    #expect(model.keysGrantInPlace)
+    #expect(model.fineTuneItems.contains(.shortcuts))
+  }
+
+  @Test func grantingAfterASkipRestoresTheOriginalMixedModes() {
+    var snapshot = environment([entry(key: "dell")])
+    snapshot.keyModesHaveCustomShortcuts = true
+    let model = OnboardingFlowModel(environment: snapshot)
+    walk(model, to: .accessibility)
+    model.skipKeys()
+    model.accessibilityGranted = true
+    #expect(!model.keysDeclined)
+    #expect(model.keyboardControlOn)
+    #expect(model.keysGrantInPlace)
+    #expect(model.committed.contains(.restoreKeyboardControl))
+  }
+
   /// A skip undone by a later grant puts the keys back, so the item returns.
   @Test func aGrantAfterASkipBringsTheShortcutsItemBack() {
     let model = modelOnKeysPage()

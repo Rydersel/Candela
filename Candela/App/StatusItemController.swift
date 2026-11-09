@@ -612,6 +612,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     }
 
     let permission = model.accessibility
+    // The guide can observe a grant while the key-mode backstop is stopped.
+    PermissionGuide.shared.onGranted = { [weak permission] pane in
+      if pane == .accessibility { permission?.recheckNow() }
+    }
     // On a first run the Setup window owns the Accessibility ask so it can
     // explain WHY first. Prompting here would fire the system dialog before that
     // window is on screen. `prefsSchemaVersion` is the trigger and is written at

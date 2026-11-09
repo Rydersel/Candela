@@ -21,4 +21,8 @@ public enum KeyModePolicy {
   public static func keysOff(brightness: KeyMode, volume: KeyMode) -> Bool {
     brightness == .disabled && volume == .disabled
   }
+
+  public static func enablingMediaKeys(_ mode: KeyMode) -> KeyMode {
+    firesCustomShortcuts(mode) ? .both : .media
+  }
 }

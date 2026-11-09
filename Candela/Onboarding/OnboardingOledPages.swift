@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import CandelaKit
 import SwiftUI
 
 /// Designation: every external display as a selectable card, the name
@@ -192,7 +193,7 @@ struct OnboardingOledCarePage: View {
         text: measuredCardText
       ) {
         model.measuredTelemetry = true
-        if !model.screenRecordingRequested {
+        if !model.screenRecordingGranted {
           model.requestScreenRecording()
         }
       }
@@ -217,7 +218,7 @@ struct OnboardingOledCarePage: View {
     if model.screenRecordingGranted {
       return "Screen Recording enabled. \(AppInfo.productName) reads the picture only to average its brightness; nothing leaves your Mac."
     }
-    return "Waiting for permission. Turn on \(AppInfo.productName) in System Settings, under Privacy & Security, Screen Recording. Health figures stay estimates until then."
+    return ScreenRecordingCopy.message(.setup)
   }
 
   private func measurementCard(

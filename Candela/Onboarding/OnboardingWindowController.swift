@@ -111,28 +111,11 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     let router = liveRouter()
     let permission = model.accessibility
     flow.onCommit = { router.route($0) }
-    // The guide replaces the system alert, which would add Candela to the list
-    // switched off and stack a second dialog over the pane. The backstop still
-    // has to hear that someone was sent to System Settings, or it rests at its
-    // slow cadence while the person is granting.
-    let showGuide = {
-      permission.noteSentToSystemSettings()
-      PermissionGuide.shared.show(.accessibility)
-    }
-    flow.onRequestAccessibility = showGuide
-    flow.onOpenAccessibilitySettings = showGuide
-    // With every media-key family off (a skip, then Back), the backstop has
-    // stood down and the grant notification can be missed, so the guide's own
-    // grant read is what tells the permission object, and through it this page.
-    PermissionGuide.shared.onGranted = { pane in
-      if pane == .accessibility { permission.recheckNow() }
-    }
-    // The request and nothing else. The return value means "already
-    // granted", not "granted now" (it is false when the dialog was merely
-    // shown), so nothing may gate on it. The model commits the care page's
-    // choices, the telemetry pref among them, ahead of this call, because
-    // granting relaunches the app.
-    flow.onRequestScreenRecording = { _ = CGRequestScreenCaptureAccess() }
+    flow.onRequestAccessibility = { permission.promptIfNeeded() }
+    flow.onOpenAccessibilitySettings = { permission.openSystemSettings() }
+    // The model saves care choices before opening Settings because granting
+    // Screen Recording can restart the app before this page advances.
+    flow.onRequestScreenRecording = { PermissionGuide.shared.request(.screenRecording) }
     flow.onSetResumeAfterCare = {
       DisplayPrefs(persistenceKey: "app").onboardingResumeAfterCare = $0
     }

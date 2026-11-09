@@ -148,15 +148,16 @@ final class OnboardingFlowModel {
   /// what these held.
   private var storedKeyModesOff: Bool
   private var storedModesNeedGrant: Bool
+  private var storedCustomShortcutsOn: Bool
 
   /// Whether the keys do anything once setup ends. Read from current state
   /// rather than from pages passed through, so a flow resumed straight onto
   /// Finish answers the same way.
-  var keyboardControlOn: Bool { !keysDeclined && !storedKeyModesOff }
+  var keyboardControlOn: Bool { keysDeclined ? storedCustomShortcutsOn : !storedKeyModesOff }
 
   /// The grant the stored modes need is in place: given, or not needed because
   /// no family watches the media keys (custom shortcuts need none).
-  var keysGrantInPlace: Bool { accessibilityGranted || !storedModesNeedGrant }
+  var keysGrantInPlace: Bool { keysDeclined || accessibilityGranted || !storedModesNeedGrant }
 
   /// Designated displays whose protection is on: after the care page, what is
   /// enrolled. A resumed flow seeds both sets from the harvest.
@@ -208,7 +209,7 @@ final class OnboardingFlowModel {
   }
 
   /// The Screen Recording ask, injected like the accessibility actions: live mode calls
-  /// `CGRequestScreenCaptureAccess`, the mock records the click.
+  /// opens the permission guide; the mock records the click.
   var onRequestScreenRecording: () -> Void = {}
   /// Achieved-state check for the Screen Recording grant, injected like the
   /// ask above: live mode binds `CGPreflightScreenCaptureAccess`, because the
@@ -352,6 +353,7 @@ final class OnboardingFlowModel {
     accessibilityGranted = environment.accessibilityGranted
     storedKeyModesOff = environment.keyModesOff
     storedModesNeedGrant = environment.keyModesRequireGrant
+    storedCustomShortcutsOn = environment.keyModesHaveCustomShortcuts
     onCommit = { _ in }
     onApplySize = { _, _, _ in }
     onKeepSize = {}
@@ -459,6 +461,7 @@ final class OnboardingFlowModel {
     if !keysDisableCommitted {
       storedKeyModesOff = environment.keyModesOff
       storedModesNeedGrant = environment.keyModesRequireGrant
+      storedCustomShortcutsOn = environment.keyModesHaveCustomShortcuts
     }
     if let pending = pendingApply,
       !environment.displays.contains(where: { $0.persistenceKey == pending.displayKey })

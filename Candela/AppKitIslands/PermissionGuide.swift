@@ -113,11 +113,14 @@ final class PermissionGuide {
     stopTracking()
   }
 
+  func request(_ pane: PermissionPane) {
+    guard !isGranted(pane) else { return }
+    show(pane)
+  }
+
   /// Opens the pane and starts tracking; a second call retargets the one guide.
-  ///
-  /// `requestFirst` is the fallback for a list that refuses a dropped app that
-  /// never asked: the system request adds Candela switched off, so there is no
-  /// row to offer and the line asks for the switch instead.
+  /// `requestFirst` supports lists that require a system request before an app
+  /// can be added, with switch-only instructions in place of the drag row.
   func show(_ pane: PermissionPane, requestFirst: Bool = false) {
     showing = pane
     tickCount = 0

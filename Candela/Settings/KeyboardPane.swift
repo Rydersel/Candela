@@ -69,13 +69,29 @@ struct KeyboardPane: View {
   /// the panel's banner gates on: two copies of the rule is how the pane and the
   /// banner end up disagreeing on an all-custom rig.
   @ViewBuilder private var accessibilitySection: some View {
-    if model.accessibility.isWarningWarranted {
+    if !KeyModePolicy.requiresAccessibility(brightness: prefs.keyboardBrightness, volume: prefs.keyboardVolume) {
+      SettingsNotice {
+        Text(KeyModePolicy.keysOff(brightness: prefs.keyboardBrightness, volume: prefs.keyboardVolume)
+          ? "Your keyboard's brightness and volume keys are off, so they won't control your external display."
+          : "Your keyboard's brightness and volume keys go straight to macOS. Custom shortcuts still work.")
+          .font(.callout)
+          .fixedSize(horizontal: false, vertical: true)
+        Button("Turn On Keys") {
+          prefs.keyboardBrightness = KeyModePolicy.enablingMediaKeys(prefs.keyboardBrightness)
+          prefs.keyboardVolume = KeyModePolicy.enablingMediaKeys(prefs.keyboardVolume)
+          ShortcutManager.syncRegistration()
+          actions.prefsDidChange([.keyboardBrightness, .keyboardVolume])
+        }
+        .buttonStyle(SettingsPrimaryButtonStyle())
+        .accessibilityLabel("Turn On Keys")
+      }
+    } else if model.accessibility.isWarningWarranted {
       SettingsNotice {
         Text("Keyboard control needs Accessibility access")
           .font(.callout.weight(.medium))
           .fixedSize(horizontal: false, vertical: true)
         SettingsCaption(
-          "macOS lets \(AppInfo.productName) see the brightness and volume keys only once it has Accessibility access. Custom shortcuts work without it."
+          "macOS lets \(AppInfo.productName) see the brightness and volume keys only once it has Accessibility access. Custom shortcuts work without it. Grant access in \(PermissionPane.accessibility.settingsPath(macOSMajor: PermissionPane.currentMacOSMajor))."
         )
         // The page's one action while the grant is missing, so it takes the
         // primary style. Trailing ellipsis: it opens another app (buttons.md).
