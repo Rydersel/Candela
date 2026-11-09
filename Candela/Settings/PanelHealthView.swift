@@ -80,8 +80,8 @@ struct PanelHealthView: View {
     model.oledCare.healthSummary(for: persistenceKey)
   }
 
-  /// Preflight only, never `CGRequestScreenCaptureAccess`: the prompting calls
-  /// are the telemetry toggle and the guided setup flow.
+  /// Preflight only, never `CGRequestScreenCaptureAccess`: only user actions
+  /// may raise the Screen Recording prompt.
   ///
   /// Re-read on every render, because the grant does come and go under a running
   /// app: an ad-hoc re-sign of a deployed build can drop it, and so can a

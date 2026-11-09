@@ -626,8 +626,9 @@ struct OledCareDisplayPage: View {
   /// user is away, and this one changes what they are looking at.
   ///
   /// It depends on BOTH measurement settings, one for luminance and one for
-  /// staticness, and they live on the Health pane, so the caption names that
-  /// pane instead of leaving the switch to do nothing silently.
+  /// staticness, and they live on the Health pane. A note in the switch's row
+  /// names whichever is off for this display, so the switch never does nothing
+  /// silently.
   ///
   /// The assertion gate is system-wide, so our own Keep Display Awake silences
   /// this control as surely as a video does. The caption lists it; the note
@@ -636,7 +637,7 @@ struct OledCareDisplayPage: View {
   /// Regional protection uses sampled persistence and window ownership. Focus
   /// and the hovered window are exclusions, not an estimate of gaze.
   private var detectionControls: some View {
-    SettingRow("Bright regions that stay unchanged across several samples can dim, with extra protection for areas with higher recorded exposure. Your foreground app and the window under your pointer stay undimmed. After the pointer leaves, regional dimming returns gradually after a short pause. Full-screen content and anything holding the screen awake pause this protection. This needs both measurement settings on the Health pane. Sampling can miss motion; turn this off when judging colors or brightness.") {
+    SettingRow("Bright regions that stay unchanged across several samples can dim, with extra protection for areas with higher recorded exposure. Your foreground app and the window under your pointer stay undimmed. After the pointer leaves, regional dimming returns gradually after a short pause. Full-screen content and anything holding the screen awake pause this protection. Sampling can miss motion; turn this off when judging colors or brightness.") {
       VStack(alignment: .leading, spacing: 6) {
         Toggle("Automatic static-region dimming", isOn: Binding(
           get: { prefs.oledDetectionDimming },
@@ -647,11 +648,111 @@ struct OledCareDisplayPage: View {
         .prefIdentifier(.oledDetectionDimming, persistenceKey: persistenceKey)
         // Same row as the switch: a divider would make the warning read as an
         // unrelated setting.
-        if prefs.oledDetectionDimming, displaySleepAssertionHeld {
+        switch Self.detectionNote(
+          detectionDimming: prefs.oledDetectionDimming,
+          telemetry: prefs.oledTelemetry,
+          windowObservation: prefs.oledWindowObservation,
+          screenRecordingGranted: CGPreflightScreenCaptureAccess(),
+          assertionHeld: displaySleepAssertionHeld,
+          safeMode: model.isSafeMode
+        ) {
+        case .safeMode:
+          OledInlineNote(Text(verbatim: Self.safeModeNoteText))
+        case let .measurementOff(gap):
+          VStack(alignment: .leading, spacing: 8) {
+            OledInlineNote(Text(verbatim: gap.message))
+            Button(gap.buttonTitle) { turnOnMeasurement(gap) }
+              .buttonStyle(SettingsSecondaryButtonStyle())
+              .accessibilityLabel(Text(verbatim: gap.accessibilityLabel))
+          }
+        case .screenRecordingMissing:
+          OledInlineNote(Text(verbatim: Self.screenRecordingMissingText))
+        case .heldAwake:
           OledInlineNote(Text("Something is holding the screen awake: video playback, a call, or Keep Display Awake. Nothing is dimmed here for as long as that lasts."))
+        case nil:
+          EmptyView()
         }
       }
     }
+  }
+
+  /// Mirrors Health's measurement switch, request included; without the request
+  /// the display measures nothing and no dialog ever shows. The pref is written
+  /// regardless, because the request that shows the dialog returns false.
+  private func turnOnMeasurement(_ gap: MeasurementGap) {
+    if gap.turnsOnTelemetry { _ = CGRequestScreenCaptureAccess() }
+    writer.writeAll(gap.prefNames) { prefs in
+      if gap.turnsOnTelemetry { prefs.oledTelemetry = true }
+      if gap.turnsOnWindowObservation { prefs.oledWindowObservation = true }
+    }
+  }
+
+  enum DetectionNote: Equatable {
+    case safeMode
+    case measurementOff(MeasurementGap)
+    case screenRecordingMissing
+    case heldAwake
+  }
+
+  /// Health's Safe Mode wording plus "or dimmed". No button: anything it turned
+  /// on would wait for the next normal launch, and so would any grant it raised.
+  static let safeModeNoteText = "Safe Mode is on for this session, so nothing is being measured or dimmed whatever this is set to, and Screen Recording is not needed until the next normal launch."
+
+  /// Same path wording as Health's grant note.
+  static let screenRecordingMissingText = "macOS has not granted Screen Recording, so no static regions are dimmed. Grant it in System Settings > Privacy & Security > Screen Recording."
+
+  struct MeasurementGap: Equatable {
+    let turnsOnTelemetry: Bool
+    let turnsOnWindowObservation: Bool
+    let message: String
+    let buttonTitle: String
+    let accessibilityLabel: String
+
+    var prefNames: [PrefName] {
+      (turnsOnTelemetry ? [.oledTelemetry] : []) + (turnsOnWindowObservation ? [.oledWindowObservation] : [])
+    }
+  }
+
+  /// One reason at a time; two at once read as a bug. Each case outranks the
+  /// next because fixing a later one alone would not start dimming.
+  ///
+  /// The permission sentence appears only when the button can raise macOS's
+  /// request, so the reason is on screen before the dialog.
+  static func detectionNote(
+    detectionDimming: Bool, telemetry: Bool, windowObservation: Bool,
+    screenRecordingGranted: Bool, assertionHeld: Bool, safeMode: Bool
+  ) -> DetectionNote? {
+    guard detectionDimming else { return nil }
+    if safeMode { return .safeMode }
+    if telemetry, windowObservation {
+      if !screenRecordingGranted { return .screenRecordingMissing }
+      return assertionHeld ? .heldAwake : nil
+    }
+    let permission = !telemetry && !screenRecordingGranted
+      ? " Measuring brightness needs Screen Recording, so macOS may ask to allow it. Nothing is recorded or stored as an image, and nothing leaves this Mac."
+      : ""
+    let gap: MeasurementGap
+    switch (telemetry, windowObservation) {
+    case (false, false):
+      gap = MeasurementGap(
+        turnsOnTelemetry: true, turnsOnWindowObservation: true,
+        message: "No static regions are dimmed while two Health settings are off for this display: measuring brightness, and noting which apps are on it." + permission,
+        buttonTitle: "Turn Both On",
+        accessibilityLabel: "Turn Both On: measuring brightness and noting which apps are on this display")
+    case (false, true):
+      gap = MeasurementGap(
+        turnsOnTelemetry: true, turnsOnWindowObservation: false,
+        message: "No static regions are dimmed while measuring brightness is off for this display on the Health pane." + permission,
+        buttonTitle: "Turn On",
+        accessibilityLabel: "Turn on measuring brightness for this display")
+    default:
+      gap = MeasurementGap(
+        turnsOnTelemetry: false, turnsOnWindowObservation: true,
+        message: "No static regions are dimmed while noting which apps are on this display is off on the Health pane.",
+        buttonTitle: "Turn On",
+        accessibilityLabel: "Turn on noting which apps are on this display")
+    }
+    return .measurementOff(gap)
   }
 
   // MARK: - Thresholds
