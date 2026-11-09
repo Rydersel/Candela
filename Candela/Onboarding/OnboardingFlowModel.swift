@@ -247,9 +247,11 @@ final class OnboardingFlowModel {
     refreshScreenRecordingGranted()
   }
 
-  /// The window closed, by any route. The marker is cleared whether or not
-  /// this flow wrote it: a resumed flow inherits one from the previous process.
-  func didClose() {
+  /// AppKit also closes windows during termination. Preserve the pending
+  /// relaunch in that case; an intentional window close clears it even when
+  /// this flow inherited the marker from the previous process.
+  func didClose(isTerminating: Bool = false) {
+    guard !isTerminating else { return }
     relaunchPending = false
     onSetResumeAfterCare(false)
   }

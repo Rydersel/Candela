@@ -1324,6 +1324,17 @@ struct OnboardingFlowModelTests {
     #expect(marks == [true, false])
   }
 
+  @Test func quittingPreservesTheResumeMarkerWhenAppKitClosesTheWindow() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledCare)
+    var marks: [Bool] = []
+    model.onSetResumeAfterCare = { marks.append($0) }
+    model.requestScreenRecording()
+    model.didClose(isTerminating: true)
+    #expect(marks == [true])
+  }
+
   /// A marker left by an earlier process is this flow's to clear as well, so
   /// the clear does not depend on this flow having made the request.
   @Test func closingClearsTheResumeMarkerWithoutARequest() {

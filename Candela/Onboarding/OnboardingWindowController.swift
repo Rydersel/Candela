@@ -29,6 +29,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
   /// harvested at present time and a re-run starts from its first page.
   private var flowModel: OnboardingFlowModel?
   private var applier: OnboardingLiveApplier?
+  private var isTerminating = false
 
   init(model: AppModel, actions: SettingsActions, onCompletion: @escaping () -> Void) {
     self.model = model
@@ -237,6 +238,12 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     return window
   }
 
+  /// Called before AppKit begins closing windows for a normal quit, including
+  /// the Screen Recording pane's Quit & Reopen action.
+  func prepareForTermination() {
+    isTerminating = true
+  }
+
   func windowWillClose(_: Notification) {
     // The red close button and ⌘W bypass the flow's own skip route, so an open
     // countdown is answered here with the revert the model already owns.
@@ -246,10 +253,10 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     // observation loop dies rather than staying armed behind a closed window. An
     // answer still waiting on its first preview observation survives this.
     applier?.cancel()
-    // Every close route lands here, the flow's own and the window's, so this is
-    // where the resume marker is cleared. Quit & Reopen terminates without
-    // closing the window, which is what lets the marker survive the relaunch.
-    flowModel?.didClose()
+    flowModel?.didClose(isTerminating: isTerminating)
+    // Quitting is not finishing Setup. In particular, don't clear its resume
+    // marker or show a first-run callout as the process is going away.
+    guard !isTerminating else { return }
     // Before `onCompletion`, which records the schema version that makes a later
     // read say "not a first run".
     let wasFirstRun = flowModel?.environment.isFirstRun ?? false

@@ -1027,6 +1027,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     }
   }
 
+  func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
+    onboardingController?.prepareForTermination()
+    return .terminateNow
+  }
+
   /// Remove software dimming, then hand the DDC register the full-range
   /// equivalent of the published brightness, so the monitor is not left at a
   /// combined-mode DDC floor.
