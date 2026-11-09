@@ -303,6 +303,56 @@ struct CopyBuilderTests {
         == render(DiagnosticsPageCopy.brightnessPath(.software(.overlay))))
   }
 
+  // MARK: - DisplayHeroView
+
+  @Test func heroControlLineTellsEveryStateApartInPlainWords() {
+    let perArm: [BrightnessPath] = [
+      .native, .hardware, .software(.gamma),
+      .combined(switchingValue: 0.4, backend: .gamma),
+      .softwareOnly(backend: .gamma, reason: .ddcTurnedOff, dimsBelow: 0.25),
+      .unavailable(.ddcTurnedOffWithNoSoftwareLeg),
+      .softwareOnly(backend: .gamma, reason: .ddcUnresponsive, dimsBelow: 0.25),
+      .unavailable(.ddcUnresponsiveWithNoSoftwareLeg),
+    ]
+    let lines = perArm.map(DisplayHeroView.controlLine)
+    #expect(Set(lines).count == perArm.count)
+    for line in lines {
+      for jargon in ["DDC", "data cable", "software", "overlay", "color profile", "Split at"] {
+        #expect(!line.contains(jargon), "\(line) says \(jargon)")
+      }
+    }
+
+    // Claims what is sent, never that the display changed.
+    #expect(DisplayHeroView.controlLine(.hardware) == "Sends brightness changes to the display itself")
+    #expect(
+      DisplayHeroView.controlLine(.software(.gamma))
+        == DisplayHeroView.controlLine(.software(.overlay)))
+
+    let split = DisplayHeroView.controlLine(.combined(switchingValue: 0.4, backend: .overlay))
+    #expect(split == "Sends brightness changes to the display itself above 40% and dims past its minimum below that")
+
+    // Switching at 0 leaves no dimming band, so no split sentence.
+    for backend in [SoftwareDimmingBackend.gamma, .overlay] {
+      #expect(
+        DisplayHeroView.controlLine(.combined(switchingValue: 0, backend: backend))
+          == DisplayHeroView.controlLine(.hardware))
+    }
+
+    // Partial arms keep the percentage (the slider is dead above it) and the cause.
+    let turnedOff = DisplayHeroView.controlLine(
+      .softwareOnly(backend: .overlay, reason: .ddcTurnedOff, dimsBelow: 0.25))
+    #expect(turnedOff.contains("25%"))
+    #expect(turnedOff.contains("brightness commands are turned off in Command Tuning on the Advanced page"))
+    // Also turned off by the person, so it names the same way back.
+    #expect(
+      DisplayHeroView.controlLine(.unavailable(.ddcTurnedOffWithNoSoftwareLeg))
+        == "Nothing is moving this display's brightness: brightness commands are turned off in Command Tuning on the Advanced page")
+    let deadWire = DisplayHeroView.controlLine(
+      .softwareOnly(backend: .gamma, reason: .ddcUnresponsive, dimsBelow: 0.25))
+    #expect(deadWire.contains("25%"))
+    #expect(deadWire.contains("stopped answering"))
+  }
+
   @Test func diagnosticsCapabilityAnswerTellsFourStatesApart() {
     let unbalanced = render(
       DiagnosticsPageCopy.capabilityAnswer(
@@ -920,15 +970,14 @@ struct CopyBuilderTests {
     #expect(RotationCopy.previewSubtitle(name: "", to: .ninety) == "90°")
   }
 
-  /// Per axis: one literal for both promised a height the create path cut back.
-  /// Retina reads the same ceiling against the doubled framebuffer.
+  /// The axes have different ceilings; High Resolution halves each.
   @Test @MainActor func theVirtualDisplaySizeCaptionReadsTheRealCeilingOnEachAxis() {
     let caption = VirtualDisplaysPane.sizeRangeCaption
     #expect(caption.contains(String(VirtualDisplayIdentity.maxPixels.wide)))
     #expect(caption.contains(String(VirtualDisplayIdentity.maxPixels.high)))
     #expect(caption.contains(String(VirtualDisplaysPane.minimumPixels)))
     #expect(VirtualDisplayIdentity.maxPixels.high != VirtualDisplayIdentity.maxPixels.wide)
-    #expect(caption.contains("Retina"))
+    #expect(caption.contains("High Resolution"))
     #expect(caption.contains(String(VirtualDisplayIdentity.maxPixels.wide / 2)))
     #expect(caption.contains(String(VirtualDisplayIdentity.maxPixels.high / 2)))
   }
@@ -1111,6 +1160,7 @@ struct CopyBuilderTests {
     add("DiagnosticsPageCopy.identityKeys(false)", DiagnosticsPageCopy.identityKeys(keysMatch: false))
     for path in Self.allBrightnessPaths {
       add("DiagnosticsPageCopy.brightnessPath(\(path))", DiagnosticsPageCopy.brightnessPath(path))
+      add("DisplayHeroView.controlLine(\(path))", DisplayHeroView.controlLine(path))
     }
     add("DiagnosticsPageCopy.nativeBrightness", DiagnosticsPageCopy.nativeBrightness)
     add("DiagnosticsPageCopy.builtInHardwareControl", DiagnosticsPageCopy.builtInHardwareControl)
