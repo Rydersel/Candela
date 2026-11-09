@@ -47,6 +47,34 @@ struct HDRShortcutTests {
     #expect(await hdr.writes.isEmpty)
   }
 
+  /// A display that listed HDR modes and is now on a mode without them: the
+  /// shortcut names the current mode, as the panel's greyed button does.
+  @Test func aShortcutOnAnHDRDisplayInAModeWithoutHDRBlamesTheMode() async {
+    let hdr = ShortcutHDR()
+    let state = TestFixtures.displayState(hdr: hdr)
+    await state.controller.noteHDRStateMayHaveChanged()
+    await hdr.setSupported(false)
+    await state.controller.noteHDRStateMayHaveChanged()
+    let action = HDRShortcutAction(gate: .init(), target: { _ in state })
+    let expected = PanelView.hdrRefusalReason(
+      isShowingSynthesizedSize: false, isHDREngaged: false, supportsHDR: false,
+      capabilityProbed: true, hasReportedHDR: true)
+    #expect(expected == PanelView.hdrUnavailableInThisModeCaption)
+    #expect(await action.toggle(on: state.id) == .refused(PanelView.hdrUnavailableInThisModeCaption))
+    #expect(await hdr.writes.isEmpty)
+  }
+
+  /// A size on a display that never listed HDR: dropping the size would not help,
+  /// so the shortcut names the capability, as the panel does.
+  @Test func aShortcutOverASizeOnADisplayWithoutHDRNamesTheCapability() async {
+    let hdr = ShortcutHDR(supported: false)
+    let state = TestFixtures.displayState(hdr: hdr)
+    await state.controller.noteHDRStateMayHaveChanged()
+    let action = HDRShortcutAction(gate: .init(), target: { _ in state }, isSynthesized: { _ in true })
+    #expect(await action.toggle(on: state.id) == .refused(PanelView.hdrNoModesCaption))
+    #expect(await hdr.writes.isEmpty)
+  }
+
   /// The pointer IS on an external display's picture here, so telling the
   /// person to move it there would be wrong.
   @Test func aSurfaceTwoPanelsShowRefusesWithItsOwnReason() async {
@@ -240,7 +268,7 @@ struct HDRShortcutTests {
 }
 
 private actor ShortcutHDR: HDRToggling {
-  let supported: Bool
+  var supported: Bool
   let accepts: Bool
   var enabled = false
   var writes: [Bool] = []
@@ -254,6 +282,7 @@ private actor ShortcutHDR: HDRToggling {
     return accepts
   }
   func displaysReconfigured() async {}
+  func setSupported(_ value: Bool) { supported = value }
 }
 
 

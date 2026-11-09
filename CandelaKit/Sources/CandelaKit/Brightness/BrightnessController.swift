@@ -185,6 +185,10 @@ public final class BrightnessController: PendingWireDraining {
   /// anything that explains the false has to wait for this.
   public var hdrCapabilityProbed: Bool { cachedHDRProbed }
 
+  /// Whether this display has listed HDR modes in any refresh, across launches.
+  /// Ask this before blaming a false `supportsHDR` on the display, not its mode.
+  public var hasReportedHDR: Bool { cachedHasReportedHDR }
+
   /// Whether HDR is live on the display right now, same pattern as `supportsHDR`.
   /// The panel's badge reads STATE from here; `hdrMode` is only the POLICY, so an
   /// externally toggled HDR (mode still `.off`) still reports engaged.
@@ -226,6 +230,11 @@ public final class BrightnessController: PendingWireDraining {
   /// Observed, not `@ObservationIgnored`: a caption that reads it has to redraw when
   /// the first refresh lands.
   private(set) var cachedHDRProbed = false
+
+  /// Seeded from prefs, cleared only when a different panel is bound.
+  /// `cachedSupportsHDR` describes the ENGAGED MODE, not the display [MEASURED
+  /// 2026-08-07: the MAG read true at native, false on 2:1 HiDPI, true at native again].
+  private(set) var cachedHasReportedHDR = false
 
   /// What the last REFRESH observed, a different fact from `cachedHDRActive`:
   /// transitions write that one optimistically (an exit sets it false before the drop
@@ -457,6 +466,7 @@ public final class BrightnessController: PendingWireDraining {
     self.quitHandbackLease = self.quitHandback.map { QuitHandbackLease(record: $0, prefs: prefs) }
     self.coalescer = BrightnessWriteCoalescer()
     self.hdrMode = prefs.hdrMode
+    self.cachedHasReportedHDR = prefs.hasReportedHDR
 
     if role == .builtIn {
       // Role `.builtIn` bypasses the migration/first-run/park-at-s block entirely:
@@ -1830,6 +1840,10 @@ public final class BrightnessController: PendingWireDraining {
     // Both arms, the backend-less one included: "this build has no HDR backend" is a
     // settled answer, not a pending one.
     cachedHDRProbed = true
+    if cachedSupportsHDR, !cachedHasReportedHDR {
+      cachedHasReportedHDR = true
+      prefs.hasReportedHDR = true
+    }
     // The DDC register just came back, whoever unlocked it. Keyed to the OBSERVED
     // edge rather than to a call because most routes out of HDR have no call of ours
     // in them: HDR switched off in System Settings or on the display's own controls
@@ -2050,6 +2064,7 @@ public final class BrightnessController: PendingWireDraining {
       // flag stops anything explaining it as the new panel's.
       resetWireHealth()
       cachedHDRProbed = false
+      cachedHasReportedHDR = false
     }
     coalescer.resetDuplicateState()
     // Dropped with the memo and for the memo's own reason: it names a write
