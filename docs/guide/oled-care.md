@@ -47,7 +47,11 @@ macOS lock screen. Your saved brightness setting stays unchanged.
   content and anything holding the display awake suspend this protection. Regional dimming is also withheld while Candela
   itself is foreground, because its windows are excluded from capture. This
   setting is **off by default** and needs both
-  measurement settings on the Health pane.
+  measurement settings on the Health pane, plus the Screen Recording
+  permission that brightness measurement uses. While it is on and either
+  setting is off for that display, its row says which and offers a button that
+  turns them on; with both on and Screen Recording not granted, the row says
+  no static regions are dimmed until it is.
 
 ### Pause dimming temporarily
 

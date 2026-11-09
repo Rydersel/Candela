@@ -857,24 +857,32 @@ extension PanelView {
   /// unavailable in the state it recovers from.
   /// `BrightnessController.setHDRMode` enforces the same asymmetry.
   ///
-  /// Capability before size: dropping the size would not bring HDR to a display
-  /// with no HDR modes. `capabilityProbed` guards the unprobed reading, where
-  /// `supportsHDR` is false only because the refresh has not answered.
+  /// `supportsHDR` follows the engaged mode, not the display, so `hasReportedHDR`
+  /// decides the blame. A display that never listed HDR gets the capability caption
+  /// even under a size, since dropping the size would not help; one that has gets
+  /// the size caption, else the current-mode caption.
+  ///
+  /// `capabilityProbed` guards the unprobed reading, where `supportsHDR` is false
+  /// only because the refresh has not answered. The HDR shortcut refuses with the
+  /// same answer.
   static func hdrRefusalReason(
     isShowingSynthesizedSize: Bool, isHDREngaged: Bool,
-    supportsHDR: Bool, capabilityProbed: Bool
+    supportsHDR: Bool, capabilityProbed: Bool, hasReportedHDR: Bool
   ) -> String? {
     guard !isHDREngaged else { return nil }
-    if capabilityProbed, !supportsHDR {
-      return Self.hdrNoModesCaption
-    }
-    guard isShowingSynthesizedSize else { return nil }
-    return SynthesisCopy.hdrBlockedBySynthesizedSize
+    let modeListsNoHDR = capabilityProbed && !supportsHDR
+    if modeListsNoHDR, !hasReportedHDR { return Self.hdrNoModesCaption }
+    if isShowingSynthesizedSize { return SynthesisCopy.hdrBlockedBySynthesizedSize }
+    if modeListsNoHDR { return Self.hdrUnavailableInThisModeCaption }
+    return nil
   }
 
   /// Not `DiagnosticsCopy.hdrNoAnswer`: alone, "has no HDR answer" reads as the
   /// app not knowing.
   static let hdrNoModesCaption = "No HDR modes were found for this display."
+
+  /// For a display that has listed HDR modes before, where "no HDR modes" is false.
+  static let hdrUnavailableInThisModeCaption = "HDR isn't available in this display's current mode."
 
   /// Grey and uncaptioned until the probe answers. Engaged outranks everything,
   /// as in `hdrRefusalReason`: this button is the way out of HDR, and a panel
@@ -884,6 +892,16 @@ extension PanelView {
   ) -> Bool {
     if isHDREngaged { return true }
     return capabilityProbed && supportsHDR && refusalReason == nil
+  }
+
+  /// Not keyed on `supportsHDR`: it follows the engaged mode, so the button would
+  /// leave and return with every mode change. A pending probe keeps the button so an
+  /// HDR display's does not vanish and reappear; engaged keeps it as the way out.
+  /// A panel first seen on a mode without HDR stays hidden until it lists HDR modes.
+  static func hdrButtonIsVisible(
+    isHDREngaged: Bool, capabilityProbed: Bool, hasReportedHDR: Bool
+  ) -> Bool {
+    isHDREngaged || !capabilityProbed || hasReportedHDR
   }
 }
 
@@ -912,24 +930,7 @@ private struct DisplayHeaderRow: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 2) {
-      HStack(spacing: 6) {
-        Text(displayName)
-          .font(.system(size: 13, weight: .semibold))
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-          .accessibilityHidden(true)  // the slider carries the display name
-        if controller.isHDREngaged {
-          Text("HDR")
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 1)
-            .background(RoundedRectangle(cornerRadius: 3, style: .continuous).fill(.quaternary))
-            .accessibilityLabel("HDR engaged")
-        }
-        Spacer(minLength: 4)
-        hdrModeButton
-      }
+      hdrLine
       if let careLine {
         if let toggleCare {
           Button(action: toggleCare) {
@@ -955,13 +956,44 @@ private struct DisplayHeaderRow: View {
         }
       }
     }
-    // On the row, not the button: the caption draws in a leading-aligned column
+  }
+
+  private var hdrLine: some View {
+    HStack(spacing: 6) {
+      Text(displayName)
+        .font(.system(size: 13, weight: .semibold))
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .accessibilityHidden(true)  // the slider carries the display name
+      if controller.isHDREngaged {
+        Text("HDR")
+          .font(.system(size: 11, weight: .medium))
+          .foregroundStyle(.secondary)
+          .padding(.horizontal, 4)
+          .padding(.vertical, 1)
+          .background(RoundedRectangle(cornerRadius: 3, style: .continuous).fill(.quaternary))
+          .accessibilityLabel("HDR engaged")
+      }
+      Spacer(minLength: 4)
+      if showsHDRButton {
+        hdrModeButton
+      } else {
+        // Kept for its height only, so this header matches an HDR display's
+        // and does not shrink when the probe lands.
+        hdrModeButton.hidden().frame(width: 0).accessibilityHidden(true)
+      }
+    }
+    // On the line, not the button: the caption draws in a leading-aligned column
     // under whatever it wraps, and the button's slot is a few characters wide.
+    // Not on the whole row either: the modifier's hover overlay hit-tests, and
+    // over the row it swallowed clicks on the care disclosure below.
     //
     // The row grows a line when a size engages, but that reconfiguration ends
     // menu tracking and rebuilds the panel, so it cannot clip the footer the way
     // a height change inside an open panel does.
-    .panelHoverReason(refusalReason)
+    //
+    // Nil when hidden: a reason would still reserve its caption line.
+    .panelHoverReason(showsHDRButton ? refusalReason : nil)
   }
 
   private func careStatus(_ line: String) -> some View {
@@ -972,12 +1004,21 @@ private struct DisplayHeaderRow: View {
       .truncationMode(.tail)
   }
 
+  private var showsHDRButton: Bool {
+    PanelView.hdrButtonIsVisible(
+      isHDREngaged: controller.isHDREngaged,
+      capabilityProbed: controller.hdrCapabilityProbed,
+      hasReportedHDR: controller.hasReportedHDR
+    )
+  }
+
   private var refusalReason: String? {
     PanelView.hdrRefusalReason(
       isShowingSynthesizedSize: isShowingSynthesizedSize,
       isHDREngaged: controller.isHDREngaged,
       supportsHDR: controller.supportsHDR,
-      capabilityProbed: controller.hdrCapabilityProbed
+      capabilityProbed: controller.hdrCapabilityProbed,
+      hasReportedHDR: controller.hasReportedHDR
     )
   }
 
@@ -995,8 +1036,8 @@ private struct DisplayHeaderRow: View {
     // status item), which would leave a phantom highlight on the next open.
     .onDisappear { isHovering = false }
     .fixedSize()
-    // Disable, don't hide, on non-HDR displays. Both flags are
-    // observation-tracked, so the button enables when the async refresh lands.
+    // Greyed, not hidden, while pending or refused; hiding is `hdrButtonIsVisible`.
+    // Every flag here is observation-tracked, so the button settles when the refresh lands.
     .disabled(!PanelView.hdrButtonIsEnabled(
       isHDREngaged: controller.isHDREngaged,
       capabilityProbed: controller.hdrCapabilityProbed,

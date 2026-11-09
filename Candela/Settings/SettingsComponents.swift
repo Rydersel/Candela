@@ -8,7 +8,7 @@ import SwiftUI
 /// longer caption at a call site. It takes a case here, and a decision about
 /// what it says and where it is spoken.
 enum SafetySentence {
-  /// The brightness slider can reach 0% on a display dimming in software.
+  /// The brightness slider can reach 0% wherever it dims the picture.
   case blankDisplay
   /// A display's Sound section, part of the mute-strand rule. The unavailable
   /// state gets a sentence of its own rather than letting a recoverable state
@@ -31,7 +31,7 @@ enum SafetySentence {
   var spoken: String? {
     switch self {
     case .blankDisplay:
-      "The slider can reach 0% on any display dimming in software, which blanks it completely. If keyboard control is also off, a blank display can be hard to undo."
+      "The slider can reach 0% wherever it dims the picture, which turns the screen fully black. If keyboard control is also off, a black screen can be hard to undo."
     case let .hardwareMute(isAvailable, dedicatedCommandInReach):
       if !isAvailable {
         "Volume control is off for this display, so mute is unavailable."

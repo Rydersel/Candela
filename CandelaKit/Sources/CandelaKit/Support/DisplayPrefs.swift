@@ -196,6 +196,15 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: key("temporaryDimEngaged")) }
   }
 
+  /// Persisted because a launch can find the display mirrored behind a synthesized
+  /// size, listing no HDR modes, which would otherwise hide its HDR button at login.
+  /// Engine state, not a setting: no `PrefName` case. Clearing it costs only a hidden
+  /// button until HDR modes are seen again.
+  public var hasReportedHDR: Bool {
+    get { defaults.bool(forKey: key("hasReportedHDR")) }
+    set { defaults.set(newValue, forKey: key("hasReportedHDR")) }
+  }
+
   // Compound record operations must be atomic across controllers sharing an identity.
   private static let handbackLock = NSLock()
 
