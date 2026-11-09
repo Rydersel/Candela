@@ -189,11 +189,38 @@ struct DisplayHeroView: View {
     .accessibilityHeading(.h1)
   }
 
-  /// How this display's brightness is actually being driven, in `DiagnosticsCopy`'s
-  /// shared words, so the hero and the diagnostics page cannot describe one
-  /// display two ways.
   private var controlLine: String {
-    DiagnosticsCopy.brightnessPath(state.controller.brightnessPath)
+    Self.controlLine(state.controller.brightnessPath)
+  }
+
+  /// What the slider does, in plain words. `DiagnosticsCopy.brightnessPath` names
+  /// the mechanism instead; both read one `BrightnessPath`, so they cannot disagree.
+  static func controlLine(_ path: BrightnessPath) -> String {
+    // What is sent, never what the display did; an ACK proves nothing.
+    let sendsToDisplay = "Sends brightness changes to the display itself"
+    let commandsOff = "brightness commands are turned off in Command Tuning on the Advanced page"
+    switch path {
+    case .native:
+      return "macOS sets this display's brightness"
+    case .hardware:
+      return sendsToDisplay
+    // Switching at 0 leaves no dimming band; a split sentence would promise dimming that never runs.
+    case let .combined(switching, _) where switching <= 0:
+      return sendsToDisplay
+    case .software:
+      return "Dims the picture without changing the display's own brightness"
+    case let .combined(switching, _):
+      return "Sends brightness changes to the display itself above \(SliderSnap.percentText(switching)) and dims past its minimum below that"
+    // Name the cause: it tells the person whether they did this and can undo it.
+    case let .softwareOnly(_, .ddcTurnedOff, dimsBelow):
+      return "Only dims the picture below \(SliderSnap.percentText(dimsBelow)): \(commandsOff)"
+    case let .softwareOnly(_, .ddcUnresponsive, dimsBelow):
+      return "Only dims the picture below \(SliderSnap.percentText(dimsBelow)): this display stopped answering brightness commands"
+    case .unavailable(.ddcTurnedOffWithNoSoftwareLeg):
+      return "Nothing is moving this display's brightness: \(commandsOff)"
+    case .unavailable(.ddcUnresponsiveWithNoSoftwareLeg):
+      return "Nothing is moving this display's brightness: it stopped answering brightness commands"
+    }
   }
 
   /// `2560 × 1440 · 60 Hz`, with `(max 175 Hz)` only when this size does offer

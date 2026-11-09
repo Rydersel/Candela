@@ -75,7 +75,7 @@ struct KeyboardPane: View {
           .font(.callout.weight(.medium))
           .fixedSize(horizontal: false, vertical: true)
         SettingsCaption(
-          "\(AppInfo.productName) watches the brightness and volume keys through the system event tap, which macOS gates behind Accessibility. Custom shortcuts work without it."
+          "macOS lets \(AppInfo.productName) see the brightness and volume keys only once it has Accessibility access. Custom shortcuts work without it."
         )
         // The page's one action while the grant is missing, so it takes the
         // primary style. Trailing ellipsis: it opens another app (buttons.md).
@@ -143,7 +143,7 @@ struct KeyboardPane: View {
         SettingRow(Self.modifierHint) {
           KeyboardShortcuts.Recorder("Contrast up:", name: .contrastUp)
         }
-        SettingsRowNote("Contrast works on displays controlled over their data cable (DDC) only.")
+        SettingsRowNote("Contrast shortcuts work only on external displays whose contrast \(AppInfo.productName) can control.")
       }
 
       if KeyModePolicy.watchesMediaKeys(prefs.keyboardBrightness) {
@@ -166,7 +166,7 @@ struct KeyboardPane: View {
   @ViewBuilder private var volumeSection: some View {
     VStack(alignment: .leading, spacing: 8) {
       SettingsCardSection(title: "Volume Keys") {
-        SettingRow("Volume applies to external displays that accept volume commands over their data cable (DDC).") {
+        SettingRow("Works on external displays whose volume \(AppInfo.productName) can control.") {
           ThemedChoiceRow(label: "Control volume with:", selection: Binding(
             get: { prefs.keyboardVolume },
             set: { setVolumeMode($0) }

@@ -204,7 +204,7 @@ struct GeneralPane: View {
   private var brightnessSection: some View {
     SettingsCardSection(title: "Brightness") {
       // Names the outcome, with the mechanism in the caption.
-      SettingRow("Keeps dimming in software once a DDC-controlled display reaches its hardware minimum.") {
+      SettingRow("When a display's own brightness reaches its lowest setting, the slider keeps going by dimming the picture.") {
         Toggle("Dim past the display's minimum", isOn: Binding(
           get: { prefs.combinedBrightness },
           set: { enabled in
