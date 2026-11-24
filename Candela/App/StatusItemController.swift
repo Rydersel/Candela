@@ -1546,6 +1546,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     guard let mediaKeyTap else { return }
     // Every start route stops here rather than failing and logging again.
     guard !model.isTapPermanentlyUnavailable else { return }
+    if ProcessInfo.processInfo.arguments.contains(MediaKeyEventTap.watchdogRecoveryArgument) {
+      log.error("media-key tap disarmed for this launch: the watchdog never received its first ping")
+      model.noteTapPermanentlyUnavailable()
+      return
+    }
     // Computed once and recorded only on success: `lastArmedTapConfig` is what is
     // actually being watched, and a config that failed to arm is not that.
     let config = model.tapConfig

@@ -6,6 +6,7 @@
 import CandelaKit
 import CoreGraphics
 import Foundation
+@preconcurrency import IOKit.hidsystem
 import os
 
 /// CGEventTap island that intercepts brightness/volume media keys and the
@@ -51,6 +52,7 @@ final class MediaKeyEventTap {
     /// The private CGEvent field indices the system-defined decode depends on
     /// did not read back what was written. See `sysDefinedFieldsUsable`.
     case eventFieldsUnrecognized
+    case watchdogUnavailable
   }
 
   /// Watchdog logging. `notice` persists to the unified log by default, so a
@@ -58,15 +60,12 @@ final class MediaKeyEventTap {
   nonisolated static let watchdogLog = Logger(
     subsystem: "com.rydersel.Candela", category: "tap-watchdog"
   )
+  nonisolated static let watchdogRecoveryArgument = "--skip-media-key-tap"
 
   /// Called (on an arbitrary thread) after the watchdog monitor performs an
   /// emergency teardown. The controller uses it to re-check the grant after a
   /// settle delay and rebuild the tap when the teardown was a false alarm.
   var onEmergencyTeardown: (@Sendable () -> Void)?
-
-  /// Self-ping marker carried in `.eventSourceUserData`. Arbitrary value,
-  /// distinctive enough not to collide with anything real.
-  nonisolated static let pingMagic: Int64 = 0x0059_CAD3_1A
 
   /// The Swift side of the C-callback trampoline. `@Sendable` both for the
   /// hop onto the tap thread and so the closure literal in `start()` is
@@ -123,6 +122,12 @@ final class MediaKeyEventTap {
     // Arm nothing if the private field indices moved: an unverified decode
     // would swallow every aux key on the system, silently.
     guard Self.sysDefinedFieldsUsable else { throw TapError.eventFieldsUnrecognized }
+    // Check that the process can post before arming an active tap. If a later
+    // post fails during revocation, the watchdog can still recover, and a
+    // relaunch with posting disabled won't arm the tap again.
+    guard let watchdogPing = WatchdogPing(), watchdogPing.post() == KERN_SUCCESS else {
+      throw TapError.watchdogUnavailable
+    }
     configLock.withLock { $0 = config }
 
     // Capture locals, not self: the trampoline lives for the tap thread's
@@ -136,18 +141,17 @@ final class MediaKeyEventTap {
     /// completed). Created before the callback closure so the callback can
     /// stamp `pingSeen`.
     let heartbeat = OSAllocatedUnfairLock<
-      (pingPosted: Date?, pingSeen: Date, probing: Date?, alive: Date)
-    >(initialState: (nil, Date(), nil, Date()))
+      (pingPosted: Date?, pingSeen: Date?, probing: Date?, alive: Date)
+    >(initialState: (nil, nil, nil, Date()))
     let callback: EventTapCallback = { type, event in
       // Record the notification before inspecting its payload: a disabled tap
       // and a stalled event stream otherwise produce the same watchdog verdict.
       if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-        let marked = event.getIntegerValueField(.eventSourceUserData) == Self.pingMagic
-        Self.watchdogLog.notice("tap disabled: type=\(type.rawValue) pingMarker=\(marked)")
+        Self.watchdogLog.notice("tap disabled: type=\(type.rawValue)")
       }
       // Self-ping marker: our own prober posted this event. Stamp its arrival
       // and swallow it, since it is not for the system.
-      if event.getIntegerValueField(.eventSourceUserData) == Self.pingMagic {
+      if type.rawValue == UInt32(NX_SYSDEFINED), watchdogPing.matches(event) {
         heartbeat.withLock { $0.pingSeen = Date(); $0.pingPosted = nil }
         return nil
       }
@@ -293,17 +297,9 @@ final class MediaKeyEventTap {
         }
         pollsSinceLastPing = dueForPing ? 1 : pollsSinceLastPing + 1
         if shouldPost {
-          // NX_SYSDEFINED with no payload: inside our tap's event mask, so
-          // the callback sees and swallows it; inert to the rest of the
-          // system if the pipeline delivers it before we do.
-          if let ping = CGEvent(source: nil) {
-            ping.type = CGEventType(rawValue: UInt32(NX_SYSDEFINED))!
-            ping.setIntegerValueField(.eventSourceUserData, value: Self.pingMagic)
-            ping.post(tap: .cgSessionEventTap)
-          } else {
-            // Cannot construct events (should not happen); do not leave a
-            // phantom "posted" timestamp for the monitor to time out on.
-            heartbeat.withLock { $0.pingPosted = nil }
+          let result = watchdogPing.post()
+          if result != KERN_SUCCESS {
+            Self.watchdogLog.error("watchdog event post failed: \(result)")
           }
         }
         // Committed revocations (toggle path) still get a fast, clean
@@ -362,7 +358,7 @@ final class MediaKeyEventTap {
           continue
         case .wedged(let pingLost, let probeStuck, let proberDead):
           let pingAge = hb.pingPosted.map { now.wall.timeIntervalSince($0) } ?? -1
-          let seenAge = now.wall.timeIntervalSince(hb.pingSeen)
+          let seenAge = hb.pingSeen.map { now.wall.timeIntervalSince($0) } ?? -1
           Self.watchdogLog.fault(
             "EMERGENCY: pingLost=\(pingLost) probeStuck=\(probeStuck) proberDead=\(proberDead) pingAge=\(pingAge) lastPingSeenAge=\(seenAge)"
           )
@@ -377,9 +373,14 @@ final class MediaKeyEventTap {
           Self.watchdogLog.fault("event pipeline wedged: exiting to clear it; relauncher spawned")
           let relauncher = Process()
           relauncher.executableURL = URL(fileURLWithPath: "/bin/sh")
-          relauncher.arguments = [
-            "-c", "sleep 2; /usr/bin/open \"\(Bundle.main.bundlePath)\"",
+          var arguments = [
+            "-c", "sleep 2; /usr/bin/open \"$@\"", "candela-relaunch", Bundle.main.bundlePath,
           ]
+          // A system that never delivered the first heartbeat could reject
+          // this route on every launch. Keep native key interception off for
+          // the recovery launch so the rest of Candela remains usable.
+          if hb.pingSeen == nil { arguments += ["--args", Self.watchdogRecoveryArgument] }
+          relauncher.arguments = arguments
           try? relauncher.run()
           exit(70)
         }
@@ -458,6 +459,44 @@ final class MediaKeyEventTap {
   /// NSEvent here; this comment is the only guard.
   private nonisolated static let sysDefinedSubtypeField = CGEventField(rawValue: 99)!
   private nonisolated static let sysDefinedData1Field = CGEventField(rawValue: 149)!
+
+  /// Quartz event posting resets the display idle timer even when the tap
+  /// swallows the ping. Posting a system-defined event through IOHID reaches
+  /// the same session tap without declaring user activity. Use an unused
+  /// subtype and a per-tap marker so a late ping cannot ACK a replacement tap.
+  private final class WatchdogPing: Sendable {
+    private static let subtype: Int16 = 64
+    private let marker = Int32.random(in: 1...Int32.max)
+    private let connection: io_connect_t
+
+    init?() {
+      let service = IOServiceGetMatchingService(
+        kIOMainPortDefault, IOServiceMatching(kIOHIDSystemClass))
+      guard service != IO_OBJECT_NULL else { return nil }
+      defer { IOObjectRelease(service) }
+
+      var connection: io_connect_t = IO_OBJECT_NULL
+      guard IOServiceOpen(service, mach_task_self_, UInt32(kIOHIDParamConnectType), &connection)
+              == KERN_SUCCESS else { return nil }
+      self.connection = connection
+    }
+
+    deinit { IOServiceClose(connection) }
+
+    func post() -> kern_return_t {
+      var data = NXEventData()
+      data.compound.subType = Self.subtype
+      data.compound.misc.L.0 = marker
+      // No options: leave the cursor position and global event flags alone.
+      return IOHIDPostEvent(
+        connection, UInt32(NX_SYSDEFINED), IOGPoint(), &data, UInt32(kNXEventVersion), 0, 0)
+    }
+
+    func matches(_ event: CGEvent) -> Bool {
+      event.getIntegerValueField(MediaKeyEventTap.sysDefinedSubtypeField) == Int64(Self.subtype)
+        && event.getIntegerValueField(MediaKeyEventTap.sysDefinedData1Field) == Int64(marker)
+    }
+  }
 
   /// The only NX_SYSDEFINED subtype that carries media keys, and the only one
   /// this tap decodes.
