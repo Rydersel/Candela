@@ -12,6 +12,43 @@
     <description>Update feed for Candela.</description>
     <language>en</language>
     <item>
+      <title>Version 1.0.6</title>
+      <pubDate>Tue, 24 Nov 2026 01:29:39 +0000</pubDate>
+      <sparkle:version>1.0.6</sparkle:version>
+      <sparkle:shortVersionString>1.0.6</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description sparkle:format="markdown"><![CDATA[
+## New
+
+- Setup: a draggable guide opens beside the right System Settings pane for keyboard or Screen Recording access. It follows the window across displays and closes when macOS grants access.
+- Health: Screen Recording warnings in Health, OLED Care, and the Heat Map can open the right System Settings pane directly.
+- Diagnostics: Prepare Hardware Report in Diagnostics and About copies a fresh report and opens the GitHub form for review and submission.
+- Setup: the final page suggests where to fine-tune OLED Care, review shortcuts, run a Checkup, or check display arrangement, based on your setup.
+
+## Changed
+
+- Settings: permission instructions match the names of the panes on your macOS version. On macOS 27, look for Device Control and Data Access and Screen & System Audio Recording.
+- Setup: the keyboard permission step appears only when your controls need access and macOS hasn't granted it. Skipping preserves custom shortcuts. Turn On Keys in Keyboard settings lets you enable the brightness and volume keys later.
+- Settings: clearer wording in display, keyboard, and menu bar settings explains what the controls do and when they're available.
+- Sizes: Virtual Displays uses clearer wording to explain how to get sharper text and which sizes support it.
+- Downloads: optimizations reduced the disk image from 7.4 MB to 4.2 MB.
+
+## Fixed
+
+- Setup: choosing Quit & Reopen after granting Screen Recording no longer loses your OLED Care and measurement choices. Setup resumes after the OLED Care step.
+- Protection: automatic static-region dimming no longer stops silently when a Health setting is off or Screen Recording access is missing. The switch explains what is missing and offers a way to fix it. It also explains why Safe Mode prevents dimming.
+- Menu bar: displays that have never reported HDR support no longer show a disabled HDR button. Once Candela has seen a display support HDR, it remembers across restarts and keeps the button visible if the current mode blocks HDR.
+- Controls: the HDR keyboard shortcut gives the same reason as the menu bar when HDR is unavailable.
+- Protection: a disabled HDR button no longer blocks clicks on the OLED Care disclosure.
+- Checkup: the file picker on macOS 27 no longer prevents you from selecting saved JSON reports.
+]]></description>
+      <sparkle:fullReleaseNotesLink>https://github.com/Rydersel/Candela/releases</sparkle:fullReleaseNotesLink>
+      <enclosure
+        url="https://github.com/Rydersel/Candela/releases/download/v1.0.6/Candela-1.0.6.zip"
+        sparkle:edSignature="GvV130edL2L2PGryJyGtDnnCyY6g6kC5ioD+b4nIlRAr9hcP3zVHkzdlxGVjRF0pa/UphYUakRKfyEa40eOVBg==" length="3734888"
+        type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Version 1.0.5</title>
       <pubDate>Fri, 02 Oct 2026 23:41:55 +0000</pubDate>
       <sparkle:version>1.0.5</sparkle:version>
